@@ -36,6 +36,7 @@ impl GpuDescription {
 }
 
 pub struct Gpu {
+    vk: Entry,
     instance: Instance,
     device: Device,
     description: GpuDescription,
@@ -120,6 +121,7 @@ impl Gpu {
             description.name
         );
         Ok(Gpu {
+            vk: entry,
             instance,
             device,
             description,
@@ -303,5 +305,14 @@ impl Gpu {
         }
 
         Err(GpuError::NoQueueFamilyFound(requested_family))
+    }
+}
+
+impl Drop for Gpu {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_device(None);
+            self.instance.destroy_instance(None);
+        }
     }
 }
