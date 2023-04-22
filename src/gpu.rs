@@ -1,23 +1,29 @@
 use std::{
     ffi::{CStr, CString},
-    ptr::{addr_of, null},
+    ptr::{addr_of, addr_of_mut, null},
 };
 
 use anyhow::Result;
 use ash::{
+    extensions::khr::Surface,
     prelude::*,
     vk::{
-        make_api_version, ApplicationInfo, DeviceCreateFlags, DeviceCreateInfo,
+        make_api_version, ApplicationInfo, Bool32, DeviceCreateFlags, DeviceCreateInfo,
         DeviceQueueCreateFlags, DeviceQueueCreateInfo, ExtensionProperties, InstanceCreateFlags,
-        InstanceCreateInfo, PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties,
-        PhysicalDeviceType, QueueFlags, StructureType, API_VERSION_1_3,
+        InstanceCreateInfo, KhrSurfaceFn, PFN_vkGetPhysicalDeviceSurfaceSupportKHR, PhysicalDevice,
+        PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType, Queue, QueueFlags,
+        StructureType, SurfaceKHR, API_VERSION_1_3,
     },
     *,
 };
 
 use log::{error, trace};
-use raw_window_handle::RawDisplayHandle;
+use once_cell::sync::OnceCell;
+use raw_window_handle::{
+    HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle,
+};
 use thiserror::Error;
+use winit::window::Window;
 
 const KHRONOS_VALIDATION_LAYER: &'static str = "VK_LAYER_KHRONOS_validation";
 
@@ -36,20 +42,39 @@ impl GpuDescription {
 }
 
 pub struct Gpu {
-    vk: Entry,
+    entry: Entry,
     instance: Instance,
     device: Device,
+    presentation_surface: Option<SurfaceKHR>,
+    graphics_queue: Queue,
+    async_compute_queue: Queue,
+    transfer_queue: Queue,
     description: GpuDescription,
 }
 
-pub struct GpuConfiguration<'a> {
-    pub raw_display_handle: Option<RawDisplayHandle>,
+pub struct GpuConfiguration<'a, 'w> {
+    pub window: Option<&'w Window>,
     pub app_name: &'a str,
     pub engine_name: &'a str,
     pub enable_validation_layer: bool,
+    pub vk_instance_extensions: Vec<String>,
+    pub vk_device_extensions: Vec<String>,
 }
 
-#[derive(Error, Debug, Clone, Copy)]
+impl<'a, 'w> Default for GpuConfiguration<'a, 'w> {
+    fn default() -> Self {
+        Self {
+            window: Default::default(),
+            app_name: Default::default(),
+            engine_name: Default::default(),
+            enable_validation_layer: false,
+            vk_instance_extensions: vec![],
+            vk_device_extensions: vec![],
+        }
+    }
+}
+
+#[derive(Error, Debug, Clone)]
 pub enum GpuError {
     #[error("No physical devices were found on this machine")]
     NoPhysicalDevices,
@@ -59,6 +84,15 @@ pub enum GpuError {
 
     #[error("Could not find a queue family with these flags")]
     NoQueueFamilyFound(QueueFlags),
+
+    #[error("This GPU was not created for surface rendering")]
+    GpuCreatedWithoutPresentationSupport,
+
+    #[error("Could not find create a surface for this device")]
+    SurfaceCreationError(String),
+
+    #[error("Generic")]
+    GenericGpuError(String),
 }
 
 #[derive(Clone)]
@@ -89,52 +123,91 @@ impl QueueFamilies {
 }
 
 impl Gpu {
-    pub fn new(configuration: GpuConfiguration) -> Result<Self> {
+    pub fn new(mut configuration: GpuConfiguration) -> Result<Self> {
         let entry = Entry::linked();
 
         let all_extensions = entry.enumerate_instance_extension_properties(None)?;
-        let required_extensions = if let Some(raw_display_handle) = configuration.raw_display_handle
-        {
-            ash_window::enumerate_required_extensions(raw_display_handle)?
-        } else {
-            &[]
-        };
+        if let Some(window) = configuration.window {
+            let mut surface_extensions =
+                ash_window::enumerate_required_extensions(window.raw_display_handle())?
+                    .iter()
+                    .map(|ext_c| unsafe { CStr::from_ptr(*ext_c).to_str().unwrap().to_string() })
+                    .collect();
 
-        Self::ensure_required_extensions_are_available(required_extensions, &all_extensions);
+            configuration
+                .vk_instance_extensions
+                .append(&mut surface_extensions);
+        }
 
+        Self::ensure_required_extensions_are_available(&configuration, &all_extensions);
+
+        for extension in configuration.vk_instance_extensions.iter() {
+            trace!("Requesting extension {}", extension);
+        }
+
+        let instance = Self::create_instance(&entry, &configuration)?;
         trace!("Created instance");
-        let instance = Self::create_instance(&entry, &configuration, required_extensions)?;
+
+        if let Some(_) = configuration.window {
+            setup_khr_surface_extensions(&entry, &instance);
+        }
 
         trace!("Created physical device");
         let physical_device = Self::select_discrete_physical_device(&instance)?;
         let description = GpuDescription::new(&physical_device);
 
-        let queue_indices = Self::get_queue_families_indices(&physical_device, &instance)?;
+        let presentation_surface = if let Some(window) = configuration.window {
+            Some(Self::create_presentation_surface(
+                &entry,
+                &instance,
+                window.raw_display_handle(),
+                window.raw_window_handle(),
+            )?)
+        } else {
+            None
+        };
+
+        let queue_indices = Self::select_queue_families_indices(
+            &physical_device,
+            &instance,
+            &presentation_surface,
+        )?;
         if !queue_indices.is_valid() {
             log::error!("Queue configurations are invalid!");
         }
         let device =
-            Self::create_device(&configuration, &instance, physical_device, queue_indices)?;
+            Self::create_device(&configuration, &instance, physical_device, &queue_indices)?;
+
+        let (graphics_queue, async_compute_queue, transfer_queue) =
+            Self::get_device_queues(&device, &queue_indices)?;
 
         log::info!(
             "Created a GPU from a device with name '{}'",
             description.name
         );
         Ok(Gpu {
-            vk: entry,
+            entry,
             instance,
             device,
+            graphics_queue,
+            async_compute_queue,
+            transfer_queue,
             description,
+            presentation_surface,
         })
     }
 
-    fn create_instance(
-        entry: &Entry,
-        configuration: &GpuConfiguration,
-        required_extensions: &[*const i8],
-    ) -> VkResult<Instance> {
+    fn create_instance(entry: &Entry, configuration: &GpuConfiguration) -> VkResult<Instance> {
         let vk_layer_khronos_validation = CString::new(KHRONOS_VALIDATION_LAYER).unwrap();
         let vk_layer_khronos_validation = vk_layer_khronos_validation.as_ptr();
+
+        let required_extensions: Vec<CString> = configuration
+            .vk_instance_extensions
+            .iter()
+            .map(|str| CString::new(str.clone()).unwrap())
+            .collect();
+        let required_extensions: Vec<*const i8> =
+            required_extensions.iter().map(|ext| ext.as_ptr()).collect();
 
         let app_name =
             CString::new(configuration.app_name).expect("Failed to create valid App name");
@@ -196,19 +269,31 @@ impl Gpu {
         Err(GpuError::NoSuitableDevice)
     }
 
-    fn get_queue_families_indices(
+    fn select_queue_families_indices(
         device: &SelectedPhysicalDevice,
         instance: &Instance,
+        surface: &Option<SurfaceKHR>,
     ) -> Result<QueueFamilies, GpuError> {
         let all_queue_families =
             unsafe { instance.get_physical_device_queue_family_properties(device.physical_device) };
-        let graphics_family = Self::find_queue_family(&all_queue_families, QueueFlags::GRAPHICS)?;
-        let async_compute_family =
-            Self::find_queue_family(&all_queue_families, QueueFlags::COMPUTE)?;
+        let graphics_family = Self::find_queue_family(
+            device.physical_device,
+            &all_queue_families,
+            QueueFlags::GRAPHICS,
+            surface,
+        )?;
+        let async_compute_family = Self::find_queue_family(
+            device.physical_device,
+            &all_queue_families,
+            QueueFlags::COMPUTE,
+            &None,
+        )?;
 
         let transfer_family = Self::find_queue_family(
+            device.physical_device,
             &all_queue_families,
             QueueFlags::TRANSFER | QueueFlags::SPARSE_BINDING,
+            &None,
         )?;
 
         Ok(QueueFamilies {
@@ -222,7 +307,7 @@ impl Gpu {
         configuration: &GpuConfiguration,
         instance: &Instance,
         selected_device: SelectedPhysicalDevice,
-        queue_indices: QueueFamilies,
+        queue_indices: &QueueFamilies,
     ) -> VkResult<Device> {
         let priority_one: f32 = 1.0;
         let vk_layer_khronos_validation = CString::new(KHRONOS_VALIDATION_LAYER).unwrap();
@@ -269,19 +354,20 @@ impl Gpu {
     }
 
     fn ensure_required_extensions_are_available(
-        required_extensions: &[*const i8],
+        configuration: &GpuConfiguration,
         all_extensions: &[ExtensionProperties],
     ) {
         let mut all_extensions_c_names = all_extensions
             .iter()
             .map(|ext| unsafe { CStr::from_ptr(ext.extension_name.as_ptr()) });
-        let required_extensions_c_names = required_extensions
+        let required_extensions_c_names = configuration
+            .vk_instance_extensions
             .iter()
-            .map(|name| unsafe { CStr::from_ptr(*name) });
+            .map(|name| unsafe { CString::from_vec_unchecked(name.clone().into_bytes()) });
 
         for required_c_name in required_extensions_c_names {
             if all_extensions_c_names
-                .find(|name| *name == required_c_name)
+                .find(|name| *name == required_c_name.as_c_str())
                 .is_none()
             {
                 error!("Extension {:?} is not supported", required_c_name);
@@ -290,11 +376,28 @@ impl Gpu {
     }
 
     fn find_queue_family(
+        physical_device: PhysicalDevice,
         all_queue_families: &Vec<vk::QueueFamilyProperties>,
         requested_family: QueueFlags,
+        surface: &Option<SurfaceKHR>,
     ) -> Result<QueueFamily, GpuError> {
         for (index, queue_family) in all_queue_families.iter().enumerate() {
             if queue_family.queue_flags.contains(requested_family) && queue_family.queue_count > 0 {
+                if let Some(surface) = surface {
+                    let surface_extensions = get_khr_surface_extensions();
+                    unsafe {
+                        let supported = surface_extensions
+                            .get_physical_device_surface_support(
+                                physical_device,
+                                index as u32,
+                                *surface,
+                            )
+                            .map_err(|e| GpuError::GenericGpuError(e.to_string()))?;
+                        if !supported {
+                            continue;
+                        }
+                    };
+                }
                 return Ok({
                     QueueFamily {
                         index: index as u32,
@@ -306,6 +409,48 @@ impl Gpu {
 
         Err(GpuError::NoQueueFamilyFound(requested_family))
     }
+
+    fn get_device_queues(
+        device: &Device,
+        queues: &QueueFamilies,
+    ) -> Result<(Queue, Queue, Queue), GpuError> {
+        let graphics_queue = unsafe { device.get_device_queue(queues.graphics_family.index, 0) };
+        let async_compute_queue =
+            unsafe { device.get_device_queue(queues.async_compute_family.index, 0) };
+        let transfer_queue = unsafe { device.get_device_queue(queues.transfer_family.index, 0) };
+        Ok((graphics_queue, async_compute_queue, transfer_queue))
+    }
+
+    pub(crate) fn get_presentation_surface(&self) -> Option<SurfaceKHR> {
+        self.presentation_surface
+    }
+
+    fn create_presentation_surface(
+        entry: &Entry,
+        instance: &Instance,
+        raw_display_handle: RawDisplayHandle,
+        raw_window_handle: RawWindowHandle,
+    ) -> Result<SurfaceKHR, GpuError> {
+        let surface = unsafe {
+            ash_window::create_surface(entry, instance, raw_display_handle, raw_window_handle, None)
+        }
+        .map_err(|e| GpuError::SurfaceCreationError(e.to_string()));
+        surface
+    }
+}
+
+static KHR_SURFACE_EXTENSIONS: OnceCell<ash::extensions::khr::Surface> = OnceCell::new();
+
+fn setup_khr_surface_extensions(entry: &Entry, instance: &Instance) {
+    KHR_SURFACE_EXTENSIONS
+        .set(Surface::new(entry, instance))
+        .map_err(|e| panic!("setup_khr_surface_extensions was already called"));
+}
+
+fn get_khr_surface_extensions() -> &'static Surface {
+    KHR_SURFACE_EXTENSIONS
+        .get()
+        .expect("setup_khr_surface_extensions was not called")
 }
 
 impl Drop for Gpu {

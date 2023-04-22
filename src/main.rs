@@ -11,13 +11,18 @@ fn main() -> anyhow::Result<()> {
     let window = winit::window::Window::new(&event_loop)?;
 
     let gpu = Gpu::new(GpuConfiguration {
-        raw_display_handle: Some(window.raw_display_handle()),
+        window: Some(&window),
         app_name: "Hello World!",
         engine_name: "Hello Engine!",
         enable_validation_layer: if cfg!(debug) { true } else { false },
+        ..Default::default()
     })?;
 
-    event_loop.run(|event, event_loop, mut control_flow| match event {
+    let surface = gpu
+        .get_presentation_surface()
+        .expect("Created a surface without presentation support, somehow");
+
+    event_loop.run(move |event, event_loop, mut control_flow| match event {
         winit::event::Event::NewEvents(_) => {}
         winit::event::Event::WindowEvent { window_id, event } => match event {
             winit::event::WindowEvent::CloseRequested => {

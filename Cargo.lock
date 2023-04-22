@@ -1000,6 +1000,7 @@ dependencies = [
  "ash-window",
  "env_logger",
  "log",
+ "once_cell",
  "raw-window-handle",
  "thiserror",
  "winit",
