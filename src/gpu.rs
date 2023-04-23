@@ -82,8 +82,12 @@ pub enum GpuError {
     #[error("A suitable device with the requested capabilities was not found")]
     NoSuitableDevice,
 
-    #[error("Could not find a queue family with these flags")]
-    NoQueueFamilyFound(QueueFlags),
+    #[error("One or more queue families aren't supported")]
+    NoQueueFamilyFound(
+        Option<(u32, vk::QueueFamilyProperties)>,
+        Option<(u32, vk::QueueFamilyProperties)>,
+        Option<(u32, vk::QueueFamilyProperties)>,
+    ),
 
     #[error("This GPU was not created for surface rendering")]
     GpuCreatedWithoutPresentationSupport,
@@ -152,8 +156,9 @@ impl Gpu {
             setup_khr_surface_extensions(&entry, &instance);
         }
 
-        trace!("Created physical device");
         let physical_device = Self::select_discrete_physical_device(&instance)?;
+        trace!("Created physical device");
+
         let description = GpuDescription::new(&physical_device);
 
         let presentation_surface = if let Some(window) = configuration.window {
@@ -167,6 +172,8 @@ impl Gpu {
             None
         };
 
+        trace!("Created presentation surface");
+
         let queue_indices = Self::select_queue_families_indices(
             &physical_device,
             &instance,
@@ -177,11 +184,13 @@ impl Gpu {
         }
         let device =
             Self::create_device(&configuration, &instance, physical_device, &queue_indices)?;
+        trace!("Created logical device");
 
         let (graphics_queue, async_compute_queue, transfer_queue) =
             Self::get_device_queues(&device, &queue_indices)?;
+        trace!("Created queues");
 
-        log::info!(
+        trace!(
             "Created a GPU from a device with name '{}'",
             description.name
         );
@@ -276,31 +285,46 @@ impl Gpu {
     ) -> Result<QueueFamilies, GpuError> {
         let all_queue_families =
             unsafe { instance.get_physical_device_queue_family_properties(device.physical_device) };
-        let graphics_family = Self::find_queue_family(
-            device.physical_device,
-            &all_queue_families,
-            QueueFlags::GRAPHICS,
-            surface,
-        )?;
-        let async_compute_family = Self::find_queue_family(
-            device.physical_device,
-            &all_queue_families,
-            QueueFlags::COMPUTE,
-            &None,
-        )?;
 
-        let transfer_family = Self::find_queue_family(
-            device.physical_device,
-            &all_queue_families,
-            QueueFlags::TRANSFER | QueueFlags::SPARSE_BINDING,
-            &None,
-        )?;
+        let mut graphics_queue = None;
+        let mut async_compute_queue = None;
+        let mut transfer_queue = None;
 
-        Ok(QueueFamilies {
-            graphics_family,
-            async_compute_family,
-            transfer_family,
-        })
+        for (index, queue_family) in all_queue_families.iter().enumerate() {
+            if queue_family.queue_count == 0 {
+                continue;
+            }
+
+            if queue_family.queue_flags.intersects(QueueFlags::GRAPHICS) {
+                graphics_queue = Some((index as u32, *queue_family));
+            } else if queue_family.queue_flags.intersects(QueueFlags::COMPUTE) {
+                async_compute_queue = Some((index as u32, *queue_family));
+            } else if queue_family.queue_flags.intersects(QueueFlags::TRANSFER) {
+                transfer_queue = Some((index as u32, *queue_family));
+            }
+        }
+
+        match (graphics_queue, async_compute_queue, transfer_queue) {
+            (Some(g), Some(a), Some(t)) => Ok(QueueFamilies {
+                graphics_family: QueueFamily {
+                    index: g.0,
+                    count: g.1.queue_count,
+                },
+                async_compute_family: QueueFamily {
+                    index: a.0,
+                    count: a.1.queue_count,
+                },
+                transfer_family: QueueFamily {
+                    index: t.0,
+                    count: t.1.queue_count,
+                },
+            }),
+            _ => Err(GpuError::NoQueueFamilyFound(
+                graphics_queue,
+                async_compute_queue,
+                transfer_queue,
+            )),
+        }
     }
 
     fn create_device(
@@ -374,42 +398,6 @@ impl Gpu {
             }
         }
     }
-
-    fn find_queue_family(
-        physical_device: PhysicalDevice,
-        all_queue_families: &Vec<vk::QueueFamilyProperties>,
-        requested_family: QueueFlags,
-        surface: &Option<SurfaceKHR>,
-    ) -> Result<QueueFamily, GpuError> {
-        for (index, queue_family) in all_queue_families.iter().enumerate() {
-            if queue_family.queue_flags.contains(requested_family) && queue_family.queue_count > 0 {
-                if let Some(surface) = surface {
-                    let surface_extensions = get_khr_surface_extensions();
-                    unsafe {
-                        let supported = surface_extensions
-                            .get_physical_device_surface_support(
-                                physical_device,
-                                index as u32,
-                                *surface,
-                            )
-                            .map_err(|e| GpuError::GenericGpuError(e.to_string()))?;
-                        if !supported {
-                            continue;
-                        }
-                    };
-                }
-                return Ok({
-                    QueueFamily {
-                        index: index as u32,
-                        count: queue_family.queue_count,
-                    }
-                });
-            }
-        }
-
-        Err(GpuError::NoQueueFamilyFound(requested_family))
-    }
-
     fn get_device_queues(
         device: &Device,
         queues: &QueueFamilies,
@@ -444,7 +432,8 @@ static KHR_SURFACE_EXTENSIONS: OnceCell<ash::extensions::khr::Surface> = OnceCel
 fn setup_khr_surface_extensions(entry: &Entry, instance: &Instance) {
     KHR_SURFACE_EXTENSIONS
         .set(Surface::new(entry, instance))
-        .map_err(|e| panic!("setup_khr_surface_extensions was already called"));
+        .map_err(|_| panic!("setup_khr_surface_extensions was already called"))
+        .unwrap();
 }
 
 fn get_khr_surface_extensions() -> &'static Surface {

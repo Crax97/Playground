@@ -14,7 +14,7 @@ fn main() -> anyhow::Result<()> {
         window: Some(&window),
         app_name: "Hello World!",
         engine_name: "Hello Engine!",
-        enable_validation_layer: if cfg!(debug) { true } else { false },
+        enable_validation_layer: if cfg!(debug_assertions) { true } else { false },
         ..Default::default()
     })?;
 
