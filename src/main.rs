@@ -2,7 +2,7 @@ mod gpu;
 mod gpu_extension;
 
 use gpu::{Gpu, GpuConfiguration};
-use gpu_extension::{NoExtensions, SurfaceParamters, SwapchainExtension};
+use gpu_extension::{DefaultExtensions, SurfaceParamters, SwapchainExtension};
 use raw_window_handle::HasRawDisplayHandle;
 use winit::event_loop::ControlFlow;
 
@@ -12,7 +12,7 @@ fn main() -> anyhow::Result<()> {
     let event_loop = winit::event_loop::EventLoop::default();
     let window = winit::window::Window::new(&event_loop)?;
 
-    let gpu = Gpu::<SwapchainExtension<NoExtensions>>::new(
+    let gpu = Gpu::<SwapchainExtension<DefaultExtensions>>::new(
         GpuConfiguration {
             app_name: "Hello World!",
             engine_name: "Hello Engine!",

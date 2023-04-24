@@ -36,8 +36,8 @@ pub trait GpuExtension {
     ) -> Vec<String>;
 }
 
-pub type NoExtensions = ();
-impl GpuExtension for NoExtensions {
+pub type DefaultExtensions = ();
+impl GpuExtension for DefaultExtensions {
     type SetupParameters = ();
 
     fn new(_: Self::SetupParameters, _: &GpuParameters) -> Self {
