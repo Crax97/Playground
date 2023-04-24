@@ -250,11 +250,6 @@ impl<T: GpuExtension> SwapchainExtension<T> {
     }
 
     pub fn select_present_mode(&mut self, present_mode: PresentModeKHR) -> VkResult<()> {
-        let physical_device = self.gpu_info.physical_device;
-        let supported_present_modes = unsafe {
-            self.extension_surface
-                .get_physical_device_surface_present_modes(physical_device, self.khr_surface)
-        }?;
         self.present_mode = present_mode;
         self.recreate_swapchain()
     }
