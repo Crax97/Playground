@@ -257,6 +257,20 @@ impl<T: GpuExtension> SwapchainExtension<T> {
     fn recreate_swapchain(&mut self) -> VkResult<()> {
         self.validate_selected_swapchain_settings();
 
+        let swapchain_creation_info = self.make_swapchain_creation_info();
+        let swapchain = unsafe {
+            self.swapchain_extension
+                .create_swapchain(&swapchain_creation_info, None)?
+        };
+        self.current_swapchain = swapchain;
+        trace!(
+            "Created a new swapchain with present format {:?}, present mode {:?} and present extents {:?}",
+            &self.present_format, &self.present_mode, &self.present_extent
+        );
+        Ok(())
+    }
+
+    fn make_swapchain_creation_info(&self) -> SwapchainCreateInfoKHR {
         let swapchain_creation_info = SwapchainCreateInfoKHR {
             s_type: StructureType::SWAPCHAIN_CREATE_INFO_KHR,
             p_next: null(),
@@ -277,18 +291,7 @@ impl<T: GpuExtension> SwapchainExtension<T> {
             clipped: TRUE,
             old_swapchain: self.current_swapchain,
         };
-
-        let swapchain = unsafe {
-            self.swapchain_extension
-                .create_swapchain(&swapchain_creation_info, None)?
-        };
-
-        self.current_swapchain = swapchain;
-        trace!(
-            "Created a new swapchain with present format {:?}, present mode {:?} and present extents {:?}",
-            &self.present_format, &self.present_mode, &self.present_extent
-        );
-        Ok(())
+        swapchain_creation_info
     }
 
     fn validate_selected_swapchain_settings(&mut self) {
