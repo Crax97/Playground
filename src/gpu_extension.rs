@@ -111,9 +111,13 @@ define_gpu_extension!(
         khr_surface: SurfaceKHR,
         present_mode: PresentModeKHR,
         swapchain_image_count: NonZeroU32,
-        swapchain_extents: Extent2D,
-        swapchain_format: SurfaceFormatKHR,
+        present_extent: Extent2D,
+        present_format: SurfaceFormatKHR,
+
+        supported_present_modes: Vec<PresentModeKHR>,
+        supported_formats: Vec<SurfaceFormatKHR>,
         device_capabilities: SurfaceCapabilitiesKHR,
+
         window: Window,
         current_swapchain: SwapchainKHR,
     }
@@ -141,20 +145,25 @@ impl<T: GpuExtension> GpuExtension for SwapchainExtension<T> {
             )
         }
         .unwrap();
+        let swapchain_extension = Swapchain::new(&gpu_info.instance, &gpu_info.logical_device);
 
         let extension_surface = Surface::new(&gpu_info.entry, &gpu_info.instance);
 
-        let supported_formats = unsafe {
-            extension_surface
-                .get_physical_device_surface_formats(gpu_info.physical_device, khr_surface)
-        }?;
-
-        let device_capabilities = unsafe {
-            extension_surface
-                .get_physical_device_surface_capabilities(gpu_info.physical_device, khr_surface)?
+        let (supported_formats, device_capabilities, supported_present_modes) = unsafe {
+            let supported_formats = extension_surface
+                .get_physical_device_surface_formats(gpu_info.physical_device, khr_surface)?;
+            let device_capabilities = extension_surface
+                .get_physical_device_surface_capabilities(gpu_info.physical_device, khr_surface)?;
+            let supported_present_modes = extension_surface
+                .get_physical_device_surface_present_modes(gpu_info.physical_device, khr_surface)?;
+            (
+                supported_formats,
+                device_capabilities,
+                supported_present_modes,
+            )
         };
 
-        let swapchain_extension = Swapchain::new(&gpu_info.instance, &gpu_info.logical_device);
+        let swapchain_format = supported_formats[0];
 
         Ok(Self {
             inner_extension,
@@ -162,14 +171,18 @@ impl<T: GpuExtension> GpuExtension for SwapchainExtension<T> {
             window: parameters.window,
             extension_surface,
             swapchain_extension,
+
+            supported_present_modes,
+            supported_formats,
+            device_capabilities,
+
             present_mode: PresentModeKHR::FIFO,
             khr_surface,
-            swapchain_extents: Extent2D {
+            present_extent: Extent2D {
                 width: 800,
                 height: 600,
             },
-            device_capabilities,
-            swapchain_format: supported_formats[0],
+            present_format: swapchain_format,
             swapchain_image_count: NonZeroU32::new(2).unwrap(),
             current_swapchain: SwapchainKHR::null(),
         })
@@ -242,30 +255,22 @@ impl<T: GpuExtension> SwapchainExtension<T> {
             self.extension_surface
                 .get_physical_device_surface_present_modes(physical_device, self.khr_surface)
         }?;
-
-        self.present_mode = if supported_present_modes.contains(&present_mode) {
-            present_mode
-        } else {
-            warn!(
-                "Device does not support extension mode {:?}, selecting FIFO",
-                present_mode
-            );
-            PresentModeKHR::FIFO
-        };
-
+        self.present_mode = present_mode;
         self.recreate_swapchain()
     }
 
     fn recreate_swapchain(&mut self) -> VkResult<()> {
+        self.validate_selected_swapchain_settings();
+
         let swapchain_creation_info = SwapchainCreateInfoKHR {
             s_type: StructureType::SWAPCHAIN_CREATE_INFO_KHR,
             p_next: null(),
             flags: SwapchainCreateFlagsKHR::default(),
             surface: self.khr_surface,
             min_image_count: self.swapchain_image_count.get(),
-            image_format: self.swapchain_format.format,
-            image_color_space: ColorSpaceKHR::SRGB_NONLINEAR,
-            image_extent: self.swapchain_extents,
+            image_format: self.present_format.format,
+            image_color_space: self.present_format.color_space,
+            image_extent: self.present_extent,
             image_array_layers: 1,
             image_usage: ImageUsageFlags::COLOR_ATTACHMENT,
             image_sharing_mode: SharingMode::EXCLUSIVE,
@@ -282,11 +287,78 @@ impl<T: GpuExtension> SwapchainExtension<T> {
             self.swapchain_extension
                 .create_swapchain(&swapchain_creation_info, None)?
         };
+
         self.current_swapchain = swapchain;
         trace!(
-            "Created a new swapchain with features {}",
-            "TODO insert features here"
+            "Created a new swapchain with present format {:?}, present mode {:?} and present extents {:?}",
+            &self.present_format, &self.present_mode, &self.present_extent
         );
         Ok(())
+    }
+
+    fn validate_selected_swapchain_settings(&mut self) {
+        if !self.supported_present_modes.contains(&self.present_mode) {
+            warn!(
+                "Device does not support extension mode {:?}, selecting FIFO, which must be supported as per specification",
+                self.present_mode
+            );
+            self.present_mode = PresentModeKHR::FIFO
+        };
+
+        if !self.supported_formats.contains(&self.present_format) {
+            warn!(
+                "Device does not support present format {:?}, selecting the first available one",
+                &self.present_format
+            );
+            self.present_format = self.supported_formats[0];
+        }
+
+        if self.swapchain_image_count.get() < self.device_capabilities.min_image_count
+            || self.swapchain_image_count.get() > self.device_capabilities.max_image_count
+        {
+            warn!(
+                "Device does not support less than {} / more than {} swapchain images! Clamping",
+                self.device_capabilities.min_image_count, self.device_capabilities.max_image_count
+            );
+            self.swapchain_image_count = self.swapchain_image_count.clamp(
+                NonZeroU32::new(self.device_capabilities.min_image_count).unwrap(),
+                NonZeroU32::new(self.device_capabilities.max_image_count).unwrap(),
+            );
+        }
+
+        let min_exent = self.device_capabilities.min_image_extent;
+        let max_exent = self.device_capabilities.max_image_extent;
+        let current_extent = self.present_extent;
+        if current_extent.width < min_exent.width
+            || current_extent.height < min_exent.height
+            || current_extent.width > max_exent.width
+            || current_extent.height > max_exent.height
+        {
+            warn!(
+                "Device does not support extents smaller than {:?} / greather than {:?}! Clamping",
+                self.device_capabilities.min_image_extent,
+                self.device_capabilities.max_image_extent
+            );
+
+            self.present_extent = Extent2D {
+                width: self.present_extent.width.clamp(
+                    self.device_capabilities.min_image_extent.width,
+                    self.device_capabilities.max_image_extent.width,
+                ),
+                height: self.present_extent.height.clamp(
+                    self.device_capabilities.min_image_extent.height,
+                    self.device_capabilities.max_image_extent.height,
+                ),
+            }
+        }
+    }
+}
+
+impl<T: GpuExtension> Drop for SwapchainExtension<T> {
+    fn drop(&mut self) {
+        unsafe {
+            self.swapchain_extension
+                .destroy_swapchain(self.current_swapchain, None)
+        }
     }
 }
