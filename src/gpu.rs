@@ -2,6 +2,7 @@ use std::{
     ffi::{CStr, CString},
     ops::{Deref, DerefMut},
     ptr::{addr_of, addr_of_mut, null},
+    sync::Arc,
 };
 
 use anyhow::Result;
@@ -44,15 +45,22 @@ impl GpuDescription {
     }
 }
 
+pub struct GpuInfo {
+    pub entry: Entry,
+    pub instance: Instance,
+    pub logical_device: Device,
+    pub physical_device: PhysicalDevice,
+    pub graphics_queue: Queue,
+    pub async_compute_queue: Queue,
+    pub transfer_queue: Queue,
+    pub description: GpuDescription,
+}
+
+pub type SharedGpuInfo = Arc<GpuInfo>;
+
 pub struct Gpu<E: GpuExtension> {
-    entry: Entry,
-    instance: Instance,
-    device: Device,
-    graphics_queue: Queue,
-    async_compute_queue: Queue,
-    transfer_queue: Queue,
     extension: E,
-    description: GpuDescription,
+    gpu_info: Arc<GpuInfo>,
 }
 
 pub struct GpuConfiguration<'a> {
@@ -143,17 +151,10 @@ impl<E: GpuExtension> Gpu<E> {
         let description = GpuDescription::new(&physical_device);
 
         trace!("Created presentation surface");
-        let extension: E = E::new(extension_params, &gpu_parameters);
 
         let queue_indices = Self::select_queue_families_indices(&physical_device, &instance)?;
         if !queue_indices.is_valid() {
             log::error!("Queue configurations are invalid!");
-        }
-
-        if !extension.accepts_queue_families(queue_indices, physical_device.physical_device)? {
-            error!("Extension did not accept the selected queues!");
-        } else {
-            trace!("Extension accepted the selected queue families");
         }
 
         Self::ensure_required_device_extensions_are_available(
@@ -162,7 +163,7 @@ impl<E: GpuExtension> Gpu<E> {
             &physical_device,
         )?;
 
-        let device = Self::create_device(
+        let logical_device = Self::create_device(
             &configuration,
             &device_extensions,
             &instance,
@@ -172,21 +173,34 @@ impl<E: GpuExtension> Gpu<E> {
         trace!("Created logical device");
 
         let (graphics_queue, async_compute_queue, transfer_queue) =
-            Self::get_device_queues(&device, &queue_indices)?;
+            Self::get_device_queues(&logical_device, &queue_indices)?;
         trace!("Created queues");
 
-        trace!(
-            "Created a GPU from a device with name '{}'",
-            description.name
-        );
-        Ok(Gpu {
+        let gpu_info = Arc::new(GpuInfo {
             entry,
             instance,
-            device,
+            logical_device,
+            physical_device: physical_device.physical_device,
             graphics_queue,
             async_compute_queue,
             transfer_queue,
             description,
+        });
+
+        let extension: E = E::new(extension_params, gpu_info.clone())?;
+
+        if !extension.accepts_queue_families(queue_indices, physical_device.physical_device)? {
+            error!("Extension did not accept the selected queues!");
+        } else {
+            trace!("Extension accepted the selected queue families");
+        }
+
+        trace!(
+            "Created a GPU from a device with name '{}'",
+            &gpu_info.description.name
+        );
+        Ok(Gpu {
+            gpu_info,
             extension,
         })
     }
@@ -462,8 +476,8 @@ impl<E: GpuExtension> DerefMut for Gpu<E> {
 impl<T: GpuExtension> Drop for Gpu<T> {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_device(None);
-            self.instance.destroy_instance(None);
+            self.gpu_info.logical_device.destroy_device(None);
+            self.gpu_info.instance.destroy_instance(None);
         }
     }
 }

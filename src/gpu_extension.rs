@@ -1,18 +1,26 @@
 use std::{
-    ffi::{CStr, CString},
+    ffi::CStr,
+    num::NonZeroU32,
     ops::{Deref, DerefMut},
+    ptr::null,
+    sync::Arc,
 };
 
 use ash::{
-    extensions::khr::Surface,
+    extensions::khr::{Surface, Swapchain},
     prelude::VkResult,
-    vk::{PhysicalDevice, QueueFamilyProperties, QueueFlags, SurfaceKHR},
+    vk::{
+        ColorSpaceKHR, CompositeAlphaFlagsKHR, Extent2D, Format, ImageUsageFlags, PhysicalDevice,
+        PresentModeKHR, SharingMode, StructureType, SurfaceCapabilitiesKHR, SurfaceFormatKHR,
+        SurfaceKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR, TRUE,
+    },
     Entry, Instance,
 };
+use log::{trace, warn};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use winit::window::Window;
 
-use crate::gpu::QueueFamilies;
+use crate::gpu::{self, GpuInfo, QueueFamilies, SharedGpuInfo};
 
 pub struct GpuParameters<'a> {
     pub entry: &'a Entry,
@@ -22,7 +30,13 @@ pub struct GpuParameters<'a> {
 pub trait GpuExtension {
     type SetupParameters;
 
-    fn new(parameters: Self::SetupParameters, gpu_parameters: &GpuParameters) -> Self;
+    fn new(parameters: Self::SetupParameters, gpu_info: SharedGpuInfo) -> VkResult<Self>
+    where
+        Self: Sized;
+
+    fn post_init(&mut self) -> VkResult<()> {
+        Ok(())
+    }
 
     fn accepts_queue_families(
         &self,
@@ -40,8 +54,11 @@ pub type DefaultExtensions = ();
 impl GpuExtension for DefaultExtensions {
     type SetupParameters = ();
 
-    fn new(_: Self::SetupParameters, _: &GpuParameters) -> Self {
-        ()
+    fn new(_: Self::SetupParameters, _: SharedGpuInfo) -> VkResult<Self>
+    where
+        Self: Sized,
+    {
+        Ok(())
     }
 
     fn accepts_queue_families(&self, _: QueueFamilies, _: PhysicalDevice) -> VkResult<bool> {
@@ -89,8 +106,16 @@ macro_rules! define_gpu_extension {
 define_gpu_extension!(
     SwapchainExtension {
         extension_surface: Surface,
+        swapchain_extension: Swapchain,
+        gpu_info: SharedGpuInfo,
         khr_surface: SurfaceKHR,
+        present_mode: PresentModeKHR,
+        swapchain_image_count: NonZeroU32,
+        swapchain_extents: Extent2D,
+        swapchain_format: SurfaceFormatKHR,
+        device_capabilities: SurfaceCapabilitiesKHR,
         window: Window,
+        current_swapchain: SwapchainKHR,
     }
 
     SurfaceParamters {
@@ -101,25 +126,61 @@ define_gpu_extension!(
 impl<T: GpuExtension> GpuExtension for SwapchainExtension<T> {
     type SetupParameters = SurfaceParamters<T>;
 
-    fn new(parameters: Self::SetupParameters, gpu_parameters: &GpuParameters) -> Self {
-        let inner_extension = T::new(parameters.inner_params, gpu_parameters);
+    fn new(parameters: Self::SetupParameters, gpu_info: SharedGpuInfo) -> VkResult<Self>
+    where
+        Self: Sized,
+    {
+        let inner_extension = T::new(parameters.inner_params, gpu_info.clone())?;
         let khr_surface = unsafe {
             ash_window::create_surface(
-                gpu_parameters.entry,
-                gpu_parameters.instance,
+                &gpu_info.entry,
+                &gpu_info.instance,
                 parameters.window.raw_display_handle(),
                 parameters.window.raw_window_handle(),
                 None,
             )
         }
         .unwrap();
-        // let surface = Surface::new(gpu_parameters.entry, gpu_parameters.instance);
-        Self {
+
+        let extension_surface = Surface::new(&gpu_info.entry, &gpu_info.instance);
+
+        let supported_formats = unsafe {
+            extension_surface
+                .get_physical_device_surface_formats(gpu_info.physical_device, khr_surface)
+        }?;
+
+        let device_capabilities = unsafe {
+            extension_surface
+                .get_physical_device_surface_capabilities(gpu_info.physical_device, khr_surface)?
+        };
+
+        let swapchain_extension = Swapchain::new(&gpu_info.instance, &gpu_info.logical_device);
+
+        Ok(Self {
             inner_extension,
+            gpu_info,
             window: parameters.window,
-            extension_surface: Surface::new(gpu_parameters.entry, gpu_parameters.instance),
+            extension_surface,
+            swapchain_extension,
+            present_mode: PresentModeKHR::FIFO,
             khr_surface,
+            swapchain_extents: Extent2D {
+                width: 800,
+                height: 600,
+            },
+            device_capabilities,
+            swapchain_format: supported_formats[0],
+            swapchain_image_count: NonZeroU32::new(2).unwrap(),
+            current_swapchain: SwapchainKHR::null(),
+        })
+    }
+
+    fn post_init(&mut self) -> VkResult<()> {
+        let inner = self.inner_extension.post_init();
+        if inner.is_err() {
+            return inner;
         }
+        self.recreate_swapchain()
     }
 
     fn get_instance_extensions(parameters: &Self::SetupParameters) -> Vec<String> {
@@ -171,7 +232,61 @@ impl<T: GpuExtension> GpuExtension for SwapchainExtension<T> {
 }
 
 impl<T: GpuExtension> SwapchainExtension<T> {
-    pub fn presentation_surface(&self) -> &SurfaceKHR {
-        &self.khr_surface
+    pub fn presentation_surface(&self) -> SurfaceKHR {
+        self.khr_surface
+    }
+
+    pub fn select_present_mode(&mut self, present_mode: PresentModeKHR) -> VkResult<()> {
+        let physical_device = self.gpu_info.physical_device;
+        let supported_present_modes = unsafe {
+            self.extension_surface
+                .get_physical_device_surface_present_modes(physical_device, self.khr_surface)
+        }?;
+
+        self.present_mode = if supported_present_modes.contains(&present_mode) {
+            present_mode
+        } else {
+            warn!(
+                "Device does not support extension mode {:?}, selecting FIFO",
+                present_mode
+            );
+            PresentModeKHR::FIFO
+        };
+
+        self.recreate_swapchain()
+    }
+
+    fn recreate_swapchain(&mut self) -> VkResult<()> {
+        let swapchain_creation_info = SwapchainCreateInfoKHR {
+            s_type: StructureType::SWAPCHAIN_CREATE_INFO_KHR,
+            p_next: null(),
+            flags: SwapchainCreateFlagsKHR::default(),
+            surface: self.khr_surface,
+            min_image_count: self.swapchain_image_count.get(),
+            image_format: self.swapchain_format.format,
+            image_color_space: ColorSpaceKHR::SRGB_NONLINEAR,
+            image_extent: self.swapchain_extents,
+            image_array_layers: 1,
+            image_usage: ImageUsageFlags::COLOR_ATTACHMENT,
+            image_sharing_mode: SharingMode::EXCLUSIVE,
+            queue_family_index_count: 0,
+            p_queue_family_indices: null(),
+            pre_transform: self.device_capabilities.current_transform,
+            composite_alpha: CompositeAlphaFlagsKHR::OPAQUE,
+            present_mode: self.present_mode,
+            clipped: TRUE,
+            old_swapchain: self.current_swapchain,
+        };
+
+        let swapchain = unsafe {
+            self.swapchain_extension
+                .create_swapchain(&swapchain_creation_info, None)?
+        };
+        self.current_swapchain = swapchain;
+        trace!(
+            "Created a new swapchain with features {}",
+            "TODO insert features here"
+        );
+        Ok(())
     }
 }

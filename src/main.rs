@@ -1,6 +1,7 @@
 mod gpu;
 mod gpu_extension;
 
+use ash::vk::PresentModeKHR;
 use gpu::{Gpu, GpuConfiguration};
 use gpu_extension::{DefaultExtensions, SurfaceParamters, SwapchainExtension};
 use raw_window_handle::HasRawDisplayHandle;
@@ -12,7 +13,7 @@ fn main() -> anyhow::Result<()> {
     let event_loop = winit::event_loop::EventLoop::default();
     let window = winit::window::Window::new(&event_loop)?;
 
-    let gpu = Gpu::<SwapchainExtension<DefaultExtensions>>::new(
+    let mut gpu = Gpu::<SwapchainExtension<DefaultExtensions>>::new(
         GpuConfiguration {
             app_name: "Hello World!",
             engine_name: "Hello Engine!",
@@ -26,6 +27,7 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     let surface = gpu.presentation_surface();
+    gpu.select_present_mode(PresentModeKHR::MAILBOX)?;
 
     event_loop.run(move |event, event_loop, mut control_flow| match event {
         winit::event::Event::NewEvents(_) => {}
