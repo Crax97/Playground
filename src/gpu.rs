@@ -187,13 +187,15 @@ impl<E: GpuExtension> Gpu<E> {
             description,
         });
 
-        let extension: E = E::new(extension_params, gpu_info.clone())?;
+        let mut extension: E = E::new(extension_params, gpu_info.clone())?;
 
         if !extension.accepts_queue_families(queue_indices, physical_device.physical_device)? {
             error!("Extension did not accept the selected queues!");
         } else {
             trace!("Extension accepted the selected queue families");
         }
+
+        extension.post_init()?;
 
         trace!(
             "Created a GPU from a device with name '{}'",

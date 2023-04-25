@@ -1,17 +1,25 @@
 mod gpu;
 mod gpu_extension;
 
-use ash::vk::PresentModeKHR;
+use ash::vk::{Extent2D, PresentModeKHR};
 use gpu::{Gpu, GpuConfiguration};
 use gpu_extension::{DefaultExtensions, SurfaceParamters, SwapchainExtension};
 use raw_window_handle::HasRawDisplayHandle;
-use winit::event_loop::ControlFlow;
+use winit::{
+    dpi::{PhysicalSize, Size},
+    event_loop::ControlFlow,
+};
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     let event_loop = winit::event_loop::EventLoop::default();
-    let window = winit::window::Window::new(&event_loop)?;
+    let window = winit::window::WindowBuilder::default()
+        .with_inner_size(PhysicalSize {
+            width: 1240,
+            height: 720,
+        })
+        .build(&event_loop)?;
 
     let mut gpu = Gpu::<SwapchainExtension<DefaultExtensions>>::new(
         GpuConfiguration {
@@ -23,6 +31,10 @@ fn main() -> anyhow::Result<()> {
         SurfaceParamters {
             inner_params: (),
             window,
+            window_size: Extent2D {
+                width: 1240,
+                height: 720,
+            },
         },
     )?;
 

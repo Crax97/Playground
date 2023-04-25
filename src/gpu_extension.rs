@@ -16,7 +16,7 @@ use ash::{
     },
     Entry, Instance,
 };
-use log::{trace, warn};
+use log::{info, trace, warn};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use winit::window::Window;
 
@@ -103,6 +103,29 @@ macro_rules! define_gpu_extension {
     };
 }
 
+mod util {
+    use ash::vk::{ColorSpaceKHR, Format, PresentModeKHR, SurfaceFormatKHR};
+
+    pub(super) fn stringify_present_mode(mode: PresentModeKHR) -> &'static str {
+        match mode {
+            PresentModeKHR::FIFO => "FIFO",
+            PresentModeKHR::FIFO_RELAXED => "FIFO_RELAXED",
+            PresentModeKHR::MAILBOX => "MAILBOX",
+            PresentModeKHR::IMMEDIATE => "IMMEDIATE",
+            PresentModeKHR::SHARED_CONTINUOUS_REFRESH => "SHARED_CONTINUOUS_REFRESH",
+            PresentModeKHR::SHARED_DEMAND_REFRESH => "SHARED_DEMAND_REFRESH",
+            _ => unreachable!(),
+        }
+    }
+
+    pub(super) fn stringify_presentation_format(format: SurfaceFormatKHR) -> String {
+        format!(
+            "Image format: {:?}, Color space: {:?}",
+            format.format, format.color_space
+        )
+    }
+}
+
 define_gpu_extension!(
     SwapchainExtension {
         extension_surface: Surface,
@@ -115,7 +138,7 @@ define_gpu_extension!(
         present_format: SurfaceFormatKHR,
 
         supported_present_modes: Vec<PresentModeKHR>,
-        supported_formats: Vec<SurfaceFormatKHR>,
+        supported_presentation_formats: Vec<SurfaceFormatKHR>,
         device_capabilities: SurfaceCapabilitiesKHR,
 
         window: Window,
@@ -124,6 +147,7 @@ define_gpu_extension!(
 
     SurfaceParamters {
         window: Window,
+        window_size: Extent2D,
     }
 );
 
@@ -173,15 +197,12 @@ impl<T: GpuExtension> GpuExtension for SwapchainExtension<T> {
             swapchain_extension,
 
             supported_present_modes,
-            supported_formats,
+            supported_presentation_formats: supported_formats,
             device_capabilities,
 
             present_mode: PresentModeKHR::FIFO,
             khr_surface,
-            present_extent: Extent2D {
-                width: 800,
-                height: 600,
-            },
+            present_extent: parameters.window_size,
             present_format: swapchain_format,
             swapchain_image_count: NonZeroU32::new(2).unwrap(),
             current_swapchain: SwapchainKHR::null(),
@@ -189,10 +210,8 @@ impl<T: GpuExtension> GpuExtension for SwapchainExtension<T> {
     }
 
     fn post_init(&mut self) -> VkResult<()> {
-        let inner = self.inner_extension.post_init();
-        if inner.is_err() {
-            return inner;
-        }
+        self.inner_extension.post_init()?;
+        self.log_supported_features();
         self.recreate_swapchain()
     }
 
@@ -249,6 +268,34 @@ impl<T: GpuExtension> SwapchainExtension<T> {
         self.khr_surface
     }
 
+    fn log_supported_features(&self) {
+        info!("Device supports the following present modes:");
+        for present_mode in &self.supported_present_modes {
+            info!("\t{}", util::stringify_present_mode(*present_mode));
+        }
+
+        info!("Device supports the following presentation formats:");
+        for presentation_format in &self.supported_presentation_formats {
+            info!(
+                "\t{}",
+                util::stringify_presentation_format(*presentation_format)
+            );
+        }
+
+        info!("Device has the folowing limits:");
+        info!(
+            "\tMin/Max swapchain images: {}/{}",
+            &self.device_capabilities.min_image_count, self.device_capabilities.max_image_count
+        );
+        info!(
+            "\tMin/Max swapchain extents: {}x{}/{}x{}",
+            self.device_capabilities.min_image_extent.width,
+            self.device_capabilities.min_image_extent.height,
+            self.device_capabilities.max_image_extent.width,
+            self.device_capabilities.max_image_extent.height
+        );
+    }
+
     pub fn select_present_mode(&mut self, present_mode: PresentModeKHR) -> VkResult<()> {
         self.present_mode = present_mode;
         self.recreate_swapchain()
@@ -303,12 +350,15 @@ impl<T: GpuExtension> SwapchainExtension<T> {
             self.present_mode = PresentModeKHR::FIFO
         };
 
-        if !self.supported_formats.contains(&self.present_format) {
+        if !self
+            .supported_presentation_formats
+            .contains(&self.present_format)
+        {
             warn!(
                 "Device does not support present format {:?}, selecting the first available one",
                 &self.present_format
             );
-            self.present_format = self.supported_formats[0];
+            self.present_format = self.supported_presentation_formats[0];
         }
 
         if self.swapchain_image_count.get() < self.device_capabilities.min_image_count
