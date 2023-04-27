@@ -406,7 +406,9 @@ impl<T: GpuExtension> Drop for SwapchainExtension<T> {
     fn drop(&mut self) {
         unsafe {
             self.swapchain_extension
-                .destroy_swapchain(self.current_swapchain, None)
+                .destroy_swapchain(self.current_swapchain, None);
+            self.extension_surface
+                .destroy_surface(self.khr_surface, None);
         }
     }
 }
