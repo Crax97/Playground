@@ -54,7 +54,9 @@ fn main() -> anyhow::Result<()> {
         winit::event::Event::Suspended => {}
         winit::event::Event::Resumed => {}
         winit::event::Event::MainEventsCleared => {}
-        winit::event::Event::RedrawRequested(_) => {}
+        winit::event::Event::RedrawRequested(_) => {
+            let next_image = gpu.get_next_swapchain_image().unwrap();
+        }
         winit::event::Event::RedrawEventsCleared => {}
         winit::event::Event::LoopDestroyed => *control_flow = ControlFlow::ExitWithCode(0),
     })

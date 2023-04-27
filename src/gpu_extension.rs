@@ -10,9 +10,12 @@ use ash::{
     extensions::khr::{Surface, Swapchain},
     prelude::VkResult,
     vk::{
-        ColorSpaceKHR, CompositeAlphaFlagsKHR, Extent2D, Format, ImageUsageFlags, PhysicalDevice,
-        PresentModeKHR, SharingMode, StructureType, SurfaceCapabilitiesKHR, SurfaceFormatKHR,
-        SurfaceKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR, TRUE,
+        self, ColorSpaceKHR, ComponentMapping, ComponentSwizzle, CompositeAlphaFlagsKHR, Extent2D,
+        Fence, FenceCreateFlags, Format, Image, ImageAspectFlags, ImageSubresourceRange,
+        ImageUsageFlags, ImageView, ImageViewCreateFlags, ImageViewCreateInfo, ImageViewType,
+        PhysicalDevice, PresentModeKHR, Semaphore, SemaphoreCreateFlags, SharingMode,
+        StructureType, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR,
+        SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR, TRUE,
     },
     Entry, Instance,
 };
@@ -143,6 +146,10 @@ define_gpu_extension!(
 
         window: Window,
         current_swapchain: SwapchainKHR,
+        current_swapchain_images: Vec<Image>,
+        current_swapchain_image_views: Vec<ImageView>,
+
+        next_image_fence: Fence,
     }
 
     SurfaceParamters {
@@ -189,6 +196,15 @@ impl<T: GpuExtension> GpuExtension for SwapchainExtension<T> {
 
         let swapchain_format = supported_formats[0];
 
+        let next_image_fence = unsafe {
+            let create_info = vk::FenceCreateInfo {
+                s_type: StructureType::FENCE_CREATE_INFO,
+                p_next: null(),
+                flags: FenceCreateFlags::empty(),
+            };
+            gpu_info.logical_device.create_fence(&create_info, None)
+        }?;
+
         Ok(Self {
             inner_extension,
             gpu_info,
@@ -206,6 +222,9 @@ impl<T: GpuExtension> GpuExtension for SwapchainExtension<T> {
             present_format: swapchain_format,
             swapchain_image_count: NonZeroU32::new(2).unwrap(),
             current_swapchain: SwapchainKHR::null(),
+            current_swapchain_images: vec![],
+            current_swapchain_image_views: vec![],
+            next_image_fence,
         })
     }
 
@@ -301,7 +320,81 @@ impl<T: GpuExtension> SwapchainExtension<T> {
         self.recreate_swapchain()
     }
 
+    pub fn get_next_swapchain_image(&mut self) -> VkResult<ImageView> {
+        loop {
+            let (next_image, suboptimal) = unsafe {
+                self.swapchain_extension.acquire_next_image(
+                    self.current_swapchain,
+                    200000,
+                    Semaphore::null(),
+                    self.next_image_fence,
+                )
+            }?;
+            unsafe {
+                self.gpu_info.logical_device.wait_for_fences(
+                    &[self.next_image_fence],
+                    true,
+                    200000,
+                )?;
+                self.gpu_info
+                    .logical_device
+                    .reset_fences(&[self.next_image_fence])?;
+            }
+            if !suboptimal {
+                let image_view = self.current_swapchain_image_views.get(next_image as usize);
+                return Ok(*image_view.unwrap());
+            }
+            self.recreate_swapchain()?;
+        }
+    }
+
     fn recreate_swapchain(&mut self) -> VkResult<()> {
+        unsafe {
+            self.swapchain_extension
+                .destroy_swapchain(self.current_swapchain, None);
+        }
+
+        let khr_surface = unsafe {
+            self.extension_surface
+                .destroy_surface(self.khr_surface, None);
+            ash_window::create_surface(
+                &self.gpu_info.entry,
+                &self.gpu_info.instance,
+                self.window.raw_display_handle(),
+                self.window.raw_window_handle(),
+                None,
+            )
+        }
+        .unwrap();
+        self.khr_surface = khr_surface;
+
+        let (supported_formats, device_capabilities, supported_present_modes) = unsafe {
+            let supported_formats = self
+                .extension_surface
+                .get_physical_device_surface_formats(self.gpu_info.physical_device, khr_surface)?;
+            let device_capabilities = self
+                .extension_surface
+                .get_physical_device_surface_capabilities(
+                    self.gpu_info.physical_device,
+                    khr_surface,
+                )?;
+            let supported_present_modes = self
+                .extension_surface
+                .get_physical_device_surface_present_modes(
+                    self.gpu_info.physical_device,
+                    khr_surface,
+                )?;
+            (
+                supported_formats,
+                device_capabilities,
+                supported_present_modes,
+            )
+        };
+
+        self.supported_presentation_formats = supported_formats;
+        self.device_capabilities = device_capabilities;
+        self.supported_present_modes = supported_present_modes;
+        self.present_format = self.supported_presentation_formats[0];
         self.validate_selected_swapchain_settings();
 
         let swapchain_creation_info = self.make_swapchain_creation_info();
@@ -314,6 +407,55 @@ impl<T: GpuExtension> SwapchainExtension<T> {
             "Created a new swapchain with present format {:?}, present mode {:?} and present extents {:?}",
             &self.present_format, &self.present_mode, &self.present_extent
         );
+
+        self.recreate_swapchain_images()?;
+        self.recreate_swapchain_image_views()?;
+
+        Ok(())
+    }
+
+    fn recreate_swapchain_images(&mut self) -> VkResult<()> {
+        let images = unsafe {
+            self.swapchain_extension
+                .get_swapchain_images(self.current_swapchain)
+        }?;
+        self.current_swapchain_images = images;
+        Ok(())
+    }
+
+    fn recreate_swapchain_image_views(&mut self) -> VkResult<()> {
+        self.current_swapchain_image_views
+            .resize(self.current_swapchain_images.len(), ImageView::null());
+        for (i, image) in self.current_swapchain_images.iter().enumerate() {
+            let view_info = ImageViewCreateInfo {
+                s_type: StructureType::IMAGE_VIEW_CREATE_INFO,
+                p_next: null(),
+                flags: ImageViewCreateFlags::empty(),
+                image: *image,
+                view_type: ImageViewType::TYPE_2D,
+                format: self.present_format.format,
+                components: ComponentMapping {
+                    r: ComponentSwizzle::R,
+                    g: ComponentSwizzle::G,
+                    b: ComponentSwizzle::B,
+                    a: ComponentSwizzle::ONE,
+                },
+                subresource_range: ImageSubresourceRange {
+                    aspect_mask: ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+            };
+            let view = unsafe {
+                self.gpu_info
+                    .logical_device
+                    .create_image_view(&view_info, None)
+            }?;
+            self.current_swapchain_image_views[i] = view;
+        }
+
         Ok(())
     }
 
@@ -336,7 +478,7 @@ impl<T: GpuExtension> SwapchainExtension<T> {
             composite_alpha: CompositeAlphaFlagsKHR::OPAQUE,
             present_mode: self.present_mode,
             clipped: TRUE,
-            old_swapchain: self.current_swapchain,
+            old_swapchain: SwapchainKHR::null(),
         };
         swapchain_creation_info
     }
@@ -405,6 +547,13 @@ impl<T: GpuExtension> SwapchainExtension<T> {
 impl<T: GpuExtension> Drop for SwapchainExtension<T> {
     fn drop(&mut self) {
         unsafe {
+            for image_view in &self.current_swapchain_image_views {
+                self.gpu_info
+                    .logical_device
+                    .destroy_image_view(*image_view, None);
+            }
+            self.current_swapchain_image_views.clear();
+
             self.swapchain_extension
                 .destroy_swapchain(self.current_swapchain, None);
             self.extension_surface
