@@ -53,6 +53,7 @@ pub struct GpuInfo {
     pub graphics_queue: Queue,
     pub async_compute_queue: Queue,
     pub transfer_queue: Queue,
+    pub queue_families: QueueFamilies,
     pub description: GpuDescription,
 }
 
@@ -152,8 +153,8 @@ impl<E: GpuExtension> Gpu<E> {
 
         trace!("Created presentation surface");
 
-        let queue_indices = Self::select_queue_families_indices(&physical_device, &instance)?;
-        if !queue_indices.is_valid() {
+        let queue_families = Self::select_queue_families_indices(&physical_device, &instance)?;
+        if !queue_families.is_valid() {
             log::error!("Queue configurations are invalid!");
         }
 
@@ -168,12 +169,12 @@ impl<E: GpuExtension> Gpu<E> {
             &device_extensions,
             &instance,
             physical_device,
-            &queue_indices,
+            &queue_families,
         )?;
         trace!("Created logical device");
 
         let (graphics_queue, async_compute_queue, transfer_queue) =
-            Self::get_device_queues(&logical_device, &queue_indices)?;
+            Self::get_device_queues(&logical_device, &queue_families)?;
         trace!("Created queues");
 
         let gpu_info = Arc::new(GpuInfo {
@@ -185,11 +186,12 @@ impl<E: GpuExtension> Gpu<E> {
             async_compute_queue,
             transfer_queue,
             description,
+            queue_families,
         });
 
         let mut extension: E = E::new(extension_params, gpu_info.clone())?;
 
-        if !extension.accepts_queue_families(queue_indices, physical_device.physical_device)? {
+        if !extension.accepts_queue_families(queue_families, physical_device.physical_device)? {
             error!("Extension did not accept the selected queues!");
         } else {
             trace!("Extension accepted the selected queue families");
@@ -459,6 +461,18 @@ impl<E: GpuExtension> Gpu<E> {
 
         Ok(())
     }
+
+    pub(crate) fn vk_logical_device(&self) -> Device {
+        self.gpu_info.logical_device.clone()
+    }
+
+    pub(crate) fn graphics_queue_family_index(&self) -> u32 {
+        self.gpu_info.queue_families.graphics_family.index
+    }
+
+    pub(crate) fn graphics_queue(&self) -> Queue {
+        self.gpu_info.graphics_queue
+    }
 }
 
 impl<E: GpuExtension> Deref for Gpu<E> {
@@ -481,5 +495,11 @@ impl<T: GpuExtension> Drop for Gpu<T> {
             self.gpu_info.logical_device.destroy_device(None);
             self.gpu_info.instance.destroy_instance(None);
         }
+    }
+}
+
+impl<E: GpuExtension> AsRef<Device> for Gpu<E> {
+    fn as_ref(&self) -> &Device {
+        &self.gpu_info.logical_device
     }
 }

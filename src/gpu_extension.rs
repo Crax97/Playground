@@ -10,12 +10,16 @@ use ash::{
     extensions::khr::{Surface, Swapchain},
     prelude::VkResult,
     vk::{
-        self, ColorSpaceKHR, ComponentMapping, ComponentSwizzle, CompositeAlphaFlagsKHR, Extent2D,
-        Fence, FenceCreateFlags, Format, Image, ImageAspectFlags, ImageSubresourceRange,
-        ImageUsageFlags, ImageView, ImageViewCreateFlags, ImageViewCreateInfo, ImageViewType,
-        PhysicalDevice, PresentModeKHR, Semaphore, SemaphoreCreateFlags, SharingMode,
-        StructureType, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR,
-        SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR, TRUE,
+        self, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
+        AttachmentReference, AttachmentStoreOp, ComponentMapping, ComponentSwizzle,
+        CompositeAlphaFlagsKHR, Extent2D, Fence, FenceCreateFlags, Format, Framebuffer,
+        FramebufferCreateFlags, FramebufferCreateInfo, Image, ImageAspectFlags, ImageLayout,
+        ImageSubresourceRange, ImageUsageFlags, ImageView, ImageViewCreateFlags,
+        ImageViewCreateInfo, ImageViewType, PhysicalDevice, PipelineBindPoint, PresentInfoKHR,
+        PresentModeKHR, RenderPass, RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags,
+        Semaphore, SemaphoreCreateFlags, SemaphoreCreateInfo, SharingMode, StructureType,
+        SubpassDescription, SubpassDescriptionFlags, SurfaceCapabilitiesKHR, SurfaceFormatKHR,
+        SurfaceKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR, TRUE,
     },
     Entry, Instance,
 };
@@ -143,13 +147,16 @@ define_gpu_extension!(
         supported_present_modes: Vec<PresentModeKHR>,
         supported_presentation_formats: Vec<SurfaceFormatKHR>,
         device_capabilities: SurfaceCapabilitiesKHR,
-
+        render_pass: RenderPass,
         window: Window,
         current_swapchain: SwapchainKHR,
         current_swapchain_images: Vec<Image>,
         current_swapchain_image_views: Vec<ImageView>,
+        current_swapchain_framebuffers: Vec<Framebuffer>,
 
         next_image_fence: Fence,
+        in_flight_fence: Fence,
+        render_finished_semaphore: Semaphore,
     }
 
     SurfaceParamters {
@@ -204,6 +211,66 @@ impl<T: GpuExtension> GpuExtension for SwapchainExtension<T> {
             };
             gpu_info.logical_device.create_fence(&create_info, None)
         }?;
+        let in_flight_fence = unsafe {
+            let create_info = vk::FenceCreateInfo {
+                s_type: StructureType::FENCE_CREATE_INFO,
+                p_next: null(),
+                flags: FenceCreateFlags::empty(),
+            };
+            gpu_info.logical_device.create_fence(&create_info, None)
+        }?;
+
+        let render_finished_semaphore = unsafe {
+            gpu_info.logical_device.create_semaphore(
+                &SemaphoreCreateInfo {
+                    s_type: StructureType::SEMAPHORE_CREATE_INFO,
+                    p_next: null(),
+                    flags: SemaphoreCreateFlags::empty(),
+                },
+                None,
+            )?
+        };
+
+        let pass_info = RenderPassCreateInfo {
+            s_type: StructureType::RENDER_PASS_CREATE_INFO,
+            p_next: null(),
+            flags: RenderPassCreateFlags::empty(),
+            attachment_count: 1,
+            p_attachments: &[AttachmentDescription {
+                flags: AttachmentDescriptionFlags::empty(),
+                format: swapchain_format.format,
+                samples: SampleCountFlags::TYPE_1,
+                load_op: AttachmentLoadOp::CLEAR,
+                store_op: AttachmentStoreOp::STORE,
+                stencil_load_op: AttachmentLoadOp::DONT_CARE,
+                stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                initial_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            }] as *const AttachmentDescription,
+            subpass_count: 1,
+            p_subpasses: &[SubpassDescription {
+                flags: SubpassDescriptionFlags::empty(),
+                pipeline_bind_point: PipelineBindPoint::GRAPHICS,
+                input_attachment_count: 0,
+                p_input_attachments: null(),
+                color_attachment_count: 1,
+                p_color_attachments: &[AttachmentReference {
+                    attachment: 0,
+                    layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                }] as *const AttachmentReference,
+                p_resolve_attachments: null(),
+                p_depth_stencil_attachment: null(),
+                preserve_attachment_count: vk::FALSE,
+                p_preserve_attachments: null(),
+            }] as *const SubpassDescription,
+            dependency_count: 0,
+            p_dependencies: null(),
+        };
+        let render_pass = unsafe {
+            gpu_info
+                .logical_device
+                .create_render_pass(&pass_info, None)?
+        };
 
         Ok(Self {
             inner_extension,
@@ -218,13 +285,17 @@ impl<T: GpuExtension> GpuExtension for SwapchainExtension<T> {
 
             present_mode: PresentModeKHR::FIFO,
             khr_surface,
+            render_pass,
             present_extent: parameters.window_size,
             present_format: swapchain_format,
             swapchain_image_count: NonZeroU32::new(2).unwrap(),
             current_swapchain: SwapchainKHR::null(),
             current_swapchain_images: vec![],
             current_swapchain_image_views: vec![],
+            current_swapchain_framebuffers: vec![],
             next_image_fence,
+            in_flight_fence,
+            render_finished_semaphore,
         })
     }
 
@@ -287,6 +358,18 @@ impl<T: GpuExtension> SwapchainExtension<T> {
         self.khr_surface
     }
 
+    pub fn swapchain_format(&self) -> Format {
+        self.present_format.format
+    }
+
+    pub(crate) fn in_flight_fence(&self) -> vk::Fence {
+        self.in_flight_fence
+    }
+
+    pub fn render_finished_semaphore(&self) -> &Semaphore {
+        &self.render_finished_semaphore
+    }
+
     fn log_supported_features(&self) {
         info!("Device supports the following present modes:");
         for present_mode in &self.supported_present_modes {
@@ -320,7 +403,7 @@ impl<T: GpuExtension> SwapchainExtension<T> {
         self.recreate_swapchain()
     }
 
-    pub fn get_next_swapchain_image(&mut self) -> VkResult<ImageView> {
+    pub fn get_next_swapchain_image(&mut self) -> VkResult<(u32, Framebuffer, ImageView)> {
         loop {
             let (next_image, suboptimal) = unsafe {
                 self.swapchain_extension.acquire_next_image(
@@ -342,9 +425,37 @@ impl<T: GpuExtension> SwapchainExtension<T> {
             }
             if !suboptimal {
                 let image_view = self.current_swapchain_image_views.get(next_image as usize);
-                return Ok(*image_view.unwrap());
+                let framebuffer = self.current_swapchain_framebuffers[next_image as usize];
+                return Ok((next_image, framebuffer, *image_view.unwrap()));
             }
             self.recreate_swapchain()?;
+        }
+    }
+
+    pub(crate) fn render_pass(&self) -> &vk::RenderPass {
+        &self.render_pass
+    }
+
+    pub(crate) fn extents(&self) -> Extent2D {
+        self.present_extent.clone()
+    }
+
+    pub(crate) fn present(&self, index: u32) -> VkResult<bool> {
+        unsafe {
+            let mut result = ash::vk::Result::SUCCESS;
+            self.swapchain_extension.queue_present(
+                self.gpu_info.graphics_queue,
+                &PresentInfoKHR {
+                    s_type: StructureType::PRESENT_INFO_KHR,
+                    p_next: null(),
+                    wait_semaphore_count: 1,
+                    p_wait_semaphores: &self.render_finished_semaphore as *const Semaphore,
+                    swapchain_count: 1,
+                    p_swapchains: &self.current_swapchain as *const SwapchainKHR,
+                    p_image_indices: &index as *const u32,
+                    p_results: &mut result as *mut ash::vk::Result,
+                },
+            )
         }
     }
 
@@ -410,6 +521,7 @@ impl<T: GpuExtension> SwapchainExtension<T> {
 
         self.recreate_swapchain_images()?;
         self.recreate_swapchain_image_views()?;
+        self.recreate_swapchain_framebuffers()?;
 
         Ok(())
     }
@@ -438,7 +550,7 @@ impl<T: GpuExtension> SwapchainExtension<T> {
                     r: ComponentSwizzle::R,
                     g: ComponentSwizzle::G,
                     b: ComponentSwizzle::B,
-                    a: ComponentSwizzle::ONE,
+                    a: ComponentSwizzle::A,
                 },
                 subresource_range: ImageSubresourceRange {
                     aspect_mask: ImageAspectFlags::COLOR,
@@ -454,6 +566,33 @@ impl<T: GpuExtension> SwapchainExtension<T> {
                     .create_image_view(&view_info, None)
             }?;
             self.current_swapchain_image_views[i] = view;
+        }
+
+        Ok(())
+    }
+
+    fn recreate_swapchain_framebuffers(&mut self) -> VkResult<()> {
+        self.current_swapchain_framebuffers
+            .resize(self.current_swapchain_images.len(), Framebuffer::null());
+        for (i, image_view) in self.current_swapchain_image_views.iter().enumerate() {
+            let create_info = FramebufferCreateInfo {
+                s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
+                p_next: null(),
+                flags: FramebufferCreateFlags::empty(),
+                render_pass: self.render_pass,
+                attachment_count: 1,
+                p_attachments: image_view as *const ImageView,
+                width: self.present_extent.width,
+                height: self.present_extent.height,
+                layers: 1,
+            };
+
+            let fb = unsafe {
+                self.gpu_info
+                    .logical_device
+                    .create_framebuffer(&create_info, None)
+            }?;
+            self.current_swapchain_framebuffers[i] = fb;
         }
 
         Ok(())
