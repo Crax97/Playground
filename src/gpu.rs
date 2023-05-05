@@ -12,9 +12,10 @@ use ash::{
     vk::{
         make_api_version, ApplicationInfo, Bool32, DeviceCreateFlags, DeviceCreateInfo,
         DeviceQueueCreateFlags, DeviceQueueCreateInfo, ExtensionProperties, InstanceCreateFlags,
-        InstanceCreateInfo, KhrSurfaceFn, PFN_vkGetPhysicalDeviceSurfaceSupportKHR, PhysicalDevice,
-        PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType, Queue, QueueFlags,
-        StructureType, SurfaceKHR, API_VERSION_1_3,
+        InstanceCreateInfo, KhrSurfaceFn, MemoryHeap, MemoryHeapFlags,
+        PFN_vkGetPhysicalDeviceSurfaceSupportKHR, PhysicalDevice, PhysicalDeviceFeatures,
+        PhysicalDeviceProperties, PhysicalDeviceType, Queue, QueueFlags, StructureType, SurfaceKHR,
+        API_VERSION_1_3,
     },
     *,
 };
@@ -148,6 +149,8 @@ impl<E: GpuExtension> Gpu<E> {
 
         let physical_device = Self::select_discrete_physical_device(&instance)?;
         trace!("Created physical device");
+
+        Self::log_physical_device_memory(&physical_device, instance.clone());
 
         let description = GpuDescription::new(&physical_device);
 
@@ -465,6 +468,9 @@ impl<E: GpuExtension> Gpu<E> {
     pub(crate) fn vk_logical_device(&self) -> Device {
         self.gpu_info.logical_device.clone()
     }
+    pub(crate) fn info(&self) -> &GpuInfo {
+        &self.gpu_info
+    }
 
     pub(crate) fn graphics_queue_family_index(&self) -> u32 {
         self.gpu_info.queue_families.graphics_family.index
@@ -472,6 +478,56 @@ impl<E: GpuExtension> Gpu<E> {
 
     pub(crate) fn graphics_queue(&self) -> Queue {
         self.gpu_info.graphics_queue
+    }
+
+    fn log_physical_device_memory(physical_device: &SelectedPhysicalDevice, instance: Instance) {
+        let memory_properties = unsafe {
+            instance.get_physical_device_memory_properties(physical_device.physical_device)
+        };
+
+        let stringify_memory_heap = |heap: MemoryHeap| {
+            let flags_str = {
+                let mut s = String::from("{ ");
+                if heap.flags.contains(MemoryHeapFlags::DEVICE_LOCAL) {
+                    s += "DEVICE_LOCAL | ";
+                }
+                if heap.flags.contains(MemoryHeapFlags::MULTI_INSTANCE) {
+                    s += "MULTI_INSTANCE | ";
+                }
+                if heap.flags.contains(MemoryHeapFlags::MULTI_INSTANCE_KHR) {
+                    s += "MULTI_INSTANCE_KHR | ";
+                }
+                if heap.flags.contains(MemoryHeapFlags::RESERVED_2_KHR) {
+                    s += "RESERVED_2_KHR ";
+                }
+
+                s += "}";
+                s
+            };
+            format!("size: {} flags {}", heap.size, flags_str)
+        };
+
+        trace!(
+            "Device has {} memory types:",
+            memory_properties.memory_type_count
+        );
+        let mut s = String::new();
+        for i in 0..memory_properties.memory_type_count {
+            let memory_type = memory_properties.memory_types[i as usize];
+            let memory_heap = memory_properties.memory_heaps[memory_type.heap_index as usize];
+            s += format!(
+                "\n\t{}) Memory type {:?} Heap info: {}",
+                i,
+                memory_type,
+                stringify_memory_heap(memory_heap)
+            )
+            .as_str();
+        }
+        trace!("{}", s);
+    }
+
+    pub(crate) fn vk_physical_device(&self) -> PhysicalDevice {
+        self.gpu_info.physical_device.clone()
     }
 }
 

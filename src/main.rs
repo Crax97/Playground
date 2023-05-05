@@ -2,31 +2,47 @@ mod gpu;
 mod gpu_extension;
 mod utils;
 
-use std::{ffi::CString, ptr::null};
+use std::{
+    ffi::{c_void, CString},
+    mem::size_of,
+    ptr::null,
+};
 
 use ash::vk::{
-    self, BlendFactor, BlendOp, ClearColorValue, ColorComponentFlags, CommandBuffer,
-    CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags,
-    CommandPoolCreateFlags, CommandPoolCreateInfo, CommandPoolResetFlags, CompareOp, CullModeFlags,
-    DynamicState, Extent2D, FrontFace, GraphicsPipelineCreateInfo, LogicOp, Offset2D, Pipeline,
-    PipelineBindPoint, PipelineCache, PipelineColorBlendAttachmentState,
-    PipelineColorBlendStateCreateFlags, PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
-    PipelineDepthStencilStateCreateFlags, PipelineDepthStencilStateCreateInfo,
-    PipelineDynamicStateCreateFlags, PipelineDynamicStateCreateInfo,
-    PipelineInputAssemblyStateCreateFlags, PipelineInputAssemblyStateCreateInfo,
-    PipelineLayoutCreateFlags, PipelineLayoutCreateInfo, PipelineMultisampleStateCreateFlags,
-    PipelineMultisampleStateCreateInfo, PipelineRasterizationStateCreateFlags,
-    PipelineRasterizationStateCreateInfo, PipelineShaderStageCreateFlags,
-    PipelineShaderStageCreateInfo, PipelineStageFlags, PipelineTessellationStateCreateFlags,
-    PipelineTessellationStateCreateInfo, PipelineVertexInputStateCreateFlags,
-    PipelineVertexInputStateCreateInfo, PipelineViewportStateCreateFlags,
-    PipelineViewportStateCreateInfo, PolygonMode, PresentModeKHR, PrimitiveTopology, Rect2D,
-    SampleCountFlags, Semaphore, ShaderStageFlags, StencilOp, StencilOpState, StructureType,
-    SubmitInfo, SubpassContents, Viewport,
+    self, BlendFactor, BlendOp, BufferCreateFlags, BufferCreateInfo, BufferUsageFlags,
+    ClearColorValue, ColorComponentFlags, CommandBuffer, CommandBufferAllocateInfo,
+    CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags, CommandPoolCreateFlags,
+    CommandPoolCreateInfo, CommandPoolResetFlags, CompareOp, CullModeFlags, DynamicState, Extent2D,
+    Format, FrontFace, GraphicsPipelineCreateInfo, LogicOp, MappedMemoryRange, MemoryAllocateInfo,
+    MemoryMapFlags, MemoryPropertyFlags, Offset2D, Pipeline, PipelineBindPoint, PipelineCache,
+    PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
+    PipelineColorBlendStateCreateInfo, PipelineCreateFlags, PipelineDepthStencilStateCreateFlags,
+    PipelineDepthStencilStateCreateInfo, PipelineDynamicStateCreateFlags,
+    PipelineDynamicStateCreateInfo, PipelineInputAssemblyStateCreateFlags,
+    PipelineInputAssemblyStateCreateInfo, PipelineLayoutCreateFlags, PipelineLayoutCreateInfo,
+    PipelineMultisampleStateCreateFlags, PipelineMultisampleStateCreateInfo,
+    PipelineRasterizationStateCreateFlags, PipelineRasterizationStateCreateInfo,
+    PipelineShaderStageCreateFlags, PipelineShaderStageCreateInfo, PipelineStageFlags,
+    PipelineTessellationStateCreateFlags, PipelineTessellationStateCreateInfo,
+    PipelineVertexInputStateCreateFlags, PipelineVertexInputStateCreateInfo,
+    PipelineViewportStateCreateFlags, PipelineViewportStateCreateInfo, PolygonMode, PresentModeKHR,
+    PrimitiveTopology, Rect2D, SampleCountFlags, Semaphore, ShaderStageFlags, SharingMode,
+    StencilOp, StencilOpState, StructureType, SubmitInfo, SubpassContents,
+    VertexInputAttributeDescription, VertexInputBindingDescription, VertexInputRate, Viewport,
 };
+
 use gpu::{Gpu, GpuConfiguration};
 use gpu_extension::{DefaultExtensions, SurfaceParamters, SwapchainExtension};
+use memoffset::offset_of;
+use nalgebra::*;
 use winit::{dpi::PhysicalSize, event_loop::ControlFlow};
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct VertexData {
+    pub position: Vector2<f32>,
+    pub color: Vector3<f32>,
+}
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();
@@ -58,6 +74,7 @@ fn main() -> anyhow::Result<()> {
 
     let surface = gpu.presentation_surface();
     let device = gpu.vk_logical_device();
+    let physical_device = gpu.vk_physical_device();
     let vertex_module = utils::read_file_to_vk_module(&device, "./shaders/vertex.spirv")?;
     let fragment_module = utils::read_file_to_vk_module(&device, "./shaders/fragment.spirv")?;
 
@@ -81,6 +98,101 @@ fn main() -> anyhow::Result<()> {
             level: CommandBufferLevel::PRIMARY,
             command_buffer_count: 1,
         })?[0]
+    };
+
+    let find_memory_type = |type_filter: u32, mem_properties: MemoryPropertyFlags| -> u32 {
+        let memory_properties = unsafe {
+            gpu.info()
+                .instance
+                .get_physical_device_memory_properties(physical_device)
+        };
+
+        for i in 0..memory_properties.memory_type_count {
+            if (type_filter & (1 << i)) > 0
+                && memory_properties.memory_types[i as usize]
+                    .property_flags
+                    .intersects(mem_properties)
+            {
+                return i;
+            }
+        }
+
+        panic!("No memory type found!")
+    };
+
+    let vertex_buffer = unsafe {
+        let vertex_data = &[
+            VertexData {
+                position: vector![0.0, -0.5],
+                color: vector![1.0, 0.0, 0.0],
+            },
+            VertexData {
+                position: vector![0.5, 0.5],
+                color: vector![0.0, 1.0, 0.0],
+            },
+            VertexData {
+                position: vector![-0.5, 0.5],
+                color: vector![0.0, 0.0, 1.0],
+            },
+        ];
+        let create_info = BufferCreateInfo {
+            s_type: StructureType::BUFFER_CREATE_INFO,
+            p_next: null(),
+            flags: BufferCreateFlags::empty(),
+            size: (size_of::<VertexData>() * vertex_data.len()) as u64,
+            usage: BufferUsageFlags::VERTEX_BUFFER,
+            sharing_mode: SharingMode::EXCLUSIVE,
+            queue_family_index_count: 0,
+            p_queue_family_indices: null(),
+        };
+        let buffer = device.create_buffer(&create_info, None).unwrap();
+
+        let memory_requirements = device.get_buffer_memory_requirements(buffer);
+        let memory_type = find_memory_type(
+            memory_requirements.memory_type_bits,
+            MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
+        );
+
+        let memory_allocate_info = MemoryAllocateInfo {
+            s_type: StructureType::MEMORY_ALLOCATE_INFO,
+            p_next: null(),
+            allocation_size: memory_requirements.size,
+            memory_type_index: memory_type,
+        };
+
+        let device_memory = device
+            .allocate_memory(&memory_allocate_info, None)
+            .expect("Failed to allocate device memory");
+        device
+            .bind_buffer_memory(buffer, device_memory, 0)
+            .expect("Failed to bind buffer memory!");
+
+        let address = device
+            .map_memory(
+                device_memory,
+                0,
+                (std::mem::size_of::<VertexData>() * 3) as u64,
+                MemoryMapFlags::empty(),
+            )
+            .expect("Failed to map memory!");
+        let address = address as *mut VertexData;
+        let address = std::slice::from_raw_parts_mut(address, 3);
+
+        address.copy_from_slice(vertex_data);
+
+        device
+            .flush_mapped_memory_ranges(&[MappedMemoryRange {
+                s_type: StructureType::MAPPED_MEMORY_RANGE,
+                p_next: null(),
+                memory: device_memory,
+                offset: 0,
+                size: memory_requirements.size,
+            }])
+            .expect("Failed to flush memory ranges");
+
+        device.unmap_memory(device_memory);
+
+        buffer
     };
 
     let pipeline = unsafe {
@@ -118,14 +230,35 @@ fn main() -> anyhow::Result<()> {
             },
         ];
 
+        let input_binding_descriptions = &[VertexInputBindingDescription {
+            binding: 0,
+            stride: std::mem::size_of::<VertexData>() as u32,
+            input_rate: VertexInputRate::VERTEX,
+        }];
+
+        let input_attribute_descriptions = &[
+            VertexInputAttributeDescription {
+                location: 0,
+                binding: 0,
+                format: Format::R32G32_SFLOAT,
+                offset: offset_of!(VertexData, position) as u32,
+            },
+            VertexInputAttributeDescription {
+                location: 1,
+                binding: 0,
+                format: Format::R32G32B32_SFLOAT,
+                offset: offset_of!(VertexData, color) as u32,
+            },
+        ];
+
         let input_stage = PipelineVertexInputStateCreateInfo {
             s_type: StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
             p_next: null(),
             flags: PipelineVertexInputStateCreateFlags::empty(),
-            vertex_binding_description_count: 0,
-            p_vertex_binding_descriptions: null(),
-            vertex_attribute_description_count: 0,
-            p_vertex_attribute_descriptions: null(),
+            vertex_binding_description_count: 1,
+            p_vertex_binding_descriptions: input_binding_descriptions.as_ptr(),
+            vertex_attribute_description_count: 2,
+            p_vertex_attribute_descriptions: input_attribute_descriptions.as_ptr(),
         };
 
         let assembly_state = PipelineInputAssemblyStateCreateInfo {
@@ -291,6 +424,9 @@ fn main() -> anyhow::Result<()> {
             let (index, framebuffer, next_image) = gpu.get_next_swapchain_image().unwrap();
             unsafe {
                 device
+                    .reset_command_pool(command_pool, CommandPoolResetFlags::empty())
+                    .unwrap();
+                device
                     .begin_command_buffer(
                         command_buffer,
                         &CommandBufferBeginInfo {
@@ -342,6 +478,7 @@ fn main() -> anyhow::Result<()> {
                         extent: gpu.extents(),
                     }],
                 );
+                device.cmd_bind_vertex_buffers(command_buffer, 0, &[vertex_buffer], &[0]);
                 device.cmd_draw(command_buffer, 3, 1, 0, 0);
                 device.cmd_end_render_pass(command_buffer);
 
@@ -364,10 +501,6 @@ fn main() -> anyhow::Result<()> {
                         }],
                         gpu.in_flight_fence(),
                     )
-                    .unwrap();
-
-                device
-                    .reset_command_pool(command_pool, CommandPoolResetFlags::empty())
                     .unwrap();
 
                 let _ = gpu.present(index);
