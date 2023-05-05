@@ -1,5 +1,4 @@
 mod gpu;
-mod gpu_extension;
 mod utils;
 
 use std::{
@@ -32,7 +31,6 @@ use ash::vk::{
 };
 
 use gpu::{Gpu, GpuConfiguration};
-use gpu_extension::{DefaultExtensions, SurfaceParamters, SwapchainExtension};
 use memoffset::offset_of;
 use nalgebra::*;
 use winit::{dpi::PhysicalSize, event_loop::ControlFlow};
@@ -55,22 +53,12 @@ fn main() -> anyhow::Result<()> {
         })
         .build(&event_loop)?;
 
-    let mut gpu = Gpu::<SwapchainExtension<DefaultExtensions>>::new(
-        GpuConfiguration {
-            app_name: "Hello World!",
-            engine_name: "Hello Engine!",
-            enable_validation_layer: if cfg!(debug_assertions) { true } else { false },
-            ..Default::default()
-        },
-        SurfaceParamters {
-            inner_params: (),
-            window,
-            window_size: Extent2D {
-                width: 1240,
-                height: 720,
-            },
-        },
-    )?;
+    let mut gpu = Gpu::new(GpuConfiguration {
+        app_name: "Hello World!",
+        engine_name: "Hello Engine!",
+        enable_validation_layer: if cfg!(debug_assertions) { true } else { false },
+        window,
+    })?;
 
     let surface = gpu.presentation_surface();
     let device = gpu.vk_logical_device();
@@ -102,8 +90,7 @@ fn main() -> anyhow::Result<()> {
 
     let find_memory_type = |type_filter: u32, mem_properties: MemoryPropertyFlags| -> u32 {
         let memory_properties = unsafe {
-            gpu.info()
-                .instance
+            gpu.instance
                 .get_physical_device_memory_properties(physical_device)
         };
 
