@@ -1,19 +1,15 @@
 mod gpu;
 mod utils;
 
-use std::{
-    ffi::{c_void, CString},
-    mem::size_of,
-    ptr::{addr_of, null},
-};
+use std::{ffi::CString, mem::size_of, ptr::null};
 
 use ash::vk::{
     self, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp, AttachmentReference,
     AttachmentStoreOp, BlendFactor, BlendOp, BufferCreateFlags, BufferCreateInfo, BufferUsageFlags,
     ClearColorValue, ColorComponentFlags, CommandBuffer, CommandBufferAllocateInfo,
     CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags, CommandPoolCreateFlags,
-    CommandPoolCreateInfo, CommandPoolResetFlags, CompareOp, CullModeFlags, DynamicState, Extent2D,
-    Format, FramebufferCreateFlags, FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo,
+    CommandPoolCreateInfo, CommandPoolResetFlags, CompareOp, CullModeFlags, DynamicState, Format,
+    FramebufferCreateFlags, FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo,
     ImageLayout, ImageView, LogicOp, MappedMemoryRange, MemoryAllocateInfo, MemoryMapFlags,
     MemoryPropertyFlags, Offset2D, Pipeline, PipelineBindPoint, PipelineCache,
     PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
@@ -63,7 +59,6 @@ fn main() -> anyhow::Result<()> {
         window,
     })?;
 
-    let surface = gpu.presentation_surface();
     let device = gpu.vk_logical_device();
     let physical_device = gpu.vk_physical_device();
     let vertex_module = utils::read_file_to_vk_module(&device, "./shaders/vertex.spirv")?;
@@ -110,7 +105,7 @@ fn main() -> anyhow::Result<()> {
         panic!("No memory type found!")
     };
 
-    let vertex_buffer = unsafe {
+    let (vertex_buffer, device_memory) = unsafe {
         let vertex_data = &[
             VertexData {
                 position: vector![0.0, -0.5],
@@ -182,7 +177,7 @@ fn main() -> anyhow::Result<()> {
 
         device.unmap_memory(device_memory);
 
-        buffer
+        (buffer, device_memory)
     };
 
     let pass_info = RenderPassCreateInfo {
@@ -427,9 +422,12 @@ fn main() -> anyhow::Result<()> {
             base_pipeline_index: 0,
         }];
 
-        device
+        let pipeline = device
             .create_graphics_pipelines(PipelineCache::null(), &create_infos, None)
-            .unwrap()
+            .unwrap();
+
+        device.destroy_pipeline_layout(pipeline_layout, None);
+        pipeline
     }[0];
     gpu.select_present_mode(PresentModeKHR::MAILBOX)?;
 
@@ -451,7 +449,12 @@ fn main() -> anyhow::Result<()> {
         winit::event::Event::Resumed => {}
         winit::event::Event::MainEventsCleared => {}
         winit::event::Event::RedrawRequested(_) => {
-            let next_image: &ImageView = gpu.acquire_next_swapchain_image().unwrap();
+            let next_image = gpu.acquire_next_swapchain_image();
+            if next_image.is_err() {
+                gpu.recreate_swapchain().unwrap();
+                return;
+            }
+            let next_image = next_image.unwrap();
             let framebuffer = unsafe {
                 let create_info = FramebufferCreateInfo {
                     s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
@@ -459,7 +462,7 @@ fn main() -> anyhow::Result<()> {
                     flags: FramebufferCreateFlags::empty(),
                     render_pass,
                     attachment_count: 1,
-                    p_attachments: next_image as *const ImageView,
+                    p_attachments: &next_image as *const ImageView,
                     width: gpu.extents().width,
                     height: gpu.extents().height,
                     layers: 1,
@@ -549,12 +552,27 @@ fn main() -> anyhow::Result<()> {
                         gpu.in_flight_fence(),
                     )
                     .unwrap();
-
                 let _ = gpu.present();
+
+                gpu.logical_device
+                    .wait_for_fences(&[gpu.in_flight_fence()], true, 20000000)
+                    .unwrap();
+                gpu.logical_device
+                    .reset_fences(&[gpu.in_flight_fence()])
+                    .unwrap();
+
                 gpu.logical_device.destroy_framebuffer(framebuffer, None);
             };
         }
         winit::event::Event::RedrawEventsCleared => {}
-        winit::event::Event::LoopDestroyed => *control_flow = ControlFlow::ExitWithCode(0),
+        winit::event::Event::LoopDestroyed => unsafe {
+            gpu.logical_device.destroy_buffer(vertex_buffer, None);
+            device.free_memory(device_memory, None);
+            gpu.logical_device
+                .free_command_buffers(command_pool, &[command_buffer]);
+            gpu.logical_device.destroy_command_pool(command_pool, None);
+            device.destroy_pipeline(pipeline, None);
+            device.destroy_render_pass(render_pass, None);
+        },
     })
 }

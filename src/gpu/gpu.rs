@@ -10,29 +10,17 @@ use anyhow::Result;
 use ash::{
     prelude::*,
     vk::{
-        make_api_version, ApplicationInfo, AttachmentDescription, AttachmentDescriptionFlags,
-        AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, Bool32, ComponentMapping,
-        ComponentSwizzle, CompositeAlphaFlagsKHR, DeviceCreateFlags, DeviceCreateInfo,
-        DeviceQueueCreateFlags, DeviceQueueCreateInfo, ExtensionProperties, Extent2D, Fence,
-        FenceCreateFlags, Format, Framebuffer, FramebufferCreateFlags, FramebufferCreateInfo,
-        Image, ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageView,
-        ImageViewCreateFlags, ImageViewCreateInfo, ImageViewType, InstanceCreateFlags,
-        InstanceCreateInfo, KhrSurfaceFn, MemoryHeap, MemoryHeapFlags,
-        PFN_vkGetPhysicalDeviceSurfaceSupportKHR, PhysicalDevice, PhysicalDeviceFeatures,
-        PhysicalDeviceProperties, PhysicalDeviceType, PipelineBindPoint, PresentInfoKHR,
-        PresentModeKHR, Queue, QueueFlags, RenderPass, RenderPassCreateFlags, RenderPassCreateInfo,
-        SampleCountFlags, Semaphore, SemaphoreCreateFlags, SemaphoreCreateInfo, SharingMode,
-        StructureType, SubpassDescription, SubpassDescriptionFlags, SurfaceCapabilitiesKHR,
-        SurfaceFormatKHR, SurfaceKHR, API_VERSION_1_3,
+        make_api_version, ApplicationInfo, DeviceCreateFlags, DeviceCreateInfo,
+        DeviceQueueCreateFlags, DeviceQueueCreateInfo, Extent2D, Format, ImageView,
+        InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, PhysicalDevice,
+        PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR,
+        Queue, QueueFlags, Semaphore, StructureType, SurfaceKHR, API_VERSION_1_3,
     },
     *,
 };
 
-use log::{error, info, trace, warn};
-use once_cell::sync::OnceCell;
-use raw_window_handle::{
-    HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle,
-};
+use log::{error, trace};
+use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 use winit::window::Window;
 
@@ -517,10 +505,6 @@ impl Gpu {
         self.physical_device.clone()
     }
 
-    pub fn presentation_surface(&self) -> SurfaceKHR {
-        self.swapchain.surface
-    }
-
     pub fn swapchain_format(&self) -> Format {
         self.swapchain.present_format.format
     }
@@ -545,8 +529,22 @@ impl Gpu {
         Ok(())
     }
 
-    pub fn acquire_next_swapchain_image(&mut self) -> VkResult<&ImageView> {
-        self.swapchain.acquire_next_image(&self.logical_device)
+    pub fn acquire_next_swapchain_image(&mut self) -> VkResult<ImageView> {
+        loop {
+            let next_image = self.swapchain.acquire_next_image(&self.logical_device);
+            match next_image {
+                Ok(image) => {
+                    return Ok(image);
+                }
+                Err(result) => {
+                    if result == vk::Result::SUBOPTIMAL_KHR {
+                        self.recreate_swapchain()?;
+                    } else {
+                        panic!("While acquiring next image: {:?}", result);
+                    }
+                }
+            }
+        }
     }
 
     pub(crate) fn extents(&self) -> Extent2D {
@@ -556,11 +554,22 @@ impl Gpu {
     pub(crate) fn present(&self) -> VkResult<bool> {
         self.swapchain.present(self.graphics_queue)
     }
+
+    pub(crate) fn recreate_swapchain(&mut self) -> VkResult<()> {
+        self.swapchain.recreate_swapchain(
+            &self.entry,
+            &self.instance,
+            &self.physical_device,
+            &self.logical_device,
+            &self.window,
+        )
+    }
 }
 
 impl Drop for Gpu {
     fn drop(&mut self) {
         unsafe {
+            self.swapchain.drop_swapchain();
             self.logical_device.destroy_device(None);
             self.instance.destroy_instance(None);
         }

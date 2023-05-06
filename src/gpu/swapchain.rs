@@ -4,17 +4,12 @@ use ash::{
     extensions::khr::Surface,
     prelude::VkResult,
     vk::{
-        self, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
-        AttachmentReference, AttachmentStoreOp, ComponentMapping, ComponentSwizzle,
-        CompositeAlphaFlagsKHR, Extent2D, Fence, FenceCreateFlags, FenceCreateInfo, Format,
-        Framebuffer, FramebufferCreateFlags, FramebufferCreateInfo, Image, ImageAspectFlags,
-        ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageView, ImageViewCreateFlags,
-        ImageViewCreateInfo, ImageViewType, PhysicalDevice, PipelineBindPoint, PresentInfoKHR,
-        PresentModeKHR, Queue, RenderPass, RenderPassCreateFlags, RenderPassCreateInfo,
-        SampleCountFlags, Semaphore, SemaphoreCreateFlags, SemaphoreCreateInfo, SharingMode,
-        StructureType, SubpassDescription, SubpassDescriptionFlags, SurfaceCapabilitiesKHR,
-        SurfaceFormatKHR, SurfaceKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR,
-        SwapchainKHR,
+        self, ComponentMapping, ComponentSwizzle, CompositeAlphaFlagsKHR, Extent2D, Fence,
+        FenceCreateFlags, FenceCreateInfo, Format, Image, ImageAspectFlags, ImageSubresourceRange,
+        ImageUsageFlags, ImageView, ImageViewCreateFlags, ImageViewCreateInfo, ImageViewType,
+        PhysicalDevice, PresentInfoKHR, PresentModeKHR, Queue, Semaphore, SemaphoreCreateFlags,
+        SemaphoreCreateInfo, SharingMode, StructureType, SurfaceCapabilitiesKHR, SurfaceFormatKHR,
+        SurfaceKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
     },
     Device, Entry, Instance,
 };
@@ -23,7 +18,7 @@ use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use winit::window::Window;
 
 mod util {
-    use ash::vk::{ColorSpaceKHR, Format, PresentModeKHR, SurfaceFormatKHR};
+    use ash::vk::{PresentModeKHR, SurfaceFormatKHR};
 
     pub(super) fn stringify_present_mode(mode: PresentModeKHR) -> &'static str {
         match mode {
@@ -136,7 +131,7 @@ impl Swapchain {
         Ok(me)
     }
 
-    pub(crate) fn acquire_next_image(&mut self, logical_device: &Device) -> VkResult<&ImageView> {
+    pub(crate) fn acquire_next_image(&mut self, logical_device: &Device) -> VkResult<ImageView> {
         let (next_image, suboptimal) = unsafe {
             self.swapchain_extension.acquire_next_image(
                 self.current_swapchain,
@@ -152,7 +147,7 @@ impl Swapchain {
         if !suboptimal {
             let image_view = self.current_swapchain_image_views.get(next_image as usize);
             self.current_swapchain_index = next_image;
-            Ok(image_view.unwrap())
+            Ok(image_view.unwrap().clone())
         } else {
             Err(vk::Result::SUBOPTIMAL_KHR)
         }
@@ -247,7 +242,7 @@ impl Swapchain {
             composite_alpha: CompositeAlphaFlagsKHR::OPAQUE,
             present_mode: self.present_mode,
             clipped: vk::TRUE,
-            old_swapchain: self.current_swapchain,
+            old_swapchain: SwapchainKHR::null(),
         };
 
         unsafe {
@@ -336,6 +331,7 @@ impl Swapchain {
     }
 
     fn recreate_swapchain_image_views(&mut self, logical_device: &Device) -> VkResult<()> {
+        self.drop_image_views();
         self.current_swapchain_image_views
             .resize(self.current_swapchain_images.len(), ImageView::null());
         for (i, image) in self.current_swapchain_images.iter().enumerate() {
@@ -403,27 +399,21 @@ impl Swapchain {
         }
     }
 
-    fn drop_images(&self) {
-        for image in self.current_swapchain_images.iter() {
-            unsafe {
-                self.logical_device.destroy_image(*image, None);
-            }
-        }
-    }
-
     fn drop_swapchain_structs(&self) {
         unsafe {
             self.swapchain_extension
                 .destroy_swapchain(self.current_swapchain, None);
             self.surface_extension.destroy_surface(self.surface, None);
+            self.logical_device
+                .destroy_fence(self.in_flight_fence, None);
+            self.logical_device
+                .destroy_fence(self.next_image_fence, None);
+            self.logical_device
+                .destroy_semaphore(self.render_finished_semaphore, None);
         }
     }
-}
-
-impl Drop for Swapchain {
-    fn drop(&mut self) {
+    pub(crate) fn drop_swapchain(&mut self) {
         self.drop_image_views();
-        self.drop_images();
         self.drop_swapchain_structs();
     }
 }
