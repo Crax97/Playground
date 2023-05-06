@@ -4,16 +4,18 @@ mod utils;
 use std::{
     ffi::{c_void, CString},
     mem::size_of,
-    ptr::null,
+    ptr::{addr_of, null},
 };
 
 use ash::vk::{
-    self, BlendFactor, BlendOp, BufferCreateFlags, BufferCreateInfo, BufferUsageFlags,
+    self, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp, AttachmentReference,
+    AttachmentStoreOp, BlendFactor, BlendOp, BufferCreateFlags, BufferCreateInfo, BufferUsageFlags,
     ClearColorValue, ColorComponentFlags, CommandBuffer, CommandBufferAllocateInfo,
     CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags, CommandPoolCreateFlags,
     CommandPoolCreateInfo, CommandPoolResetFlags, CompareOp, CullModeFlags, DynamicState, Extent2D,
-    Format, FrontFace, GraphicsPipelineCreateInfo, LogicOp, MappedMemoryRange, MemoryAllocateInfo,
-    MemoryMapFlags, MemoryPropertyFlags, Offset2D, Pipeline, PipelineBindPoint, PipelineCache,
+    Format, FramebufferCreateFlags, FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo,
+    ImageLayout, ImageView, LogicOp, MappedMemoryRange, MemoryAllocateInfo, MemoryMapFlags,
+    MemoryPropertyFlags, Offset2D, Pipeline, PipelineBindPoint, PipelineCache,
     PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
     PipelineColorBlendStateCreateInfo, PipelineCreateFlags, PipelineDepthStencilStateCreateFlags,
     PipelineDepthStencilStateCreateInfo, PipelineDynamicStateCreateFlags,
@@ -25,9 +27,10 @@ use ash::vk::{
     PipelineTessellationStateCreateFlags, PipelineTessellationStateCreateInfo,
     PipelineVertexInputStateCreateFlags, PipelineVertexInputStateCreateInfo,
     PipelineViewportStateCreateFlags, PipelineViewportStateCreateInfo, PolygonMode, PresentModeKHR,
-    PrimitiveTopology, Rect2D, SampleCountFlags, Semaphore, ShaderStageFlags, SharingMode,
-    StencilOp, StencilOpState, StructureType, SubmitInfo, SubpassContents,
-    VertexInputAttributeDescription, VertexInputBindingDescription, VertexInputRate, Viewport,
+    PrimitiveTopology, Rect2D, RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags,
+    Semaphore, ShaderStageFlags, SharingMode, StencilOp, StencilOpState, StructureType, SubmitInfo,
+    SubpassContents, SubpassDescription, SubpassDescriptionFlags, VertexInputAttributeDescription,
+    VertexInputBindingDescription, VertexInputRate, Viewport,
 };
 
 use gpu::{Gpu, GpuConfiguration};
@@ -180,6 +183,46 @@ fn main() -> anyhow::Result<()> {
         device.unmap_memory(device_memory);
 
         buffer
+    };
+
+    let pass_info = RenderPassCreateInfo {
+        s_type: StructureType::RENDER_PASS_CREATE_INFO,
+        p_next: null(),
+        flags: RenderPassCreateFlags::empty(),
+        attachment_count: 1,
+        p_attachments: &[AttachmentDescription {
+            flags: AttachmentDescriptionFlags::empty(),
+            format: gpu.swapchain_format(),
+            samples: SampleCountFlags::TYPE_1,
+            load_op: AttachmentLoadOp::CLEAR,
+            store_op: AttachmentStoreOp::STORE,
+            stencil_load_op: AttachmentLoadOp::DONT_CARE,
+            stencil_store_op: AttachmentStoreOp::DONT_CARE,
+            initial_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        }] as *const AttachmentDescription,
+        subpass_count: 1,
+        p_subpasses: &[SubpassDescription {
+            flags: SubpassDescriptionFlags::empty(),
+            pipeline_bind_point: PipelineBindPoint::GRAPHICS,
+            input_attachment_count: 0,
+            p_input_attachments: null(),
+            color_attachment_count: 1,
+            p_color_attachments: &[AttachmentReference {
+                attachment: 0,
+                layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            }] as *const AttachmentReference,
+            p_resolve_attachments: null(),
+            p_depth_stencil_attachment: null(),
+            preserve_attachment_count: vk::FALSE,
+            p_preserve_attachments: null(),
+        }] as *const SubpassDescription,
+        dependency_count: 0,
+        p_dependencies: null(),
+    };
+    let render_pass = unsafe {
+        gpu.vk_logical_device()
+            .create_render_pass(&pass_info, None)?
     };
 
     let pipeline = unsafe {
@@ -378,7 +421,7 @@ fn main() -> anyhow::Result<()> {
             p_color_blend_state: &color_blend as *const PipelineColorBlendStateCreateInfo,
             p_dynamic_state: &dynamic_state as *const PipelineDynamicStateCreateInfo,
             layout: pipeline_layout,
-            render_pass: gpu.render_pass().clone(),
+            render_pass,
             subpass: 0,
             base_pipeline_handle: Pipeline::null(),
             base_pipeline_index: 0,
@@ -408,7 +451,24 @@ fn main() -> anyhow::Result<()> {
         winit::event::Event::Resumed => {}
         winit::event::Event::MainEventsCleared => {}
         winit::event::Event::RedrawRequested(_) => {
-            let (index, framebuffer, next_image) = gpu.get_next_swapchain_image().unwrap();
+            let next_image: &ImageView = gpu.acquire_next_swapchain_image().unwrap();
+            let framebuffer = unsafe {
+                let create_info = FramebufferCreateInfo {
+                    s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
+                    p_next: null(),
+                    flags: FramebufferCreateFlags::empty(),
+                    render_pass,
+                    attachment_count: 1,
+                    p_attachments: next_image as *const ImageView,
+                    width: gpu.extents().width,
+                    height: gpu.extents().height,
+                    layers: 1,
+                };
+
+                gpu.logical_device
+                    .create_framebuffer(&create_info, None)
+                    .unwrap()
+            };
             unsafe {
                 device
                     .reset_command_pool(command_pool, CommandPoolResetFlags::empty())
@@ -429,7 +489,7 @@ fn main() -> anyhow::Result<()> {
                     &vk::RenderPassBeginInfo {
                         s_type: StructureType::RENDER_PASS_BEGIN_INFO,
                         p_next: null(),
-                        render_pass: gpu.render_pass().clone(),
+                        render_pass,
                         framebuffer,
                         render_area: Rect2D {
                             offset: Offset2D { x: 0, y: 0 },
@@ -490,7 +550,8 @@ fn main() -> anyhow::Result<()> {
                     )
                     .unwrap();
 
-                let _ = gpu.present(index);
+                let _ = gpu.present();
+                gpu.logical_device.destroy_framebuffer(framebuffer, None);
             };
         }
         winit::event::Event::RedrawEventsCleared => {}
