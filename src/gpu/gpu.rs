@@ -53,7 +53,7 @@ pub struct Gpu {
     pub queue_families: QueueFamilies,
     pub description: GpuDescription,
 
-    window: Window,
+    pub window: Window,
     swapchain: Swapchain,
 }
 
@@ -515,6 +515,10 @@ impl Gpu {
 
     pub fn render_finished_semaphore(&self) -> &Semaphore {
         &self.swapchain.render_finished_semaphore
+    }
+
+    pub fn image_available_semaphore(&self) -> &Semaphore {
+        &self.swapchain.image_available_semaphore
     }
 
     pub fn select_present_mode(&mut self, present_mode: PresentModeKHR) -> VkResult<()> {

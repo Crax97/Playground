@@ -56,6 +56,7 @@ pub(crate) struct Swapchain {
     pub next_image_fence: Fence,
     pub in_flight_fence: Fence,
     pub render_finished_semaphore: Semaphore,
+    pub image_available_semaphore: Semaphore,
 
     current_swapchain_index: u32,
 
@@ -101,6 +102,17 @@ impl Swapchain {
             )?
         };
 
+        let image_available_semaphore = unsafe {
+            logical_device.create_semaphore(
+                &SemaphoreCreateInfo {
+                    s_type: StructureType::SEMAPHORE_CREATE_INFO,
+                    p_next: std::ptr::null(),
+                    flags: SemaphoreCreateFlags::empty(),
+                },
+                None,
+            )?
+        };
+
         let present_extent = Extent2D {
             width: window.outer_size().width,
             height: window.outer_size().height,
@@ -124,6 +136,7 @@ impl Swapchain {
             next_image_fence,
             in_flight_fence,
             render_finished_semaphore,
+            image_available_semaphore,
             logical_device: logical_device.clone(),
         };
         me.recreate_swapchain(entry, instance, physical_device, logical_device, window)?;
@@ -136,7 +149,7 @@ impl Swapchain {
             self.swapchain_extension.acquire_next_image(
                 self.current_swapchain,
                 200000,
-                Semaphore::null(),
+                self.image_available_semaphore,
                 self.next_image_fence,
             )
         }?;
@@ -155,7 +168,6 @@ impl Swapchain {
 
     pub(crate) fn present(&self, graphics_queue: Queue) -> VkResult<bool> {
         unsafe {
-            let mut result = ash::vk::Result::SUCCESS;
             self.swapchain_extension.queue_present(
                 graphics_queue,
                 &PresentInfoKHR {
@@ -166,7 +178,7 @@ impl Swapchain {
                     swapchain_count: 1,
                     p_swapchains: &self.current_swapchain as *const SwapchainKHR,
                     p_image_indices: &self.current_swapchain_index as *const u32,
-                    p_results: &mut result as *mut ash::vk::Result,
+                    p_results: std::ptr::null_mut(),
                 },
             )
         }
@@ -196,7 +208,7 @@ impl Swapchain {
             self.surface_extension.destroy_surface(self.surface, None);
         };
 
-        let surface = unsafe {
+        self.surface = unsafe {
             ash_window::create_surface(
                 entry,
                 instance,
@@ -208,17 +220,17 @@ impl Swapchain {
 
         self.supported_presentation_formats = unsafe {
             self.surface_extension
-                .get_physical_device_surface_formats(*physical_device, surface)
+                .get_physical_device_surface_formats(*physical_device, self.surface)
         }?;
 
         self.surface_capabilities = unsafe {
             self.surface_extension
-                .get_physical_device_surface_capabilities(*physical_device, surface)
+                .get_physical_device_surface_capabilities(*physical_device, self.surface)
         }?;
 
         self.supported_present_modes = unsafe {
             self.surface_extension
-                .get_physical_device_surface_present_modes(*physical_device, surface)
+                .get_physical_device_surface_present_modes(*physical_device, self.surface)
         }?;
         self.present_format = Self::pick_swapchain_format(&self.supported_presentation_formats);
 
@@ -228,7 +240,7 @@ impl Swapchain {
             s_type: StructureType::SWAPCHAIN_CREATE_INFO_KHR,
             p_next: std::ptr::null(),
             flags: SwapchainCreateFlagsKHR::empty(),
-            surface,
+            surface: self.surface,
             min_image_count: self.swapchain_image_count.get(),
             image_format: self.present_format.format,
             image_color_space: self.present_format.color_space,
@@ -326,6 +338,7 @@ impl Swapchain {
             self.swapchain_extension
                 .get_swapchain_images(self.current_swapchain)
         }?;
+
         self.current_swapchain_images = images;
         Ok(())
     }
@@ -410,6 +423,8 @@ impl Swapchain {
                 .destroy_fence(self.next_image_fence, None);
             self.logical_device
                 .destroy_semaphore(self.render_finished_semaphore, None);
+            self.logical_device
+                .destroy_semaphore(self.image_available_semaphore, None);
         }
     }
     pub(crate) fn drop_swapchain(&mut self) {
