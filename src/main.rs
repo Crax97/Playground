@@ -1,33 +1,38 @@
 mod gpu;
 mod utils;
 
-use std::{ffi::CString, mem::size_of, ptr::null};
+use std::{ffi::CString, mem::size_of, ops::Deref, ptr::null, sync::Arc};
 
-use ash::vk::{
-    self, AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
-    AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp, BufferCreateFlags,
-    BufferCreateInfo, BufferUsageFlags, ClearColorValue, ColorComponentFlags, CommandBuffer,
-    CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags,
-    CommandPoolCreateFlags, CommandPoolCreateInfo, CommandPoolResetFlags, CompareOp, CullModeFlags,
-    DependencyFlags, DynamicState, Format, FramebufferCreateFlags, FramebufferCreateInfo,
-    FrontFace, GraphicsPipelineCreateInfo, ImageLayout, ImageView, LogicOp, MappedMemoryRange,
-    MemoryAllocateInfo, MemoryMapFlags, MemoryPropertyFlags, Offset2D, Pipeline, PipelineBindPoint,
-    PipelineCache, PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
-    PipelineColorBlendStateCreateInfo, PipelineCreateFlags, PipelineDepthStencilStateCreateFlags,
-    PipelineDepthStencilStateCreateInfo, PipelineDynamicStateCreateFlags,
-    PipelineDynamicStateCreateInfo, PipelineInputAssemblyStateCreateFlags,
-    PipelineInputAssemblyStateCreateInfo, PipelineLayoutCreateFlags, PipelineLayoutCreateInfo,
-    PipelineMultisampleStateCreateFlags, PipelineMultisampleStateCreateInfo,
-    PipelineRasterizationStateCreateFlags, PipelineRasterizationStateCreateInfo,
-    PipelineShaderStageCreateFlags, PipelineShaderStageCreateInfo, PipelineStageFlags,
-    PipelineTessellationStateCreateFlags, PipelineTessellationStateCreateInfo,
-    PipelineVertexInputStateCreateFlags, PipelineVertexInputStateCreateInfo,
-    PipelineViewportStateCreateFlags, PipelineViewportStateCreateInfo, PolygonMode, PresentModeKHR,
-    PrimitiveTopology, Rect2D, RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags,
-    Semaphore, ShaderStageFlags, SharingMode, StencilOp, StencilOpState, StructureType, SubmitInfo,
-    SubpassContents, SubpassDependency, SubpassDescription, SubpassDescriptionFlags,
-    VertexInputAttributeDescription, VertexInputBindingDescription, VertexInputRate, Viewport,
-    SUBPASS_EXTERNAL,
+use ash::{
+    extensions::khr::Swapchain,
+    vk::{
+        self, AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
+        AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp, BufferCreateFlags,
+        BufferCreateInfo, BufferUsageFlags, ClearColorValue, ColorComponentFlags, CommandBuffer,
+        CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
+        CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo,
+        CommandPoolResetFlags, CompareOp, CullModeFlags, DependencyFlags, DynamicState, Format,
+        FramebufferCreateFlags, FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo,
+        ImageLayout, ImageView, LogicOp, MappedMemoryRange, MemoryAllocateInfo, MemoryMapFlags,
+        MemoryPropertyFlags, Offset2D, Pipeline, PipelineBindPoint, PipelineCache,
+        PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
+        PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
+        PipelineDepthStencilStateCreateFlags, PipelineDepthStencilStateCreateInfo,
+        PipelineDynamicStateCreateFlags, PipelineDynamicStateCreateInfo,
+        PipelineInputAssemblyStateCreateFlags, PipelineInputAssemblyStateCreateInfo,
+        PipelineLayoutCreateFlags, PipelineLayoutCreateInfo, PipelineMultisampleStateCreateFlags,
+        PipelineMultisampleStateCreateInfo, PipelineRasterizationStateCreateFlags,
+        PipelineRasterizationStateCreateInfo, PipelineShaderStageCreateFlags,
+        PipelineShaderStageCreateInfo, PipelineStageFlags, PipelineTessellationStateCreateFlags,
+        PipelineTessellationStateCreateInfo, PipelineVertexInputStateCreateFlags,
+        PipelineVertexInputStateCreateInfo, PipelineViewportStateCreateFlags,
+        PipelineViewportStateCreateInfo, PolygonMode, PresentModeKHR, PrimitiveTopology, Rect2D,
+        RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, Semaphore, ShaderStageFlags,
+        SharingMode, StencilOp, StencilOpState, StructureType, SubmitInfo, SubpassContents,
+        SubpassDependency, SubpassDescription, SubpassDescriptionFlags,
+        VertexInputAttributeDescription, VertexInputBindingDescription, VertexInputRate, Viewport,
+        SUBPASS_EXTERNAL,
+    },
 };
 
 use gpu::{Gpu, GpuConfiguration};
@@ -41,7 +46,6 @@ struct VertexData {
     pub position: Vector2<f32>,
     pub color: Vector3<f32>,
 }
-
 fn main() -> anyhow::Result<()> {
     env_logger::init();
 
@@ -53,12 +57,15 @@ fn main() -> anyhow::Result<()> {
         })
         .build(&event_loop)?;
 
-    let mut gpu = Gpu::new(GpuConfiguration {
+    let gpu = Gpu::new(GpuConfiguration {
         app_name: "Hello World!",
         engine_name: "Hello Engine!",
         enable_validation_layer: if cfg!(debug_assertions) { true } else { false },
-        window,
+        window: &window,
     })?;
+    let gpu = Arc::new(gpu);
+
+    let mut swapchain = gpu::Swapchain::new(gpu.clone(), window)?;
 
     let device = gpu.vk_logical_device();
     let physical_device = gpu.vk_physical_device();
@@ -188,7 +195,7 @@ fn main() -> anyhow::Result<()> {
         attachment_count: 1,
         p_attachments: &[AttachmentDescription {
             flags: AttachmentDescriptionFlags::empty(),
-            format: gpu.swapchain_format(),
+            format: swapchain.present_format.format,
             samples: SampleCountFlags::TYPE_1,
             load_op: AttachmentLoadOp::CLEAR,
             store_op: AttachmentStoreOp::STORE,
@@ -438,11 +445,12 @@ fn main() -> anyhow::Result<()> {
         device.destroy_pipeline_layout(pipeline_layout, None);
         pipeline
     }[0];
-    gpu.select_present_mode(PresentModeKHR::MAILBOX)?;
+
+    swapchain.select_present_mode(PresentModeKHR::MAILBOX);
 
     unsafe {
-        gpu.as_ref().destroy_shader_module(vertex_module, None);
-        gpu.as_ref().destroy_shader_module(fragment_module, None);
+        device.destroy_shader_module(vertex_module, None);
+        device.destroy_shader_module(fragment_module, None);
     }
     event_loop.run(move |event, event_loop, mut control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -462,7 +470,7 @@ fn main() -> anyhow::Result<()> {
             winit::event::Event::Resumed => {}
             winit::event::Event::MainEventsCleared => {}
             winit::event::Event::RedrawRequested(window) => {
-                let next_image = gpu.acquire_next_swapchain_image().unwrap();
+                let next_image = swapchain.acquire_next_image().unwrap();
                 let framebuffer = unsafe {
                     let create_info = FramebufferCreateInfo {
                         s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
@@ -471,8 +479,8 @@ fn main() -> anyhow::Result<()> {
                         render_pass,
                         attachment_count: 1,
                         p_attachments: &next_image as *const ImageView,
-                        width: gpu.extents().width,
-                        height: gpu.extents().height,
+                        width: swapchain.extents().width,
+                        height: swapchain.extents().height,
                         layers: 1,
                     };
 
@@ -505,7 +513,7 @@ fn main() -> anyhow::Result<()> {
                             framebuffer,
                             render_area: Rect2D {
                                 offset: Offset2D { x: 0, y: 0 },
-                                extent: gpu.extents(),
+                                extent: swapchain.extents(),
                             },
                             clear_value_count: 1,
                             p_clear_values: &vk::ClearValue {
@@ -523,8 +531,8 @@ fn main() -> anyhow::Result<()> {
                         &[Viewport {
                             x: 0 as f32,
                             y: 0 as f32,
-                            width: gpu.extents().width as f32,
-                            height: gpu.extents().height as f32,
+                            width: swapchain.extents().width as f32,
+                            height: swapchain.extents().height as f32,
                             min_depth: 0.0,
                             max_depth: 1.0,
                         }],
@@ -534,7 +542,7 @@ fn main() -> anyhow::Result<()> {
                         0,
                         &[Rect2D {
                             offset: Offset2D { x: 0, y: 0 },
-                            extent: gpu.extents(),
+                            extent: swapchain.extents(),
                         }],
                     );
                     device.cmd_bind_vertex_buffers(command_buffer, 0, &[vertex_buffer], &[0]);
@@ -549,26 +557,26 @@ fn main() -> anyhow::Result<()> {
                                 s_type: StructureType::SUBMIT_INFO,
                                 p_next: null(),
                                 wait_semaphore_count: 1,
-                                p_wait_semaphores: gpu.image_available_semaphore()
+                                p_wait_semaphores: swapchain.image_available_semaphore.deref()
                                     as *const Semaphore,
                                 p_wait_dst_stage_mask: &PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
                                     as *const PipelineStageFlags,
                                 command_buffer_count: 1,
                                 p_command_buffers: &command_buffer as *const CommandBuffer,
                                 signal_semaphore_count: 1,
-                                p_signal_semaphores: gpu.render_finished_semaphore()
+                                p_signal_semaphores: swapchain.render_finished_semaphore.deref()
                                     as *const Semaphore,
                             }],
-                            gpu.in_flight_fence(),
+                            *swapchain.in_flight_fence,
                         )
                         .unwrap();
-                    let _ = gpu.present();
+                    let _ = swapchain.present();
 
                     gpu.logical_device
-                        .wait_for_fences(&[gpu.in_flight_fence()], true, 20000000)
+                        .wait_for_fences(&[*swapchain.in_flight_fence], true, 20000000)
                         .unwrap();
                     gpu.logical_device
-                        .reset_fences(&[gpu.in_flight_fence()])
+                        .reset_fences(&[*swapchain.in_flight_fence])
                         .unwrap();
 
                     gpu.logical_device.destroy_framebuffer(framebuffer, None);

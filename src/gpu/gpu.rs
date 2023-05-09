@@ -19,12 +19,16 @@ use ash::{
     *,
 };
 
+use types::*;
+
 use log::{error, trace};
 use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 use winit::window::Window;
 
 use crate::gpu::swapchain::Swapchain;
+
+use super::types;
 
 const KHRONOS_VALIDATION_LAYER: &'static str = "VK_LAYER_KHRONOS_validation";
 
@@ -52,16 +56,13 @@ pub struct Gpu {
     pub transfer_queue: Queue,
     pub queue_families: QueueFamilies,
     pub description: GpuDescription,
-
-    pub window: Window,
-    swapchain: Swapchain,
 }
 
 pub struct GpuConfiguration<'a> {
     pub app_name: &'a str,
     pub engine_name: &'a str,
     pub enable_validation_layer: bool,
-    pub window: Window,
+    pub window: &'a Window,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -167,14 +168,6 @@ impl Gpu {
             &description.name
         );
 
-        let swapchain = Swapchain::new(
-            &entry,
-            &instance,
-            &physical_device.physical_device,
-            &logical_device,
-            &configuration.window,
-        )?;
-
         Ok(Gpu {
             entry,
             instance,
@@ -185,8 +178,6 @@ impl Gpu {
             transfer_queue,
             description,
             queue_families,
-            window: configuration.window,
-            swapchain,
         })
     }
 
@@ -369,9 +360,7 @@ impl Gpu {
             p_enabled_features: null(),
         };
 
-        let device =
-            unsafe { instance.create_device(selected_device.physical_device, &create_info, None) };
-        device
+        unsafe { instance.create_device(selected_device.physical_device, &create_info, None) }
     }
 
     fn ensure_required_instance_extensions_are_available(
@@ -503,85 +492,5 @@ impl Gpu {
 
     pub(crate) fn vk_physical_device(&self) -> PhysicalDevice {
         self.physical_device.clone()
-    }
-
-    pub fn swapchain_format(&self) -> Format {
-        self.swapchain.present_format.format
-    }
-
-    pub(crate) fn in_flight_fence(&self) -> vk::Fence {
-        self.swapchain.in_flight_fence
-    }
-
-    pub fn render_finished_semaphore(&self) -> &Semaphore {
-        &self.swapchain.render_finished_semaphore
-    }
-
-    pub fn image_available_semaphore(&self) -> &Semaphore {
-        &self.swapchain.image_available_semaphore
-    }
-
-    pub fn select_present_mode(&mut self, present_mode: PresentModeKHR) -> VkResult<()> {
-        self.swapchain.present_mode = present_mode;
-        self.swapchain.recreate_swapchain(
-            &self.entry,
-            &self.instance,
-            &self.physical_device,
-            &self.logical_device,
-            &self.window,
-        )?;
-        Ok(())
-    }
-
-    pub fn acquire_next_swapchain_image(&mut self) -> VkResult<ImageView> {
-        loop {
-            let next_image = self.swapchain.acquire_next_image(&self.logical_device);
-            match next_image {
-                Ok(image) => {
-                    return Ok(image);
-                }
-                Err(result) => {
-                    if result == vk::Result::SUBOPTIMAL_KHR {
-                        self.recreate_swapchain()?;
-                    } else {
-                        panic!("While acquiring next image: {:?}", result);
-                    }
-                }
-            }
-        }
-    }
-
-    pub(crate) fn extents(&self) -> Extent2D {
-        self.swapchain.present_extent.clone()
-    }
-
-    pub(crate) fn present(&self) -> VkResult<bool> {
-        self.swapchain.present(self.graphics_queue)
-    }
-
-    pub(crate) fn recreate_swapchain(&mut self) -> VkResult<()> {
-        self.swapchain.recreate_swapchain(
-            &self.entry,
-            &self.instance,
-            &self.physical_device,
-            &self.logical_device,
-            &self.window,
-        )
-    }
-}
-
-impl Drop for Gpu {
-    fn drop(&mut self) {
-        unsafe {
-            self.swapchain.drop_swapchain();
-            self.logical_device.destroy_device(None);
-            self.instance.destroy_instance(None);
-        }
-    }
-}
-
-impl AsRef<Device> for Gpu {
-    fn as_ref(&self) -> &Device {
-        &self.logical_device
     }
 }
