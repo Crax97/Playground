@@ -35,7 +35,7 @@ use ash::{
     },
 };
 
-use gpu::{Gpu, GpuConfiguration};
+use gpu::{Gpu, GpuConfiguration, PasstroughAllocator};
 use memoffset::offset_of;
 use nalgebra::*;
 use winit::{dpi::PhysicalSize, event_loop::ControlFlow};
@@ -57,7 +57,7 @@ fn main() -> anyhow::Result<()> {
         })
         .build(&event_loop)?;
 
-    let gpu = Gpu::new(GpuConfiguration {
+    let gpu = Gpu::<PasstroughAllocator>::new(GpuConfiguration {
         app_name: "Hello World!",
         engine_name: "Hello Engine!",
         enable_validation_layer: if cfg!(debug_assertions) { true } else { false },

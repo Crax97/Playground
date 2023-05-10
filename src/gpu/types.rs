@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use crate::gpu::Gpu;
+use crate::gpu::SharedGpu;
 use ash::{
     prelude::*,
     vk::{
@@ -18,12 +18,12 @@ pub fn get_allocation_callbacks() -> Option<&'static AllocationCallbacks> {
 macro_rules! define_raii_wrapper {
     (($name:ident,  $vk_type:ty, $drop_fn:path) {($($arg_name:ident : $arg_typ:ty,)*) => $create_impl_block:tt}) => {
         pub struct $name {
-            gpu: Arc<Gpu>,
+            gpu: SharedGpu,
             inner: $vk_type,
         }
 
         impl $name {
-            pub fn create(gpu: Arc<Gpu>, $($arg_name : $arg_typ,)*) -> VkResult<Self> {
+            pub fn create(gpu: SharedGpu, $($arg_name : $arg_typ,)*) -> VkResult<Self> {
 
                 let inner = $create_impl_block(&gpu)?;
                 Ok(Self {
@@ -53,13 +53,13 @@ macro_rules! define_raii_wrapper {
 
 define_raii_wrapper!((GPUSemaphore, vk::Semaphore, ash::Device::destroy_semaphore) {
     (create_info: &SemaphoreCreateInfo,) => {
-        |gpu: &Gpu| { unsafe { gpu.logical_device.create_semaphore(create_info, get_allocation_callbacks()) }}
+        |gpu: &SharedGpu| { unsafe { gpu.logical_device.create_semaphore(create_info, get_allocation_callbacks()) }}
     }
 });
 
 define_raii_wrapper!((GPUFence, vk::Fence, ash::Device::destroy_fence) {
     (create_info: &FenceCreateInfo,) => {
-        |gpu: &Gpu| { unsafe { gpu.logical_device.create_fence(create_info, get_allocation_callbacks()) }}
+        |gpu: &SharedGpu| { unsafe { gpu.logical_device.create_fence(create_info, get_allocation_callbacks()) }}
     }
 });
 

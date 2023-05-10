@@ -17,7 +17,7 @@ use log::{info, trace, warn};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use winit::window::Window;
 
-use super::{GPUFence, GPUSemaphore, Gpu};
+use super::{GPUFence, GPUSemaphore, Gpu, SharedGpu};
 
 mod util {
     use ash::vk::{PresentModeKHR, SurfaceFormatKHR};
@@ -62,11 +62,11 @@ pub struct Swapchain {
     pub window: Window,
 
     current_swapchain_index: u32,
-    gpu: Arc<Gpu>,
+    gpu: SharedGpu,
 }
 
 impl Swapchain {
-    pub(crate) fn new(gpu: Arc<Gpu>, window: Window) -> VkResult<Self> {
+    pub(crate) fn new(gpu: SharedGpu, window: Window) -> VkResult<Self> {
         let surface_extension = Surface::new(&gpu.entry, &gpu.instance);
         let swapchain_extension =
             ash::extensions::khr::Swapchain::new(&gpu.instance, &gpu.logical_device);

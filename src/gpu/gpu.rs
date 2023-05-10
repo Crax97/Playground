@@ -19,16 +19,15 @@ use ash::{
     *,
 };
 
-use types::*;
-
 use log::{error, trace};
 use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 use winit::window::Window;
 
-use crate::gpu::swapchain::Swapchain;
-
-use super::types;
+use super::{
+    allocator::{Allocator, PasstroughAllocator},
+    types,
+};
 
 const KHRONOS_VALIDATION_LAYER: &'static str = "VK_LAYER_KHRONOS_validation";
 
@@ -46,7 +45,7 @@ impl GpuDescription {
     }
 }
 
-pub struct Gpu {
+pub struct Gpu<A: Allocator> {
     pub entry: Entry,
     pub instance: Instance,
     pub logical_device: Device,
@@ -56,7 +55,10 @@ pub struct Gpu {
     pub transfer_queue: Queue,
     pub queue_families: QueueFamilies,
     pub description: GpuDescription,
+    pub allocator: A,
 }
+
+pub type SharedGpu = Arc<Gpu<PasstroughAllocator>>;
 
 pub struct GpuConfiguration<'a> {
     pub app_name: &'a str,
@@ -112,7 +114,7 @@ impl QueueFamilies {
     }
 }
 
-impl Gpu {
+impl<A: Allocator> Gpu<A> {
     pub fn new(configuration: GpuConfiguration) -> Result<Self> {
         let entry = Entry::linked();
 
@@ -168,6 +170,8 @@ impl Gpu {
             &description.name
         );
 
+        let allocator = A::new(&instance, physical_device.physical_device, &logical_device)?;
+
         Ok(Gpu {
             entry,
             instance,
@@ -178,6 +182,7 @@ impl Gpu {
             transfer_queue,
             description,
             queue_families,
+            allocator,
         })
     }
 
