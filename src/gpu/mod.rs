@@ -1,5 +1,6 @@
 mod allocator;
 mod gpu;
+mod resource;
 mod swapchain;
 mod types;
 
