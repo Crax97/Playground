@@ -35,7 +35,7 @@ use ash::{
     },
 };
 
-use gpu::{Gpu, GpuConfiguration, PasstroughAllocator};
+use gpu::{Gpu, GpuConfiguration, MemoryDomain, PasstroughAllocator};
 use memoffset::offset_of;
 use nalgebra::*;
 use winit::{dpi::PhysicalSize, event_loop::ControlFlow};
@@ -63,7 +63,7 @@ fn main() -> anyhow::Result<()> {
         enable_validation_layer: if cfg!(debug_assertions) { true } else { false },
         window: &window,
     })?;
-    let gpu = Arc::new(gpu);
+    let mut gpu = Arc::new(gpu);
 
     let mut swapchain = gpu::Swapchain::new(gpu.clone(), window)?;
 
@@ -113,7 +113,7 @@ fn main() -> anyhow::Result<()> {
         panic!("No memory type found!")
     };
 
-    let (vertex_buffer, device_memory) = unsafe {
+    let vertex_buffer = {
         let vertex_data = &[
             VertexData {
                 position: vector![0.0, -0.5],
@@ -138,54 +138,60 @@ fn main() -> anyhow::Result<()> {
             queue_family_index_count: 0,
             p_queue_family_indices: null(),
         };
-        let buffer = device.create_buffer(&create_info, None).unwrap();
-
-        let memory_requirements = device.get_buffer_memory_requirements(buffer);
-        let memory_type = find_memory_type(
-            memory_requirements.memory_type_bits,
-            MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
-        );
-
-        let memory_allocate_info = MemoryAllocateInfo {
-            s_type: StructureType::MEMORY_ALLOCATE_INFO,
-            p_next: null(),
-            allocation_size: memory_requirements.size,
-            memory_type_index: memory_type,
-        };
-
-        let device_memory = device
-            .allocate_memory(&memory_allocate_info, None)
-            .expect("Failed to allocate device memory");
-        device
-            .bind_buffer_memory(buffer, device_memory, 0)
-            .expect("Failed to bind buffer memory!");
-
-        let address = device
-            .map_memory(
-                device_memory,
-                0,
-                (std::mem::size_of::<VertexData>() * 3) as u64,
-                MemoryMapFlags::empty(),
-            )
-            .expect("Failed to map memory!");
-        let address = address as *mut VertexData;
-        let address = std::slice::from_raw_parts_mut(address, 3);
-
-        address.copy_from_slice(vertex_data);
-
-        device
-            .flush_mapped_memory_ranges(&[MappedMemoryRange {
-                s_type: StructureType::MAPPED_MEMORY_RANGE,
-                p_next: null(),
-                memory: device_memory,
-                offset: 0,
-                size: memory_requirements.size,
-            }])
-            .expect("Failed to flush memory ranges");
-
-        device.unmap_memory(device_memory);
-
-        (buffer, device_memory)
+        let buffer = gpu.create_buffer(
+            &create_info,
+            MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
+        )?;
+        buffer.write_data(vertex_data);
+        buffer
+        // let buffer = device.create_buffer(&create_info, None).unwrap();
+        //
+        // let memory_requirements = device.get_buffer_memory_requirements(buffer);
+        // let memory_type = find_memory_type(
+        //     memory_requirements.memory_type_bits,
+        //     MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
+        // );
+        //
+        // let memory_allocate_info = MemoryAllocateInfo {
+        //     s_type: StructureType::MEMORY_ALLOCATE_INFO,
+        //     p_next: null(),
+        //     allocation_size: memory_requirements.size,
+        //     memory_type_index: memory_type,
+        // };
+        //
+        // let device_memory = device
+        //     .allocate_memory(&memory_allocate_info, None)
+        //     .expect("Failed to allocate device memory");
+        // device
+        //     .bind_buffer_memory(buffer, device_memory, 0)
+        //     .expect("Failed to bind buffer memory!");
+        //
+        // let address = device
+        //     .map_memory(
+        //         device_memory,
+        //         0,
+        //         (std::mem::size_of::<VertexData>() * 3) as u64,
+        //         MemoryMapFlags::empty(),
+        //     )
+        //     .expect("Failed to map memory!");
+        // let address = address as *mut VertexData;
+        // let address = std::slice::from_raw_parts_mut(address, 3);
+        //
+        // address.copy_from_slice(vertex_data);
+        //
+        // device
+        //     .flush_mapped_memory_ranges(&[MappedMemoryRange {
+        //         s_type: StructureType::MAPPED_MEMORY_RANGE,
+        //         p_next: null(),
+        //         memory: device_memory,
+        //         offset: 0,
+        //         size: memory_requirements.size,
+        //     }])
+        //     .expect("Failed to flush memory ranges");
+        //
+        // device.unmap_memory(device_memory);
+        //
+        // (buffer, device_memory)
     };
 
     let pass_info = RenderPassCreateInfo {
@@ -545,7 +551,12 @@ fn main() -> anyhow::Result<()> {
                             extent: swapchain.extents(),
                         }],
                     );
-                    device.cmd_bind_vertex_buffers(command_buffer, 0, &[vertex_buffer], &[0]);
+                    device.cmd_bind_vertex_buffers(
+                        command_buffer,
+                        0,
+                        &[*vertex_buffer.deref()],
+                        &[0],
+                    );
                     device.cmd_draw(command_buffer, 3, 1, 0, 0);
                     device.cmd_end_render_pass(command_buffer);
 
@@ -584,8 +595,7 @@ fn main() -> anyhow::Result<()> {
             }
             winit::event::Event::RedrawEventsCleared => {}
             winit::event::Event::LoopDestroyed => unsafe {
-                gpu.logical_device.destroy_buffer(vertex_buffer, None);
-                device.free_memory(device_memory, None);
+                //                device.free_memory(device_memory, None);
                 gpu.logical_device
                     .free_command_buffers(command_pool, &[command_buffer]);
                 gpu.logical_device.destroy_command_pool(command_pool, None);

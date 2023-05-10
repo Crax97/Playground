@@ -17,7 +17,7 @@ use log::{info, trace, warn};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use winit::window::Window;
 
-use super::{GPUFence, GPUSemaphore, Gpu, SharedGpu};
+use super::{GPUFence, GPUSemaphore, Gpu, GpuAllocator, SharedGpu};
 
 mod util {
     use ash::vk::{PresentModeKHR, SurfaceFormatKHR};
@@ -72,7 +72,7 @@ impl Swapchain {
             ash::extensions::khr::Swapchain::new(&gpu.instance, &gpu.logical_device);
 
         let next_image_fence = GPUFence::create(
-            gpu.clone(),
+            &gpu,
             &FenceCreateInfo {
                 s_type: StructureType::FENCE_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -80,7 +80,7 @@ impl Swapchain {
             },
         )?;
         let in_flight_fence = GPUFence::create(
-            gpu.clone(),
+            &gpu,
             &FenceCreateInfo {
                 s_type: StructureType::FENCE_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -89,7 +89,7 @@ impl Swapchain {
         )?;
 
         let render_finished_semaphore = GPUSemaphore::create(
-            gpu.clone(),
+            &gpu,
             &SemaphoreCreateInfo {
                 s_type: StructureType::SEMAPHORE_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -98,7 +98,7 @@ impl Swapchain {
         )?;
 
         let image_available_semaphore = GPUSemaphore::create(
-            gpu.clone(),
+            &gpu,
             &SemaphoreCreateInfo {
                 s_type: StructureType::SEMAPHORE_CREATE_INFO,
                 p_next: std::ptr::null(),

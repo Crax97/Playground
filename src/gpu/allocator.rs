@@ -44,18 +44,23 @@ pub struct AllocationRequirements {
     pub memory_domain: MemoryDomain,
 }
 
-pub trait Allocator {
+pub struct MemoryAllocation {
+    pub(crate) device_memory: DeviceMemory,
+    pub(crate) offset: u64,
+}
+
+pub trait GpuAllocator {
     fn new(instance: &Instance, physical_device: PhysicalDevice, device: &Device) -> VkResult<Self>
     where
         Self: Sized;
 
     fn allocate(
-        &mut self,
+        &self,
         device: &Device,
         allocation_requirements: AllocationRequirements,
-    ) -> VkResult<DeviceMemory>;
+    ) -> VkResult<MemoryAllocation>;
 
-    fn deallocate(&mut self, device: Device, allocation: DeviceMemory);
+    fn deallocate(&mut self, device: Device, allocation: MemoryAllocation);
 }
 
 pub struct PasstroughAllocator {
@@ -77,7 +82,7 @@ impl PasstroughAllocator {
     }
 }
 
-impl Allocator for PasstroughAllocator {
+impl GpuAllocator for PasstroughAllocator {
     fn new(instance: &Instance, physical_device: PhysicalDevice, _: &Device) -> VkResult<Self>
     where
         Self: Sized,
@@ -88,10 +93,10 @@ impl Allocator for PasstroughAllocator {
     }
 
     fn allocate(
-        &mut self,
+        &self,
         device: &Device,
         allocation_requirements: AllocationRequirements,
-    ) -> VkResult<DeviceMemory> {
+    ) -> VkResult<MemoryAllocation> {
         let memory_type_index = self.find_memory_type(
             allocation_requirements.memory_requirements.memory_type_bits,
             allocation_requirements.memory_domain,
@@ -107,12 +112,16 @@ impl Allocator for PasstroughAllocator {
             allocation_size: allocation_requirements.memory_requirements.size,
             memory_type_index,
         };
-        unsafe { device.allocate_memory(&allocate_info, None) }
+        let device_memory = unsafe { device.allocate_memory(&allocate_info, None) }?;
+        Ok(MemoryAllocation {
+            device_memory,
+            offset: 0,
+        })
     }
 
-    fn deallocate(&mut self, device: Device, allocation: DeviceMemory) {
+    fn deallocate(&mut self, device: Device, allocation: MemoryAllocation) {
         unsafe {
-            device.free_memory(allocation, None);
+            device.free_memory(allocation.device_memory, None);
         }
     }
 }

@@ -10,7 +10,7 @@ use anyhow::Result;
 use ash::{
     prelude::*,
     vk::{
-        make_api_version, ApplicationInfo, DeviceCreateFlags, DeviceCreateInfo,
+        make_api_version, ApplicationInfo, BufferCreateInfo, DeviceCreateFlags, DeviceCreateInfo,
         DeviceQueueCreateFlags, DeviceQueueCreateInfo, Extent2D, Format, ImageView,
         InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, PhysicalDevice,
         PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR,
@@ -25,8 +25,8 @@ use thiserror::Error;
 use winit::window::Window;
 
 use super::{
-    allocator::{Allocator, PasstroughAllocator},
-    types,
+    allocator::{GpuAllocator, PasstroughAllocator},
+    types, AllocationRequirements, GpuBuffer, MemoryDomain,
 };
 
 const KHRONOS_VALIDATION_LAYER: &'static str = "VK_LAYER_KHRONOS_validation";
@@ -45,7 +45,7 @@ impl GpuDescription {
     }
 }
 
-pub struct Gpu<A: Allocator> {
+pub struct Gpu<A: GpuAllocator> {
     pub entry: Entry,
     pub instance: Instance,
     pub logical_device: Device,
@@ -114,7 +114,7 @@ impl QueueFamilies {
     }
 }
 
-impl<A: Allocator> Gpu<A> {
+impl<A: GpuAllocator> Gpu<A> {
     pub fn new(configuration: GpuConfiguration) -> Result<Self> {
         let entry = Entry::linked();
 
@@ -497,5 +497,32 @@ impl<A: Allocator> Gpu<A> {
 
     pub(crate) fn vk_physical_device(&self) -> PhysicalDevice {
         self.physical_device.clone()
+    }
+}
+
+impl<A: GpuAllocator> Gpu<A> {
+    pub fn create_buffer(
+        &self,
+        create_info: &BufferCreateInfo,
+        memory_domain: MemoryDomain,
+    ) -> VkResult<GpuBuffer> {
+        let buffer = unsafe { self.logical_device.create_buffer(create_info, None) }?;
+        let memory_requirements =
+            unsafe { self.logical_device.get_buffer_memory_requirements(buffer) };
+
+        let allocation_requirements = AllocationRequirements {
+            memory_requirements,
+            memory_domain,
+        };
+
+        let allocation = self
+            .allocator
+            .allocate(&self.logical_device, allocation_requirements)?;
+        unsafe {
+            self.logical_device
+                .bind_buffer_memory(buffer, allocation.device_memory, 0)
+        }?;
+
+        Ok(GpuBuffer::create(self, buffer, allocation)?)
     }
 }
