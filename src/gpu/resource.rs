@@ -72,7 +72,7 @@ impl ResourceMap {
         }
     }
 
-    pub(crate) fn add<R: Resource + 'static>(&mut self, resource: R) -> ResourceHandle<R> {
+    pub(crate) fn add<R: Resource + 'static>(&self, resource: R) -> ResourceHandle<R> {
         self.map.borrow_mut().resources += 1;
         let store = self.get_arena::<R>();
         let id = store.insert(resource);

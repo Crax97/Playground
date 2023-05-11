@@ -4,15 +4,12 @@ use crate::gpu::Gpu;
 use ash::{
     prelude::*,
     vk::{
-        self, AllocationCallbacks, Buffer, BufferCreateInfo, DeviceCreateInfo, FenceCreateInfo,
-        InstanceCreateInfo, MappedMemoryRange, MemoryMapFlags, PhysicalDevice, SemaphoreCreateInfo,
-        StructureType,
+        self, AllocationCallbacks, Buffer, FenceCreateInfo, MappedMemoryRange, MemoryMapFlags,
+        SemaphoreCreateInfo, StructureType,
     },
-    Instance,
 };
-use std::sync::Arc;
 
-use super::MemoryAllocation;
+use super::{resource::Resource, MemoryAllocation};
 
 pub fn get_allocation_callbacks() -> Option<&'static AllocationCallbacks> {
     None
@@ -53,6 +50,10 @@ macro_rules! define_raii_wrapper {
             fn deref(&self) -> &Self::Target {
                 &self.inner
             }
+        }
+
+        impl Resource for $name {
+
         }
     };
 }

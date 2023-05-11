@@ -142,7 +142,10 @@ fn main() -> anyhow::Result<()> {
             &create_info,
             MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
         )?;
-        buffer.write_data(vertex_data);
+        gpu.resource_map
+            .get(&buffer)
+            .unwrap()
+            .write_data(vertex_data);
         buffer
         // let buffer = device.create_buffer(&create_info, None).unwrap();
         //
@@ -554,7 +557,7 @@ fn main() -> anyhow::Result<()> {
                     device.cmd_bind_vertex_buffers(
                         command_buffer,
                         0,
-                        &[*vertex_buffer.deref()],
+                        &[*gpu.resource_map.get(&vertex_buffer).unwrap().deref()],
                         &[0],
                     );
                     device.cmd_draw(command_buffer, 3, 1, 0, 0);

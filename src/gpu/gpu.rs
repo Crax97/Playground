@@ -26,6 +26,7 @@ use winit::window::Window;
 
 use super::{
     allocator::{GpuAllocator, PasstroughAllocator},
+    resource::{ResourceHandle, ResourceMap},
     types, AllocationRequirements, GpuBuffer, MemoryDomain,
 };
 
@@ -56,6 +57,8 @@ pub struct Gpu<A: GpuAllocator> {
     pub queue_families: QueueFamilies,
     pub description: GpuDescription,
     pub allocator: A,
+
+    pub resource_map: ResourceMap,
 }
 
 pub type SharedGpu = Arc<Gpu<PasstroughAllocator>>;
@@ -183,6 +186,7 @@ impl<A: GpuAllocator> Gpu<A> {
             description,
             queue_families,
             allocator,
+            resource_map: ResourceMap::new(),
         })
     }
 
@@ -505,7 +509,7 @@ impl<A: GpuAllocator> Gpu<A> {
         &self,
         create_info: &BufferCreateInfo,
         memory_domain: MemoryDomain,
-    ) -> VkResult<GpuBuffer> {
+    ) -> VkResult<ResourceHandle<GpuBuffer>> {
         let buffer = unsafe { self.logical_device.create_buffer(create_info, None) }?;
         let memory_requirements =
             unsafe { self.logical_device.get_buffer_memory_requirements(buffer) };
@@ -522,7 +526,9 @@ impl<A: GpuAllocator> Gpu<A> {
             self.logical_device
                 .bind_buffer_memory(buffer, allocation.device_memory, 0)
         }?;
+        let buffer = GpuBuffer::create(self, buffer, allocation)?;
 
-        Ok(GpuBuffer::create(self, buffer, allocation)?)
+        let id = self.resource_map.add(buffer);
+        Ok(id)
     }
 }
