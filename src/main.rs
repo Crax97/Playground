@@ -13,8 +13,8 @@ use ash::{
         CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo,
         CommandPoolResetFlags, CompareOp, CullModeFlags, DependencyFlags, DynamicState, Format,
         FramebufferCreateFlags, FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo,
-        ImageLayout, ImageView, LogicOp, MappedMemoryRange, MemoryAllocateInfo, MemoryMapFlags,
-        MemoryPropertyFlags, Offset2D, Pipeline, PipelineBindPoint, PipelineCache,
+        ImageLayout, ImageView, IndexType, LogicOp, MappedMemoryRange, MemoryAllocateInfo,
+        MemoryMapFlags, MemoryPropertyFlags, Offset2D, Pipeline, PipelineBindPoint, PipelineCache,
         PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
         PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
         PipelineDepthStencilStateCreateFlags, PipelineDepthStencilStateCreateInfo,
@@ -113,18 +113,23 @@ fn main() -> anyhow::Result<()> {
     };
     let vertex_data = &[
         VertexData {
-            position: vector![0.0, -0.5],
+            position: vector![-0.5, -0.5],
             color: vector![1.0, 0.0, 0.0],
         },
         VertexData {
-            position: vector![0.5, 0.5],
+            position: vector![0.5, -0.5],
             color: vector![0.0, 1.0, 0.0],
         },
         VertexData {
-            position: vector![-0.5, 0.5],
+            position: vector![0.5, 0.5],
             color: vector![0.0, 0.0, 1.0],
         },
+        VertexData {
+            position: vector![-0.5, 0.5],
+            color: vector![1.0, 1.0, 1.0],
+        },
     ];
+    let indices: &[u32] = &[0, 1, 2, 2, 3, 0];
     let data_size = (size_of::<VertexData>() * vertex_data.len()) as u64;
     let vertex_buffer = {
         let create_info = BufferCreateInfo {
@@ -141,12 +146,35 @@ fn main() -> anyhow::Result<()> {
         buffer
     };
 
+    let index_size = (size_of::<u32>() * indices.len()) as u64;
+
+    let index_buffer = {
+        let create_info = BufferCreateInfo {
+            s_type: StructureType::BUFFER_CREATE_INFO,
+            p_next: null(),
+            flags: BufferCreateFlags::empty(),
+            size: index_size,
+            usage: BufferUsageFlags::INDEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
+            sharing_mode: SharingMode::EXCLUSIVE,
+            queue_family_index_count: 0,
+            p_queue_family_indices: null(),
+        };
+        let buffer = gpu.create_buffer(&create_info, MemoryDomain::DeviceLocal)?;
+        buffer
+    };
+
     gpu.resource_map
         .get(&staging_buffer)
         .unwrap()
         .write_data(vertex_data);
 
     gpu.copy_buffer(&staging_buffer, &vertex_buffer, data_size)?;
+    gpu.resource_map
+        .get(&staging_buffer)
+        .unwrap()
+        .write_data(indices);
+
+    gpu.copy_buffer(&staging_buffer, &index_buffer, index_size)?;
 
     let pass_info = RenderPassCreateInfo {
         s_type: StructureType::RENDER_PASS_CREATE_INFO,
@@ -406,7 +434,7 @@ fn main() -> anyhow::Result<()> {
         pipeline
     }[0];
 
-    swapchain.select_present_mode(PresentModeKHR::MAILBOX);
+    swapchain.select_present_mode(PresentModeKHR::MAILBOX)?;
 
     unsafe {
         device.destroy_shader_module(vertex_module, None);
@@ -511,7 +539,13 @@ fn main() -> anyhow::Result<()> {
                         &[*gpu.resource_map.get(&vertex_buffer).unwrap().deref()],
                         &[0],
                     );
-                    device.cmd_draw(command_buffer, 3, 1, 0, 0);
+                    device.cmd_bind_index_buffer(
+                        command_buffer,
+                        *gpu.resource_map.get(&index_buffer).unwrap().deref(),
+                        0,
+                        IndexType::UINT32,
+                    );
+                    device.cmd_draw_indexed(command_buffer, 6, 1, 0, 0, 0);
                     device.cmd_end_render_pass(command_buffer);
 
                     device.end_command_buffer(command_buffer).unwrap();

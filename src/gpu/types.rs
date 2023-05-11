@@ -113,7 +113,6 @@ impl Resource for GpuBuffer {}
 
 impl GpuBuffer {
     pub fn write_data<I: Sized + Copy>(&self, data: &[I]) {
-        let length = data.len() as u64;
         let address = unsafe {
             self.device
                 .map_memory(
@@ -125,7 +124,7 @@ impl GpuBuffer {
                 .expect("Failed to map memory!")
         };
         let address = address as *mut I;
-        let address = unsafe { std::slice::from_raw_parts_mut(address, 3) };
+        let address = unsafe { std::slice::from_raw_parts_mut(address, data.len()) };
 
         address.copy_from_slice(data);
 
