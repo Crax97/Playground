@@ -8,6 +8,7 @@ use ash::{
 };
 use ash::{Device, Instance};
 use bitflags::bitflags;
+use log::trace;
 
 bitflags! {
     #[repr(transparent)]
@@ -47,6 +48,7 @@ pub struct AllocationRequirements {
 pub struct MemoryAllocation {
     pub(crate) device_memory: DeviceMemory,
     pub(crate) offset: u64,
+    pub(crate) size: u64,
 }
 
 pub trait GpuAllocator {
@@ -55,16 +57,17 @@ pub trait GpuAllocator {
         Self: Sized;
 
     fn allocate(
-        &self,
+        &mut self,
         device: &Device,
         allocation_requirements: AllocationRequirements,
     ) -> VkResult<MemoryAllocation>;
 
-    fn deallocate(&mut self, device: Device, allocation: MemoryAllocation);
+    fn deallocate(&mut self, device: &Device, allocation: &MemoryAllocation);
 }
 
 pub struct PasstroughAllocator {
     memory_properties: PhysicalDeviceMemoryProperties,
+    num_allocations: u32,
 }
 impl PasstroughAllocator {
     fn find_memory_type(&self, type_filter: u32, memory_domain: MemoryDomain) -> Option<u32> {
@@ -89,11 +92,14 @@ impl GpuAllocator for PasstroughAllocator {
     {
         let memory_properties =
             unsafe { instance.get_physical_device_memory_properties(physical_device) };
-        Ok(Self { memory_properties })
+        Ok(Self {
+            memory_properties,
+            num_allocations: 0,
+        })
     }
 
     fn allocate(
-        &self,
+        &mut self,
         device: &Device,
         allocation_requirements: AllocationRequirements,
     ) -> VkResult<MemoryAllocation> {
@@ -113,15 +119,29 @@ impl GpuAllocator for PasstroughAllocator {
             memory_type_index,
         };
         let device_memory = unsafe { device.allocate_memory(&allocate_info, None) }?;
+        self.num_allocations += 1;
+        trace!(
+            "PasstroughAllocator: Allocated {} bytes, there are {} allocations",
+            allocate_info.allocation_size,
+            self.num_allocations
+        );
+
         Ok(MemoryAllocation {
             device_memory,
             offset: 0,
+            size: allocate_info.allocation_size,
         })
     }
 
-    fn deallocate(&mut self, device: Device, allocation: MemoryAllocation) {
+    fn deallocate(&mut self, device: &Device, allocation: &MemoryAllocation) {
         unsafe {
             device.free_memory(allocation.device_memory, None);
         }
+        self.num_allocations -= 1;
+        trace!(
+            "PasstroughAllocator: Deallocated {} bytes, there are {} allocations",
+            allocation.size,
+            self.num_allocations
+        );
     }
 }

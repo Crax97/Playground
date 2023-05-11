@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     ffi::{CStr, CString},
     num::NonZeroU32,
     ops::{Deref, DerefMut},
@@ -10,11 +11,13 @@ use anyhow::Result;
 use ash::{
     prelude::*,
     vk::{
-        make_api_version, ApplicationInfo, BufferCreateInfo, DeviceCreateFlags, DeviceCreateInfo,
-        DeviceQueueCreateFlags, DeviceQueueCreateInfo, Extent2D, Format, ImageView,
+        make_api_version, ApplicationInfo, BufferCreateInfo, CommandBufferAllocateInfo,
+        CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags,
+        CommandPoolCreateFlags, CommandPoolCreateInfo, DeviceCreateFlags, DeviceCreateInfo,
+        DeviceQueueCreateFlags, DeviceQueueCreateInfo, Extent2D, Fence, Format, ImageView,
         InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, PhysicalDevice,
         PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR,
-        Queue, QueueFlags, Semaphore, StructureType, SurfaceKHR, API_VERSION_1_3,
+        Queue, QueueFlags, Semaphore, StructureType, SubmitInfo, SurfaceKHR, API_VERSION_1_3,
     },
     *,
 };
@@ -46,7 +49,7 @@ impl GpuDescription {
     }
 }
 
-pub struct Gpu<A: GpuAllocator> {
+pub struct Gpu {
     pub entry: Entry,
     pub instance: Instance,
     pub logical_device: Device,
@@ -56,12 +59,12 @@ pub struct Gpu<A: GpuAllocator> {
     pub transfer_queue: Queue,
     pub queue_families: QueueFamilies,
     pub description: GpuDescription,
-    pub allocator: A,
+    pub allocator: Arc<RefCell<dyn GpuAllocator>>,
 
     pub resource_map: ResourceMap,
 }
 
-pub type SharedGpu = Arc<Gpu<PasstroughAllocator>>;
+pub type SharedGpu = Arc<Gpu>;
 
 pub struct GpuConfiguration<'a> {
     pub app_name: &'a str,
@@ -117,7 +120,7 @@ impl QueueFamilies {
     }
 }
 
-impl<A: GpuAllocator> Gpu<A> {
+impl Gpu {
     pub fn new(configuration: GpuConfiguration) -> Result<Self> {
         let entry = Entry::linked();
 
@@ -173,7 +176,8 @@ impl<A: GpuAllocator> Gpu<A> {
             &description.name
         );
 
-        let allocator = A::new(&instance, physical_device.physical_device, &logical_device)?;
+        let allocator =
+            PasstroughAllocator::new(&instance, physical_device.physical_device, &logical_device)?;
 
         Ok(Gpu {
             entry,
@@ -185,7 +189,7 @@ impl<A: GpuAllocator> Gpu<A> {
             transfer_queue,
             description,
             queue_families,
-            allocator,
+            allocator: Arc::new(RefCell::new(allocator)),
             resource_map: ResourceMap::new(),
         })
     }
@@ -504,7 +508,7 @@ impl<A: GpuAllocator> Gpu<A> {
     }
 }
 
-impl<A: GpuAllocator> Gpu<A> {
+impl Gpu {
     pub fn create_buffer(
         &self,
         create_info: &BufferCreateInfo,
@@ -521,14 +525,90 @@ impl<A: GpuAllocator> Gpu<A> {
 
         let allocation = self
             .allocator
+            .borrow_mut()
             .allocate(&self.logical_device, allocation_requirements)?;
         unsafe {
             self.logical_device
                 .bind_buffer_memory(buffer, allocation.device_memory, 0)
         }?;
-        let buffer = GpuBuffer::create(self, buffer, allocation)?;
+        let buffer = GpuBuffer::create(self, buffer, allocation, self.allocator.clone())?;
 
         let id = self.resource_map.add(buffer);
         Ok(id)
+    }
+    pub fn copy_buffer(
+        &self,
+        source_buffer: &ResourceHandle<GpuBuffer>,
+        dest_buffer: &ResourceHandle<GpuBuffer>,
+        size: u64,
+    ) -> VkResult<()> {
+        unsafe {
+            let command_pool = self.logical_device.create_command_pool(
+                &CommandPoolCreateInfo {
+                    s_type: StructureType::COMMAND_POOL_CREATE_INFO,
+                    p_next: std::ptr::null(),
+                    flags: CommandPoolCreateFlags::empty(),
+                    queue_family_index: self.graphics_queue_family_index(),
+                },
+                None,
+            )?;
+
+            let command_buffer =
+                self.logical_device
+                    .allocate_command_buffers(&CommandBufferAllocateInfo {
+                        s_type: StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
+                        p_next: std::ptr::null(),
+                        command_pool,
+                        level: CommandBufferLevel::PRIMARY,
+                        command_buffer_count: 1,
+                    })?[0];
+
+            self.logical_device.begin_command_buffer(
+                command_buffer,
+                &CommandBufferBeginInfo {
+                    s_type: StructureType::COMMAND_BUFFER_BEGIN_INFO,
+                    p_next: std::ptr::null(),
+                    flags: CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+                    p_inheritance_info: std::ptr::null(),
+                },
+            )?;
+
+            let src_buffer = self.resource_map.get(source_buffer).unwrap().inner;
+            let dst_buffer = self.resource_map.get(dest_buffer).unwrap().inner;
+
+            self.logical_device.cmd_copy_buffer(
+                command_buffer,
+                src_buffer,
+                dst_buffer,
+                &[vk::BufferCopy {
+                    src_offset: 0,
+                    dst_offset: 0,
+                    size,
+                }],
+            );
+            self.logical_device.end_command_buffer(command_buffer)?;
+            self.logical_device.queue_submit(
+                self.graphics_queue,
+                &[SubmitInfo {
+                    s_type: StructureType::SUBMIT_INFO,
+                    p_next: std::ptr::null(),
+                    wait_semaphore_count: 0,
+                    p_wait_semaphores: std::ptr::null(),
+                    p_wait_dst_stage_mask: std::ptr::null(),
+                    command_buffer_count: 1,
+                    p_command_buffers: addr_of!(command_buffer),
+                    signal_semaphore_count: 0,
+                    p_signal_semaphores: std::ptr::null(),
+                }],
+                Fence::null(),
+            )?;
+            self.logical_device.queue_wait_idle(self.graphics_queue())?;
+
+            self.logical_device
+                .free_command_buffers(command_pool, &[command_buffer]);
+            self.logical_device.destroy_command_pool(command_pool, None);
+        }
+
+        Ok(())
     }
 }

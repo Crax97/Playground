@@ -57,18 +57,17 @@ fn main() -> anyhow::Result<()> {
         })
         .build(&event_loop)?;
 
-    let gpu = Gpu::<PasstroughAllocator>::new(GpuConfiguration {
+    let gpu = Gpu::new(GpuConfiguration {
         app_name: "Hello World!",
         engine_name: "Hello Engine!",
         enable_validation_layer: if cfg!(debug_assertions) { true } else { false },
         window: &window,
     })?;
-    let mut gpu = Arc::new(gpu);
+    let gpu = Arc::new(gpu);
 
     let mut swapchain = gpu::Swapchain::new(gpu.clone(), window)?;
 
     let device = gpu.vk_logical_device();
-    let physical_device = gpu.vk_physical_device();
     let vertex_module = utils::read_file_to_vk_module(&device, "./shaders/vertex.spirv")?;
     let fragment_module = utils::read_file_to_vk_module(&device, "./shaders/fragment.spirv")?;
 
@@ -94,108 +93,60 @@ fn main() -> anyhow::Result<()> {
         })?[0]
     };
 
-    let find_memory_type = |type_filter: u32, mem_properties: MemoryPropertyFlags| -> u32 {
-        let memory_properties = unsafe {
-            gpu.instance
-                .get_physical_device_memory_properties(physical_device)
-        };
+    let mb_16 = 1024 * 1024 * 16;
 
-        for i in 0..memory_properties.memory_type_count {
-            if (type_filter & (1 << i)) > 0
-                && memory_properties.memory_types[i as usize]
-                    .property_flags
-                    .intersects(mem_properties)
-            {
-                return i;
-            }
-        }
-
-        panic!("No memory type found!")
-    };
-
-    let vertex_buffer = {
-        let vertex_data = &[
-            VertexData {
-                position: vector![0.0, -0.5],
-                color: vector![1.0, 0.0, 0.0],
-            },
-            VertexData {
-                position: vector![0.5, 0.5],
-                color: vector![0.0, 1.0, 0.0],
-            },
-            VertexData {
-                position: vector![-0.5, 0.5],
-                color: vector![0.0, 0.0, 1.0],
-            },
-        ];
+    let staging_buffer = {
         let create_info = BufferCreateInfo {
             s_type: StructureType::BUFFER_CREATE_INFO,
             p_next: null(),
             flags: BufferCreateFlags::empty(),
-            size: (size_of::<VertexData>() * vertex_data.len()) as u64,
-            usage: BufferUsageFlags::VERTEX_BUFFER,
+            size: mb_16,
+            usage: BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_SRC,
             sharing_mode: SharingMode::EXCLUSIVE,
             queue_family_index_count: 0,
             p_queue_family_indices: null(),
         };
-        let buffer = gpu.create_buffer(
+        gpu.create_buffer(
             &create_info,
-            MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
-        )?;
-        gpu.resource_map
-            .get(&buffer)
-            .unwrap()
-            .write_data(vertex_data);
-        buffer
-        // let buffer = device.create_buffer(&create_info, None).unwrap();
-        //
-        // let memory_requirements = device.get_buffer_memory_requirements(buffer);
-        // let memory_type = find_memory_type(
-        //     memory_requirements.memory_type_bits,
-        //     MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
-        // );
-        //
-        // let memory_allocate_info = MemoryAllocateInfo {
-        //     s_type: StructureType::MEMORY_ALLOCATE_INFO,
-        //     p_next: null(),
-        //     allocation_size: memory_requirements.size,
-        //     memory_type_index: memory_type,
-        // };
-        //
-        // let device_memory = device
-        //     .allocate_memory(&memory_allocate_info, None)
-        //     .expect("Failed to allocate device memory");
-        // device
-        //     .bind_buffer_memory(buffer, device_memory, 0)
-        //     .expect("Failed to bind buffer memory!");
-        //
-        // let address = device
-        //     .map_memory(
-        //         device_memory,
-        //         0,
-        //         (std::mem::size_of::<VertexData>() * 3) as u64,
-        //         MemoryMapFlags::empty(),
-        //     )
-        //     .expect("Failed to map memory!");
-        // let address = address as *mut VertexData;
-        // let address = std::slice::from_raw_parts_mut(address, 3);
-        //
-        // address.copy_from_slice(vertex_data);
-        //
-        // device
-        //     .flush_mapped_memory_ranges(&[MappedMemoryRange {
-        //         s_type: StructureType::MAPPED_MEMORY_RANGE,
-        //         p_next: null(),
-        //         memory: device_memory,
-        //         offset: 0,
-        //         size: memory_requirements.size,
-        //     }])
-        //     .expect("Failed to flush memory ranges");
-        //
-        // device.unmap_memory(device_memory);
-        //
-        // (buffer, device_memory)
+            MemoryDomain::HostCached | MemoryDomain::HostVisible,
+        )?
     };
+    let vertex_data = &[
+        VertexData {
+            position: vector![0.0, -0.5],
+            color: vector![1.0, 0.0, 0.0],
+        },
+        VertexData {
+            position: vector![0.5, 0.5],
+            color: vector![0.0, 1.0, 0.0],
+        },
+        VertexData {
+            position: vector![-0.5, 0.5],
+            color: vector![0.0, 0.0, 1.0],
+        },
+    ];
+    let data_size = (size_of::<VertexData>() * vertex_data.len()) as u64;
+    let vertex_buffer = {
+        let create_info = BufferCreateInfo {
+            s_type: StructureType::BUFFER_CREATE_INFO,
+            p_next: null(),
+            flags: BufferCreateFlags::empty(),
+            size: data_size,
+            usage: BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
+            sharing_mode: SharingMode::EXCLUSIVE,
+            queue_family_index_count: 0,
+            p_queue_family_indices: null(),
+        };
+        let buffer = gpu.create_buffer(&create_info, MemoryDomain::DeviceLocal)?;
+        buffer
+    };
+
+    gpu.resource_map
+        .get(&staging_buffer)
+        .unwrap()
+        .write_data(vertex_data);
+
+    gpu.copy_buffer(&staging_buffer, &vertex_buffer, data_size)?;
 
     let pass_info = RenderPassCreateInfo {
         s_type: StructureType::RENDER_PASS_CREATE_INFO,

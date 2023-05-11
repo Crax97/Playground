@@ -1,6 +1,6 @@
-use std::ops::Deref;
+use std::{cell::RefCell, ops::Deref, sync::Arc};
 
-use crate::gpu::Gpu;
+use crate::{gpu::allocator::GpuAllocator, gpu::Gpu};
 use ash::{
     prelude::*,
     vk::{
@@ -25,7 +25,7 @@ macro_rules! define_raii_wrapper {
 
         impl $name {
 
-            pub fn create<A: crate::gpu::allocator::GpuAllocator>(gpu: &Gpu<A>, $arg_name : $arg_typ, $($mem_name : $mem_ty,)*) -> VkResult<Self> {
+            pub fn create(gpu: &Gpu, $arg_name : $arg_typ, $($mem_name : $mem_ty,)*) -> VkResult<Self> {
 
                 let inner = $create_impl_block(&gpu)?;
                 Ok(Self {
@@ -60,7 +60,7 @@ macro_rules! define_raii_wrapper {
 
 define_raii_wrapper!((struct GPUSemaphore {}, vk::Semaphore, ash::Device::destroy_semaphore) {
     (create_info: &SemaphoreCreateInfo,) => {
-        |gpu: &Gpu<A>| { unsafe {
+        |gpu: &Gpu| { unsafe {
             gpu.logical_device.create_semaphore(create_info, get_allocation_callbacks())
         }}
     }
@@ -68,28 +68,58 @@ define_raii_wrapper!((struct GPUSemaphore {}, vk::Semaphore, ash::Device::destro
 
 define_raii_wrapper!((struct GPUFence {}, vk::Fence, ash::Device::destroy_fence) {
     (create_info: &FenceCreateInfo,) => {
-        |gpu: &Gpu<A>| { unsafe { gpu.logical_device.create_fence(create_info, get_allocation_callbacks()) }}
+        |gpu: &Gpu| { unsafe { gpu.logical_device.create_fence(create_info, get_allocation_callbacks()) }}
     }
 });
 
-define_raii_wrapper!((struct GpuBuffer {
-    allocation: MemoryAllocation,
-}, vk::Buffer, ash::Device::destroy_buffer) {
-    (buffer: Buffer,) => {
-        |gpu: &Gpu<A>| { Ok(buffer) }
+pub struct GpuBuffer {
+    device: ash::Device,
+    pub(crate) inner: vk::Buffer,
+    pub(crate) allocation: MemoryAllocation,
+    pub(crate) allocator: Arc<RefCell<dyn GpuAllocator>>,
+}
+impl GpuBuffer {
+    pub fn create(
+        gpu: &Gpu,
+        buffer: Buffer,
+        allocation: MemoryAllocation,
+        allocator: Arc<RefCell<dyn GpuAllocator>>,
+    ) -> VkResult<Self> {
+        Ok(Self {
+            device: gpu.logical_device.clone(),
+            inner: buffer,
+            allocation,
+            allocator,
+        })
     }
-});
+}
+impl Drop for GpuBuffer {
+    fn drop(&mut self) {
+        self.allocator
+            .borrow_mut()
+            .deallocate(&self.device, &self.allocation);
+        unsafe {
+            ash::Device::destroy_buffer(&self.device, self.inner, self::get_allocation_callbacks());
+        }
+    }
+}
+impl Deref for GpuBuffer {
+    type Target = vk::Buffer;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+impl Resource for GpuBuffer {}
 
 impl GpuBuffer {
     pub fn write_data<I: Sized + Copy>(&self, data: &[I]) {
         let length = data.len() as u64;
-        let size_bytes = length * std::mem::size_of::<I>() as u64;
         let address = unsafe {
             self.device
                 .map_memory(
                     self.allocation.device_memory,
                     self.allocation.offset,
-                    size_bytes,
+                    vk::WHOLE_SIZE,
                     MemoryMapFlags::empty(),
                 )
                 .expect("Failed to map memory!")
@@ -106,7 +136,7 @@ impl GpuBuffer {
                     p_next: std::ptr::null(),
                     memory: self.allocation.device_memory,
                     offset: 0,
-                    size: size_bytes,
+                    size: vk::WHOLE_SIZE,
                 }])
                 .expect("Failed to flush memory ranges")
         };
@@ -114,35 +144,3 @@ impl GpuBuffer {
         unsafe { self.device.unmap_memory(self.allocation.device_memory) };
     }
 }
-
-// pub struct Semaphore<'d> {
-//     owning_device: &'d Device,
-//     inner: vk::Semaphore,
-// }
-//
-// impl<'d> Semaphore<'d> {
-//     pub fn create(device: &'d Device, create_info: &SemaphoreCreateInfo) -> VkResult<Self> {
-//         let inner = unsafe { device.create_semaphore(create_info, get_allocation_callbacks()) }?;
-//         Ok(Self {
-//             owning_device: device,
-//             inner,
-//         })
-//     }
-// }
-//
-// impl<'d> Drop for Semaphore<'d> {
-//     fn drop(&mut self) {
-//         unsafe {
-//             self.owning_device
-//                 .destroy_semaphore(self.inner, get_allocation_callbacks())
-//         }
-//     }
-// }
-//
-// impl<'d> Deref for Semaphore<'d> {
-//     type Target = ash::vk::Semaphore;
-//
-//     fn deref(&self) -> &Self::Target {
-//         &self.inner
-//     }
-// }
