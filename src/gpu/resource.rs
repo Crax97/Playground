@@ -49,11 +49,13 @@ impl<R: Resource + 'static> Drop for ResourceHandle<R> {
         self.reference_counter -= 1;
 
         if self.reference_counter == 0 {
-            let map = self.resource_map.upgrade().unwrap();
-            let mut map = map.borrow_mut();
-            map.resources -= 1;
-            let arena = map.types_map.get_mut::<Arena<R>>().unwrap();
-            arena.remove(self.id.id);
+            if let Some(map) = self.resource_map.upgrade() {
+                let mut map = map.borrow_mut();
+                map.resources -= 1;
+                let arena = map.types_map.get_mut::<Arena<R>>().unwrap();
+                arena.remove(self.id.id);
+            }
+            // else the map has been dropped before the ids
         }
     }
 }
@@ -82,14 +84,17 @@ impl ResourceMap {
         }
     }
 
-    pub(crate) fn get<R: Resource + 'static>(&self, id: &ResourceHandle<R>) -> &R {
-        let arena_ref = self.get_arena_unchecked();
-        arena_ref.get(id.id.id).unwrap()
+    pub(crate) fn get<R: Resource + 'static>(&self, id: &ResourceHandle<R>) -> Option<&R> {
+        let arena_ref = self.get_arena();
+        arena_ref.get(id.id.id)
     }
 
-    pub(crate) fn get_mut<R: Resource + 'static>(&mut self, id: &ResourceHandle<R>) -> &mut R {
+    pub(crate) fn get_mut<R: Resource + 'static>(
+        &mut self,
+        id: &ResourceHandle<R>,
+    ) -> Option<&mut R> {
         let arena_ref = self.get_arena();
-        arena_ref.get_mut(id.id.id).unwrap()
+        arena_ref.get_mut(id.id.id)
     }
 
     pub(crate) fn len_total(&self) -> usize {
@@ -97,10 +102,10 @@ impl ResourceMap {
     }
 
     pub(crate) fn len<R: Resource + 'static>(&self) -> usize {
-        self.get_arena_unchecked::<R>().len()
+        self.get_arena::<R>().len()
     }
 
-    fn get_arena<R: Resource + 'static>(&mut self) -> &mut Arena<R> {
+    fn get_arena<R: Resource + 'static>(&self) -> &mut Arena<R> {
         let map: *mut ResourceMapState = self.map.as_ptr();
         let map =
             unsafe { std::mem::transmute::<*mut ResourceMapState, &mut ResourceMapState>(map) };
@@ -110,13 +115,6 @@ impl ResourceMap {
         }
 
         map.types_map.get_mut::<Arena<R>>().unwrap()
-    }
-
-    fn get_arena_unchecked<R: Resource + 'static>(&self) -> &Arena<R> {
-        let map: *mut ResourceMapState = self.map.as_ptr();
-        let map =
-            unsafe { std::mem::transmute::<*mut ResourceMapState, &mut ResourceMapState>(map) };
-        map.types_map.get::<Arena<R>>().unwrap()
     }
 }
 
@@ -140,7 +138,7 @@ mod test {
         let mut map = ResourceMap::new();
         let id = map.add(TestResource { val: 10 });
 
-        assert_eq!(map.get(&id).val, 10);
+        assert_eq!(map.get(&id).unwrap().val, 10);
     }
 
     #[test]
@@ -150,16 +148,16 @@ mod test {
         let id_3 = map.add(TestResource2 { val2: 142 });
         {
             let id = map.add(TestResource { val: 10 });
-            assert_eq!(map.get(&id).val, 10);
-            assert_eq!(map.get(&id_2).val, 14);
+            assert_eq!(map.get(&id).unwrap().val, 10);
+            assert_eq!(map.get(&id_2).unwrap().val, 14);
 
             assert_eq!(map.len::<TestResource>(), 2);
         }
 
         assert_eq!(map.len::<TestResource>(), 1);
         assert_eq!(map.len::<TestResource2>(), 1);
-        assert_eq!(map.get(&id_2).val, 14);
-        assert_eq!(map.get(&id_3).val2, 142);
+        assert_eq!(map.get(&id_2).unwrap().val, 14);
+        assert_eq!(map.get(&id_3).unwrap().val2, 142);
     }
 
     #[test]
@@ -174,8 +172,8 @@ mod test {
             let id = map.add(TestResource { val: 10 });
 
             let do_checks = |map: ResourceMap| {
-                assert_eq!(map.get(&id).val, 10);
-                assert_eq!(map.get(&id_2).val, 14);
+                assert_eq!(map.get(&id).unwrap().val, 10);
+                assert_eq!(map.get(&id_2).unwrap().val, 14);
 
                 assert_eq!(map.len::<TestResource>(), 2);
                 map
@@ -185,6 +183,17 @@ mod test {
         }
 
         assert_eq!(map.len::<TestResource>(), 1);
-        assert_eq!(map.get(&id_2).val, 14);
+        assert_eq!(map.get(&id_2).unwrap().val, 14);
+    }
+
+    #[test]
+    fn test_other_map() {
+        let mut map_1 = ResourceMap::new();
+        let id_1 = map_1.add(TestResource { val: 1 });
+        drop(map_1);
+
+        let map_2 = ResourceMap::new();
+        let value = map_2.get(&id_1);
+        assert!(value.is_none());
     }
 }
