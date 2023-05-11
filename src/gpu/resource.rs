@@ -1,4 +1,8 @@
-use std::marker::PhantomData;
+use std::{
+    cell::RefCell,
+    marker::PhantomData,
+    sync::{Arc, Weak},
+};
 use thunderdome::{Arena, Index};
 
 pub trait Resource {}
@@ -9,6 +13,15 @@ pub(crate) struct ResourceId {
     pub(crate) id: Index,
 }
 
+pub struct ResourceMapState {
+    types_map: anymap::AnyMap,
+    resources: usize,
+}
+
+pub struct ResourceMap {
+    map: Arc<RefCell<ResourceMapState>>,
+}
+
 pub struct ResourceHandle<R>
 where
     R: Resource + 'static,
@@ -17,7 +30,7 @@ where
     pub(crate) id: ResourceId,
     pub(crate) reference_counter: u32,
 
-    resource_map: *mut ResourceMap,
+    resource_map: Weak<RefCell<ResourceMapState>>,
 }
 
 impl<R: Resource + 'static> Clone for ResourceHandle<R> {
@@ -26,7 +39,7 @@ impl<R: Resource + 'static> Clone for ResourceHandle<R> {
             _marker: self._marker,
             id: self.id.clone(),
             reference_counter: self.reference_counter.clone() + 1,
-            resource_map: self.resource_map,
+            resource_map: self.resource_map.clone(),
         }
     }
 }
@@ -36,34 +49,36 @@ impl<R: Resource + 'static> Drop for ResourceHandle<R> {
         self.reference_counter -= 1;
 
         if self.reference_counter == 0 {
-            unsafe { std::mem::transmute::<*mut ResourceMap, &mut ResourceMap>(self.resource_map) }
-                .drop_resource::<R>(&self.id);
+            let map = self.resource_map.upgrade().unwrap();
+            let mut map = map.borrow_mut();
+            map.resources -= 1;
+            let arena = map.types_map.get_mut::<Arena<R>>().unwrap();
+            arena.remove(self.id.id);
         }
     }
-}
-
-pub struct ResourceMap {
-    types_map: anymap::AnyMap,
-    resources: usize,
 }
 
 impl ResourceMap {
     pub(crate) fn new() -> Self {
-        Self {
+        let state = ResourceMapState {
             types_map: anymap::AnyMap::new(),
             resources: 0,
+        };
+
+        Self {
+            map: Arc::new(RefCell::new(state)),
         }
     }
 
     pub(crate) fn add<R: Resource + 'static>(&mut self, resource: R) -> ResourceHandle<R> {
+        self.map.borrow_mut().resources += 1;
         let store = self.get_arena::<R>();
         let id = store.insert(resource);
-        self.resources += 1;
         ResourceHandle {
             _marker: PhantomData,
             id: ResourceId { id },
             reference_counter: 1,
-            resource_map: self as *mut Self,
+            resource_map: Arc::downgrade(&self.map),
         }
     }
 
@@ -78,7 +93,7 @@ impl ResourceMap {
     }
 
     pub(crate) fn len_total(&self) -> usize {
-        self.resources
+        self.map.borrow().resources
     }
 
     pub(crate) fn len<R: Resource + 'static>(&self) -> usize {
@@ -86,20 +101,22 @@ impl ResourceMap {
     }
 
     fn get_arena<R: Resource + 'static>(&mut self) -> &mut Arena<R> {
-        if !self.types_map.contains::<Arena<R>>() {
-            self.types_map.insert(Arena::<R>::new());
+        let map: *mut ResourceMapState = self.map.as_ptr();
+        let map =
+            unsafe { std::mem::transmute::<*mut ResourceMapState, &mut ResourceMapState>(map) };
+
+        if !map.types_map.contains::<Arena<R>>() {
+            map.types_map.insert(Arena::<R>::new());
         }
 
-        self.types_map.get_mut::<Arena<R>>().unwrap()
+        map.types_map.get_mut::<Arena<R>>().unwrap()
     }
 
     fn get_arena_unchecked<R: Resource + 'static>(&self) -> &Arena<R> {
-        self.types_map.get::<Arena<R>>().unwrap()
-    }
-
-    fn drop_resource<R: Resource + 'static>(&mut self, id: &ResourceId) {
-        self.get_arena::<R>().remove(id.id).unwrap();
-        self.resources -= 1;
+        let map: *mut ResourceMapState = self.map.as_ptr();
+        let map =
+            unsafe { std::mem::transmute::<*mut ResourceMapState, &mut ResourceMapState>(map) };
+        map.types_map.get::<Arena<R>>().unwrap()
     }
 }
 
@@ -147,9 +164,12 @@ mod test {
 
     #[test]
     fn test_shuffle_memory() {
-        let mut map = ResourceMap::new();
+        let (mut map, id_2) = {
+            let mut map = ResourceMap::new();
+            let id_2 = map.add(TestResource { val: 14 });
+            (map, id_2)
+        };
 
-        let id_2 = map.add(TestResource { val: 14 });
         {
             let id = map.add(TestResource { val: 10 });
 
