@@ -139,28 +139,30 @@ impl Swapchain {
     }
 
     pub(crate) fn acquire_next_image(&mut self) -> VkResult<ImageView> {
-        let (next_image, suboptimal) = unsafe {
-            self.swapchain_extension.acquire_next_image(
-                self.current_swapchain,
-                200000,
-                *self.image_available_semaphore,
-                *self.next_image_fence,
-            )
-        }?;
-        unsafe {
-            self.gpu
-                .logical_device
-                .wait_for_fences(&[*self.next_image_fence], true, 200000)?;
-            self.gpu
-                .logical_device
-                .reset_fences(&[*self.next_image_fence])?;
-        }
-        if !suboptimal {
-            let image_view = self.current_swapchain_image_views.get(next_image as usize);
-            self.current_swapchain_index = next_image;
-            Ok(image_view.unwrap().clone())
-        } else {
-            Err(vk::Result::SUBOPTIMAL_KHR)
+        loop {
+            let (next_image, suboptimal) = unsafe {
+                self.swapchain_extension.acquire_next_image(
+                    self.current_swapchain,
+                    200000,
+                    *self.image_available_semaphore,
+                    *self.next_image_fence,
+                )
+            }?;
+            unsafe {
+                self.gpu
+                    .logical_device
+                    .wait_for_fences(&[*self.next_image_fence], true, 200000)?;
+                self.gpu
+                    .logical_device
+                    .reset_fences(&[*self.next_image_fence])?;
+            }
+            if !suboptimal {
+                let image_view = self.current_swapchain_image_views.get(next_image as usize);
+                self.current_swapchain_index = next_image;
+                return Ok(image_view.unwrap().clone());
+            } else {
+                self.recreate_swapchain()?;
+            }
         }
     }
 

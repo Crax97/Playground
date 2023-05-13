@@ -1,7 +1,13 @@
 mod gpu;
 mod utils;
 
-use std::{ffi::CString, mem::size_of, ops::Deref, ptr::null, sync::Arc};
+use std::{
+    ffi::CString,
+    mem::size_of,
+    ops::Deref,
+    ptr::{addr_of, null},
+    sync::Arc,
+};
 
 use ash::{
     extensions::khr::Swapchain,
@@ -11,12 +17,14 @@ use ash::{
         BufferCreateInfo, BufferUsageFlags, ClearColorValue, ColorComponentFlags, CommandBuffer,
         CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
         CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo,
-        CommandPoolResetFlags, CompareOp, CullModeFlags, DependencyFlags, DynamicState, Format,
-        FramebufferCreateFlags, FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo,
-        ImageLayout, ImageView, IndexType, LogicOp, MappedMemoryRange, MemoryAllocateInfo,
-        MemoryMapFlags, MemoryPropertyFlags, Offset2D, Pipeline, PipelineBindPoint, PipelineCache,
-        PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
-        PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
+        CommandPoolResetFlags, CompareOp, CullModeFlags, DependencyFlags, DescriptorBufferInfo,
+        DescriptorPoolCreateFlags, DescriptorPoolCreateInfo, DescriptorPoolSize,
+        DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags, DescriptorSetLayoutCreateInfo,
+        DescriptorType, DynamicState, Format, FramebufferCreateFlags, FramebufferCreateInfo,
+        FrontFace, GraphicsPipelineCreateInfo, ImageLayout, ImageView, IndexType, LogicOp,
+        MappedMemoryRange, MemoryAllocateInfo, MemoryMapFlags, MemoryPropertyFlags, Offset2D,
+        Pipeline, PipelineBindPoint, PipelineCache, PipelineColorBlendAttachmentState,
+        PipelineColorBlendStateCreateFlags, PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
         PipelineDepthStencilStateCreateFlags, PipelineDepthStencilStateCreateInfo,
         PipelineDynamicStateCreateFlags, PipelineDynamicStateCreateInfo,
         PipelineInputAssemblyStateCreateFlags, PipelineInputAssemblyStateCreateInfo,
@@ -31,7 +39,7 @@ use ash::{
         SharingMode, StencilOp, StencilOpState, StructureType, SubmitInfo, SubpassContents,
         SubpassDependency, SubpassDescription, SubpassDescriptionFlags,
         VertexInputAttributeDescription, VertexInputBindingDescription, VertexInputRate, Viewport,
-        SUBPASS_EXTERNAL,
+        WriteDescriptorSet, SUBPASS_EXTERNAL,
     },
 };
 
@@ -39,6 +47,14 @@ use gpu::{Gpu, GpuConfiguration, MemoryDomain, PasstroughAllocator};
 use memoffset::offset_of;
 use nalgebra::*;
 use winit::{dpi::PhysicalSize, event_loop::ControlFlow};
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PerObjectData {
+    model: nalgebra::Matrix4<f32>,
+    view: nalgebra::Matrix4<f32>,
+    projection: nalgebra::Matrix4<f32>,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -163,6 +179,24 @@ fn main() -> anyhow::Result<()> {
         buffer
     };
 
+    let uniform_buffer = {
+        let create_info = BufferCreateInfo {
+            s_type: StructureType::BUFFER_CREATE_INFO,
+            p_next: null(),
+            flags: BufferCreateFlags::empty(),
+            size: std::mem::size_of::<PerObjectData>() as u64,
+            usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
+            sharing_mode: SharingMode::EXCLUSIVE,
+            queue_family_index_count: 0,
+            p_queue_family_indices: null(),
+        };
+        let buffer = gpu.create_buffer(
+            &create_info,
+            MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
+        )?;
+        buffer
+    };
+
     gpu.resource_map
         .get(&staging_buffer)
         .unwrap()
@@ -175,6 +209,24 @@ fn main() -> anyhow::Result<()> {
         .write_data(indices);
 
     gpu.copy_buffer(&staging_buffer, &index_buffer, index_size)?;
+
+    let descriptor_set_layout = {
+        let descriptor_set_layout_binding = DescriptorSetLayoutBinding {
+            binding: 0,
+            descriptor_type: DescriptorType::UNIFORM_BUFFER,
+            descriptor_count: 1,
+            stage_flags: ShaderStageFlags::VERTEX,
+            p_immutable_samplers: null(),
+        };
+        let create_info = DescriptorSetLayoutCreateInfo {
+            s_type: StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            p_next: null(),
+            flags: DescriptorSetLayoutCreateFlags::empty(),
+            binding_count: 1,
+            p_bindings: addr_of!(descriptor_set_layout_binding),
+        };
+        unsafe { device.create_descriptor_set_layout(&create_info, None) }?
+    };
 
     let pass_info = RenderPassCreateInfo {
         s_type: StructureType::RENDER_PASS_CREATE_INFO,
@@ -224,18 +276,21 @@ fn main() -> anyhow::Result<()> {
             .create_render_pass(&pass_info, None)?
     };
 
-    let pipeline = unsafe {
+    let pipeline_layout = unsafe {
         let layout_infos = PipelineLayoutCreateInfo {
             s_type: StructureType::PIPELINE_LAYOUT_CREATE_INFO,
             p_next: null(),
             flags: PipelineLayoutCreateFlags::empty(),
-            set_layout_count: 0,
-            p_set_layouts: null(),
+            set_layout_count: 1,
+            p_set_layouts: addr_of!(descriptor_set_layout),
             push_constant_range_count: 0,
             p_push_constant_ranges: null(),
         };
         let pipeline_layout = device.create_pipeline_layout(&layout_infos, None)?;
+        pipeline_layout
+    };
 
+    let pipeline = unsafe {
         let main_name = CString::new("main")?;
 
         let stages: [PipelineShaderStageCreateInfo; 2] = [
@@ -430,9 +485,62 @@ fn main() -> anyhow::Result<()> {
             .create_graphics_pipelines(PipelineCache::null(), &create_infos, None)
             .unwrap();
 
-        device.destroy_pipeline_layout(pipeline_layout, None);
         pipeline
     }[0];
+
+    let descriptor_pool = unsafe {
+        let size = DescriptorPoolSize {
+            ty: DescriptorType::UNIFORM_BUFFER,
+            descriptor_count: 1,
+        };
+        gpu.logical_device.create_descriptor_pool(
+            &DescriptorPoolCreateInfo {
+                s_type: StructureType::DESCRIPTOR_POOL_CREATE_INFO,
+                p_next: null(),
+                flags: DescriptorPoolCreateFlags::empty(),
+                max_sets: 1,
+                pool_size_count: 1,
+                p_pool_sizes: addr_of!(size),
+            },
+            None,
+        )?
+    };
+
+    let descriptor_set = unsafe {
+        let descriptor_set =
+            gpu.logical_device
+                .allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo {
+                    s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
+                    p_next: null(),
+                    descriptor_pool,
+                    descriptor_set_count: 1,
+                    p_set_layouts: addr_of!(descriptor_set_layout),
+                })?[0];
+
+        let buffer_info = DescriptorBufferInfo {
+            buffer: *gpu.resource_map.get(&uniform_buffer).unwrap().deref(),
+            offset: 0,
+            range: vk::WHOLE_SIZE,
+        };
+
+        gpu.logical_device.update_descriptor_sets(
+            &[WriteDescriptorSet {
+                s_type: StructureType::WRITE_DESCRIPTOR_SET,
+                p_next: null(),
+                dst_set: descriptor_set,
+                dst_binding: 0,
+                dst_array_element: 0,
+                descriptor_count: 1,
+                descriptor_type: DescriptorType::UNIFORM_BUFFER,
+                p_image_info: null(),
+                p_buffer_info: addr_of!(buffer_info),
+                p_texel_buffer_view: null(),
+            }],
+            &[],
+        );
+
+        descriptor_set
+    };
 
     swapchain.select_present_mode(PresentModeKHR::MAILBOX)?;
 
@@ -458,6 +566,24 @@ fn main() -> anyhow::Result<()> {
             winit::event::Event::Resumed => {}
             winit::event::Event::MainEventsCleared => {}
             winit::event::Event::RedrawRequested(window) => {
+                gpu.resource_map
+                    .get(&uniform_buffer)
+                    .unwrap()
+                    .write_data(&[PerObjectData {
+                        model: nalgebra::Matrix4::new_rotation(vector![0.0, 0.0, 0.0]),
+                        view: nalgebra::Matrix4::look_at_rh(
+                            &point![2.0, 2.0, 2.0],
+                            &point![0.0, 0.0, 0.0],
+                            &vector![0.0, 0.0, -1.0],
+                        ),
+                        projection: nalgebra::Matrix4::new_perspective(
+                            1240.0 / 720.0,
+                            45.0,
+                            0.1,
+                            10.0,
+                        ),
+                    }]);
+
                 let next_image = swapchain.acquire_next_image().unwrap();
                 let framebuffer = unsafe {
                     let create_info = FramebufferCreateInfo {
@@ -533,6 +659,14 @@ fn main() -> anyhow::Result<()> {
                             extent: swapchain.extents(),
                         }],
                     );
+                    device.cmd_bind_descriptor_sets(
+                        command_buffer,
+                        PipelineBindPoint::GRAPHICS,
+                        pipeline_layout,
+                        0,
+                        &[descriptor_set],
+                        &[],
+                    );
                     device.cmd_bind_vertex_buffers(
                         command_buffer,
                         0,
@@ -584,6 +718,11 @@ fn main() -> anyhow::Result<()> {
             winit::event::Event::RedrawEventsCleared => {}
             winit::event::Event::LoopDestroyed => unsafe {
                 //                device.free_memory(device_memory, None);
+                device.destroy_pipeline_layout(pipeline_layout, None);
+                gpu.logical_device
+                    .destroy_descriptor_set_layout(descriptor_set_layout, None);
+                gpu.logical_device
+                    .destroy_descriptor_pool(descriptor_pool, None);
                 gpu.logical_device
                     .free_command_buffers(command_pool, &[command_buffer]);
                 gpu.logical_device.destroy_command_pool(command_pool, None);
