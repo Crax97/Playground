@@ -686,7 +686,9 @@ fn main() -> anyhow::Result<()> {
                 winit::event::WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::ExitWithCode(0)
                 }
-
+                winit::event::WindowEvent::Resized(_) => unsafe {
+                    swapchain.recreate_swapchain();
+                },
                 _ => {}
             },
             winit::event::Event::DeviceEvent { device_id, event } => {}
@@ -716,6 +718,7 @@ fn main() -> anyhow::Result<()> {
             }
             winit::event::Event::RedrawEventsCleared => {}
             winit::event::Event::LoopDestroyed => unsafe {
+                device.device_wait_idle().unwrap();
                 //                device.free_memory(device_memory, None);
                 device.destroy_pipeline_layout(pipeline_layout, None);
                 gpu.logical_device

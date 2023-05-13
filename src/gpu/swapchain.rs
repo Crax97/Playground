@@ -76,7 +76,7 @@ impl Swapchain {
             &FenceCreateInfo {
                 s_type: StructureType::FENCE_CREATE_INFO,
                 p_next: std::ptr::null(),
-                flags: FenceCreateFlags::SIGNALED,
+                flags: FenceCreateFlags::empty(),
             },
         )?;
         let in_flight_fence = GPUFence::create(
@@ -139,15 +139,22 @@ impl Swapchain {
     }
 
     pub(crate) fn acquire_next_image(&mut self) -> VkResult<ImageView> {
+        let next_image_fence = self.next_image_fence.inner;
         loop {
             let (next_image, suboptimal) = unsafe {
                 self.swapchain_extension.acquire_next_image(
                     self.current_swapchain,
                     u64::MAX,
                     *self.image_available_semaphore,
-                    Fence::null(),
+                    next_image_fence,
                 )
             }?;
+            unsafe {
+                self.gpu
+                    .logical_device
+                    .wait_for_fences(&[next_image_fence], true, u64::MAX)?;
+                self.gpu.logical_device.reset_fences(&[next_image_fence])?;
+            }
             if !suboptimal {
                 let image_view = self.current_swapchain_image_views.get(next_image as usize);
                 self.current_swapchain_index = next_image;
