@@ -3,6 +3,7 @@ mod utils;
 
 use std::{
     ffi::CString,
+    io::BufReader,
     mem::size_of,
     ops::Deref,
     ptr::{addr_of, null},
@@ -13,18 +14,19 @@ use ash::{
     extensions::khr::Swapchain,
     vk::{
         self, AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
-        AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp, BufferCreateFlags,
-        BufferCreateInfo, BufferUsageFlags, ClearColorValue, ColorComponentFlags, CommandBuffer,
-        CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
-        CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo,
+        AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor,
+        BufferCreateFlags, BufferCreateInfo, BufferUsageFlags, ClearColorValue,
+        ColorComponentFlags, CommandBuffer, CommandBufferAllocateInfo, CommandBufferBeginInfo,
+        CommandBufferLevel, CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo,
         CommandPoolResetFlags, CompareOp, CullModeFlags, DependencyFlags, DescriptorBufferInfo,
         DescriptorPoolCreateFlags, DescriptorPoolCreateInfo, DescriptorPoolSize,
         DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags, DescriptorSetLayoutCreateInfo,
-        DescriptorType, DynamicState, Format, FramebufferCreateFlags, FramebufferCreateInfo,
-        FrontFace, GraphicsPipelineCreateInfo, ImageLayout, ImageView, IndexType, LogicOp,
-        MappedMemoryRange, MemoryAllocateInfo, MemoryMapFlags, MemoryPropertyFlags, Offset2D,
-        Pipeline, PipelineBindPoint, PipelineCache, PipelineColorBlendAttachmentState,
-        PipelineColorBlendStateCreateFlags, PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
+        DescriptorType, DynamicState, Filter, Format, FramebufferCreateFlags,
+        FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo, ImageLayout, ImageUsageFlags,
+        ImageView, IndexType, LogicOp, MappedMemoryRange, MemoryAllocateInfo, MemoryMapFlags,
+        MemoryPropertyFlags, Offset2D, Pipeline, PipelineBindPoint, PipelineCache,
+        PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
+        PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
         PipelineDepthStencilStateCreateFlags, PipelineDepthStencilStateCreateInfo,
         PipelineDynamicStateCreateFlags, PipelineDynamicStateCreateInfo,
         PipelineInputAssemblyStateCreateFlags, PipelineInputAssemblyStateCreateInfo,
@@ -35,7 +37,8 @@ use ash::{
         PipelineTessellationStateCreateInfo, PipelineVertexInputStateCreateFlags,
         PipelineVertexInputStateCreateInfo, PipelineViewportStateCreateFlags,
         PipelineViewportStateCreateInfo, PolygonMode, PresentModeKHR, PrimitiveTopology, Rect2D,
-        RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, Semaphore, ShaderStageFlags,
+        RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, SamplerAddressMode,
+        SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, Semaphore, ShaderStageFlags,
         SharingMode, StencilOp, StencilOpState, StructureType, SubmitInfo, SubpassContents,
         SubpassDependency, SubpassDescription, SubpassDescriptionFlags,
         VertexInputAttributeDescription, VertexInputBindingDescription, VertexInputRate, Viewport,
@@ -43,7 +46,9 @@ use ash::{
     },
 };
 
-use gpu::{Gpu, GpuConfiguration, MemoryDomain, PasstroughAllocator};
+use gpu::{
+    Gpu, GpuConfiguration, ImageCreateInfo, MemoryDomain, PasstroughAllocator, TransitionInfo,
+};
 use memoffset::offset_of;
 use nalgebra::*;
 use winit::{dpi::PhysicalSize, event_loop::ControlFlow};
@@ -82,6 +87,11 @@ fn main() -> anyhow::Result<()> {
     let gpu = Arc::new(gpu);
 
     let mut swapchain = gpu::Swapchain::new(gpu.clone(), window)?;
+
+    let cpu_image = image::load(
+        BufReader::new(std::fs::File::open("images/texture.jpg")?),
+        image::ImageFormat::Jpeg,
+    )?;
 
     let device = gpu.vk_logical_device();
     let vertex_module = utils::read_file_to_vk_module(&device, "./shaders/vertex.spirv")?;
@@ -197,6 +207,16 @@ fn main() -> anyhow::Result<()> {
         buffer
     };
 
+    let image = gpu.create_image(
+        &ImageCreateInfo {
+            width: cpu_image.width(),
+            height: cpu_image.height(),
+            format: vk::Format::R8G8B8A8_UINT,
+            usage: ImageUsageFlags::TRANSFER_DST | ImageUsageFlags::SAMPLED,
+        },
+        MemoryDomain::DeviceLocal,
+    )?;
+
     gpu.resource_map
         .get(&staging_buffer)
         .unwrap()
@@ -209,6 +229,72 @@ fn main() -> anyhow::Result<()> {
         .write_data(indices);
 
     gpu.copy_buffer(&staging_buffer, &index_buffer, index_size)?;
+
+    gpu.transition_image_layout(
+        &image,
+        Format::R8G8B8A8_UINT,
+        TransitionInfo {
+            layout: ImageLayout::UNDEFINED,
+            access_mask: AccessFlags::empty(),
+            stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+        },
+        TransitionInfo {
+            layout: ImageLayout::TRANSFER_DST_OPTIMAL,
+            access_mask: AccessFlags::TRANSFER_WRITE,
+            stage_mask: PipelineStageFlags::TRANSFER,
+        },
+    )?;
+
+    gpu.resource_map
+        .get(&staging_buffer)
+        .unwrap()
+        .write_data(cpu_image.as_bytes());
+    gpu.copy_buffer_to_image(
+        &staging_buffer,
+        &image,
+        cpu_image.width(),
+        cpu_image.height(),
+    )?;
+
+    gpu.transition_image_layout(
+        &image,
+        Format::R8G8B8A8_UINT,
+        TransitionInfo {
+            layout: ImageLayout::TRANSFER_DST_OPTIMAL,
+            access_mask: AccessFlags::TRANSFER_WRITE,
+            stage_mask: PipelineStageFlags::TRANSFER,
+        },
+        TransitionInfo {
+            layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            access_mask: AccessFlags::SHADER_READ,
+            stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
+        },
+    )?;
+
+    let sampler = gpu.create_sampler(&SamplerCreateInfo {
+        s_type: StructureType::SAMPLER_CREATE_INFO,
+        p_next: std::ptr::null(),
+        flags: SamplerCreateFlags::empty(),
+        mag_filter: Filter::LINEAR,
+        min_filter: Filter::LINEAR,
+        mipmap_mode: SamplerMipmapMode::LINEAR,
+        address_mode_u: SamplerAddressMode::REPEAT,
+        address_mode_v: SamplerAddressMode::REPEAT,
+        address_mode_w: SamplerAddressMode::REPEAT,
+        mip_lod_bias: 0.0,
+        anisotropy_enable: vk::TRUE,
+        max_anisotropy: gpu
+            .physical_device
+            .device_properties
+            .limits
+            .max_sampler_anisotropy,
+        compare_enable: vk::FALSE,
+        compare_op: CompareOp::ALWAYS,
+        min_lod: 0.0,
+        max_lod: 0.0,
+        border_color: BorderColor::default(),
+        unnormalized_coordinates: vk::FALSE,
+    })?;
 
     let descriptor_set_layout = {
         let descriptor_set_layout_binding = DescriptorSetLayoutBinding {

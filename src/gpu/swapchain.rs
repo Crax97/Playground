@@ -213,17 +213,23 @@ impl Swapchain {
 
         self.supported_presentation_formats = unsafe {
             self.surface_extension
-                .get_physical_device_surface_formats(self.gpu.physical_device, self.surface)
+                .get_physical_device_surface_formats(self.gpu.vk_physical_device(), self.surface)
         }?;
 
         self.surface_capabilities = unsafe {
             self.surface_extension
-                .get_physical_device_surface_capabilities(self.gpu.physical_device, self.surface)
+                .get_physical_device_surface_capabilities(
+                    self.gpu.vk_physical_device(),
+                    self.surface,
+                )
         }?;
 
         self.supported_present_modes = unsafe {
             self.surface_extension
-                .get_physical_device_surface_present_modes(self.gpu.physical_device, self.surface)
+                .get_physical_device_surface_present_modes(
+                    self.gpu.vk_physical_device(),
+                    self.surface,
+                )
         }?;
         self.present_format = Self::pick_swapchain_format(&self.supported_presentation_formats);
 

@@ -11,13 +11,17 @@ use anyhow::Result;
 use ash::{
     prelude::*,
     vk::{
-        make_api_version, ApplicationInfo, BufferCreateInfo, CommandBufferAllocateInfo,
-        CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags,
-        CommandPoolCreateFlags, CommandPoolCreateInfo, DeviceCreateFlags, DeviceCreateInfo,
-        DeviceQueueCreateFlags, DeviceQueueCreateInfo, Extent2D, Fence, Format, ImageView,
-        InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, PhysicalDevice,
-        PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType, PresentModeKHR,
-        Queue, QueueFlags, Semaphore, StructureType, SubmitInfo, SurfaceKHR, API_VERSION_1_3,
+        make_api_version, AccessFlags, ApplicationInfo, BufferCreateInfo,
+        CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
+        CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo, DependencyFlags,
+        DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo,
+        Extent2D, Extent3D, Fence, Format, ImageAspectFlags, ImageCreateFlags, ImageLayout,
+        ImageMemoryBarrier, ImageSubresource, ImageSubresourceLayers, ImageSubresourceRange,
+        ImageTiling, ImageType, ImageView, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap,
+        MemoryHeapFlags, Offset3D, PhysicalDevice, PhysicalDeviceFeatures,
+        PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags, PresentModeKHR, Queue,
+        QueueFlags, SampleCountFlags, SamplerCreateInfo, Semaphore, SharingMode, StructureType,
+        SubmitInfo, SurfaceKHR, API_VERSION_1_3,
     },
     *,
 };
@@ -30,7 +34,7 @@ use winit::window::Window;
 use super::{
     allocator::{GpuAllocator, PasstroughAllocator},
     resource::{ResourceHandle, ResourceMap},
-    types, AllocationRequirements, GpuBuffer, MemoryDomain,
+    types, AllocationRequirements, GpuBuffer, GpuImage, GpuSampler, MemoryDomain,
 };
 
 const KHRONOS_VALIDATION_LAYER: &'static str = "VK_LAYER_KHRONOS_validation";
@@ -53,7 +57,7 @@ pub struct Gpu {
     pub entry: Entry,
     pub instance: Instance,
     pub logical_device: Device,
-    pub physical_device: PhysicalDevice,
+    pub physical_device: SelectedPhysicalDevice,
     pub graphics_queue: Queue,
     pub async_compute_queue: Queue,
     pub transfer_queue: Queue,
@@ -106,10 +110,10 @@ pub struct QueueFamilies {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct SelectedPhysicalDevice {
-    physical_device: PhysicalDevice,
-    device_properties: PhysicalDeviceProperties,
-    device_features: PhysicalDeviceFeatures,
+pub struct SelectedPhysicalDevice {
+    pub physical_device: PhysicalDevice,
+    pub device_properties: PhysicalDeviceProperties,
+    pub device_features: PhysicalDeviceFeatures,
 }
 
 impl QueueFamilies {
@@ -183,7 +187,7 @@ impl Gpu {
             entry,
             instance,
             logical_device,
-            physical_device: physical_device.physical_device,
+            physical_device,
             graphics_queue,
             async_compute_queue,
             transfer_queue,
@@ -352,6 +356,9 @@ impl Gpu {
             make_queue_create_info(queue_indices.transfer_family.index),
         ];
 
+        let mut device_features = PhysicalDeviceFeatures::default();
+        device_features.sampler_anisotropy = vk::TRUE;
+
         let create_info = DeviceCreateInfo {
             s_type: StructureType::DEVICE_CREATE_INFO,
             p_next: null(),
@@ -370,7 +377,7 @@ impl Gpu {
             },
             enabled_extension_count: c_ptr_device_extensions.len() as u32,
             pp_enabled_extension_names: c_ptr_device_extensions.as_ptr(),
-            p_enabled_features: null(),
+            p_enabled_features: addr_of!(device_features),
         };
 
         unsafe { instance.create_device(selected_device.physical_device, &create_info, None) }
@@ -504,8 +511,21 @@ impl Gpu {
     }
 
     pub(crate) fn vk_physical_device(&self) -> PhysicalDevice {
-        self.physical_device.clone()
+        self.physical_device.physical_device.clone()
     }
+}
+
+pub struct ImageCreateInfo {
+    pub width: u32,
+    pub height: u32,
+    pub format: vk::Format,
+    pub usage: vk::ImageUsageFlags,
+}
+
+pub struct TransitionInfo {
+    pub layout: ImageLayout,
+    pub access_mask: AccessFlags,
+    pub stage_mask: PipelineStageFlags,
 }
 
 impl Gpu {
@@ -536,6 +556,75 @@ impl Gpu {
         let id = self.resource_map.add(buffer);
         Ok(id)
     }
+
+    pub fn create_image(
+        &self,
+        create_info: &ImageCreateInfo,
+        memory_domain: MemoryDomain,
+    ) -> VkResult<ResourceHandle<GpuImage>> {
+        let image = unsafe {
+            let create_info = vk::ImageCreateInfo {
+                s_type: StructureType::IMAGE_CREATE_INFO,
+                p_next: std::ptr::null(),
+                flags: ImageCreateFlags::empty(),
+                image_type: ImageType::TYPE_2D,
+                format: create_info.format,
+                extent: Extent3D {
+                    width: create_info.width,
+                    height: create_info.height,
+                    depth: 1,
+                },
+                mip_levels: 1,
+                array_layers: 1,
+                samples: SampleCountFlags::TYPE_1,
+                tiling: if memory_domain.contains(MemoryDomain::HostVisible) {
+                    ImageTiling::LINEAR
+                } else {
+                    ImageTiling::OPTIMAL
+                },
+                usage: create_info.usage,
+                sharing_mode: SharingMode::EXCLUSIVE,
+                queue_family_index_count: 1,
+                p_queue_family_indices: addr_of!(self.queue_families.graphics_family.index),
+                initial_layout: ImageLayout::UNDEFINED,
+            };
+            self.logical_device.create_image(&create_info, None)?
+        };
+        let memory_requirements =
+            unsafe { self.logical_device.get_image_memory_requirements(image) };
+        let allocation_requirements = AllocationRequirements {
+            memory_requirements,
+            memory_domain,
+        };
+        let allocation = self
+            .allocator
+            .borrow_mut()
+            .allocate(&self.logical_device, allocation_requirements)?;
+        unsafe {
+            self.logical_device
+                .bind_image_memory(image, allocation.device_memory, 0)
+        }?;
+        let image: GpuImage = GpuImage::create(
+            self,
+            image,
+            create_info.format,
+            allocation,
+            self.allocator.clone(),
+        )?;
+
+        let id = self.resource_map.add(image);
+        Ok(id)
+    }
+
+    pub fn create_sampler(
+        &self,
+        create_info: &SamplerCreateInfo,
+    ) -> VkResult<ResourceHandle<GpuSampler>> {
+        let sampler = GpuSampler::create(self, create_info)?;
+        let id = self.resource_map.add(sampler);
+        Ok(id)
+    }
+
     pub fn copy_buffer(
         &self,
         source_buffer: &ResourceHandle<GpuBuffer>,
@@ -584,6 +673,188 @@ impl Gpu {
                     src_offset: 0,
                     dst_offset: 0,
                     size,
+                }],
+            );
+            self.logical_device.end_command_buffer(command_buffer)?;
+            self.logical_device.queue_submit(
+                self.graphics_queue,
+                &[SubmitInfo {
+                    s_type: StructureType::SUBMIT_INFO,
+                    p_next: std::ptr::null(),
+                    wait_semaphore_count: 0,
+                    p_wait_semaphores: std::ptr::null(),
+                    p_wait_dst_stage_mask: std::ptr::null(),
+                    command_buffer_count: 1,
+                    p_command_buffers: addr_of!(command_buffer),
+                    signal_semaphore_count: 0,
+                    p_signal_semaphores: std::ptr::null(),
+                }],
+                Fence::null(),
+            )?;
+            self.logical_device.queue_wait_idle(self.graphics_queue())?;
+
+            self.logical_device
+                .free_command_buffers(command_pool, &[command_buffer]);
+            self.logical_device.destroy_command_pool(command_pool, None);
+        }
+
+        Ok(())
+    }
+
+    pub fn transition_image_layout(
+        &self,
+        image: &ResourceHandle<GpuImage>,
+        format: Format,
+        old_layout: TransitionInfo,
+        new_layout: TransitionInfo,
+    ) -> VkResult<()> {
+        unsafe {
+            let command_pool = self.logical_device.create_command_pool(
+                &CommandPoolCreateInfo {
+                    s_type: StructureType::COMMAND_POOL_CREATE_INFO,
+                    p_next: std::ptr::null(),
+                    flags: CommandPoolCreateFlags::empty(),
+                    queue_family_index: self.graphics_queue_family_index(),
+                },
+                None,
+            )?;
+
+            let command_buffer =
+                self.logical_device
+                    .allocate_command_buffers(&CommandBufferAllocateInfo {
+                        s_type: StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
+                        p_next: std::ptr::null(),
+                        command_pool,
+                        level: CommandBufferLevel::PRIMARY,
+                        command_buffer_count: 1,
+                    })?[0];
+
+            self.logical_device.begin_command_buffer(
+                command_buffer,
+                &CommandBufferBeginInfo {
+                    s_type: StructureType::COMMAND_BUFFER_BEGIN_INFO,
+                    p_next: std::ptr::null(),
+                    flags: CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+                    p_inheritance_info: std::ptr::null(),
+                },
+            )?;
+
+            let memory_barrier = ImageMemoryBarrier {
+                s_type: StructureType::IMAGE_MEMORY_BARRIER,
+                p_next: std::ptr::null(),
+                src_access_mask: old_layout.access_mask,
+                dst_access_mask: new_layout.access_mask,
+                old_layout: old_layout.layout,
+                new_layout: new_layout.layout,
+                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                image: *self.resource_map.get(image).unwrap().deref(),
+                subresource_range: ImageSubresourceRange {
+                    aspect_mask: ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+            };
+
+            self.logical_device.cmd_pipeline_barrier(
+                command_buffer,
+                old_layout.stage_mask,
+                new_layout.stage_mask,
+                DependencyFlags::empty(),
+                &[],
+                &[],
+                &[memory_barrier],
+            );
+
+            self.logical_device.end_command_buffer(command_buffer)?;
+            self.logical_device.queue_submit(
+                self.graphics_queue,
+                &[SubmitInfo {
+                    s_type: StructureType::SUBMIT_INFO,
+                    p_next: std::ptr::null(),
+                    wait_semaphore_count: 0,
+                    p_wait_semaphores: std::ptr::null(),
+                    p_wait_dst_stage_mask: std::ptr::null(),
+                    command_buffer_count: 1,
+                    p_command_buffers: addr_of!(command_buffer),
+                    signal_semaphore_count: 0,
+                    p_signal_semaphores: std::ptr::null(),
+                }],
+                Fence::null(),
+            )?;
+            self.logical_device.queue_wait_idle(self.graphics_queue())?;
+
+            self.logical_device
+                .free_command_buffers(command_pool, &[command_buffer]);
+            self.logical_device.destroy_command_pool(command_pool, None);
+        };
+        Ok(())
+    }
+
+    pub fn copy_buffer_to_image(
+        &self,
+        source_buffer: &ResourceHandle<GpuBuffer>,
+        dest_image: &ResourceHandle<GpuImage>,
+        width: u32,
+        height: u32,
+    ) -> VkResult<()> {
+        unsafe {
+            let command_pool = self.logical_device.create_command_pool(
+                &CommandPoolCreateInfo {
+                    s_type: StructureType::COMMAND_POOL_CREATE_INFO,
+                    p_next: std::ptr::null(),
+                    flags: CommandPoolCreateFlags::empty(),
+                    queue_family_index: self.graphics_queue_family_index(),
+                },
+                None,
+            )?;
+
+            let command_buffer =
+                self.logical_device
+                    .allocate_command_buffers(&CommandBufferAllocateInfo {
+                        s_type: StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
+                        p_next: std::ptr::null(),
+                        command_pool,
+                        level: CommandBufferLevel::PRIMARY,
+                        command_buffer_count: 1,
+                    })?[0];
+
+            self.logical_device.begin_command_buffer(
+                command_buffer,
+                &CommandBufferBeginInfo {
+                    s_type: StructureType::COMMAND_BUFFER_BEGIN_INFO,
+                    p_next: std::ptr::null(),
+                    flags: CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+                    p_inheritance_info: std::ptr::null(),
+                },
+            )?;
+
+            let src_buffer = self.resource_map.get(source_buffer).unwrap().inner;
+            let dst_image = self.resource_map.get(dest_image).unwrap().inner;
+
+            self.logical_device.cmd_copy_buffer_to_image(
+                command_buffer,
+                src_buffer,
+                dst_image,
+                ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[vk::BufferImageCopy {
+                    buffer_offset: 0,
+                    buffer_row_length: 0,
+                    buffer_image_height: 0,
+                    image_subresource: ImageSubresourceLayers {
+                        aspect_mask: ImageAspectFlags::COLOR,
+                        mip_level: 0,
+                        layer_count: 1,
+                        base_array_layer: 0,
+                    },
+                    image_offset: Offset3D { x: 0, y: 0, z: 0 },
+                    image_extent: Extent3D {
+                        width,
+                        height,
+                        depth: 1,
+                    },
                 }],
             );
             self.logical_device.end_command_buffer(command_buffer)?;
