@@ -47,7 +47,8 @@ use ash::{
 };
 
 use gpu::{
-    Gpu, GpuConfiguration, ImageCreateInfo, MemoryDomain, PasstroughAllocator, TransitionInfo,
+    Gpu, GpuBuffer, GpuConfiguration, ImageCreateInfo, MemoryDomain, PasstroughAllocator,
+    ResourceHandle, TransitionInfo,
 };
 use memoffset::offset_of;
 use nalgebra::*;
@@ -695,154 +696,21 @@ fn main() -> anyhow::Result<()> {
             winit::event::Event::MainEventsCleared => {}
             winit::event::Event::RedrawRequested(window) => {
                 time += 0.001;
-                gpu.resource_map
-                    .get(&uniform_buffer)
-                    .unwrap()
-                    .write_data(&[PerObjectData {
-                        model: nalgebra::Matrix4::new_rotation(vector![0.0, 0.0, time]),
-                        view: nalgebra::Matrix4::look_at_rh(
-                            &point![2.0, 2.0, 2.0],
-                            &point![0.0, 0.0, 0.0],
-                            &vector![0.0, 0.0, -1.0],
-                        ),
-                        projection: nalgebra::Matrix4::new_perspective(
-                            1240.0 / 720.0,
-                            45.0,
-                            0.1,
-                            10.0,
-                        ),
-                    }]);
-
-                let next_image = swapchain.acquire_next_image().unwrap();
-                let framebuffer = unsafe {
-                    let create_info = FramebufferCreateInfo {
-                        s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
-                        p_next: null(),
-                        flags: FramebufferCreateFlags::empty(),
-                        render_pass,
-                        attachment_count: 1,
-                        p_attachments: &next_image as *const ImageView,
-                        width: swapchain.extents().width,
-                        height: swapchain.extents().height,
-                        layers: 1,
-                    };
-
-                    gpu.logical_device
-                        .create_framebuffer(&create_info, None)
-                        .unwrap()
-                };
-                unsafe {
-                    device
-                        .reset_command_pool(command_pool, CommandPoolResetFlags::empty())
-                        .unwrap();
-                    device
-                        .begin_command_buffer(
-                            command_buffer,
-                            &CommandBufferBeginInfo {
-                                s_type: StructureType::COMMAND_BUFFER_BEGIN_INFO,
-                                p_next: null(),
-                                flags: CommandBufferUsageFlags::empty(),
-                                p_inheritance_info: null(),
-                            },
-                        )
-                        .unwrap();
-
-                    device.cmd_begin_render_pass(
-                        command_buffer,
-                        &vk::RenderPassBeginInfo {
-                            s_type: StructureType::RENDER_PASS_BEGIN_INFO,
-                            p_next: null(),
-                            render_pass,
-                            framebuffer,
-                            render_area: Rect2D {
-                                offset: Offset2D { x: 0, y: 0 },
-                                extent: swapchain.extents(),
-                            },
-                            clear_value_count: 1,
-                            p_clear_values: &vk::ClearValue {
-                                color: ClearColorValue {
-                                    float32: [0.0, 0.0, 0.0, 1.0],
-                                },
-                            },
-                        },
-                        SubpassContents::INLINE,
-                    );
-                    device.cmd_bind_pipeline(command_buffer, PipelineBindPoint::GRAPHICS, pipeline);
-                    device.cmd_set_viewport(
-                        command_buffer,
-                        0,
-                        &[Viewport {
-                            x: 0 as f32,
-                            y: 0 as f32,
-                            width: swapchain.extents().width as f32,
-                            height: swapchain.extents().height as f32,
-                            min_depth: 0.0,
-                            max_depth: 1.0,
-                        }],
-                    );
-                    device.cmd_set_scissor(
-                        command_buffer,
-                        0,
-                        &[Rect2D {
-                            offset: Offset2D { x: 0, y: 0 },
-                            extent: swapchain.extents(),
-                        }],
-                    );
-                    device.cmd_bind_descriptor_sets(
-                        command_buffer,
-                        PipelineBindPoint::GRAPHICS,
-                        pipeline_layout,
-                        0,
-                        &[descriptor_set],
-                        &[],
-                    );
-                    device.cmd_bind_vertex_buffers(
-                        command_buffer,
-                        0,
-                        &[*gpu.resource_map.get(&vertex_buffer).unwrap().deref()],
-                        &[0],
-                    );
-                    device.cmd_bind_index_buffer(
-                        command_buffer,
-                        *gpu.resource_map.get(&index_buffer).unwrap().deref(),
-                        0,
-                        IndexType::UINT32,
-                    );
-                    device.cmd_draw_indexed(command_buffer, 6, 1, 0, 0, 0);
-                    device.cmd_end_render_pass(command_buffer);
-
-                    device.end_command_buffer(command_buffer).unwrap();
-                    device
-                        .queue_submit(
-                            gpu.graphics_queue(),
-                            &[SubmitInfo {
-                                s_type: StructureType::SUBMIT_INFO,
-                                p_next: null(),
-                                wait_semaphore_count: 1,
-                                p_wait_semaphores: swapchain.image_available_semaphore.deref()
-                                    as *const Semaphore,
-                                p_wait_dst_stage_mask: &PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-                                    as *const PipelineStageFlags,
-                                command_buffer_count: 1,
-                                p_command_buffers: &command_buffer as *const CommandBuffer,
-                                signal_semaphore_count: 1,
-                                p_signal_semaphores: swapchain.render_finished_semaphore.deref()
-                                    as *const Semaphore,
-                            }],
-                            *swapchain.in_flight_fence,
-                        )
-                        .unwrap();
-                    let _ = swapchain.present();
-
-                    gpu.logical_device
-                        .wait_for_fences(&[*swapchain.in_flight_fence], true, 20000000)
-                        .unwrap();
-                    gpu.logical_device
-                        .reset_fences(&[*swapchain.in_flight_fence])
-                        .unwrap();
-
-                    gpu.logical_device.destroy_framebuffer(framebuffer, None);
-                };
+                render_frame(
+                    &gpu,
+                    &uniform_buffer,
+                    time,
+                    &mut swapchain,
+                    render_pass,
+                    &device,
+                    command_pool,
+                    command_buffer,
+                    pipeline,
+                    pipeline_layout,
+                    descriptor_set,
+                    &vertex_buffer,
+                    &index_buffer,
+                );
             }
             winit::event::Event::RedrawEventsCleared => {}
             winit::event::Event::LoopDestroyed => unsafe {
@@ -860,4 +728,164 @@ fn main() -> anyhow::Result<()> {
             },
         }
     })
+}
+
+fn render_frame(
+    gpu: &Arc<Gpu>,
+    uniform_buffer: &ResourceHandle<GpuBuffer>,
+    time: f32,
+    swapchain: &mut gpu::Swapchain,
+    render_pass: vk::RenderPass,
+    device: &ash::Device,
+    command_pool: vk::CommandPool,
+    command_buffer: CommandBuffer,
+    pipeline: Pipeline,
+    pipeline_layout: vk::PipelineLayout,
+    descriptor_set: vk::DescriptorSet,
+    vertex_buffer: &ResourceHandle<GpuBuffer>,
+    index_buffer: &ResourceHandle<GpuBuffer>,
+) {
+    gpu.resource_map
+        .get(&uniform_buffer)
+        .unwrap()
+        .write_data(&[PerObjectData {
+            model: nalgebra::Matrix4::new_rotation(vector![0.0, 0.0, time]),
+            view: nalgebra::Matrix4::look_at_rh(
+                &point![2.0, 2.0, 2.0],
+                &point![0.0, 0.0, 0.0],
+                &vector![0.0, 0.0, -1.0],
+            ),
+            projection: nalgebra::Matrix4::new_perspective(1240.0 / 720.0, 45.0, 0.1, 10.0),
+        }]);
+
+    let next_image = swapchain.acquire_next_image().unwrap();
+    let framebuffer = unsafe {
+        let create_info = FramebufferCreateInfo {
+            s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
+            p_next: null(),
+            flags: FramebufferCreateFlags::empty(),
+            render_pass,
+            attachment_count: 1,
+            p_attachments: &next_image as *const ImageView,
+            width: swapchain.extents().width,
+            height: swapchain.extents().height,
+            layers: 1,
+        };
+
+        gpu.logical_device
+            .create_framebuffer(&create_info, None)
+            .unwrap()
+    };
+    unsafe {
+        device
+            .reset_command_pool(command_pool, CommandPoolResetFlags::empty())
+            .unwrap();
+        device
+            .begin_command_buffer(
+                command_buffer,
+                &CommandBufferBeginInfo {
+                    s_type: StructureType::COMMAND_BUFFER_BEGIN_INFO,
+                    p_next: null(),
+                    flags: CommandBufferUsageFlags::empty(),
+                    p_inheritance_info: null(),
+                },
+            )
+            .unwrap();
+
+        device.cmd_begin_render_pass(
+            command_buffer,
+            &vk::RenderPassBeginInfo {
+                s_type: StructureType::RENDER_PASS_BEGIN_INFO,
+                p_next: null(),
+                render_pass,
+                framebuffer,
+                render_area: Rect2D {
+                    offset: Offset2D { x: 0, y: 0 },
+                    extent: swapchain.extents(),
+                },
+                clear_value_count: 1,
+                p_clear_values: &vk::ClearValue {
+                    color: ClearColorValue {
+                        float32: [0.0, 0.0, 0.0, 1.0],
+                    },
+                },
+            },
+            SubpassContents::INLINE,
+        );
+        device.cmd_bind_pipeline(command_buffer, PipelineBindPoint::GRAPHICS, pipeline);
+        device.cmd_set_viewport(
+            command_buffer,
+            0,
+            &[Viewport {
+                x: 0 as f32,
+                y: 0 as f32,
+                width: swapchain.extents().width as f32,
+                height: swapchain.extents().height as f32,
+                min_depth: 0.0,
+                max_depth: 1.0,
+            }],
+        );
+        device.cmd_set_scissor(
+            command_buffer,
+            0,
+            &[Rect2D {
+                offset: Offset2D { x: 0, y: 0 },
+                extent: swapchain.extents(),
+            }],
+        );
+        device.cmd_bind_descriptor_sets(
+            command_buffer,
+            PipelineBindPoint::GRAPHICS,
+            pipeline_layout,
+            0,
+            &[descriptor_set],
+            &[],
+        );
+        device.cmd_bind_vertex_buffers(
+            command_buffer,
+            0,
+            &[*gpu.resource_map.get(&vertex_buffer).unwrap().deref()],
+            &[0],
+        );
+        device.cmd_bind_index_buffer(
+            command_buffer,
+            *gpu.resource_map.get(&index_buffer).unwrap().deref(),
+            0,
+            IndexType::UINT32,
+        );
+        device.cmd_draw_indexed(command_buffer, 6, 1, 0, 0, 0);
+        device.cmd_end_render_pass(command_buffer);
+
+        device.end_command_buffer(command_buffer).unwrap();
+        device
+            .queue_submit(
+                gpu.graphics_queue(),
+                &[SubmitInfo {
+                    s_type: StructureType::SUBMIT_INFO,
+                    p_next: null(),
+                    wait_semaphore_count: 1,
+                    p_wait_semaphores: swapchain.image_available_semaphore.deref()
+                        as *const Semaphore,
+                    p_wait_dst_stage_mask: &PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                        as *const PipelineStageFlags,
+                    command_buffer_count: 1,
+                    p_command_buffers: &command_buffer as *const CommandBuffer,
+                    signal_semaphore_count: 1,
+                    p_signal_semaphores: swapchain.render_finished_semaphore.deref()
+                        as *const Semaphore,
+                }],
+                *swapchain.in_flight_fence,
+            )
+            .unwrap();
+        let _ = swapchain.present();
+
+        gpu.logical_device
+            .wait_for_fences(&[*swapchain.in_flight_fence], true, 20000000)
+            .unwrap();
+        gpu.logical_device
+            .reset_fences(&[*swapchain.in_flight_fence])
+            .unwrap();
+
+        gpu.logical_device.destroy_framebuffer(framebuffer, None);
+    };
 }
