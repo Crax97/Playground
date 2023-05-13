@@ -76,7 +76,7 @@ impl Swapchain {
             &FenceCreateInfo {
                 s_type: StructureType::FENCE_CREATE_INFO,
                 p_next: std::ptr::null(),
-                flags: FenceCreateFlags::empty(),
+                flags: FenceCreateFlags::SIGNALED,
             },
         )?;
         let in_flight_fence = GPUFence::create(
@@ -145,17 +145,9 @@ impl Swapchain {
                     self.current_swapchain,
                     u64::MAX,
                     *self.image_available_semaphore,
-                    *self.next_image_fence,
+                    Fence::null(),
                 )
             }?;
-            unsafe {
-                self.gpu
-                    .logical_device
-                    .wait_for_fences(&[*self.next_image_fence], true, 200000)?;
-                self.gpu
-                    .logical_device
-                    .reset_fences(&[*self.next_image_fence])?;
-            }
             if !suboptimal {
                 let image_view = self.current_swapchain_image_views.get(next_image as usize);
                 self.current_swapchain_index = next_image;
@@ -168,6 +160,14 @@ impl Swapchain {
 
     pub(crate) fn present(&self) -> VkResult<bool> {
         unsafe {
+            self.gpu
+                .logical_device
+                .wait_for_fences(&[*self.in_flight_fence], true, u64::MAX)
+                .unwrap();
+            self.gpu
+                .logical_device
+                .reset_fences(&[*self.in_flight_fence])
+                .unwrap();
             self.swapchain_extension.queue_present(
                 self.gpu.graphics_queue,
                 &PresentInfoKHR {
@@ -180,8 +180,9 @@ impl Swapchain {
                     p_image_indices: &self.current_swapchain_index as *const u32,
                     p_results: std::ptr::null_mut(),
                 },
-            )
+            )?;
         }
+        Ok(true)
     }
 
     fn pick_swapchain_format(supported_formats: &Vec<SurfaceFormatKHR>) -> SurfaceFormatKHR {

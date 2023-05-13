@@ -693,7 +693,9 @@ fn main() -> anyhow::Result<()> {
             winit::event::Event::UserEvent(_) => {}
             winit::event::Event::Suspended => {}
             winit::event::Event::Resumed => {}
-            winit::event::Event::MainEventsCleared => {}
+            winit::event::Event::MainEventsCleared => {
+                swapchain.window.request_redraw();
+            }
             winit::event::Event::RedrawRequested(window) => {
                 time += 0.001;
                 render_frame(
@@ -777,115 +779,137 @@ fn render_frame(
             .unwrap()
     };
     unsafe {
-        device
-            .reset_command_pool(command_pool, CommandPoolResetFlags::empty())
-            .unwrap();
-        device
-            .begin_command_buffer(
-                command_buffer,
-                &CommandBufferBeginInfo {
-                    s_type: StructureType::COMMAND_BUFFER_BEGIN_INFO,
-                    p_next: null(),
-                    flags: CommandBufferUsageFlags::empty(),
-                    p_inheritance_info: null(),
-                },
-            )
-            .unwrap();
-
-        device.cmd_begin_render_pass(
+        render_textured_quad(
+            device,
+            command_pool,
             command_buffer,
-            &vk::RenderPassBeginInfo {
-                s_type: StructureType::RENDER_PASS_BEGIN_INFO,
-                p_next: null(),
-                render_pass,
-                framebuffer,
-                render_area: Rect2D {
-                    offset: Offset2D { x: 0, y: 0 },
-                    extent: swapchain.extents(),
-                },
-                clear_value_count: 1,
-                p_clear_values: &vk::ClearValue {
-                    color: ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 1.0],
-                    },
-                },
-            },
-            SubpassContents::INLINE,
-        );
-        device.cmd_bind_pipeline(command_buffer, PipelineBindPoint::GRAPHICS, pipeline);
-        device.cmd_set_viewport(
-            command_buffer,
-            0,
-            &[Viewport {
-                x: 0 as f32,
-                y: 0 as f32,
-                width: swapchain.extents().width as f32,
-                height: swapchain.extents().height as f32,
-                min_depth: 0.0,
-                max_depth: 1.0,
-            }],
-        );
-        device.cmd_set_scissor(
-            command_buffer,
-            0,
-            &[Rect2D {
-                offset: Offset2D { x: 0, y: 0 },
-                extent: swapchain.extents(),
-            }],
-        );
-        device.cmd_bind_descriptor_sets(
-            command_buffer,
-            PipelineBindPoint::GRAPHICS,
+            render_pass,
+            framebuffer,
+            swapchain,
+            pipeline,
             pipeline_layout,
-            0,
-            &[descriptor_set],
-            &[],
+            descriptor_set,
+            gpu,
+            vertex_buffer,
+            index_buffer,
         );
-        device.cmd_bind_vertex_buffers(
-            command_buffer,
-            0,
-            &[*gpu.resource_map.get(&vertex_buffer).unwrap().deref()],
-            &[0],
-        );
-        device.cmd_bind_index_buffer(
-            command_buffer,
-            *gpu.resource_map.get(&index_buffer).unwrap().deref(),
-            0,
-            IndexType::UINT32,
-        );
-        device.cmd_draw_indexed(command_buffer, 6, 1, 0, 0, 0);
-        device.cmd_end_render_pass(command_buffer);
-
-        device.end_command_buffer(command_buffer).unwrap();
-        device
-            .queue_submit(
-                gpu.graphics_queue(),
-                &[SubmitInfo {
-                    s_type: StructureType::SUBMIT_INFO,
-                    p_next: null(),
-                    wait_semaphore_count: 1,
-                    p_wait_semaphores: swapchain.image_available_semaphore.deref()
-                        as *const Semaphore,
-                    p_wait_dst_stage_mask: &PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-                        as *const PipelineStageFlags,
-                    command_buffer_count: 1,
-                    p_command_buffers: &command_buffer as *const CommandBuffer,
-                    signal_semaphore_count: 1,
-                    p_signal_semaphores: swapchain.render_finished_semaphore.deref()
-                        as *const Semaphore,
-                }],
-                *swapchain.in_flight_fence,
-            )
-            .unwrap();
-        let _ = swapchain.present();
-
-        gpu.logical_device
-            .wait_for_fences(&[*swapchain.in_flight_fence], true, 20000000)
-            .unwrap();
-        gpu.logical_device
-            .reset_fences(&[*swapchain.in_flight_fence])
-            .unwrap();
 
         gpu.logical_device.destroy_framebuffer(framebuffer, None);
     };
+}
+
+unsafe fn render_textured_quad(
+    device: &ash::Device,
+    command_pool: vk::CommandPool,
+    command_buffer: CommandBuffer,
+    render_pass: vk::RenderPass,
+    framebuffer: vk::Framebuffer,
+    swapchain: &mut gpu::Swapchain,
+    pipeline: Pipeline,
+    pipeline_layout: vk::PipelineLayout,
+    descriptor_set: vk::DescriptorSet,
+    gpu: &Arc<Gpu>,
+    vertex_buffer: &ResourceHandle<GpuBuffer>,
+    index_buffer: &ResourceHandle<GpuBuffer>,
+) {
+    device
+        .reset_command_pool(command_pool, CommandPoolResetFlags::empty())
+        .unwrap();
+    device
+        .begin_command_buffer(
+            command_buffer,
+            &CommandBufferBeginInfo {
+                s_type: StructureType::COMMAND_BUFFER_BEGIN_INFO,
+                p_next: null(),
+                flags: CommandBufferUsageFlags::empty(),
+                p_inheritance_info: null(),
+            },
+        )
+        .unwrap();
+    device.cmd_begin_render_pass(
+        command_buffer,
+        &vk::RenderPassBeginInfo {
+            s_type: StructureType::RENDER_PASS_BEGIN_INFO,
+            p_next: null(),
+            render_pass,
+            framebuffer,
+            render_area: Rect2D {
+                offset: Offset2D { x: 0, y: 0 },
+                extent: swapchain.extents(),
+            },
+            clear_value_count: 1,
+            p_clear_values: &vk::ClearValue {
+                color: ClearColorValue {
+                    float32: [0.0, 0.0, 0.0, 1.0],
+                },
+            },
+        },
+        SubpassContents::INLINE,
+    );
+    device.cmd_bind_pipeline(command_buffer, PipelineBindPoint::GRAPHICS, pipeline);
+    device.cmd_set_viewport(
+        command_buffer,
+        0,
+        &[Viewport {
+            x: 0 as f32,
+            y: 0 as f32,
+            width: swapchain.extents().width as f32,
+            height: swapchain.extents().height as f32,
+            min_depth: 0.0,
+            max_depth: 1.0,
+        }],
+    );
+    device.cmd_set_scissor(
+        command_buffer,
+        0,
+        &[Rect2D {
+            offset: Offset2D { x: 0, y: 0 },
+            extent: swapchain.extents(),
+        }],
+    );
+    device.cmd_bind_descriptor_sets(
+        command_buffer,
+        PipelineBindPoint::GRAPHICS,
+        pipeline_layout,
+        0,
+        &[descriptor_set],
+        &[],
+    );
+    device.cmd_bind_vertex_buffers(
+        command_buffer,
+        0,
+        &[*gpu.resource_map.get(&vertex_buffer).unwrap().deref()],
+        &[0],
+    );
+    device.cmd_bind_index_buffer(
+        command_buffer,
+        *gpu.resource_map.get(&index_buffer).unwrap().deref(),
+        0,
+        IndexType::UINT32,
+    );
+    device.cmd_draw_indexed(command_buffer, 6, 1, 0, 0, 0);
+    device.cmd_end_render_pass(command_buffer);
+
+    device.end_command_buffer(command_buffer).unwrap();
+    device
+        .queue_submit(
+            gpu.graphics_queue(),
+            &[SubmitInfo {
+                s_type: StructureType::SUBMIT_INFO,
+                p_next: null(),
+                wait_semaphore_count: 1,
+                p_wait_semaphores: swapchain.image_available_semaphore.deref() as *const Semaphore,
+                p_wait_dst_stage_mask: &PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                    as *const PipelineStageFlags,
+                command_buffer_count: 1,
+                p_command_buffers: &command_buffer as *const CommandBuffer,
+                signal_semaphore_count: 1,
+                p_signal_semaphores: swapchain.render_finished_semaphore.deref()
+                    as *const Semaphore,
+            }],
+            *swapchain.in_flight_fence,
+        )
+        .unwrap();
+
+    let _ = swapchain.present();
 }
