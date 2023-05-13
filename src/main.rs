@@ -19,14 +19,14 @@ use ash::{
         ColorComponentFlags, CommandBuffer, CommandBufferAllocateInfo, CommandBufferBeginInfo,
         CommandBufferLevel, CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo,
         CommandPoolResetFlags, CompareOp, CullModeFlags, DependencyFlags, DescriptorBufferInfo,
-        DescriptorPoolCreateFlags, DescriptorPoolCreateInfo, DescriptorPoolSize,
-        DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags, DescriptorSetLayoutCreateInfo,
-        DescriptorType, DynamicState, Filter, Format, FramebufferCreateFlags,
-        FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo, ImageLayout, ImageUsageFlags,
-        ImageView, IndexType, LogicOp, MappedMemoryRange, MemoryAllocateInfo, MemoryMapFlags,
-        MemoryPropertyFlags, Offset2D, Pipeline, PipelineBindPoint, PipelineCache,
-        PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
-        PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
+        DescriptorImageInfo, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
+        DescriptorPoolSize, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
+        DescriptorSetLayoutCreateInfo, DescriptorType, DynamicState, Filter, Format,
+        FramebufferCreateFlags, FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo,
+        ImageLayout, ImageUsageFlags, ImageView, IndexType, LogicOp, MappedMemoryRange,
+        MemoryAllocateInfo, MemoryMapFlags, MemoryPropertyFlags, Offset2D, Pipeline,
+        PipelineBindPoint, PipelineCache, PipelineColorBlendAttachmentState,
+        PipelineColorBlendStateCreateFlags, PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
         PipelineDepthStencilStateCreateFlags, PipelineDepthStencilStateCreateInfo,
         PipelineDynamicStateCreateFlags, PipelineDynamicStateCreateInfo,
         PipelineInputAssemblyStateCreateFlags, PipelineInputAssemblyStateCreateInfo,
@@ -66,6 +66,7 @@ struct PerObjectData {
 struct VertexData {
     pub position: Vector2<f32>,
     pub color: Vector3<f32>,
+    pub uv: Vector2<f32>,
 }
 fn main() -> anyhow::Result<()> {
     env_logger::init();
@@ -141,18 +142,22 @@ fn main() -> anyhow::Result<()> {
         VertexData {
             position: vector![-0.5, -0.5],
             color: vector![1.0, 0.0, 0.0],
+            uv: vector![1.0, 0.0],
         },
         VertexData {
             position: vector![0.5, -0.5],
             color: vector![0.0, 1.0, 0.0],
+            uv: vector![0.0, 0.0],
         },
         VertexData {
             position: vector![0.5, 0.5],
             color: vector![0.0, 0.0, 1.0],
+            uv: vector![0.0, 1.0],
         },
         VertexData {
             position: vector![-0.5, 0.5],
             color: vector![1.0, 1.0, 1.0],
+            uv: vector![1.0, 1.0],
         },
     ];
     let indices: &[u32] = &[0, 1, 2, 2, 3, 0];
@@ -211,7 +216,7 @@ fn main() -> anyhow::Result<()> {
         &ImageCreateInfo {
             width: cpu_image.width(),
             height: cpu_image.height(),
-            format: vk::Format::R8G8B8A8_UINT,
+            format: vk::Format::R8G8B8A8_UNORM,
             usage: ImageUsageFlags::TRANSFER_DST | ImageUsageFlags::SAMPLED,
         },
         MemoryDomain::DeviceLocal,
@@ -297,19 +302,26 @@ fn main() -> anyhow::Result<()> {
     })?;
 
     let descriptor_set_layout = {
-        let descriptor_set_layout_binding = DescriptorSetLayoutBinding {
+        let uniform_buffer_binding = DescriptorSetLayoutBinding {
             binding: 0,
             descriptor_type: DescriptorType::UNIFORM_BUFFER,
             descriptor_count: 1,
             stage_flags: ShaderStageFlags::VERTEX,
             p_immutable_samplers: null(),
         };
+        let sampler_binding = DescriptorSetLayoutBinding {
+            binding: 1,
+            descriptor_type: DescriptorType::COMBINED_IMAGE_SAMPLER,
+            descriptor_count: 1,
+            stage_flags: ShaderStageFlags::FRAGMENT,
+            p_immutable_samplers: null(),
+        };
         let create_info = DescriptorSetLayoutCreateInfo {
             s_type: StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
             p_next: null(),
             flags: DescriptorSetLayoutCreateFlags::empty(),
-            binding_count: 1,
-            p_bindings: addr_of!(descriptor_set_layout_binding),
+            binding_count: 2,
+            p_bindings: [uniform_buffer_binding, sampler_binding].as_ptr(),
         };
         unsafe { device.create_descriptor_set_layout(&create_info, None) }?
     };
@@ -419,6 +431,12 @@ fn main() -> anyhow::Result<()> {
                 format: Format::R32G32B32_SFLOAT,
                 offset: offset_of!(VertexData, color) as u32,
             },
+            VertexInputAttributeDescription {
+                location: 2,
+                binding: 0,
+                format: Format::R32G32_SFLOAT,
+                offset: offset_of!(VertexData, uv) as u32,
+            },
         ];
 
         let input_stage = PipelineVertexInputStateCreateInfo {
@@ -427,7 +445,7 @@ fn main() -> anyhow::Result<()> {
             flags: PipelineVertexInputStateCreateFlags::empty(),
             vertex_binding_description_count: 1,
             p_vertex_binding_descriptions: input_binding_descriptions.as_ptr(),
-            vertex_attribute_description_count: 2,
+            vertex_attribute_description_count: 3,
             p_vertex_attribute_descriptions: input_attribute_descriptions.as_ptr(),
         };
 
@@ -575,8 +593,12 @@ fn main() -> anyhow::Result<()> {
     }[0];
 
     let descriptor_pool = unsafe {
-        let size = DescriptorPoolSize {
+        let pool_size_uniform_buffer = DescriptorPoolSize {
             ty: DescriptorType::UNIFORM_BUFFER,
+            descriptor_count: 1,
+        };
+        let pool_size_sampler = DescriptorPoolSize {
+            ty: DescriptorType::COMBINED_IMAGE_SAMPLER,
             descriptor_count: 1,
         };
         gpu.logical_device.create_descriptor_pool(
@@ -585,8 +607,8 @@ fn main() -> anyhow::Result<()> {
                 p_next: null(),
                 flags: DescriptorPoolCreateFlags::empty(),
                 max_sets: 1,
-                pool_size_count: 1,
-                p_pool_sizes: addr_of!(size),
+                pool_size_count: 2,
+                p_pool_sizes: [pool_size_uniform_buffer, pool_size_sampler].as_ptr(),
             },
             None,
         )?
@@ -608,20 +630,39 @@ fn main() -> anyhow::Result<()> {
             offset: 0,
             range: vk::WHOLE_SIZE,
         };
+        let image_info = DescriptorImageInfo {
+            sampler: *gpu.resource_map.get(&sampler).unwrap().deref(),
+            image_view: gpu.resource_map.get(&image).unwrap().view,
+            image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        };
 
         gpu.logical_device.update_descriptor_sets(
-            &[WriteDescriptorSet {
-                s_type: StructureType::WRITE_DESCRIPTOR_SET,
-                p_next: null(),
-                dst_set: descriptor_set,
-                dst_binding: 0,
-                dst_array_element: 0,
-                descriptor_count: 1,
-                descriptor_type: DescriptorType::UNIFORM_BUFFER,
-                p_image_info: null(),
-                p_buffer_info: addr_of!(buffer_info),
-                p_texel_buffer_view: null(),
-            }],
+            &[
+                WriteDescriptorSet {
+                    s_type: StructureType::WRITE_DESCRIPTOR_SET,
+                    p_next: null(),
+                    dst_set: descriptor_set,
+                    dst_binding: 0,
+                    dst_array_element: 0,
+                    descriptor_count: 1,
+                    descriptor_type: DescriptorType::UNIFORM_BUFFER,
+                    p_image_info: null(),
+                    p_buffer_info: addr_of!(buffer_info),
+                    p_texel_buffer_view: null(),
+                },
+                WriteDescriptorSet {
+                    s_type: StructureType::WRITE_DESCRIPTOR_SET,
+                    p_next: null(),
+                    dst_set: descriptor_set,
+                    dst_binding: 1,
+                    dst_array_element: 0,
+                    descriptor_count: 1,
+                    descriptor_type: DescriptorType::COMBINED_IMAGE_SAMPLER,
+                    p_image_info: addr_of!(image_info),
+                    p_buffer_info: null(),
+                    p_texel_buffer_view: null(),
+                },
+            ],
             &[],
         );
 
@@ -634,6 +675,7 @@ fn main() -> anyhow::Result<()> {
         device.destroy_shader_module(vertex_module, None);
         device.destroy_shader_module(fragment_module, None);
     }
+    let mut time = 0.0;
     event_loop.run(move |event, event_loop, mut control_flow| {
         *control_flow = ControlFlow::Poll;
 
@@ -652,11 +694,12 @@ fn main() -> anyhow::Result<()> {
             winit::event::Event::Resumed => {}
             winit::event::Event::MainEventsCleared => {}
             winit::event::Event::RedrawRequested(window) => {
+                time += 0.001;
                 gpu.resource_map
                     .get(&uniform_buffer)
                     .unwrap()
                     .write_data(&[PerObjectData {
-                        model: nalgebra::Matrix4::new_rotation(vector![0.0, 0.0, 0.0]),
+                        model: nalgebra::Matrix4::new_rotation(vector![0.0, 0.0, time]),
                         view: nalgebra::Matrix4::look_at_rh(
                             &point![2.0, 2.0, 2.0],
                             &point![0.0, 0.0, 0.0],

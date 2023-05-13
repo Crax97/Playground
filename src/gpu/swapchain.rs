@@ -143,7 +143,7 @@ impl Swapchain {
             let (next_image, suboptimal) = unsafe {
                 self.swapchain_extension.acquire_next_image(
                     self.current_swapchain,
-                    200000,
+                    u64::MAX,
                     *self.image_available_semaphore,
                     *self.next_image_fence,
                 )
