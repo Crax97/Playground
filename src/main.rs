@@ -47,8 +47,10 @@ use ash::{
 };
 
 use gpu::{
-    Gpu, GpuBuffer, GpuConfiguration, ImageCreateInfo, MemoryDomain, PasstroughAllocator,
-    ResourceHandle, TransitionInfo,
+    BlendState, ColorAttachment, FragmentStageInfo, GlobalBinding, Gpu, GpuBuffer,
+    GpuConfiguration, ImageCreateInfo, Material, MaterialDescription, MemoryDomain,
+    PasstroughAllocator, ResourceHandle, TransitionInfo, VertexAttributeDescription,
+    VertexBindingDescription, VertexStageInfo,
 };
 use image::{EncodableLayout, RgbaImage};
 use memoffset::offset_of;
@@ -302,6 +304,90 @@ fn main() -> anyhow::Result<()> {
         unnormalized_coordinates: vk::FALSE,
     })?;
 
+    let material = Material::new(
+        &gpu,
+        &MaterialDescription {
+            global_bindings: &[
+                GlobalBinding {
+                    binding_type: gpu::BindingType::Uniform,
+                    index: 0,
+                    stage: gpu::ShaderStage::Vertex,
+                },
+                GlobalBinding {
+                    binding_type: gpu::BindingType::CombinedImageSampler,
+                    index: 1,
+                    stage: gpu::ShaderStage::Fragment,
+                },
+            ],
+            vertex_inputs: &[VertexBindingDescription {
+                binding: 0,
+                input_rate: gpu::InputRate::PerVertex,
+                stride: size_of::<VertexData>() as u32,
+                attributes: &[
+                    VertexAttributeDescription {
+                        location: 0,
+                        format: vk::Format::R32G32_SFLOAT,
+                        offset: offset_of!(VertexData, position) as u32,
+                    },
+                    VertexAttributeDescription {
+                        location: 1,
+                        format: vk::Format::R32G32B32_SFLOAT,
+                        offset: offset_of!(VertexData, color) as u32,
+                    },
+                    VertexAttributeDescription {
+                        location: 2,
+                        format: vk::Format::R32G32_SFLOAT,
+                        offset: offset_of!(VertexData, uv) as u32,
+                    },
+                ],
+            }],
+            vertex_stage: Some(VertexStageInfo {
+                entry_point: "main",
+                module: vertex_module,
+            }),
+            fragment_stage: Some(FragmentStageInfo {
+                entry_point: "main",
+                module: fragment_module,
+                color_attachments: &[ColorAttachment {
+                    format: swapchain.present_format.format,
+                    samples: SampleCountFlags::TYPE_1,
+                    load_op: AttachmentLoadOp::CLEAR,
+                    store_op: AttachmentStoreOp::STORE,
+                    stencil_load_op: AttachmentLoadOp::DONT_CARE,
+                    stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                    initial_layout: ImageLayout::UNDEFINED,
+                    final_layout: ImageLayout::PRESENT_SRC_KHR,
+                    blend_state: BlendState {
+                        blend_enable: true,
+                        src_color_blend_factor: BlendFactor::ONE,
+                        dst_color_blend_factor: BlendFactor::ZERO,
+                        color_blend_op: BlendOp::ADD,
+                        src_alpha_blend_factor: BlendFactor::ONE,
+                        dst_alpha_blend_factor: BlendFactor::ZERO,
+                        alpha_blend_op: BlendOp::ADD,
+                        color_write_mask: ColorComponentFlags::RGBA,
+                    },
+                }],
+                depth_stencil_attachments: &[],
+                dependencies: &[SubpassDependency {
+                    src_subpass: SUBPASS_EXTERNAL,
+                    dst_subpass: 0,
+                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    src_access_mask: AccessFlags::empty(),
+                    dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                    dependency_flags: DependencyFlags::empty(),
+                }],
+            }),
+            input_topology: gpu::PrimitiveTopology::TriangleList,
+            primitive_restart: false,
+            polygon_mode: gpu::PolygonMode::Fill,
+            cull_mode: gpu::CullMode::Back,
+            front_face: gpu::FrontFace::ClockWise,
+            ..Default::default()
+        },
+    )?;
+
     let descriptor_set_layout = {
         let uniform_buffer_binding = DescriptorSetLayoutBinding {
             binding: 0,
@@ -326,272 +412,6 @@ fn main() -> anyhow::Result<()> {
         };
         unsafe { device.create_descriptor_set_layout(&create_info, None) }?
     };
-
-    let pass_info = RenderPassCreateInfo {
-        s_type: StructureType::RENDER_PASS_CREATE_INFO,
-        p_next: null(),
-        flags: RenderPassCreateFlags::empty(),
-        attachment_count: 1,
-        p_attachments: &[AttachmentDescription {
-            flags: AttachmentDescriptionFlags::empty(),
-            format: swapchain.present_format.format,
-            samples: SampleCountFlags::TYPE_1,
-            load_op: AttachmentLoadOp::CLEAR,
-            store_op: AttachmentStoreOp::STORE,
-            stencil_load_op: AttachmentLoadOp::DONT_CARE,
-            stencil_store_op: AttachmentStoreOp::DONT_CARE,
-            initial_layout: ImageLayout::UNDEFINED,
-            final_layout: ImageLayout::PRESENT_SRC_KHR,
-        }] as *const AttachmentDescription,
-        subpass_count: 1,
-        p_subpasses: &[SubpassDescription {
-            flags: SubpassDescriptionFlags::empty(),
-            pipeline_bind_point: PipelineBindPoint::GRAPHICS,
-            input_attachment_count: 0,
-            p_input_attachments: null(),
-            color_attachment_count: 1,
-            p_color_attachments: &[AttachmentReference {
-                attachment: 0,
-                layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            }] as *const AttachmentReference,
-            p_resolve_attachments: null(),
-            p_depth_stencil_attachment: null(),
-            preserve_attachment_count: vk::FALSE,
-            p_preserve_attachments: null(),
-        }] as *const SubpassDescription,
-        dependency_count: 1,
-        p_dependencies: &[SubpassDependency {
-            src_subpass: SUBPASS_EXTERNAL,
-            dst_subpass: 0,
-            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            src_access_mask: AccessFlags::empty(),
-            dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-            dependency_flags: DependencyFlags::empty(),
-        }] as *const SubpassDependency,
-    };
-    let render_pass = unsafe {
-        gpu.vk_logical_device()
-            .create_render_pass(&pass_info, None)?
-    };
-
-    let pipeline_layout = unsafe {
-        let layout_infos = PipelineLayoutCreateInfo {
-            s_type: StructureType::PIPELINE_LAYOUT_CREATE_INFO,
-            p_next: null(),
-            flags: PipelineLayoutCreateFlags::empty(),
-            set_layout_count: 1,
-            p_set_layouts: addr_of!(descriptor_set_layout),
-            push_constant_range_count: 0,
-            p_push_constant_ranges: null(),
-        };
-        let pipeline_layout = device.create_pipeline_layout(&layout_infos, None)?;
-        pipeline_layout
-    };
-
-    let pipeline = unsafe {
-        let main_name = CString::new("main")?;
-
-        let stages: [PipelineShaderStageCreateInfo; 2] = [
-            PipelineShaderStageCreateInfo {
-                s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
-                p_next: null(),
-                flags: PipelineShaderStageCreateFlags::empty(),
-                stage: ShaderStageFlags::VERTEX,
-                module: vertex_module,
-                p_name: main_name.as_ptr(),
-                p_specialization_info: null(),
-            },
-            PipelineShaderStageCreateInfo {
-                s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
-                p_next: null(),
-                flags: PipelineShaderStageCreateFlags::empty(),
-                stage: ShaderStageFlags::FRAGMENT,
-                module: fragment_module,
-                p_name: main_name.as_ptr(),
-                p_specialization_info: null(),
-            },
-        ];
-
-        let input_binding_descriptions = &[VertexInputBindingDescription {
-            binding: 0,
-            stride: std::mem::size_of::<VertexData>() as u32,
-            input_rate: VertexInputRate::VERTEX,
-        }];
-
-        let input_attribute_descriptions = &[
-            VertexInputAttributeDescription {
-                location: 0,
-                binding: 0,
-                format: Format::R32G32_SFLOAT,
-                offset: offset_of!(VertexData, position) as u32,
-            },
-            VertexInputAttributeDescription {
-                location: 1,
-                binding: 0,
-                format: Format::R32G32B32_SFLOAT,
-                offset: offset_of!(VertexData, color) as u32,
-            },
-            VertexInputAttributeDescription {
-                location: 2,
-                binding: 0,
-                format: Format::R32G32_SFLOAT,
-                offset: offset_of!(VertexData, uv) as u32,
-            },
-        ];
-
-        let input_stage = PipelineVertexInputStateCreateInfo {
-            s_type: StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-            p_next: null(),
-            flags: PipelineVertexInputStateCreateFlags::empty(),
-            vertex_binding_description_count: 1,
-            p_vertex_binding_descriptions: input_binding_descriptions.as_ptr(),
-            vertex_attribute_description_count: 3,
-            p_vertex_attribute_descriptions: input_attribute_descriptions.as_ptr(),
-        };
-
-        let assembly_state = PipelineInputAssemblyStateCreateInfo {
-            s_type: StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-            p_next: null(),
-            flags: PipelineInputAssemblyStateCreateFlags::empty(),
-            topology: PrimitiveTopology::TRIANGLE_LIST,
-            primitive_restart_enable: vk::FALSE,
-        };
-
-        let tessellation_state: PipelineTessellationStateCreateInfo =
-            PipelineTessellationStateCreateInfo {
-                s_type: StructureType::PIPELINE_TESSELLATION_STATE_CREATE_INFO,
-                p_next: null(),
-                flags: PipelineTessellationStateCreateFlags::empty(),
-                patch_control_points: 0,
-            };
-
-        let viewport_state = PipelineViewportStateCreateInfo {
-            s_type: StructureType::PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-            p_next: null(),
-            flags: PipelineViewportStateCreateFlags::empty(),
-            viewport_count: 1,
-            p_viewports: null(),
-            scissor_count: 1,
-            p_scissors: null(),
-        };
-
-        let raster_state = PipelineRasterizationStateCreateInfo {
-            s_type: StructureType::PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-            p_next: null(),
-            flags: PipelineRasterizationStateCreateFlags::empty(),
-            depth_clamp_enable: vk::FALSE,
-            rasterizer_discard_enable: vk::FALSE,
-            polygon_mode: PolygonMode::FILL,
-            cull_mode: CullModeFlags::BACK,
-            front_face: FrontFace::CLOCKWISE,
-            depth_bias_enable: vk::FALSE,
-            depth_bias_constant_factor: 0.0,
-            depth_bias_clamp: 0.0,
-            depth_bias_slope_factor: 0.0,
-            line_width: 1.0,
-        };
-
-        let multisample_state = PipelineMultisampleStateCreateInfo {
-            s_type: StructureType::PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-            p_next: null(),
-            flags: PipelineMultisampleStateCreateFlags::empty(),
-            rasterization_samples: SampleCountFlags::TYPE_1,
-            sample_shading_enable: vk::FALSE,
-            min_sample_shading: 1.0,
-            p_sample_mask: null(),
-            alpha_to_coverage_enable: vk::FALSE,
-            alpha_to_one_enable: vk::FALSE,
-        };
-
-        let stencil_state = PipelineDepthStencilStateCreateInfo {
-            s_type: StructureType::PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-            p_next: null(),
-            flags: PipelineDepthStencilStateCreateFlags::empty(),
-            depth_test_enable: vk::FALSE,
-            depth_write_enable: vk::TRUE,
-            depth_compare_op: CompareOp::GREATER,
-            depth_bounds_test_enable: vk::FALSE,
-            stencil_test_enable: vk::FALSE,
-            front: StencilOpState {
-                fail_op: StencilOp::KEEP,
-                pass_op: StencilOp::KEEP,
-                depth_fail_op: StencilOp::KEEP,
-                compare_op: CompareOp::ALWAYS,
-                compare_mask: 0xFFFFFFF,
-                write_mask: 0x0,
-                reference: 0,
-            },
-            back: StencilOpState {
-                fail_op: StencilOp::KEEP,
-                pass_op: StencilOp::KEEP,
-                depth_fail_op: StencilOp::KEEP,
-                compare_op: CompareOp::ALWAYS,
-                compare_mask: 0xFFFFFFF,
-                write_mask: 0x0,
-                reference: 0,
-            },
-            min_depth_bounds: 0.0,
-            max_depth_bounds: 1.0,
-        };
-
-        let color_blend = PipelineColorBlendStateCreateInfo {
-            s_type: StructureType::PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-            p_next: null(),
-            flags: PipelineColorBlendStateCreateFlags::empty(),
-            logic_op_enable: vk::FALSE,
-            logic_op: LogicOp::COPY,
-            attachment_count: 1,
-            p_attachments: &[PipelineColorBlendAttachmentState {
-                blend_enable: vk::FALSE,
-                src_color_blend_factor: BlendFactor::ONE,
-                dst_color_blend_factor: BlendFactor::ZERO,
-                color_blend_op: BlendOp::ADD,
-                src_alpha_blend_factor: BlendFactor::ONE,
-                dst_alpha_blend_factor: BlendFactor::ZERO,
-                alpha_blend_op: BlendOp::ADD,
-                color_write_mask: ColorComponentFlags::RGBA,
-            }] as *const PipelineColorBlendAttachmentState,
-            blend_constants: [0.0, 0.0, 0.0, 0.0],
-        };
-
-        let dynamic_state = PipelineDynamicStateCreateInfo {
-            s_type: StructureType::PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-            p_next: null(),
-            flags: PipelineDynamicStateCreateFlags::empty(),
-            dynamic_state_count: 2,
-            p_dynamic_states: &[DynamicState::VIEWPORT, DynamicState::SCISSOR]
-                as *const DynamicState,
-        };
-
-        let create_infos = [GraphicsPipelineCreateInfo {
-            s_type: StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
-            p_next: null(),
-            flags: PipelineCreateFlags::ALLOW_DERIVATIVES,
-            stage_count: 2,
-            p_stages: stages.as_ptr(),
-            p_vertex_input_state: &input_stage as *const PipelineVertexInputStateCreateInfo,
-            p_input_assembly_state: &assembly_state as *const PipelineInputAssemblyStateCreateInfo,
-            p_tessellation_state: &tessellation_state as *const PipelineTessellationStateCreateInfo,
-            p_viewport_state: &viewport_state as *const PipelineViewportStateCreateInfo,
-            p_rasterization_state: &raster_state as *const PipelineRasterizationStateCreateInfo,
-            p_multisample_state: &multisample_state as *const PipelineMultisampleStateCreateInfo,
-            p_depth_stencil_state: &stencil_state as *const PipelineDepthStencilStateCreateInfo,
-            p_color_blend_state: &color_blend as *const PipelineColorBlendStateCreateInfo,
-            p_dynamic_state: &dynamic_state as *const PipelineDynamicStateCreateInfo,
-            layout: pipeline_layout,
-            render_pass,
-            subpass: 0,
-            base_pipeline_handle: Pipeline::null(),
-            base_pipeline_index: 0,
-        }];
-
-        let pipeline = device
-            .create_graphics_pipelines(PipelineCache::null(), &create_infos, None)
-            .unwrap();
-
-        pipeline
-    }[0];
 
     let descriptor_pool = unsafe {
         let pool_size_uniform_buffer = DescriptorPoolSize {
@@ -702,13 +522,11 @@ fn main() -> anyhow::Result<()> {
                     &gpu,
                     &uniform_buffer,
                     time,
+                    &material,
                     &mut swapchain,
-                    render_pass,
                     &device,
                     command_pool,
                     command_buffer,
-                    pipeline,
-                    pipeline_layout,
                     descriptor_set,
                     &vertex_buffer,
                     &index_buffer,
@@ -718,13 +536,10 @@ fn main() -> anyhow::Result<()> {
             winit::event::Event::LoopDestroyed => unsafe {
                 device.device_wait_idle().unwrap();
                 //                device.free_memory(device_memory, None);
-                device.destroy_pipeline_layout(pipeline_layout, None);
                 device.destroy_descriptor_set_layout(descriptor_set_layout, None);
                 device.destroy_descriptor_pool(descriptor_pool, None);
                 device.free_command_buffers(command_pool, &[command_buffer]);
                 device.destroy_command_pool(command_pool, None);
-                device.destroy_pipeline(pipeline, None);
-                device.destroy_render_pass(render_pass, None);
             },
         }
     })
@@ -734,13 +549,11 @@ fn render_frame(
     gpu: &Gpu,
     uniform_buffer: &ResourceHandle<GpuBuffer>,
     time: f32,
+    material: &Material,
     swapchain: &mut gpu::Swapchain,
-    render_pass: vk::RenderPass,
     device: &ash::Device,
     command_pool: vk::CommandPool,
     command_buffer: CommandBuffer,
-    pipeline: Pipeline,
-    pipeline_layout: vk::PipelineLayout,
     descriptor_set: vk::DescriptorSet,
     vertex_buffer: &ResourceHandle<GpuBuffer>,
     index_buffer: &ResourceHandle<GpuBuffer>,
@@ -764,7 +577,7 @@ fn render_frame(
             s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
             p_next: null(),
             flags: FramebufferCreateFlags::empty(),
-            render_pass,
+            render_pass: material.render_pass,
             attachment_count: 1,
             p_attachments: &next_image as *const ImageView,
             width: swapchain.extents().width,
@@ -782,11 +595,9 @@ fn render_frame(
             device,
             command_pool,
             command_buffer,
-            render_pass,
+            material,
             framebuffer,
             swapchain,
-            pipeline,
-            pipeline_layout,
             descriptor_set,
             gpu,
             vertex_buffer,
@@ -803,11 +614,9 @@ unsafe fn render_textured_quad(
     device: &ash::Device,
     command_pool: vk::CommandPool,
     command_buffer: CommandBuffer,
-    render_pass: vk::RenderPass,
+    material: &Material,
     framebuffer: vk::Framebuffer,
     swapchain: &mut gpu::Swapchain,
-    pipeline: Pipeline,
-    pipeline_layout: vk::PipelineLayout,
     descriptor_set: vk::DescriptorSet,
     gpu: &Gpu,
     vertex_buffer: &ResourceHandle<GpuBuffer>,
@@ -832,7 +641,7 @@ unsafe fn render_textured_quad(
         &vk::RenderPassBeginInfo {
             s_type: StructureType::RENDER_PASS_BEGIN_INFO,
             p_next: null(),
-            render_pass,
+            render_pass: material.render_pass,
             framebuffer,
             render_area: Rect2D {
                 offset: Offset2D { x: 0, y: 0 },
@@ -847,7 +656,11 @@ unsafe fn render_textured_quad(
         },
         SubpassContents::INLINE,
     );
-    device.cmd_bind_pipeline(command_buffer, PipelineBindPoint::GRAPHICS, pipeline);
+    device.cmd_bind_pipeline(
+        command_buffer,
+        PipelineBindPoint::GRAPHICS,
+        material.pipeline,
+    );
     device.cmd_set_viewport(
         command_buffer,
         0,
@@ -871,7 +684,7 @@ unsafe fn render_textured_quad(
     device.cmd_bind_descriptor_sets(
         command_buffer,
         PipelineBindPoint::GRAPHICS,
-        pipeline_layout,
+        material.pipeline_layout,
         0,
         &[descriptor_set],
         &[],

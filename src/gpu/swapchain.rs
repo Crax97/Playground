@@ -4,20 +4,19 @@ use ash::{
     extensions::khr::Surface,
     prelude::VkResult,
     vk::{
-        self, ComponentMapping, ComponentSwizzle, CompositeAlphaFlagsKHR, Extent2D, Fence,
+        self, ComponentMapping, ComponentSwizzle, CompositeAlphaFlagsKHR, Extent2D,
         FenceCreateFlags, FenceCreateInfo, Format, Image, ImageAspectFlags, ImageSubresourceRange,
         ImageUsageFlags, ImageView, ImageViewCreateFlags, ImageViewCreateInfo, ImageViewType,
-        PhysicalDevice, PresentInfoKHR, PresentModeKHR, Queue, Semaphore, SemaphoreCreateFlags,
-        SemaphoreCreateInfo, SharingMode, StructureType, SurfaceCapabilitiesKHR, SurfaceFormatKHR,
-        SurfaceKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
+        PresentInfoKHR, PresentModeKHR, Semaphore, SemaphoreCreateFlags, SemaphoreCreateInfo,
+        SharingMode, StructureType, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR,
+        SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
     },
-    Device, Entry, Instance,
 };
 use log::{info, trace, warn};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use winit::window::Window;
 
-use super::{GPUFence, GPUSemaphore, Gpu, GpuAllocator, GpuState, SharedGpu};
+use super::{GPUFence, GPUSemaphore, Gpu, GpuState};
 
 mod util {
     use ash::vk::{PresentModeKHR, SurfaceFormatKHR};

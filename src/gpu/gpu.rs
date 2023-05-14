@@ -1,9 +1,8 @@
 use std::{
     cell::RefCell,
     ffi::{CStr, CString},
-    num::NonZeroU32,
-    ops::{Deref, DerefMut},
-    ptr::{addr_of, addr_of_mut, null},
+    ops::Deref,
+    ptr::{addr_of, null},
     sync::Arc,
 };
 
@@ -15,13 +14,12 @@ use ash::{
         CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
         CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo, DependencyFlags,
         DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo,
-        Extent2D, Extent3D, Fence, Format, ImageAspectFlags, ImageCreateFlags, ImageLayout,
-        ImageMemoryBarrier, ImageSubresource, ImageSubresourceLayers, ImageSubresourceRange,
-        ImageTiling, ImageType, ImageView, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap,
-        MemoryHeapFlags, Offset3D, PhysicalDevice, PhysicalDeviceFeatures,
-        PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags, PresentModeKHR, Queue,
-        QueueFlags, SampleCountFlags, SamplerCreateInfo, Semaphore, SharingMode, StructureType,
-        SubmitInfo, SurfaceKHR, API_VERSION_1_3,
+        Extent3D, Fence, ImageAspectFlags, ImageCreateFlags, ImageLayout, ImageMemoryBarrier,
+        ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType, InstanceCreateFlags,
+        InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D, PhysicalDevice,
+        PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags,
+        Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo, SharingMode, StructureType,
+        SubmitInfo, API_VERSION_1_3,
     },
     *,
 };
@@ -34,7 +32,7 @@ use winit::window::Window;
 use super::{
     allocator::{GpuAllocator, PasstroughAllocator},
     resource::{ResourceHandle, ResourceMap},
-    types, AllocationRequirements, GpuBuffer, GpuImage, GpuSampler, MemoryDomain,
+    AllocationRequirements, GpuBuffer, GpuImage, GpuSampler, MemoryDomain,
 };
 
 const KHRONOS_VALIDATION_LAYER: &'static str = "VK_LAYER_KHRONOS_validation";
@@ -66,12 +64,78 @@ pub struct GpuState {
     pub allocator: Arc<RefCell<dyn GpuAllocator>>,
 }
 
-pub struct Gpu {
-    pub state: Arc<GpuState>,
-    pub resource_map: ResourceMap,
+pub struct GpuThreadLocalState {
+    pub graphics_command_pool: vk::CommandPool,
+    pub compute_command_pool: vk::CommandPool,
+    pub transfer_command_pool: vk::CommandPool,
+
+    shared_state: Arc<GpuState>,
 }
 
-pub type SharedGpu = Arc<Gpu>;
+impl GpuThreadLocalState {
+    pub fn new(shared_state: Arc<GpuState>) -> VkResult<Self> {
+        let graphics_command_pool = unsafe {
+            shared_state.logical_device.create_command_pool(
+                &CommandPoolCreateInfo {
+                    s_type: StructureType::COMMAND_POOL_CREATE_INFO,
+                    p_next: null(),
+                    flags: CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
+                    queue_family_index: shared_state.queue_families.graphics_family.index,
+                },
+                None,
+            )
+        }?;
+        let compute_command_pool = unsafe {
+            shared_state.logical_device.create_command_pool(
+                &CommandPoolCreateInfo {
+                    s_type: StructureType::COMMAND_POOL_CREATE_INFO,
+                    p_next: null(),
+                    flags: CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
+                    queue_family_index: shared_state.queue_families.async_compute_family.index,
+                },
+                None,
+            )
+        }?;
+        let transfer_command_pool = unsafe {
+            shared_state.logical_device.create_command_pool(
+                &CommandPoolCreateInfo {
+                    s_type: StructureType::COMMAND_POOL_CREATE_INFO,
+                    p_next: null(),
+                    flags: CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
+                    queue_family_index: shared_state.queue_families.transfer_family.index,
+                },
+                None,
+            )
+        }?;
+
+        Ok(Self {
+            graphics_command_pool,
+            compute_command_pool,
+            transfer_command_pool,
+            shared_state,
+        })
+    }
+}
+
+impl Drop for GpuThreadLocalState {
+    fn drop(&mut self) {
+        let device = &self.shared_state.logical_device;
+        unsafe {
+            device
+                .device_wait_idle()
+                .expect("Failed to wait for device while dropping thread local state");
+            device.destroy_command_pool(self.graphics_command_pool, None);
+            device.destroy_command_pool(self.compute_command_pool, None);
+            device.destroy_command_pool(self.transfer_command_pool, None);
+        }
+    }
+}
+
+pub struct Gpu {
+    pub state: Arc<GpuState>,
+    pub thread_local_state: GpuThreadLocalState,
+    pub resource_map: ResourceMap,
+}
 
 pub struct GpuConfiguration<'a> {
     pub app_name: &'a str,
@@ -94,9 +158,6 @@ pub enum GpuError {
         Option<(u32, vk::QueueFamilyProperties)>,
         Option<(u32, vk::QueueFamilyProperties)>,
     ),
-
-    #[error("Generic")]
-    GenericGpuError(String),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -186,19 +247,24 @@ impl Gpu {
         let allocator =
             PasstroughAllocator::new(&instance, physical_device.physical_device, &logical_device)?;
 
+        let state = Arc::new(GpuState {
+            entry,
+            instance,
+            logical_device,
+            physical_device,
+            graphics_queue,
+            async_compute_queue,
+            transfer_queue,
+            description,
+            queue_families,
+            allocator: Arc::new(RefCell::new(allocator)),
+        });
+
+        let thread_local_state = GpuThreadLocalState::new(state.clone())?;
+
         Ok(Gpu {
-            state: Arc::new(GpuState {
-                entry,
-                instance,
-                logical_device,
-                physical_device,
-                graphics_queue,
-                async_compute_queue,
-                transfer_queue,
-                description,
-                queue_families,
-                allocator: Arc::new(RefCell::new(allocator)),
-            }),
+            state,
+            thread_local_state,
             resource_map: ResourceMap::new(),
         })
     }
@@ -513,10 +579,6 @@ impl Gpu {
             .as_str();
         }
         trace!("{}", s);
-    }
-
-    pub(crate) fn vk_physical_device(&self) -> PhysicalDevice {
-        self.state.physical_device.physical_device.clone()
     }
 }
 
