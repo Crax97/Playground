@@ -50,6 +50,7 @@ use gpu::{
     Gpu, GpuBuffer, GpuConfiguration, ImageCreateInfo, MemoryDomain, PasstroughAllocator,
     ResourceHandle, TransitionInfo,
 };
+use image::{EncodableLayout, RgbaImage};
 use memoffset::offset_of;
 use nalgebra::*;
 use winit::{dpi::PhysicalSize, event_loop::ControlFlow};
@@ -94,6 +95,7 @@ fn main() -> anyhow::Result<()> {
         BufReader::new(std::fs::File::open("images/texture.jpg")?),
         image::ImageFormat::Jpeg,
     )?;
+    let cpu_image = cpu_image.into_rgba8();
 
     let device = gpu.vk_logical_device();
     let vertex_module = utils::read_file_to_vk_module(&device, "./shaders/vertex.spirv")?;
@@ -238,7 +240,6 @@ fn main() -> anyhow::Result<()> {
 
     gpu.transition_image_layout(
         &image,
-        Format::R8G8B8A8_UINT,
         TransitionInfo {
             layout: ImageLayout::UNDEFINED,
             access_mask: AccessFlags::empty(),
@@ -264,7 +265,6 @@ fn main() -> anyhow::Result<()> {
 
     gpu.transition_image_layout(
         &image,
-        Format::R8G8B8A8_UINT,
         TransitionInfo {
             layout: ImageLayout::TRANSFER_DST_OPTIMAL,
             access_mask: AccessFlags::TRANSFER_WRITE,

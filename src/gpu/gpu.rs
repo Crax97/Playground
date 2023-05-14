@@ -704,7 +704,6 @@ impl Gpu {
     pub fn transition_image_layout(
         &self,
         image: &ResourceHandle<GpuImage>,
-        format: Format,
         old_layout: TransitionInfo,
         new_layout: TransitionInfo,
     ) -> VkResult<()> {
