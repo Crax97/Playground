@@ -17,7 +17,7 @@ use log::{info, trace, warn};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use winit::window::Window;
 
-use super::{GPUFence, GPUSemaphore, Gpu, GpuAllocator, SharedGpu};
+use super::{GPUFence, GPUSemaphore, Gpu, GpuAllocator, GpuState, SharedGpu};
 
 mod util {
     use ash::vk::{PresentModeKHR, SurfaceFormatKHR};
@@ -62,14 +62,15 @@ pub struct Swapchain {
     pub window: Window,
 
     current_swapchain_index: u32,
-    gpu: SharedGpu,
+    state: Arc<GpuState>,
 }
 
 impl Swapchain {
-    pub(crate) fn new(gpu: SharedGpu, window: Window) -> VkResult<Self> {
-        let surface_extension = Surface::new(&gpu.entry, &gpu.instance);
+    pub(crate) fn new(gpu: &Gpu, window: Window) -> VkResult<Self> {
+        let state = gpu.state.clone();
+        let surface_extension = Surface::new(&state.entry, &state.instance);
         let swapchain_extension =
-            ash::extensions::khr::Swapchain::new(&gpu.instance, &gpu.logical_device);
+            ash::extensions::khr::Swapchain::new(&state.instance, &state.logical_device);
 
         let next_image_fence = GPUFence::create(
             &gpu,
@@ -130,7 +131,7 @@ impl Swapchain {
             in_flight_fence,
             render_finished_semaphore,
             image_available_semaphore,
-            gpu: gpu.clone(),
+            state,
             window,
         };
         me.recreate_swapchain()?;
@@ -150,10 +151,12 @@ impl Swapchain {
                 )
             }?;
             unsafe {
-                self.gpu
+                self.state
                     .logical_device
                     .wait_for_fences(&[next_image_fence], true, u64::MAX)?;
-                self.gpu.logical_device.reset_fences(&[next_image_fence])?;
+                self.state
+                    .logical_device
+                    .reset_fences(&[next_image_fence])?;
             }
             if !suboptimal {
                 let image_view = self.current_swapchain_image_views.get(next_image as usize);
@@ -167,16 +170,16 @@ impl Swapchain {
 
     pub(crate) fn present(&self) -> VkResult<bool> {
         unsafe {
-            self.gpu
+            self.state
                 .logical_device
                 .wait_for_fences(&[*self.in_flight_fence], true, u64::MAX)
                 .unwrap();
-            self.gpu
+            self.state
                 .logical_device
                 .reset_fences(&[*self.in_flight_fence])
                 .unwrap();
             self.swapchain_extension.queue_present(
-                self.gpu.graphics_queue,
+                self.state.graphics_queue,
                 &PresentInfoKHR {
                     s_type: StructureType::PRESENT_INFO_KHR,
                     p_next: std::ptr::null(),
@@ -211,8 +214,8 @@ impl Swapchain {
 
         self.surface = unsafe {
             ash_window::create_surface(
-                &self.gpu.entry,
-                &self.gpu.instance,
+                &self.state.entry,
+                &self.state.instance,
                 self.window.raw_display_handle(),
                 self.window.raw_window_handle(),
                 None,
@@ -220,14 +223,16 @@ impl Swapchain {
         };
 
         self.supported_presentation_formats = unsafe {
-            self.surface_extension
-                .get_physical_device_surface_formats(self.gpu.vk_physical_device(), self.surface)
+            self.surface_extension.get_physical_device_surface_formats(
+                self.state.physical_device.physical_device,
+                self.surface,
+            )
         }?;
 
         self.surface_capabilities = unsafe {
             self.surface_extension
                 .get_physical_device_surface_capabilities(
-                    self.gpu.vk_physical_device(),
+                    self.state.physical_device.physical_device,
                     self.surface,
                 )
         }?;
@@ -235,7 +240,7 @@ impl Swapchain {
         self.supported_present_modes = unsafe {
             self.surface_extension
                 .get_physical_device_surface_present_modes(
-                    self.gpu.vk_physical_device(),
+                    self.state.physical_device.physical_device,
                     self.surface,
                 )
         }?;
@@ -377,7 +382,7 @@ impl Swapchain {
                 },
             };
             let view: ImageView = unsafe {
-                self.gpu
+                self.state
                     .logical_device
                     .create_image_view(&view_info, None)?
             };
@@ -418,7 +423,7 @@ impl Swapchain {
     fn drop_image_views(&self) {
         for view in self.current_swapchain_image_views.iter() {
             unsafe {
-                self.gpu.logical_device.destroy_image_view(*view, None);
+                self.state.logical_device.destroy_image_view(*view, None);
             }
         }
     }

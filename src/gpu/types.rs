@@ -30,7 +30,7 @@ macro_rules! define_raii_wrapper {
 
                 let inner = $create_impl_block(&gpu)?;
                 Ok(Self {
-                    device: gpu.logical_device.clone(),
+                    device: gpu.state.logical_device.clone(),
                     inner,
                     $($mem_name),*
                 })
@@ -62,14 +62,14 @@ macro_rules! define_raii_wrapper {
 define_raii_wrapper!((struct GPUSemaphore {}, vk::Semaphore, ash::Device::destroy_semaphore) {
     (create_info: &SemaphoreCreateInfo,) => {
         |gpu: &Gpu| { unsafe {
-            gpu.logical_device.create_semaphore(create_info, get_allocation_callbacks())
+            gpu.state.logical_device.create_semaphore(create_info, get_allocation_callbacks())
         }}
     }
 });
 
 define_raii_wrapper!((struct GPUFence {}, vk::Fence, ash::Device::destroy_fence) {
     (create_info: &FenceCreateInfo,) => {
-        |gpu: &Gpu| { unsafe { gpu.logical_device.create_fence(create_info, get_allocation_callbacks()) }}
+        |gpu: &Gpu| { unsafe { gpu.state.logical_device.create_fence(create_info, get_allocation_callbacks()) }}
     }
 });
 
@@ -87,7 +87,7 @@ impl GpuBuffer {
         allocator: Arc<RefCell<dyn GpuAllocator>>,
     ) -> VkResult<Self> {
         Ok(Self {
-            device: gpu.logical_device.clone(),
+            device: gpu.state.logical_device.clone(),
             inner: buffer,
             allocation,
             allocator,
@@ -161,7 +161,7 @@ impl GpuImage {
         allocator: Arc<RefCell<dyn GpuAllocator>>,
     ) -> VkResult<Self> {
         let view = unsafe {
-            gpu.logical_device.create_image_view(
+            gpu.state.logical_device.create_image_view(
                 &vk::ImageViewCreateInfo {
                     s_type: StructureType::IMAGE_VIEW_CREATE_INFO,
                     p_next: std::ptr::null(),
@@ -183,7 +183,7 @@ impl GpuImage {
         }?;
 
         Ok(Self {
-            device: gpu.logical_device.clone(),
+            device: gpu.state.logical_device.clone(),
             inner: image,
             view,
             allocation,
@@ -214,7 +214,7 @@ impl Resource for GpuImage {}
 
 define_raii_wrapper!((struct GpuSampler {}, vk::Sampler, ash::Device::destroy_sampler) {
     (create_info: &SamplerCreateInfo,) => {
-        |gpu: &Gpu| { unsafe { gpu.logical_device.create_sampler(create_info, get_allocation_callbacks()) }}
+        |gpu: &Gpu| { unsafe { gpu.state.logical_device.create_sampler(create_info, get_allocation_callbacks()) }}
     }
 });
 

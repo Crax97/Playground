@@ -87,9 +87,8 @@ fn main() -> anyhow::Result<()> {
         enable_validation_layer: if cfg!(debug_assertions) { true } else { false },
         window: &window,
     })?;
-    let gpu = Arc::new(gpu);
 
-    let mut swapchain = gpu::Swapchain::new(gpu.clone(), window)?;
+    let mut swapchain = gpu::Swapchain::new(&gpu, window)?;
 
     let cpu_image = image::load(
         BufReader::new(std::fs::File::open("images/texture.jpg")?),
@@ -290,6 +289,7 @@ fn main() -> anyhow::Result<()> {
         mip_lod_bias: 0.0,
         anisotropy_enable: vk::TRUE,
         max_anisotropy: gpu
+            .state
             .physical_device
             .device_properties
             .limits
@@ -602,7 +602,7 @@ fn main() -> anyhow::Result<()> {
             ty: DescriptorType::COMBINED_IMAGE_SAMPLER,
             descriptor_count: 1,
         };
-        gpu.logical_device.create_descriptor_pool(
+        device.create_descriptor_pool(
             &DescriptorPoolCreateInfo {
                 s_type: StructureType::DESCRIPTOR_POOL_CREATE_INFO,
                 p_next: null(),
@@ -616,15 +616,13 @@ fn main() -> anyhow::Result<()> {
     };
 
     let descriptor_set = unsafe {
-        let descriptor_set =
-            gpu.logical_device
-                .allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo {
-                    s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
-                    p_next: null(),
-                    descriptor_pool,
-                    descriptor_set_count: 1,
-                    p_set_layouts: addr_of!(descriptor_set_layout),
-                })?[0];
+        let descriptor_set = device.allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo {
+            s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
+            p_next: null(),
+            descriptor_pool,
+            descriptor_set_count: 1,
+            p_set_layouts: addr_of!(descriptor_set_layout),
+        })?[0];
 
         let buffer_info = DescriptorBufferInfo {
             buffer: *gpu.resource_map.get(&uniform_buffer).unwrap().deref(),
@@ -637,7 +635,7 @@ fn main() -> anyhow::Result<()> {
             image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         };
 
-        gpu.logical_device.update_descriptor_sets(
+        device.update_descriptor_sets(
             &[
                 WriteDescriptorSet {
                     s_type: StructureType::WRITE_DESCRIPTOR_SET,
@@ -721,13 +719,10 @@ fn main() -> anyhow::Result<()> {
                 device.device_wait_idle().unwrap();
                 //                device.free_memory(device_memory, None);
                 device.destroy_pipeline_layout(pipeline_layout, None);
-                gpu.logical_device
-                    .destroy_descriptor_set_layout(descriptor_set_layout, None);
-                gpu.logical_device
-                    .destroy_descriptor_pool(descriptor_pool, None);
-                gpu.logical_device
-                    .free_command_buffers(command_pool, &[command_buffer]);
-                gpu.logical_device.destroy_command_pool(command_pool, None);
+                device.destroy_descriptor_set_layout(descriptor_set_layout, None);
+                device.destroy_descriptor_pool(descriptor_pool, None);
+                device.free_command_buffers(command_pool, &[command_buffer]);
+                device.destroy_command_pool(command_pool, None);
                 device.destroy_pipeline(pipeline, None);
                 device.destroy_render_pass(render_pass, None);
             },
@@ -736,7 +731,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn render_frame(
-    gpu: &Arc<Gpu>,
+    gpu: &Gpu,
     uniform_buffer: &ResourceHandle<GpuBuffer>,
     time: f32,
     swapchain: &mut gpu::Swapchain,
@@ -777,7 +772,8 @@ fn render_frame(
             layers: 1,
         };
 
-        gpu.logical_device
+        gpu.state
+            .logical_device
             .create_framebuffer(&create_info, None)
             .unwrap()
     };
@@ -797,7 +793,9 @@ fn render_frame(
             index_buffer,
         );
 
-        gpu.logical_device.destroy_framebuffer(framebuffer, None);
+        gpu.state
+            .logical_device
+            .destroy_framebuffer(framebuffer, None);
     };
 }
 
@@ -811,7 +809,7 @@ unsafe fn render_textured_quad(
     pipeline: Pipeline,
     pipeline_layout: vk::PipelineLayout,
     descriptor_set: vk::DescriptorSet,
-    gpu: &Arc<Gpu>,
+    gpu: &Gpu,
     vertex_buffer: &ResourceHandle<GpuBuffer>,
     index_buffer: &ResourceHandle<GpuBuffer>,
 ) {
