@@ -18,10 +18,10 @@ use ash::{
         PipelineShaderStageCreateFlags, PipelineShaderStageCreateInfo, PipelineStageFlags,
         PipelineTessellationStateCreateFlags, PipelineTessellationStateCreateInfo,
         PipelineVertexInputStateCreateFlags, PipelineVertexInputStateCreateInfo,
-        PipelineViewportStateCreateFlags, PipelineViewportStateCreateInfo, RenderPass,
-        RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags,
-        StructureType, SubpassDependency, SubpassDescription, SubpassDescriptionFlags,
-        VertexInputAttributeDescription, VertexInputBindingDescription, SUBPASS_EXTERNAL,
+        PipelineViewportStateCreateFlags, PipelineViewportStateCreateInfo, RenderPassCreateFlags,
+        RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags, StructureType, SubpassDependency,
+        SubpassDescription, SubpassDescriptionFlags, VertexInputAttributeDescription,
+        VertexInputBindingDescription, SUBPASS_EXTERNAL,
     },
 };
 
@@ -180,7 +180,6 @@ pub struct FragmentStageInfo<'a> {
     pub module: vk::ShaderModule,
     pub color_attachments: &'a [ColorAttachment],
     pub depth_stencil_attachments: &'a [DepthStencilAttachment],
-    pub dependencies: &'a [vk::SubpassDependency],
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -265,6 +264,87 @@ impl From<LogicOp> for vk::LogicOp {
             LogicOp::Nand => vk::LogicOp::NAND,
             LogicOp::Set => vk::LogicOp::SET,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RenderPassDescription<'a> {
+    pub color_attachments: &'a [ColorAttachment],
+    pub depth_stencil_attachments: &'a [DepthStencilAttachment],
+    pub dependencies: &'a [vk::SubpassDependency],
+}
+impl<'a> RenderPassDescription<'a> {
+    fn get_output_attachments(&self) -> Vec<AttachmentDescription> {
+        let mut attachment_descriptions = vec![];
+
+        for attachment in self.color_attachments.iter() {
+            attachment_descriptions.push(AttachmentDescription {
+                flags: AttachmentDescriptionFlags::empty(),
+                format: attachment.format,
+                samples: attachment.samples,
+                load_op: attachment.load_op,
+                store_op: attachment.store_op,
+                stencil_load_op: attachment.stencil_load_op,
+                stencil_store_op: attachment.stencil_store_op,
+                initial_layout: attachment.initial_layout,
+                final_layout: attachment.final_layout,
+            });
+        }
+        attachment_descriptions
+    }
+}
+
+pub struct RenderPass {
+    pub inner: vk::RenderPass,
+    state: Arc<GpuState>,
+}
+
+impl Drop for RenderPass {
+    fn drop(&mut self) {
+        unsafe {
+            self.state
+                .logical_device
+                .destroy_render_pass(self.inner, None);
+        }
+    }
+}
+impl RenderPass {
+    pub fn new(gpu: &Gpu, pass_description: &RenderPassDescription) -> VkResult<Self> {
+        let output_attachments = pass_description.get_output_attachments();
+        let pass_info = RenderPassCreateInfo {
+            s_type: StructureType::RENDER_PASS_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: RenderPassCreateFlags::empty(),
+            attachment_count: output_attachments.len() as _,
+            p_attachments: output_attachments.as_ptr(),
+            subpass_count: 1,
+            p_subpasses: &[SubpassDescription {
+                flags: SubpassDescriptionFlags::empty(),
+                pipeline_bind_point: PipelineBindPoint::GRAPHICS,
+                input_attachment_count: 0,
+                p_input_attachments: std::ptr::null(),
+                color_attachment_count: 1,
+                p_color_attachments: &[AttachmentReference {
+                    attachment: 0,
+                    layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                }] as *const AttachmentReference,
+                p_resolve_attachments: std::ptr::null(),
+                p_depth_stencil_attachment: std::ptr::null(),
+                preserve_attachment_count: vk::FALSE,
+                p_preserve_attachments: std::ptr::null(),
+            }] as *const SubpassDescription,
+            dependency_count: pass_description.dependencies.len() as _,
+            p_dependencies: pass_description.dependencies.as_ptr(),
+        };
+        let render_pass = unsafe {
+            gpu.vk_logical_device()
+                .create_render_pass(&pass_info, None)?
+        };
+
+        Ok(Self {
+            inner: render_pass,
+            state: gpu.state.clone(),
+        })
     }
 }
 
@@ -380,20 +460,16 @@ impl<'a> MaterialDescription<'a> {
 pub struct Material {
     pub pipeline: Pipeline,
     pub pipeline_layout: PipelineLayout,
-    pub render_pass: RenderPass,
 
     shared_state: Arc<GpuState>,
 }
 
 impl Material {
-    pub fn new(gpu: &Gpu, material_description: &MaterialDescription) -> VkResult<Self> {
-        let (dependency_count, p_dependencies) =
-            if let Some(fs) = material_description.fragment_stage {
-                (fs.dependencies.len() as u32, fs.dependencies.as_ptr())
-            } else {
-                (0, std::ptr::null())
-            };
-
+    pub fn new(
+        gpu: &Gpu,
+        target_render_pass: &RenderPass,
+        material_description: &MaterialDescription,
+    ) -> VkResult<Self> {
         let descriptor_set_layout = material_description.create_descriptor_set_layout(gpu)?;
         let (output_attachments, color_blend_attachments) =
             material_description.get_output_attachments();
@@ -435,36 +511,6 @@ impl Material {
 
         let (input_binding_descriptions, input_attribute_descriptions) =
             material_description.get_input_bindings_and_attributes();
-
-        let pass_info = RenderPassCreateInfo {
-            s_type: StructureType::RENDER_PASS_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: RenderPassCreateFlags::empty(),
-            attachment_count: output_attachments.len() as _,
-            p_attachments: output_attachments.as_ptr(),
-            subpass_count: 1,
-            p_subpasses: &[SubpassDescription {
-                flags: SubpassDescriptionFlags::empty(),
-                pipeline_bind_point: PipelineBindPoint::GRAPHICS,
-                input_attachment_count: 0,
-                p_input_attachments: std::ptr::null(),
-                color_attachment_count: 1,
-                p_color_attachments: &[AttachmentReference {
-                    attachment: 0,
-                    layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                }] as *const AttachmentReference,
-                p_resolve_attachments: std::ptr::null(),
-                p_depth_stencil_attachment: std::ptr::null(),
-                preserve_attachment_count: vk::FALSE,
-                p_preserve_attachments: std::ptr::null(),
-            }] as *const SubpassDescription,
-            dependency_count,
-            p_dependencies,
-        };
-        let render_pass = unsafe {
-            gpu.vk_logical_device()
-                .create_render_pass(&pass_info, None)?
-        };
 
         let pipeline_layout = unsafe {
             let layout_infos = PipelineLayoutCreateInfo {
@@ -637,7 +683,7 @@ impl Material {
                 p_color_blend_state: &color_blend as *const PipelineColorBlendStateCreateInfo,
                 p_dynamic_state: &dynamic_state as *const PipelineDynamicStateCreateInfo,
                 layout: pipeline_layout,
-                render_pass,
+                render_pass: target_render_pass.inner,
                 subpass: 0,
                 base_pipeline_handle: Pipeline::null(),
                 base_pipeline_index: 0,
@@ -655,7 +701,6 @@ impl Material {
         Ok(Self {
             pipeline,
             pipeline_layout,
-            render_pass,
             shared_state: gpu.state.clone(),
         })
     }
@@ -664,9 +709,6 @@ impl Material {
 impl Drop for Material {
     fn drop(&mut self) {
         unsafe {
-            self.shared_state
-                .logical_device
-                .destroy_render_pass(self.render_pass, None);
             self.shared_state
                 .logical_device
                 .destroy_pipeline(self.pipeline, None);

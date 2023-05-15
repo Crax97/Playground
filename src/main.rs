@@ -49,8 +49,8 @@ use ash::{
 use gpu::{
     BlendState, ColorAttachment, FragmentStageInfo, GlobalBinding, Gpu, GpuBuffer,
     GpuConfiguration, ImageCreateInfo, Material, MaterialDescription, MemoryDomain,
-    PasstroughAllocator, ResourceHandle, TransitionInfo, VertexAttributeDescription,
-    VertexBindingDescription, VertexStageInfo,
+    PasstroughAllocator, RenderPass, RenderPassDescription, ResourceHandle, TransitionInfo,
+    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
 use image::{EncodableLayout, RgbaImage};
 use memoffset::offset_of;
@@ -304,8 +304,47 @@ fn main() -> anyhow::Result<()> {
         unnormalized_coordinates: vk::FALSE,
     })?;
 
+    let color_attachments = &[ColorAttachment {
+        format: swapchain.present_format.format,
+        samples: SampleCountFlags::TYPE_1,
+        load_op: AttachmentLoadOp::CLEAR,
+        store_op: AttachmentStoreOp::STORE,
+        stencil_load_op: AttachmentLoadOp::DONT_CARE,
+        stencil_store_op: AttachmentStoreOp::DONT_CARE,
+        initial_layout: ImageLayout::UNDEFINED,
+        final_layout: ImageLayout::PRESENT_SRC_KHR,
+        blend_state: BlendState {
+            blend_enable: true,
+            src_color_blend_factor: BlendFactor::ONE,
+            dst_color_blend_factor: BlendFactor::ZERO,
+            color_blend_op: BlendOp::ADD,
+            src_alpha_blend_factor: BlendFactor::ONE,
+            dst_alpha_blend_factor: BlendFactor::ZERO,
+            alpha_blend_op: BlendOp::ADD,
+            color_write_mask: ColorComponentFlags::RGBA,
+        },
+    }];
+
+    let render_pass = RenderPass::new(
+        &gpu,
+        &RenderPassDescription {
+            color_attachments,
+            dependencies: &[SubpassDependency {
+                src_subpass: SUBPASS_EXTERNAL,
+                dst_subpass: 0,
+                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                src_access_mask: AccessFlags::empty(),
+                dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                dependency_flags: DependencyFlags::empty(),
+            }],
+            ..Default::default()
+        },
+    )?;
+
     let material = Material::new(
         &gpu,
+        &render_pass,
         &MaterialDescription {
             global_bindings: &[
                 GlobalBinding {
@@ -348,36 +387,8 @@ fn main() -> anyhow::Result<()> {
             fragment_stage: Some(FragmentStageInfo {
                 entry_point: "main",
                 module: fragment_module,
-                color_attachments: &[ColorAttachment {
-                    format: swapchain.present_format.format,
-                    samples: SampleCountFlags::TYPE_1,
-                    load_op: AttachmentLoadOp::CLEAR,
-                    store_op: AttachmentStoreOp::STORE,
-                    stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                    stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                    initial_layout: ImageLayout::UNDEFINED,
-                    final_layout: ImageLayout::PRESENT_SRC_KHR,
-                    blend_state: BlendState {
-                        blend_enable: true,
-                        src_color_blend_factor: BlendFactor::ONE,
-                        dst_color_blend_factor: BlendFactor::ZERO,
-                        color_blend_op: BlendOp::ADD,
-                        src_alpha_blend_factor: BlendFactor::ONE,
-                        dst_alpha_blend_factor: BlendFactor::ZERO,
-                        alpha_blend_op: BlendOp::ADD,
-                        color_write_mask: ColorComponentFlags::RGBA,
-                    },
-                }],
+                color_attachments,
                 depth_stencil_attachments: &[],
-                dependencies: &[SubpassDependency {
-                    src_subpass: SUBPASS_EXTERNAL,
-                    dst_subpass: 0,
-                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                    dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                    src_access_mask: AccessFlags::empty(),
-                    dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                    dependency_flags: DependencyFlags::empty(),
-                }],
             }),
             input_topology: gpu::PrimitiveTopology::TriangleList,
             primitive_restart: false,
@@ -523,6 +534,7 @@ fn main() -> anyhow::Result<()> {
                     &uniform_buffer,
                     time,
                     &material,
+                    &render_pass,
                     &mut swapchain,
                     &device,
                     command_pool,
@@ -550,6 +562,7 @@ fn render_frame(
     uniform_buffer: &ResourceHandle<GpuBuffer>,
     time: f32,
     material: &Material,
+    render_pass: &RenderPass,
     swapchain: &mut gpu::Swapchain,
     device: &ash::Device,
     command_pool: vk::CommandPool,
@@ -577,7 +590,8 @@ fn render_frame(
             s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
             p_next: null(),
             flags: FramebufferCreateFlags::empty(),
-            render_pass: material.render_pass,
+            render_pass: render_pass.inner,
+
             attachment_count: 1,
             p_attachments: &next_image as *const ImageView,
             width: swapchain.extents().width,
@@ -596,6 +610,7 @@ fn render_frame(
             command_pool,
             command_buffer,
             material,
+            render_pass,
             framebuffer,
             swapchain,
             descriptor_set,
@@ -615,6 +630,7 @@ unsafe fn render_textured_quad(
     command_pool: vk::CommandPool,
     command_buffer: CommandBuffer,
     material: &Material,
+    render_pass: &RenderPass,
     framebuffer: vk::Framebuffer,
     swapchain: &mut gpu::Swapchain,
     descriptor_set: vk::DescriptorSet,
@@ -641,7 +657,7 @@ unsafe fn render_textured_quad(
         &vk::RenderPassBeginInfo {
             s_type: StructureType::RENDER_PASS_BEGIN_INFO,
             p_next: null(),
-            render_pass: material.render_pass,
+            render_pass: render_pass.inner,
             framebuffer,
             render_area: Rect2D {
                 offset: Offset2D { x: 0, y: 0 },
