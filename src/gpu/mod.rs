@@ -7,6 +7,7 @@ mod swapchain;
 mod types;
 
 pub use allocator::*;
+pub use command_buffer::*;
 pub use gpu::*;
 pub use material::*;
 pub use resource::*;

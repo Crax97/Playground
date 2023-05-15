@@ -2,57 +2,33 @@ mod gpu;
 mod utils;
 
 use std::{
-    ffi::CString,
     io::BufReader,
     mem::size_of,
     ops::Deref,
     ptr::{addr_of, null},
-    sync::Arc,
 };
 
-use ash::{
-    extensions::khr::Swapchain,
-    vk::{
-        self, AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
-        AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor,
-        BufferCreateFlags, BufferCreateInfo, BufferUsageFlags, ClearColorValue,
-        ColorComponentFlags, CommandBuffer, CommandBufferAllocateInfo, CommandBufferBeginInfo,
-        CommandBufferLevel, CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo,
-        CommandPoolResetFlags, CompareOp, CullModeFlags, DependencyFlags, DescriptorBufferInfo,
-        DescriptorImageInfo, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
-        DescriptorPoolSize, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
-        DescriptorSetLayoutCreateInfo, DescriptorType, DynamicState, Filter, Format,
-        FramebufferCreateFlags, FramebufferCreateInfo, FrontFace, GraphicsPipelineCreateInfo,
-        ImageLayout, ImageUsageFlags, ImageView, IndexType, LogicOp, MappedMemoryRange,
-        MemoryAllocateInfo, MemoryMapFlags, MemoryPropertyFlags, Offset2D, Pipeline,
-        PipelineBindPoint, PipelineCache, PipelineColorBlendAttachmentState,
-        PipelineColorBlendStateCreateFlags, PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
-        PipelineDepthStencilStateCreateFlags, PipelineDepthStencilStateCreateInfo,
-        PipelineDynamicStateCreateFlags, PipelineDynamicStateCreateInfo,
-        PipelineInputAssemblyStateCreateFlags, PipelineInputAssemblyStateCreateInfo,
-        PipelineLayoutCreateFlags, PipelineLayoutCreateInfo, PipelineMultisampleStateCreateFlags,
-        PipelineMultisampleStateCreateInfo, PipelineRasterizationStateCreateFlags,
-        PipelineRasterizationStateCreateInfo, PipelineShaderStageCreateFlags,
-        PipelineShaderStageCreateInfo, PipelineStageFlags, PipelineTessellationStateCreateFlags,
-        PipelineTessellationStateCreateInfo, PipelineVertexInputStateCreateFlags,
-        PipelineVertexInputStateCreateInfo, PipelineViewportStateCreateFlags,
-        PipelineViewportStateCreateInfo, PolygonMode, PresentModeKHR, PrimitiveTopology, Rect2D,
-        RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, SamplerAddressMode,
-        SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, Semaphore, ShaderStageFlags,
-        SharingMode, StencilOp, StencilOpState, StructureType, SubmitInfo, SubpassContents,
-        SubpassDependency, SubpassDescription, SubpassDescriptionFlags,
-        VertexInputAttributeDescription, VertexInputBindingDescription, VertexInputRate, Viewport,
-        WriteDescriptorSet, SUBPASS_EXTERNAL,
-    },
+use ash::vk::{
+    self, AccessFlags, AttachmentLoadOp, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor,
+    BufferCreateFlags, BufferCreateInfo, BufferUsageFlags, ClearColorValue, ClearValue,
+    ColorComponentFlags, CommandBufferAllocateInfo, CommandBufferLevel, CommandPoolCreateFlags,
+    CommandPoolCreateInfo, CommandPoolResetFlags, CompareOp, DependencyFlags, DescriptorBufferInfo,
+    DescriptorImageInfo, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo, DescriptorPoolSize,
+    DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags, DescriptorSetLayoutCreateInfo,
+    DescriptorType, Filter, FramebufferCreateFlags, FramebufferCreateInfo, ImageLayout,
+    ImageUsageFlags, ImageView, IndexType, Offset2D, PipelineBindPoint, PipelineStageFlags,
+    PresentModeKHR, Rect2D, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags,
+    SamplerCreateInfo, SamplerMipmapMode, ShaderStageFlags, SharingMode, StructureType,
+    SubpassDependency, WriteDescriptorSet, SUBPASS_EXTERNAL,
 };
 
 use gpu::{
-    BlendState, ColorAttachment, FragmentStageInfo, GlobalBinding, Gpu, GpuBuffer,
-    GpuConfiguration, ImageCreateInfo, Material, MaterialDescription, MemoryDomain,
-    PasstroughAllocator, RenderPass, RenderPassDescription, ResourceHandle, TransitionInfo,
-    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
+    BeginRenderPassInfo, BlendState, ColorAttachment, FragmentStageInfo, GlobalBinding, Gpu,
+    GpuBuffer, GpuConfiguration, ImageCreateInfo, Material, MaterialDescription, MemoryDomain,
+    RenderPass, RenderPassDescription, ResourceHandle, TransitionInfo, VertexAttributeDescription,
+    VertexBindingDescription, VertexStageInfo,
 };
-use image::{EncodableLayout, RgbaImage};
+use image::EncodableLayout;
 use memoffset::offset_of;
 use nalgebra::*;
 use winit::{dpi::PhysicalSize, event_loop::ControlFlow};
@@ -506,28 +482,28 @@ fn main() -> anyhow::Result<()> {
         device.destroy_shader_module(fragment_module, None);
     }
     let mut time = 0.0;
-    event_loop.run(move |event, event_loop, mut control_flow| {
+    event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
 
         match event {
             winit::event::Event::NewEvents(_) => {}
-            winit::event::Event::WindowEvent { window_id, event } => match event {
+            winit::event::Event::WindowEvent { event, .. } => match event {
                 winit::event::WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::ExitWithCode(0)
                 }
-                winit::event::WindowEvent::Resized(_) => unsafe {
-                    swapchain.recreate_swapchain();
-                },
+                winit::event::WindowEvent::Resized(_) => {
+                    swapchain.recreate_swapchain().unwrap();
+                }
                 _ => {}
             },
-            winit::event::Event::DeviceEvent { device_id, event } => {}
+            winit::event::Event::DeviceEvent { .. } => {}
             winit::event::Event::UserEvent(_) => {}
             winit::event::Event::Suspended => {}
             winit::event::Event::Resumed => {}
             winit::event::Event::MainEventsCleared => {
                 swapchain.window.request_redraw();
             }
-            winit::event::Event::RedrawRequested(window) => {
+            winit::event::Event::RedrawRequested(..) => {
                 time += 0.001;
                 render_frame(
                     &gpu,
@@ -537,8 +513,6 @@ fn main() -> anyhow::Result<()> {
                     &render_pass,
                     &mut swapchain,
                     &device,
-                    command_pool,
-                    command_buffer,
                     descriptor_set,
                     &vertex_buffer,
                     &index_buffer,
@@ -565,8 +539,6 @@ fn render_frame(
     render_pass: &RenderPass,
     swapchain: &mut gpu::Swapchain,
     device: &ash::Device,
-    command_pool: vk::CommandPool,
-    command_buffer: CommandBuffer,
     descriptor_set: vk::DescriptorSet,
     vertex_buffer: &ResourceHandle<GpuBuffer>,
     index_buffer: &ResourceHandle<GpuBuffer>,
@@ -607,8 +579,6 @@ fn render_frame(
     unsafe {
         render_textured_quad(
             device,
-            command_pool,
-            command_buffer,
             material,
             render_pass,
             framebuffer,
@@ -618,7 +588,7 @@ fn render_frame(
             vertex_buffer,
             index_buffer,
         );
-
+        let _ = swapchain.present();
         gpu.state
             .logical_device
             .destroy_framebuffer(framebuffer, None);
@@ -627,8 +597,6 @@ fn render_frame(
 
 unsafe fn render_textured_quad(
     device: &ash::Device,
-    command_pool: vk::CommandPool,
-    command_buffer: CommandBuffer,
     material: &Material,
     render_pass: &RenderPass,
     framebuffer: vk::Framebuffer,
@@ -639,107 +607,62 @@ unsafe fn render_textured_quad(
     index_buffer: &ResourceHandle<GpuBuffer>,
 ) {
     device
-        .reset_command_pool(command_pool, CommandPoolResetFlags::empty())
+        .reset_command_pool(
+            gpu.thread_local_state.graphics_command_pool,
+            CommandPoolResetFlags::empty(),
+        )
         .unwrap();
-    device
-        .begin_command_buffer(
-            command_buffer,
-            &CommandBufferBeginInfo {
-                s_type: StructureType::COMMAND_BUFFER_BEGIN_INFO,
-                p_next: null(),
-                flags: CommandBufferUsageFlags::empty(),
-                p_inheritance_info: null(),
+    {
+        let mut command_buffer = gpu::CommandBuffer::new(
+            gpu,
+            gpu::CommandBufferSubmitInfo {
+                wait_semaphores: vec![swapchain.image_available_semaphore.inner],
+                wait_stages: vec![PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
+                signal_semaphores: vec![swapchain.render_finished_semaphore.inner],
+                fence: Some(swapchain.in_flight_fence.inner),
+                target_queue: gpu::QueueType::Graphics,
             },
         )
         .unwrap();
-    device.cmd_begin_render_pass(
-        command_buffer,
-        &vk::RenderPassBeginInfo {
-            s_type: StructureType::RENDER_PASS_BEGIN_INFO,
-            p_next: null(),
-            render_pass: render_pass.inner,
-            framebuffer,
-            render_area: Rect2D {
-                offset: Offset2D { x: 0, y: 0 },
-                extent: swapchain.extents(),
-            },
-            clear_value_count: 1,
-            p_clear_values: &vk::ClearValue {
-                color: ClearColorValue {
-                    float32: [0.0, 0.0, 0.0, 1.0],
+
+        {
+            let inner_command_buffer = command_buffer.inner();
+            let mut render_pass = command_buffer.begin_render_pass(&BeginRenderPassInfo {
+                framebuffer,
+                render_pass,
+                clear_color_values: &[ClearValue {
+                    color: ClearColorValue {
+                        float32: [0.0, 0.0, 0.0, 1.0],
+                    },
+                }],
+                render_area: Rect2D {
+                    offset: Offset2D { x: 0, y: 0 },
+                    extent: swapchain.extents(),
                 },
-            },
-        },
-        SubpassContents::INLINE,
-    );
-    device.cmd_bind_pipeline(
-        command_buffer,
-        PipelineBindPoint::GRAPHICS,
-        material.pipeline,
-    );
-    device.cmd_set_viewport(
-        command_buffer,
-        0,
-        &[Viewport {
-            x: 0 as f32,
-            y: 0 as f32,
-            width: swapchain.extents().width as f32,
-            height: swapchain.extents().height as f32,
-            min_depth: 0.0,
-            max_depth: 1.0,
-        }],
-    );
-    device.cmd_set_scissor(
-        command_buffer,
-        0,
-        &[Rect2D {
-            offset: Offset2D { x: 0, y: 0 },
-            extent: swapchain.extents(),
-        }],
-    );
-    device.cmd_bind_descriptor_sets(
-        command_buffer,
-        PipelineBindPoint::GRAPHICS,
-        material.pipeline_layout,
-        0,
-        &[descriptor_set],
-        &[],
-    );
-    device.cmd_bind_vertex_buffers(
-        command_buffer,
-        0,
-        &[*gpu.resource_map.get(&vertex_buffer).unwrap().deref()],
-        &[0],
-    );
-    device.cmd_bind_index_buffer(
-        command_buffer,
-        *gpu.resource_map.get(&index_buffer).unwrap().deref(),
-        0,
-        IndexType::UINT32,
-    );
-    device.cmd_draw_indexed(command_buffer, 6, 1, 0, 0, 0);
-    device.cmd_end_render_pass(command_buffer);
+            });
+            render_pass.bind_material(material);
 
-    device.end_command_buffer(command_buffer).unwrap();
-    device
-        .queue_submit(
-            gpu.graphics_queue(),
-            &[SubmitInfo {
-                s_type: StructureType::SUBMIT_INFO,
-                p_next: null(),
-                wait_semaphore_count: 1,
-                p_wait_semaphores: swapchain.image_available_semaphore.deref() as *const Semaphore,
-                p_wait_dst_stage_mask: &PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-                    as *const PipelineStageFlags,
-                command_buffer_count: 1,
-                p_command_buffers: &command_buffer as *const CommandBuffer,
-                signal_semaphore_count: 1,
-                p_signal_semaphores: swapchain.render_finished_semaphore.deref()
-                    as *const Semaphore,
-            }],
-            *swapchain.in_flight_fence,
-        )
-        .unwrap();
-
-    let _ = swapchain.present();
+            device.cmd_bind_descriptor_sets(
+                inner_command_buffer,
+                PipelineBindPoint::GRAPHICS,
+                material.pipeline_layout,
+                0,
+                &[descriptor_set],
+                &[],
+            );
+            device.cmd_bind_vertex_buffers(
+                inner_command_buffer,
+                0,
+                &[*gpu.resource_map.get(&vertex_buffer).unwrap().deref()],
+                &[0],
+            );
+            device.cmd_bind_index_buffer(
+                inner_command_buffer,
+                *gpu.resource_map.get(&index_buffer).unwrap().deref(),
+                0,
+                IndexType::UINT32,
+            );
+            render_pass.draw_indexed(6, 1, 0, 0, 0);
+        }
+    }
 }
