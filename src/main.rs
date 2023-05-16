@@ -1,4 +1,5 @@
 mod gpu;
+mod mesh;
 mod utils;
 
 use std::{
@@ -10,10 +11,10 @@ use std::{
 
 use ash::vk::{
     self, AccessFlags, AttachmentLoadOp, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor,
-    BufferCreateFlags, BufferCreateInfo, BufferUsageFlags, ClearColorValue, ClearValue,
-    ColorComponentFlags, CommandBufferAllocateInfo, CommandBufferLevel, CommandPoolCreateFlags,
-    CommandPoolCreateInfo, CommandPoolResetFlags, CompareOp, DependencyFlags, DescriptorBufferInfo,
-    DescriptorImageInfo, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo, DescriptorPoolSize,
+    BufferCreateFlags, BufferUsageFlags, ClearColorValue, ClearValue, ColorComponentFlags,
+    CommandBufferAllocateInfo, CommandBufferLevel, CommandPoolCreateFlags, CommandPoolCreateInfo,
+    CompareOp, DependencyFlags, DescriptorBufferInfo, DescriptorImageInfo,
+    DescriptorPoolCreateFlags, DescriptorPoolCreateInfo, DescriptorPoolSize,
     DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags, DescriptorSetLayoutCreateInfo,
     DescriptorType, Filter, FramebufferCreateFlags, FramebufferCreateInfo, ImageLayout,
     ImageUsageFlags, ImageView, IndexType, Offset2D, PipelineBindPoint, PipelineStageFlags,
@@ -23,10 +24,10 @@ use ash::vk::{
 };
 
 use gpu::{
-    BeginRenderPassInfo, BlendState, ColorAttachment, FragmentStageInfo, GlobalBinding, Gpu,
-    GpuBuffer, GpuConfiguration, ImageCreateInfo, Material, MaterialDescription, MemoryDomain,
-    RenderPass, RenderPassDescription, ResourceHandle, TransitionInfo, VertexAttributeDescription,
-    VertexBindingDescription, VertexStageInfo,
+    BeginRenderPassInfo, BlendState, BufferCreateInfo, ColorAttachment, FragmentStageInfo,
+    GlobalBinding, Gpu, GpuBuffer, GpuConfiguration, ImageCreateInfo, Material,
+    MaterialDescription, MemoryDomain, RenderPass, RenderPassDescription, ResourceHandle,
+    TransitionInfo, VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
 use image::EncodableLayout;
 use memoffset::offset_of;
@@ -104,14 +105,8 @@ fn main() -> anyhow::Result<()> {
 
     let staging_buffer = {
         let create_info = BufferCreateInfo {
-            s_type: StructureType::BUFFER_CREATE_INFO,
-            p_next: null(),
-            flags: BufferCreateFlags::empty(),
             size: mb_16,
             usage: BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_SRC,
-            sharing_mode: SharingMode::EXCLUSIVE,
-            queue_family_index_count: 0,
-            p_queue_family_indices: null(),
         };
         gpu.create_buffer(
             &create_info,
@@ -141,34 +136,22 @@ fn main() -> anyhow::Result<()> {
         },
     ];
     let indices: &[u32] = &[0, 1, 2, 2, 3, 0];
-    let data_size = (size_of::<VertexData>() * vertex_data.len()) as u64;
+    let data_size = size_of::<VertexData>() * vertex_data.len();
     let vertex_buffer = {
         let create_info = BufferCreateInfo {
-            s_type: StructureType::BUFFER_CREATE_INFO,
-            p_next: null(),
-            flags: BufferCreateFlags::empty(),
             size: data_size,
             usage: BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
-            sharing_mode: SharingMode::EXCLUSIVE,
-            queue_family_index_count: 0,
-            p_queue_family_indices: null(),
         };
         let buffer = gpu.create_buffer(&create_info, MemoryDomain::DeviceLocal)?;
         buffer
     };
 
-    let index_size = (size_of::<u32>() * indices.len()) as u64;
+    let index_size = (size_of::<u32>() * indices.len());
 
     let index_buffer = {
         let create_info = BufferCreateInfo {
-            s_type: StructureType::BUFFER_CREATE_INFO,
-            p_next: null(),
-            flags: BufferCreateFlags::empty(),
             size: index_size,
             usage: BufferUsageFlags::INDEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
-            sharing_mode: SharingMode::EXCLUSIVE,
-            queue_family_index_count: 0,
-            p_queue_family_indices: null(),
         };
         let buffer = gpu.create_buffer(&create_info, MemoryDomain::DeviceLocal)?;
         buffer
@@ -176,14 +159,8 @@ fn main() -> anyhow::Result<()> {
 
     let uniform_buffer = {
         let create_info = BufferCreateInfo {
-            s_type: StructureType::BUFFER_CREATE_INFO,
-            p_next: null(),
-            flags: BufferCreateFlags::empty(),
-            size: std::mem::size_of::<PerObjectData>() as u64,
+            size: std::mem::size_of::<PerObjectData>(),
             usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
-            sharing_mode: SharingMode::EXCLUSIVE,
-            queue_family_index_count: 0,
-            p_queue_family_indices: null(),
         };
         let buffer = gpu.create_buffer(
             &create_info,
@@ -505,6 +482,7 @@ fn main() -> anyhow::Result<()> {
             }
             winit::event::Event::RedrawRequested(..) => {
                 time += 0.001;
+                gpu.reset_state().unwrap();
                 render_frame(
                     &gpu,
                     &uniform_buffer,
@@ -606,12 +584,6 @@ unsafe fn render_textured_quad(
     vertex_buffer: &ResourceHandle<GpuBuffer>,
     index_buffer: &ResourceHandle<GpuBuffer>,
 ) {
-    device
-        .reset_command_pool(
-            gpu.thread_local_state.graphics_command_pool,
-            CommandPoolResetFlags::empty(),
-        )
-        .unwrap();
     {
         let mut command_buffer = gpu::CommandBuffer::new(
             gpu,

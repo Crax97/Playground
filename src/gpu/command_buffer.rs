@@ -8,15 +8,7 @@ use ash::{
 };
 use log::trace;
 
-use super::{material::RenderPass, Gpu, Material};
-
-#[derive(Default)]
-pub enum QueueType {
-    #[default]
-    Graphics,
-    AsyncCompute,
-    Transfer,
-}
+use super::{material::RenderPass, Gpu, Material, QueueType};
 
 #[derive(Default)]
 pub struct CommandBufferSubmitInfo {
@@ -51,11 +43,7 @@ impl<'g> CommandBuffer<'g> {
             device.allocate_command_buffers(&CommandBufferAllocateInfo {
                 s_type: StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
                 p_next: std::ptr::null(),
-                command_pool: match info.target_queue {
-                    QueueType::Graphics => gpu.thread_local_state.graphics_command_pool,
-                    QueueType::AsyncCompute => gpu.thread_local_state.compute_command_pool,
-                    QueueType::Transfer => gpu.thread_local_state.transfer_command_pool,
-                },
+                command_pool: info.target_queue.get_vk_queue(gpu),
                 level: CommandBufferLevel::PRIMARY,
                 command_buffer_count: 1,
             })

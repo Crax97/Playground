@@ -10,16 +10,17 @@ use anyhow::Result;
 use ash::{
     prelude::*,
     vk::{
-        make_api_version, AccessFlags, ApplicationInfo, BufferCreateInfo,
+        make_api_version, AccessFlags, ApplicationInfo, BufferCreateFlags, BufferUsageFlags,
         CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
-        CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo, DependencyFlags,
-        DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo,
-        Extent3D, Fence, ImageAspectFlags, ImageCreateFlags, ImageLayout, ImageMemoryBarrier,
-        ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType, InstanceCreateFlags,
-        InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D, PhysicalDevice,
-        PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags,
-        Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo, SharingMode, StructureType,
-        SubmitInfo, API_VERSION_1_3,
+        CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo,
+        CommandPoolResetFlags, DependencyFlags, DeviceCreateFlags, DeviceCreateInfo,
+        DeviceQueueCreateFlags, DeviceQueueCreateInfo, Extent3D, Fence, ImageAspectFlags,
+        ImageCreateFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceLayers,
+        ImageSubresourceRange, ImageTiling, ImageType, InstanceCreateFlags, InstanceCreateInfo,
+        MemoryHeap, MemoryHeapFlags, Offset3D, PhysicalDevice, PhysicalDeviceFeatures,
+        PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags, Queue, QueueFlags,
+        SampleCountFlags, SamplerCreateInfo, SharingMode, StructureType, SubmitInfo,
+        API_VERSION_1_3,
     },
     *,
 };
@@ -32,7 +33,7 @@ use winit::window::Window;
 use super::{
     allocator::{GpuAllocator, PasstroughAllocator},
     resource::{ResourceHandle, ResourceMap},
-    AllocationRequirements, GpuBuffer, GpuImage, GpuSampler, MemoryDomain,
+    AllocationRequirements, GpuBuffer, GpuImage, GpuSampler, MemoryDomain, QueueType,
 };
 
 const KHRONOS_VALIDATION_LAYER: &'static str = "VK_LAYER_KHRONOS_validation";
@@ -267,6 +268,15 @@ impl Gpu {
             thread_local_state,
             resource_map: ResourceMap::new(),
         })
+    }
+
+    pub fn reset_state(&self) -> VkResult<()> {
+        unsafe {
+            self.vk_logical_device().reset_command_pool(
+                self.thread_local_state.graphics_command_pool,
+                CommandPoolResetFlags::empty(),
+            )
+        }
     }
 
     fn create_instance(
@@ -589,6 +599,10 @@ pub struct ImageCreateInfo {
     pub usage: vk::ImageUsageFlags,
 }
 
+pub struct BufferCreateInfo {
+    pub size: usize,
+    pub usage: BufferUsageFlags,
+}
 pub struct TransitionInfo {
     pub layout: ImageLayout,
     pub access_mask: AccessFlags,
@@ -601,7 +615,23 @@ impl Gpu {
         create_info: &BufferCreateInfo,
         memory_domain: MemoryDomain,
     ) -> VkResult<ResourceHandle<GpuBuffer>> {
-        let buffer = unsafe { self.state.logical_device.create_buffer(create_info, None) }?;
+        let family = self.state.queue_families.clone();
+        let create_info = vk::BufferCreateInfo {
+            s_type: StructureType::BUFFER_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: BufferCreateFlags::empty(),
+            size: create_info.size as u64,
+            usage: create_info.usage,
+            sharing_mode: SharingMode::CONCURRENT,
+            queue_family_index_count: 3,
+            p_queue_family_indices: [
+                family.graphics_family.index,
+                family.async_compute_family.index,
+                family.transfer_family.index,
+            ]
+            .as_ptr(),
+        };
+        let buffer = unsafe { self.state.logical_device.create_buffer(&create_info, None) }?;
         let memory_requirements = unsafe {
             self.state
                 .logical_device
@@ -706,7 +736,7 @@ impl Gpu {
         &self,
         source_buffer: &ResourceHandle<GpuBuffer>,
         dest_buffer: &ResourceHandle<GpuBuffer>,
-        size: u64,
+        size: usize,
     ) -> VkResult<()> {
         unsafe {
             let command_pool = self.state.logical_device.create_command_pool(
@@ -750,7 +780,7 @@ impl Gpu {
                 &[vk::BufferCopy {
                     src_offset: 0,
                     dst_offset: 0,
-                    size,
+                    size: size as u64,
                 }],
             );
             self.state
