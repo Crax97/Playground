@@ -10,7 +10,7 @@ use ash::{
     },
 };
 
-use super::{resource::Resource, MemoryAllocation};
+use super::{resource::Resource, MemoryAllocation, MemoryDomain};
 
 pub fn get_allocation_callbacks() -> Option<&'static AllocationCallbacks> {
     None
@@ -76,19 +76,22 @@ define_raii_wrapper!((struct GPUFence {}, vk::Fence, ash::Device::destroy_fence)
 pub struct GpuBuffer {
     device: ash::Device,
     pub(crate) inner: vk::Buffer,
+    pub(crate) memory_domain: MemoryDomain,
     pub(crate) allocation: MemoryAllocation,
     pub(crate) allocator: Arc<RefCell<dyn GpuAllocator>>,
 }
 impl GpuBuffer {
     pub fn create(
-        gpu: &Gpu,
+        device: ash::Device,
         buffer: Buffer,
+        memory_domain: MemoryDomain,
         allocation: MemoryAllocation,
         allocator: Arc<RefCell<dyn GpuAllocator>>,
     ) -> VkResult<Self> {
         Ok(Self {
-            device: gpu.state.logical_device.clone(),
+            device,
             inner: buffer,
+            memory_domain,
             allocation,
             allocator,
         })

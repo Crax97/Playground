@@ -1,7 +1,4 @@
-use ash::{
-    prelude::VkResult,
-    vk::{BufferCreateFlags, BufferUsageFlags, SharingMode, StructureType},
-};
+use ash::{prelude::VkResult, vk::BufferUsageFlags};
 use nalgebra::{Vector2, Vector3};
 
 use crate::gpu::{BufferCreateInfo, Gpu, GpuBuffer, MemoryDomain, ResourceHandle};
@@ -30,7 +27,36 @@ impl Mesh {
                 usage: BufferUsageFlags::INDEX_BUFFER,
             },
             MemoryDomain::DeviceLocal,
-        );
+        )?;
+        gpu.write_buffer_data(&index_buffer, create_info.indices)?;
+        let position_component = gpu.create_buffer(
+            &BufferCreateInfo {
+                size: std::mem::size_of::<u32>() * create_info.positions.len(),
+                usage: BufferUsageFlags::VERTEX_BUFFER,
+            },
+            MemoryDomain::DeviceLocal,
+        )?;
+        let normal_component = gpu.create_buffer(
+            &BufferCreateInfo {
+                size: std::mem::size_of::<u32>() * create_info.normals.len(),
+                usage: BufferUsageFlags::VERTEX_BUFFER,
+            },
+            MemoryDomain::DeviceLocal,
+        )?;
+        let tangent_component = gpu.create_buffer(
+            &BufferCreateInfo {
+                size: std::mem::size_of::<u32>() * create_info.tangents.len(),
+                usage: BufferUsageFlags::VERTEX_BUFFER,
+            },
+            MemoryDomain::DeviceLocal,
+        )?;
+        let uv_component = gpu.create_buffer(
+            &BufferCreateInfo {
+                size: std::mem::size_of::<u32>() * create_info.uvs.len(),
+                usage: BufferUsageFlags::VERTEX_BUFFER,
+            },
+            MemoryDomain::DeviceLocal,
+        )?;
         todo!()
     }
 }

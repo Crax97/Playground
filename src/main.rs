@@ -11,16 +11,15 @@ use std::{
 
 use ash::vk::{
     self, AccessFlags, AttachmentLoadOp, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor,
-    BufferCreateFlags, BufferUsageFlags, ClearColorValue, ClearValue, ColorComponentFlags,
-    CommandBufferAllocateInfo, CommandBufferLevel, CommandPoolCreateFlags, CommandPoolCreateInfo,
-    CompareOp, DependencyFlags, DescriptorBufferInfo, DescriptorImageInfo,
-    DescriptorPoolCreateFlags, DescriptorPoolCreateInfo, DescriptorPoolSize,
-    DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags, DescriptorSetLayoutCreateInfo,
-    DescriptorType, Filter, FramebufferCreateFlags, FramebufferCreateInfo, ImageLayout,
-    ImageUsageFlags, ImageView, IndexType, Offset2D, PipelineBindPoint, PipelineStageFlags,
-    PresentModeKHR, Rect2D, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags,
-    SamplerCreateInfo, SamplerMipmapMode, ShaderStageFlags, SharingMode, StructureType,
-    SubpassDependency, WriteDescriptorSet, SUBPASS_EXTERNAL,
+    BufferUsageFlags, ClearColorValue, ClearValue, ColorComponentFlags, CommandBufferAllocateInfo,
+    CommandBufferLevel, CommandPoolCreateFlags, CommandPoolCreateInfo, CompareOp, DependencyFlags,
+    DescriptorBufferInfo, DescriptorImageInfo, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
+    DescriptorPoolSize, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
+    DescriptorSetLayoutCreateInfo, DescriptorType, Filter, FramebufferCreateFlags,
+    FramebufferCreateInfo, ImageLayout, ImageUsageFlags, ImageView, IndexType, Offset2D,
+    PipelineBindPoint, PipelineStageFlags, PresentModeKHR, Rect2D, SampleCountFlags,
+    SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, ShaderStageFlags,
+    StructureType, SubpassDependency, WriteDescriptorSet, SUBPASS_EXTERNAL,
 };
 
 use gpu::{
@@ -101,18 +100,6 @@ fn main() -> anyhow::Result<()> {
         })?[0]
     };
 
-    let mb_16 = 1024 * 1024 * 16;
-
-    let staging_buffer = {
-        let create_info = BufferCreateInfo {
-            size: mb_16,
-            usage: BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_SRC,
-        };
-        gpu.create_buffer(
-            &create_info,
-            MemoryDomain::HostCached | MemoryDomain::HostVisible,
-        )?
-    };
     let vertex_data = &[
         VertexData {
             position: vector![-0.5, -0.5],
@@ -146,7 +133,7 @@ fn main() -> anyhow::Result<()> {
         buffer
     };
 
-    let index_size = (size_of::<u32>() * indices.len());
+    let index_size = size_of::<u32>() * indices.len();
 
     let index_buffer = {
         let create_info = BufferCreateInfo {
@@ -179,18 +166,8 @@ fn main() -> anyhow::Result<()> {
         MemoryDomain::DeviceLocal,
     )?;
 
-    gpu.resource_map
-        .get(&staging_buffer)
-        .unwrap()
-        .write_data(vertex_data);
-
-    gpu.copy_buffer(&staging_buffer, &vertex_buffer, data_size)?;
-    gpu.resource_map
-        .get(&staging_buffer)
-        .unwrap()
-        .write_data(indices);
-
-    gpu.copy_buffer(&staging_buffer, &index_buffer, index_size)?;
+    gpu.write_buffer_data(&vertex_buffer, vertex_data)?;
+    gpu.write_buffer_data(&index_buffer, indices)?;
 
     gpu.transition_image_layout(
         &image,
@@ -206,6 +183,18 @@ fn main() -> anyhow::Result<()> {
         },
     )?;
 
+    let mb_16 = 1024 * 1024 * 16;
+
+    let staging_buffer = {
+        let create_info = BufferCreateInfo {
+            size: mb_16,
+            usage: BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_SRC,
+        };
+        gpu.create_buffer(
+            &create_info,
+            MemoryDomain::HostCached | MemoryDomain::HostVisible,
+        )?
+    };
     gpu.resource_map
         .get(&staging_buffer)
         .unwrap()

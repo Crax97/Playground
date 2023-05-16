@@ -33,7 +33,7 @@ use winit::window::Window;
 use super::{
     allocator::{GpuAllocator, PasstroughAllocator},
     resource::{ResourceHandle, ResourceMap},
-    AllocationRequirements, GpuBuffer, GpuImage, GpuSampler, MemoryDomain, QueueType,
+    AllocationRequirements, GpuBuffer, GpuImage, GpuSampler, MemoryDomain,
 };
 
 const KHRONOS_VALIDATION_LAYER: &'static str = "VK_LAYER_KHRONOS_validation";
@@ -135,6 +135,7 @@ impl Drop for GpuThreadLocalState {
 pub struct Gpu {
     pub state: Arc<GpuState>,
     pub thread_local_state: GpuThreadLocalState,
+    pub staging_buffer: ResourceHandle<GpuBuffer>,
     pub resource_map: ResourceMap,
 }
 
@@ -263,10 +264,14 @@ impl Gpu {
 
         let thread_local_state = GpuThreadLocalState::new(state.clone())?;
 
+        let staging_buffer = create_staging_buffer(&state)?;
+        let resource_map = ResourceMap::new();
+        let staging_buffer = resource_map.add(staging_buffer);
         Ok(Gpu {
             state,
             thread_local_state,
-            resource_map: ResourceMap::new(),
+            staging_buffer,
+            resource_map,
         })
     }
 
@@ -592,6 +597,50 @@ impl Gpu {
     }
 }
 
+fn create_staging_buffer(state: &Arc<GpuState>) -> VkResult<GpuBuffer> {
+    let mb_64 = 1024 * 1024 * 64;
+    let family = state.queue_families.clone();
+    let create_info = vk::BufferCreateInfo {
+        s_type: StructureType::BUFFER_CREATE_INFO,
+        p_next: std::ptr::null(),
+        flags: BufferCreateFlags::empty(),
+        size: mb_64 as u64,
+        usage: BufferUsageFlags::TRANSFER_SRC,
+        sharing_mode: SharingMode::CONCURRENT,
+        queue_family_index_count: 3,
+        p_queue_family_indices: [
+            family.graphics_family.index,
+            family.async_compute_family.index,
+            family.transfer_family.index,
+        ]
+        .as_ptr(),
+    };
+    let buffer = unsafe { state.logical_device.create_buffer(&create_info, None) }?;
+    let memory_requirements =
+        unsafe { state.logical_device.get_buffer_memory_requirements(buffer) };
+    let allocation_requirements = AllocationRequirements {
+        memory_requirements,
+        memory_domain: MemoryDomain::HostVisible,
+    };
+    let allocation = state
+        .allocator
+        .borrow_mut()
+        .allocate(&state.logical_device, allocation_requirements)?;
+    unsafe {
+        state
+            .logical_device
+            .bind_buffer_memory(buffer, allocation.device_memory, 0)
+    }?;
+    let buffer = GpuBuffer::create(
+        state.logical_device.clone(),
+        buffer,
+        MemoryDomain::HostVisible,
+        allocation,
+        state.allocator.clone(),
+    )?;
+    Ok(buffer)
+}
+
 pub struct ImageCreateInfo {
     pub width: u32,
     pub height: u32,
@@ -621,7 +670,12 @@ impl Gpu {
             p_next: std::ptr::null(),
             flags: BufferCreateFlags::empty(),
             size: create_info.size as u64,
-            usage: create_info.usage,
+            usage: create_info.usage
+                | if memory_domain.contains(MemoryDomain::HostVisible) {
+                    BufferUsageFlags::empty()
+                } else {
+                    BufferUsageFlags::TRANSFER_DST
+                },
             sharing_mode: SharingMode::CONCURRENT,
             queue_family_index_count: 3,
             p_queue_family_indices: [
@@ -653,12 +707,39 @@ impl Gpu {
                 .logical_device
                 .bind_buffer_memory(buffer, allocation.device_memory, 0)
         }?;
-        let buffer = GpuBuffer::create(self, buffer, allocation, self.state.allocator.clone())?;
+        let buffer = GpuBuffer::create(
+            self.vk_logical_device(),
+            buffer,
+            memory_domain,
+            allocation,
+            self.state.allocator.clone(),
+        )?;
 
         let id = self.resource_map.add(buffer);
         Ok(id)
     }
 
+    pub(crate) fn write_buffer_data<T: Copy>(
+        &self,
+        buffer: &ResourceHandle<GpuBuffer>,
+        data: &[T],
+    ) -> VkResult<()> {
+        let gpu_buffer = self.resource_map.get(buffer).unwrap();
+        if gpu_buffer.memory_domain.contains(MemoryDomain::HostVisible) {
+            gpu_buffer.write_data(data);
+        } else {
+            self.resource_map
+                .get(&self.staging_buffer)
+                .unwrap()
+                .write_data(data);
+            self.copy_buffer(
+                &self.staging_buffer,
+                buffer,
+                data.len() * std::mem::size_of::<T>(),
+            )?;
+        }
+        Ok(())
+    }
     pub fn create_image(
         &self,
         create_info: &ImageCreateInfo,
