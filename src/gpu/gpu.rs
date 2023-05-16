@@ -13,14 +13,15 @@ use ash::{
         make_api_version, AccessFlags, ApplicationInfo, BufferCreateFlags, BufferUsageFlags,
         CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
         CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo,
-        CommandPoolResetFlags, DependencyFlags, DeviceCreateFlags, DeviceCreateInfo,
+        CommandPoolResetFlags, DependencyFlags, DescriptorSetLayoutBinding,
+        DescriptorSetLayoutCreateFlags, DescriptorType, DeviceCreateFlags, DeviceCreateInfo,
         DeviceQueueCreateFlags, DeviceQueueCreateInfo, Extent3D, Fence, ImageAspectFlags,
         ImageCreateFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceLayers,
         ImageSubresourceRange, ImageTiling, ImageType, InstanceCreateFlags, InstanceCreateInfo,
         MemoryHeap, MemoryHeapFlags, Offset3D, PhysicalDevice, PhysicalDeviceFeatures,
         PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags, Queue, QueueFlags,
-        SampleCountFlags, SamplerCreateInfo, SharingMode, StructureType, SubmitInfo,
-        API_VERSION_1_3,
+        SampleCountFlags, SamplerCreateInfo, ShaderStageFlags, SharingMode, StructureType,
+        SubmitInfo, API_VERSION_1_3,
     },
     *,
 };
@@ -30,10 +31,14 @@ use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 use winit::window::Window;
 
+use crate::gpu::descriptor_set::PooledDescriptorSetAllocator;
+
 use super::{
     allocator::{GpuAllocator, PasstroughAllocator},
+    descriptor_set::DescriptorSetAllocator,
     resource::{ResourceHandle, ResourceMap},
-    AllocationRequirements, GpuBuffer, GpuImage, GpuSampler, MemoryDomain,
+    AllocationRequirements, DescriptorSetInfo, GpuBuffer, GpuDescriptorSet, GpuImage, GpuSampler,
+    MemoryDomain,
 };
 
 const KHRONOS_VALIDATION_LAYER: &'static str = "VK_LAYER_KHRONOS_validation";
@@ -62,7 +67,8 @@ pub struct GpuState {
     pub transfer_queue: Queue,
     pub queue_families: QueueFamilies,
     pub description: GpuDescription,
-    pub allocator: Arc<RefCell<dyn GpuAllocator>>,
+    pub gpu_memory_allocator: Arc<RefCell<dyn GpuAllocator>>,
+    pub descriptor_set_allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
 }
 
 pub struct GpuThreadLocalState {
@@ -246,8 +252,10 @@ impl Gpu {
             &description.name
         );
 
-        let allocator =
+        let gpu_memory_allocator =
             PasstroughAllocator::new(&instance, physical_device.physical_device, &logical_device)?;
+
+        let descriptor_set_allocator = PooledDescriptorSetAllocator::new(logical_device.clone())?;
 
         let state = Arc::new(GpuState {
             entry,
@@ -259,7 +267,8 @@ impl Gpu {
             transfer_queue,
             description,
             queue_families,
-            allocator: Arc::new(RefCell::new(allocator)),
+            gpu_memory_allocator: Arc::new(RefCell::new(gpu_memory_allocator)),
+            descriptor_set_allocator: Arc::new(RefCell::new(descriptor_set_allocator)),
         });
 
         let thread_local_state = GpuThreadLocalState::new(state.clone())?;
@@ -595,6 +604,15 @@ impl Gpu {
         }
         trace!("{}", s);
     }
+
+    fn initialize_descriptor_set(
+        &self,
+        descriptor_set: &vk::DescriptorSet,
+        info: &DescriptorSetInfo,
+    ) -> VkResult<()> {
+        // todo...
+        Ok(())
+    }
 }
 
 fn create_staging_buffer(state: &Arc<GpuState>) -> VkResult<GpuBuffer> {
@@ -623,7 +641,7 @@ fn create_staging_buffer(state: &Arc<GpuState>) -> VkResult<GpuBuffer> {
         memory_domain: MemoryDomain::HostVisible,
     };
     let allocation = state
-        .allocator
+        .gpu_memory_allocator
         .borrow_mut()
         .allocate(&state.logical_device, allocation_requirements)?;
     unsafe {
@@ -636,7 +654,7 @@ fn create_staging_buffer(state: &Arc<GpuState>) -> VkResult<GpuBuffer> {
         buffer,
         MemoryDomain::HostVisible,
         allocation,
-        state.allocator.clone(),
+        state.gpu_memory_allocator.clone(),
     )?;
     Ok(buffer)
 }
@@ -699,7 +717,7 @@ impl Gpu {
 
         let allocation = self
             .state
-            .allocator
+            .gpu_memory_allocator
             .borrow_mut()
             .allocate(&self.state.logical_device, allocation_requirements)?;
         unsafe {
@@ -712,7 +730,7 @@ impl Gpu {
             buffer,
             memory_domain,
             allocation,
-            self.state.allocator.clone(),
+            self.state.gpu_memory_allocator.clone(),
         )?;
 
         let id = self.resource_map.add(buffer);
@@ -784,7 +802,7 @@ impl Gpu {
         };
         let allocation = self
             .state
-            .allocator
+            .gpu_memory_allocator
             .borrow_mut()
             .allocate(&self.state.logical_device, allocation_requirements)?;
         unsafe {
@@ -797,7 +815,7 @@ impl Gpu {
             image,
             create_info.format,
             allocation,
-            self.state.allocator.clone(),
+            self.state.gpu_memory_allocator.clone(),
         )?;
 
         let id = self.resource_map.add(image);
@@ -1092,5 +1110,53 @@ impl Gpu {
         }
 
         Ok(())
+    }
+
+    pub fn create_descriptor_set(
+        &self,
+        info: &DescriptorSetInfo,
+    ) -> VkResult<ResourceHandle<GpuDescriptorSet>> {
+        let mut descriptor_set_bindings = vec![];
+        for descriptor_info in info.descriptors {
+            let stage_flags = match descriptor_info.binding_stage {
+                crate::gpu::ShaderStage::Vertex => ShaderStageFlags::VERTEX,
+                crate::gpu::ShaderStage::Fragment => ShaderStageFlags::FRAGMENT,
+                crate::gpu::ShaderStage::Compute => ShaderStageFlags::COMPUTE,
+            };
+            let descriptor_type = match descriptor_info.element_type {
+                crate::gpu::DescriptorType::UniformBuffer(_) => DescriptorType::UNIFORM_BUFFER,
+                crate::gpu::DescriptorType::StorageBuffer(_) => DescriptorType::STORAGE_BUFFER,
+                crate::gpu::DescriptorType::Sampler(_) => DescriptorType::SAMPLER,
+                crate::gpu::DescriptorType::CombinedImageSampler(_) => {
+                    DescriptorType::COMBINED_IMAGE_SAMPLER
+                }
+            };
+            let binding = DescriptorSetLayoutBinding {
+                binding: descriptor_info.binding,
+                descriptor_type,
+                descriptor_count: 1,
+                stage_flags,
+                p_immutable_samplers: std::ptr::null(),
+            };
+
+            descriptor_set_bindings.push(binding);
+        }
+
+        let allocated_descriptor_set = self.state.descriptor_set_allocator.borrow_mut().allocate(
+            &vk::DescriptorSetLayoutCreateInfo {
+                s_type: StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                p_next: std::ptr::null(),
+                flags: DescriptorSetLayoutCreateFlags::empty(),
+                binding_count: descriptor_set_bindings.len() as _,
+                p_bindings: descriptor_set_bindings.as_ptr(),
+            },
+        )?;
+        self.initialize_descriptor_set(&allocated_descriptor_set.descriptor_set, info)?;
+        let descriptor_set = GpuDescriptorSet::create(
+            self,
+            allocated_descriptor_set,
+            self.state.descriptor_set_allocator.clone(),
+        )?;
+        Ok(self.resource_map.add(descriptor_set))
     }
 }

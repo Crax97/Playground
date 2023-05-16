@@ -4,13 +4,17 @@ use crate::{gpu::allocator::GpuAllocator, gpu::Gpu};
 use ash::{
     prelude::*,
     vk::{
-        self, AllocationCallbacks, Buffer, FenceCreateInfo, ImageAspectFlags,
+        self, AllocationCallbacks, Buffer, DescriptorSet, FenceCreateInfo, ImageAspectFlags,
         ImageSubresourceRange, ImageViewCreateFlags, ImageViewType, MappedMemoryRange,
         MemoryMapFlags, SamplerCreateInfo, SemaphoreCreateInfo, StructureType,
     },
 };
 
-use super::{resource::Resource, MemoryAllocation, MemoryDomain};
+use super::{
+    descriptor_set::{DescriptorSetAllocation, DescriptorSetAllocator},
+    resource::Resource,
+    MemoryAllocation, MemoryDomain,
+};
 
 pub fn get_allocation_callbacks() -> Option<&'static AllocationCallbacks> {
     None
@@ -214,6 +218,40 @@ impl Deref for GpuImage {
     }
 }
 impl Resource for GpuImage {}
+
+pub struct GpuDescriptorSet {
+    device: ash::Device,
+    pub(crate) allocation: DescriptorSetAllocation,
+    pub(crate) allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
+}
+impl GpuDescriptorSet {
+    pub fn create(
+        gpu: &Gpu,
+        allocation: DescriptorSetAllocation,
+        allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
+    ) -> VkResult<Self> {
+        Ok(Self {
+            device: gpu.state.logical_device.clone(),
+            allocation,
+            allocator,
+        })
+    }
+}
+impl Drop for GpuDescriptorSet {
+    fn drop(&mut self) {
+        self.allocator
+            .borrow_mut()
+            .deallocate(&self.allocation)
+            .expect("Failed to deallocate descriptor set");
+    }
+}
+impl Deref for GpuDescriptorSet {
+    type Target = vk::DescriptorSet;
+    fn deref(&self) -> &Self::Target {
+        &self.allocation.descriptor_set
+    }
+}
+impl Resource for GpuDescriptorSet {}
 
 define_raii_wrapper!((struct GpuSampler {}, vk::Sampler, ash::Device::destroy_sampler) {
     (create_info: &SamplerCreateInfo,) => {

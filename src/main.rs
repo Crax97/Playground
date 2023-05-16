@@ -23,13 +23,13 @@ use ash::vk::{
 };
 
 use gpu::{
-    BeginRenderPassInfo, BlendState, BufferCreateInfo, ColorAttachment, FragmentStageInfo,
-    GlobalBinding, Gpu, GpuBuffer, GpuConfiguration, ImageCreateInfo, Material,
-    MaterialDescription, MemoryDomain, RenderPass, RenderPassDescription, ResourceHandle,
-    TransitionInfo, VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
+    BeginRenderPassInfo, BlendState, BufferCreateInfo, BufferRange, ColorAttachment,
+    DescriptorInfo, DescriptorSetInfo, FragmentStageInfo, GlobalBinding, Gpu, GpuBuffer,
+    GpuConfiguration, GpuDescriptorSet, ImageCreateInfo, Material, MaterialDescription,
+    MemoryDomain, RenderPass, RenderPassDescription, ResourceHandle, SamplerState, TransitionInfo,
+    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
 use image::EncodableLayout;
-use memoffset::offset_of;
 use mesh::{Mesh, MeshCreateInfo};
 use nalgebra::*;
 use winit::{dpi::PhysicalSize, event_loop::ControlFlow};
@@ -455,59 +455,80 @@ fn main() -> anyhow::Result<()> {
         )?
     };
 
-    let descriptor_set = unsafe {
-        let descriptor_set = device.allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo {
-            s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
-            p_next: null(),
-            descriptor_pool,
-            descriptor_set_count: 1,
-            p_set_layouts: addr_of!(descriptor_set_layout),
-        })?[0];
+    let descriptor_set = gpu.create_descriptor_set(&DescriptorSetInfo {
+        descriptors: &[
+            DescriptorInfo {
+                binding: 0,
+                element_type: gpu::DescriptorType::UniformBuffer(BufferRange {
+                    handle: uniform_buffer.clone(),
+                    offset: 0,
+                    size: vk::WHOLE_SIZE,
+                }),
+                binding_stage: gpu::ShaderStage::Vertex,
+            },
+            DescriptorInfo {
+                binding: 0,
+                element_type: gpu::DescriptorType::CombinedImageSampler(SamplerState {
+                    sampler: sampler.clone(),
+                    image_view: image.clone(),
+                    image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                }),
+                binding_stage: gpu::ShaderStage::Vertex,
+            },
+        ],
+    })?;
 
-        let buffer_info = DescriptorBufferInfo {
-            buffer: *gpu.resource_map.get(&uniform_buffer).unwrap().deref(),
-            offset: 0,
-            range: vk::WHOLE_SIZE,
-        };
-        let image_info = DescriptorImageInfo {
-            sampler: *gpu.resource_map.get(&sampler).unwrap().deref(),
-            image_view: gpu.resource_map.get(&image).unwrap().view,
-            image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        };
+    /*
+       let descriptor_set = unsafe {
+           let descriptor_set = device.allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo {
+               s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
+               p_next: null(),
+               descriptor_pool,
+               descriptor_set_count: 1,
+               p_set_layouts: addr_of!(descriptor_set_layout),
+           })?[0];
 
-        device.update_descriptor_sets(
-            &[
-                WriteDescriptorSet {
-                    s_type: StructureType::WRITE_DESCRIPTOR_SET,
-                    p_next: null(),
-                    dst_set: descriptor_set,
-                    dst_binding: 0,
-                    dst_array_element: 0,
-                    descriptor_count: 1,
-                    descriptor_type: DescriptorType::UNIFORM_BUFFER,
-                    p_image_info: null(),
-                    p_buffer_info: addr_of!(buffer_info),
-                    p_texel_buffer_view: null(),
-                },
-                WriteDescriptorSet {
-                    s_type: StructureType::WRITE_DESCRIPTOR_SET,
-                    p_next: null(),
-                    dst_set: descriptor_set,
-                    dst_binding: 1,
-                    dst_array_element: 0,
-                    descriptor_count: 1,
-                    descriptor_type: DescriptorType::COMBINED_IMAGE_SAMPLER,
-                    p_image_info: addr_of!(image_info),
-                    p_buffer_info: null(),
-                    p_texel_buffer_view: null(),
-                },
-            ],
-            &[],
-        );
+           let buffer_info = DescriptorBufferInfo {
+               buffer: *gpu.resource_map.get(&uniform_buffer).unwrap().deref(),
+               offset: 0,
+               range: vk::WHOLE_SIZE,
+           };
+           let image_info = DescriptorImageInfo {
+               sampler: *gpu.resource_map.get(&sampler).unwrap().deref(),
+               image_view: gpu.resource_map.get(&image).unwrap().view,
+               image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+           };
 
-        descriptor_set
-    };
-
+           device.update_descriptor_sets(
+               &[
+                   WriteDescriptorSet {
+                       s_type: StructureType::WRITE_DESCRIPTOR_SET,
+                       p_next: null(),
+                       dst_set: descriptor_set,
+                       dst_binding: 0,
+                       dst_array_element: 0,
+                       descriptor_count: 1,
+                       descriptor_type: DescriptorType::UNIFORM_BUFFER,
+                       p_image_info: null(),
+                       p_buffer_info: addr_of!(buffer_info),
+                       p_texel_buffer_view: null(),
+                   },
+                   WriteDescriptorSet {
+                       s_type: StructureType::WRITE_DESCRIPTOR_SET,
+                       p_next: null(),
+                       dst_set: descriptor_set,
+                       dst_binding: 1,
+                       dst_array_element: 0,
+                       descriptor_count: 1,
+                       descriptor_type: DescriptorType::COMBINED_IMAGE_SAMPLER,
+                       p_image_info: addr_of!(image_info),
+                       p_buffer_info: null(),
+                       p_texel_buffer_view: null(),
+                   },
+               ],
+               &[],
+           );
+    */
     swapchain.select_present_mode(PresentModeKHR::MAILBOX)?;
 
     unsafe {
@@ -547,14 +568,13 @@ fn main() -> anyhow::Result<()> {
                     &render_pass,
                     &mut swapchain,
                     &device,
-                    descriptor_set,
+                    &descriptor_set,
                     &mesh,
                 );
             }
             winit::event::Event::RedrawEventsCleared => {}
             winit::event::Event::LoopDestroyed => unsafe {
                 device.device_wait_idle().unwrap();
-                //                device.free_memory(device_memory, None);
                 device.destroy_descriptor_set_layout(descriptor_set_layout, None);
                 device.destroy_descriptor_pool(descriptor_pool, None);
                 device.free_command_buffers(command_pool, &[command_buffer]);
@@ -572,7 +592,7 @@ fn render_frame(
     render_pass: &RenderPass,
     swapchain: &mut gpu::Swapchain,
     device: &ash::Device,
-    descriptor_set: vk::DescriptorSet,
+    descriptor_set: &ResourceHandle<GpuDescriptorSet>,
     mesh: &Mesh,
 ) {
     gpu.resource_map
@@ -632,7 +652,7 @@ unsafe fn render_textured_quad(
     render_pass: &RenderPass,
     framebuffer: vk::Framebuffer,
     swapchain: &mut gpu::Swapchain,
-    descriptor_set: vk::DescriptorSet,
+    descriptor_set: &ResourceHandle<GpuDescriptorSet>,
     gpu: &Gpu,
     mesh: &Mesh,
 ) {
@@ -671,7 +691,12 @@ unsafe fn render_textured_quad(
                 PipelineBindPoint::GRAPHICS,
                 material.pipeline_layout,
                 0,
-                &[descriptor_set],
+                &[gpu
+                    .resource_map
+                    .get(descriptor_set)
+                    .unwrap()
+                    .allocation
+                    .descriptor_set],
                 &[],
             );
             device.cmd_bind_index_buffer(

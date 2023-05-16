@@ -25,7 +25,7 @@ use ash::{
     },
 };
 
-use super::{Gpu, GpuState};
+use super::{Gpu, GpuState, ShaderStage};
 
 fn vk_bool(b: bool) -> u32 {
     if b {
@@ -33,13 +33,6 @@ fn vk_bool(b: bool) -> u32 {
     } else {
         vk::FALSE
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum ShaderStage {
-    Vertex,
-    Fragment,
-    Compute,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -102,50 +95,6 @@ pub struct VertexStageInfo<'a> {
     pub entry_point: &'a str,
     pub module: vk::ShaderModule,
 }
-/*
-let pass_info = RenderPassCreateInfo {
-        s_type: StructureType::RENDER_PASS_CREATE_INFO,
-        p_next: null(),
-        flags: RenderPassCreateFlags::empty(),
-        attachment_count: 1,
-        p_attachments: &[AttachmentDescription {
-            flags: AttachmentDescriptionFlags::empty(),
-            format: swapchain.present_format.format,
-            samples: SampleCountFlags::TYPE_1,
-            load_op: AttachmentLoadOp::CLEAR,
-            store_op: AttachmentStoreOp::STORE,
-            stencil_load_op: AttachmentLoadOp::DONT_CARE,
-            stencil_store_op: AttachmentStoreOp::DONT_CARE,
-            initial_layout: ImageLayout::UNDEFINED,
-            final_layout: ImageLayout::PRESENT_SRC_KHR,
-        }] as *const AttachmentDescription,
-        subpass_count: 1,
-        p_subpasses: &[SubpassDescription {
-            flags: SubpassDescriptionFlags::empty(),
-            pipeline_bind_point: PipelineBindPoint::GRAPHICS,
-            input_attachment_count: 0,
-            p_input_attachments: null(),
-            color_attachment_count: 1,
-            p_color_attachments: &[AttachmentReference {
-                attachment: 0,
-                layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            }] as *const AttachmentReference,
-            p_resolve_attachments: null(),
-            p_depth_stencil_attachment: null(),
-            preserve_attachment_count: vk::FALSE,
-            p_preserve_attachments: null(),
-        }] as *const SubpassDescription,
-        dependency_count: 1,
-        p_dependencies: &[SubpassDependency {
-            src_subpass: SUBPASS_EXTERNAL,
-            dst_subpass: 0,
-            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            src_access_mask: AccessFlags::empty(),
-            dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-            dependency_flags: DependencyFlags::empty(),
-        }] as *const SubpassDependency,
-    }; */
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BlendState {

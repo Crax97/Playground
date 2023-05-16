@@ -1,5 +1,6 @@
 mod allocator;
 mod command_buffer;
+mod descriptor_set;
 mod gpu;
 mod material;
 mod resource;
@@ -7,6 +8,7 @@ mod swapchain;
 mod types;
 
 pub use allocator::*;
+use ash::vk::ImageLayout;
 pub use command_buffer::*;
 pub use gpu::*;
 pub use material::*;
@@ -36,4 +38,40 @@ impl QueueType {
             QueueType::Transfer => gpu.state.queue_families.transfer_family.index,
         }
     }
+}
+
+pub struct BufferRange {
+    pub handle: ResourceHandle<GpuBuffer>,
+    pub offset: u64,
+    pub size: u64,
+}
+
+pub struct SamplerState {
+    pub sampler: ResourceHandle<GpuSampler>,
+    pub image_view: ResourceHandle<GpuImage>,
+    pub image_layout: ImageLayout,
+}
+
+pub enum DescriptorType {
+    UniformBuffer(BufferRange),
+    StorageBuffer(BufferRange),
+    Sampler(SamplerState),
+    CombinedImageSampler(SamplerState),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum ShaderStage {
+    Vertex,
+    Fragment,
+    Compute,
+}
+
+pub struct DescriptorInfo {
+    pub binding: u32,
+    pub element_type: DescriptorType,
+    pub binding_stage: ShaderStage,
+}
+
+pub struct DescriptorSetInfo<'a> {
+    pub descriptors: &'a [DescriptorInfo],
 }
