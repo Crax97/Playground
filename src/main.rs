@@ -30,6 +30,7 @@ use gpu::{
 };
 use image::EncodableLayout;
 use memoffset::offset_of;
+use mesh::{Mesh, MeshCreateInfo};
 use nalgebra::*;
 use winit::{dpi::PhysicalSize, event_loop::ControlFlow};
 
@@ -99,6 +100,42 @@ fn main() -> anyhow::Result<()> {
             command_buffer_count: 1,
         })?[0]
     };
+
+    let mesh_data = MeshCreateInfo {
+        indices: &[0, 1, 2, 2, 3, 0],
+        positions: &[
+            vector![-0.5, -0.5, 0.0],
+            vector![0.5, -0.5, 0.0],
+            vector![0.5, 0.5, 0.0],
+            vector![-0.5, 0.5, 0.0],
+        ],
+        colors: &[
+            vector![1.0, 0.0, 0.0],
+            vector![0.0, 1.0, 0.0],
+            vector![0.0, 0.0, 1.0],
+            vector![1.0, 1.0, 1.0],
+        ],
+        normals: &[
+            vector![0.0, 1.0, 0.0],
+            vector![0.0, 1.0, 0.0],
+            vector![0.0, 1.0, 0.0],
+            vector![0.0, 1.0, 0.0],
+        ],
+        tangents: &[
+            vector![0.0, 0.0, 1.0],
+            vector![0.0, 0.0, 1.0],
+            vector![0.0, 0.0, 1.0],
+            vector![0.0, 0.0, 1.0],
+        ],
+        uvs: &[
+            vector![1.0, 0.0],
+            vector![0.0, 0.0],
+            vector![0.0, 1.0],
+            vector![1.0, 1.0],
+        ],
+    };
+
+    let mesh = Mesh::new(&gpu, &mesh_data)?;
 
     let vertex_data = &[
         VertexData {
@@ -300,28 +337,58 @@ fn main() -> anyhow::Result<()> {
                     stage: gpu::ShaderStage::Fragment,
                 },
             ],
-            vertex_inputs: &[VertexBindingDescription {
-                binding: 0,
-                input_rate: gpu::InputRate::PerVertex,
-                stride: size_of::<VertexData>() as u32,
-                attributes: &[
-                    VertexAttributeDescription {
+            vertex_inputs: &[
+                VertexBindingDescription {
+                    binding: 0,
+                    input_rate: gpu::InputRate::PerVertex,
+                    stride: size_of::<Vector3<f32>>() as u32,
+                    attributes: &[VertexAttributeDescription {
                         location: 0,
-                        format: vk::Format::R32G32_SFLOAT,
-                        offset: offset_of!(VertexData, position) as u32,
-                    },
-                    VertexAttributeDescription {
+                        format: vk::Format::R32G32B32_SFLOAT,
+                        offset: 0,
+                    }],
+                },
+                VertexBindingDescription {
+                    binding: 1,
+                    input_rate: gpu::InputRate::PerVertex,
+                    stride: size_of::<Vector3<f32>>() as u32,
+                    attributes: &[VertexAttributeDescription {
                         location: 1,
                         format: vk::Format::R32G32B32_SFLOAT,
-                        offset: offset_of!(VertexData, color) as u32,
-                    },
-                    VertexAttributeDescription {
+                        offset: 0,
+                    }],
+                },
+                VertexBindingDescription {
+                    binding: 2,
+                    input_rate: gpu::InputRate::PerVertex,
+                    stride: size_of::<Vector3<f32>>() as u32,
+                    attributes: &[VertexAttributeDescription {
                         location: 2,
+                        format: vk::Format::R32G32B32_SFLOAT,
+                        offset: 0,
+                    }],
+                },
+                VertexBindingDescription {
+                    binding: 3,
+                    input_rate: gpu::InputRate::PerVertex,
+                    stride: size_of::<Vector3<f32>>() as u32,
+                    attributes: &[VertexAttributeDescription {
+                        location: 3,
+                        format: vk::Format::R32G32B32_SFLOAT,
+                        offset: 0,
+                    }],
+                },
+                VertexBindingDescription {
+                    binding: 4,
+                    input_rate: gpu::InputRate::PerVertex,
+                    stride: size_of::<Vector2<f32>>() as u32,
+                    attributes: &[VertexAttributeDescription {
+                        location: 4,
                         format: vk::Format::R32G32_SFLOAT,
-                        offset: offset_of!(VertexData, uv) as u32,
-                    },
-                ],
-            }],
+                        offset: 0,
+                    }],
+                },
+            ],
             vertex_stage: Some(VertexStageInfo {
                 entry_point: "main",
                 module: vertex_module,
@@ -481,8 +548,7 @@ fn main() -> anyhow::Result<()> {
                     &mut swapchain,
                     &device,
                     descriptor_set,
-                    &vertex_buffer,
-                    &index_buffer,
+                    &mesh,
                 );
             }
             winit::event::Event::RedrawEventsCleared => {}
@@ -507,8 +573,7 @@ fn render_frame(
     swapchain: &mut gpu::Swapchain,
     device: &ash::Device,
     descriptor_set: vk::DescriptorSet,
-    vertex_buffer: &ResourceHandle<GpuBuffer>,
-    index_buffer: &ResourceHandle<GpuBuffer>,
+    mesh: &Mesh,
 ) {
     gpu.resource_map
         .get(&uniform_buffer)
@@ -552,8 +617,7 @@ fn render_frame(
             swapchain,
             descriptor_set,
             gpu,
-            vertex_buffer,
-            index_buffer,
+            mesh,
         );
         let _ = swapchain.present();
         gpu.state
@@ -570,8 +634,7 @@ unsafe fn render_textured_quad(
     swapchain: &mut gpu::Swapchain,
     descriptor_set: vk::DescriptorSet,
     gpu: &Gpu,
-    vertex_buffer: &ResourceHandle<GpuBuffer>,
-    index_buffer: &ResourceHandle<GpuBuffer>,
+    mesh: &Mesh,
 ) {
     {
         let mut command_buffer = gpu::CommandBuffer::new(
@@ -611,17 +674,53 @@ unsafe fn render_textured_quad(
                 &[descriptor_set],
                 &[],
             );
+            device.cmd_bind_index_buffer(
+                inner_command_buffer,
+                *gpu.resource_map.get(&mesh.index_buffer).unwrap().deref(),
+                0,
+                IndexType::UINT32,
+            );
             device.cmd_bind_vertex_buffers(
                 inner_command_buffer,
                 0,
-                &[*gpu.resource_map.get(&vertex_buffer).unwrap().deref()],
+                &[*gpu
+                    .resource_map
+                    .get(&mesh.position_component)
+                    .unwrap()
+                    .deref()],
                 &[0],
             );
-            device.cmd_bind_index_buffer(
+            device.cmd_bind_vertex_buffers(
                 inner_command_buffer,
-                *gpu.resource_map.get(&index_buffer).unwrap().deref(),
-                0,
-                IndexType::UINT32,
+                1,
+                &[*gpu.resource_map.get(&mesh.color_component).unwrap().deref()],
+                &[0],
+            );
+            device.cmd_bind_vertex_buffers(
+                inner_command_buffer,
+                2,
+                &[*gpu
+                    .resource_map
+                    .get(&mesh.normal_component)
+                    .unwrap()
+                    .deref()],
+                &[0],
+            );
+            device.cmd_bind_vertex_buffers(
+                inner_command_buffer,
+                3,
+                &[*gpu
+                    .resource_map
+                    .get(&mesh.tangent_component)
+                    .unwrap()
+                    .deref()],
+                &[0],
+            );
+            device.cmd_bind_vertex_buffers(
+                inner_command_buffer,
+                4,
+                &[*gpu.resource_map.get(&mesh.uv_component).unwrap().deref()],
+                &[0],
             );
             render_pass.draw_indexed(6, 1, 0, 0, 0);
         }
