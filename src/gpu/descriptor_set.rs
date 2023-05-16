@@ -134,11 +134,10 @@ use ash::{
     Device,
 };
 
-use super::Gpu;
-
 pub struct DescriptorSetAllocation {
     pub owner_pool: vk::DescriptorPool,
     pub descriptor_set: vk::DescriptorSet,
+    pub descriptor_set_layout: vk::DescriptorSetLayout,
 }
 
 pub trait DescriptorSetAllocator {
@@ -241,6 +240,7 @@ impl DescriptorSetAllocator for PooledDescriptorSetAllocator {
                     return Ok(DescriptorSetAllocation {
                         descriptor_set: descriptor_set[0],
                         owner_pool: descriptor_pool,
+                        descriptor_set_layout,
                     })
                 }
                 Err(e) => {
@@ -259,6 +259,8 @@ impl DescriptorSetAllocator for PooledDescriptorSetAllocator {
 
     fn deallocate(&mut self, allocation: &DescriptorSetAllocation) -> VkResult<()> {
         unsafe {
+            self.device
+                .destroy_descriptor_set_layout(allocation.descriptor_set_layout, None);
             self.device
                 .free_descriptor_sets(allocation.owner_pool, &[allocation.descriptor_set])
         }
