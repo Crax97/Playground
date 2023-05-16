@@ -118,21 +118,6 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 &create_info,
                 SubpassContents::INLINE,
             );
-            let viewport = Viewport {
-                x: 0 as f32,
-                y: 0 as f32,
-                width: info.render_area.extent.width as f32,
-                height: info.render_area.extent.height as f32,
-                min_depth: 0.0,
-                max_depth: 1.0,
-            };
-
-            let scissor = Rect2D {
-                offset: Offset2D { x: 0, y: 0 },
-                extent: info.render_area.extent,
-            };
-            device.cmd_set_viewport(command_buffer.inner(), 0, &[viewport]);
-            device.cmd_set_scissor(command_buffer.inner(), 0, &[scissor]);
         };
 
         Self {
@@ -163,6 +148,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         vertex_offset: i32,
         first_instance: u32,
     ) {
+        self.prepare_draw();
         self.has_draw_command = true;
         self.command_buffer.has_recorded_anything = true;
         let device = self.command_buffer.gpu.vk_logical_device();
@@ -175,6 +161,33 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 vertex_offset,
                 first_instance,
             );
+        }
+    }
+
+    fn prepare_draw(&self) {
+        let device = self.command_buffer.gpu.vk_logical_device();
+
+        let viewport = match self.viewport_area {
+            Some(viewport) => viewport,
+            None => Viewport {
+                x: 0 as f32,
+                y: 0 as f32,
+                width: self.render_area.extent.width as f32,
+                height: self.render_area.extent.height as f32,
+                min_depth: 0.0,
+                max_depth: 1.0,
+            },
+        };
+        let scissor = match self.scissor_area {
+            Some(scissor) => scissor,
+            None => Rect2D {
+                offset: Offset2D { x: 0, y: 0 },
+                extent: self.render_area.extent,
+            },
+        };
+        unsafe {
+            device.cmd_set_viewport(self.command_buffer.inner(), 0, &[viewport]);
+            device.cmd_set_scissor(self.command_buffer.inner(), 0, &[scissor]);
         }
     }
 }
