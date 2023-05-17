@@ -9,7 +9,8 @@ use ash::{
 use log::trace;
 
 use super::{
-    material::RenderPass, Gpu, GpuBuffer, GpuDescriptorSet, Material, QueueType, ResourceHandle,
+    material::RenderPass, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, Material, QueueType,
+    ResourceHandle,
 };
 
 #[derive(Default)]
@@ -84,7 +85,7 @@ impl<'g> CommandBuffer<'g> {
 
 #[derive(Clone, Copy)]
 pub struct BeginRenderPassInfo<'a> {
-    pub framebuffer: vk::Framebuffer,
+    pub framebuffer: &'a GpuFramebuffer,
     pub render_pass: &'a RenderPass,
     pub clear_color_values: &'a [ClearValue],
     pub render_area: Rect2D,
@@ -97,7 +98,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
             s_type: StructureType::RENDER_PASS_BEGIN_INFO,
             p_next: std::ptr::null(),
             render_pass: info.render_pass.inner,
-            framebuffer: info.framebuffer,
+            framebuffer: info.framebuffer.inner,
             render_area: info.render_area,
             clear_value_count: info.clear_color_values.len() as _,
             p_clear_values: info.clear_color_values.as_ptr(),

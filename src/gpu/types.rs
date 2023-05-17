@@ -4,17 +4,17 @@ use crate::{gpu::allocator::GpuAllocator, gpu::Gpu};
 use ash::{
     prelude::*,
     vk::{
-        self, AllocationCallbacks, Buffer, DescriptorSet, FenceCreateInfo, ImageAspectFlags,
-        ImageSubresourceRange, ImageViewCreateFlags, ImageViewType, MappedMemoryRange,
-        MemoryMapFlags, SamplerCreateInfo, SemaphoreCreateInfo, ShaderModuleCreateInfo,
-        StructureType,
+        self, AllocationCallbacks, Buffer, DescriptorSet, FenceCreateInfo, FramebufferCreateFlags,
+        ImageAspectFlags, ImageSubresourceRange, ImageView, ImageViewCreateFlags, ImageViewType,
+        MappedMemoryRange, MemoryMapFlags, SamplerCreateInfo, SemaphoreCreateInfo,
+        ShaderModuleCreateInfo, StructureType,
     },
 };
 
 use super::{
     descriptor_set::{DescriptorSetAllocation, DescriptorSetAllocator},
     resource::Resource,
-    MemoryAllocation, MemoryDomain,
+    MemoryAllocation, MemoryDomain, RenderPass,
 };
 
 pub fn get_allocation_callbacks() -> Option<&'static AllocationCallbacks> {
@@ -265,35 +265,30 @@ define_raii_wrapper!((struct GpuShaderModule {}, vk::ShaderModule, ash::Device::
     }
 });
 
-// impl GpuImage {
-//     pub fn write_data<I: Sized + Copy>(&self, data: &[I]) {
-//         let address = unsafe {
-//             self.device
-//                 .map_memory(
-//                     self.allocation.device_memory,
-//                     self.allocation.offset,
-//                     vk::WHOLE_SIZE,
-//                     MemoryMapFlags::empty(),
-//                 )
-//                 .expect("Failed to map memory!")
-//         };
-//         let address = address as *mut I;
-//         let address = unsafe { std::slice::from_raw_parts_mut(address, data.len()) };
-//
-//         address.copy_from_slice(data);
-//
-//         unsafe {
-//             self.device
-//                 .flush_mapped_memory_ranges(&[MappedMemoryRange {
-//                     s_type: StructureType::MAPPED_MEMORY_RANGE,
-//                     p_next: std::ptr::null(),
-//                     memory: self.allocation.device_memory,
-//                     offset: 0,
-//                     size: vk::WHOLE_SIZE,
-//                 }])
-//                 .expect("Failed to flush memory ranges")
-//         };
-//
-//         unsafe { self.device.unmap_memory(self.allocation.device_memory) };
-//     }
-// }
+pub struct FramebufferCreateInfo<'a> {
+    pub render_pass: &'a RenderPass,
+    pub attachments: &'a [&'a ImageView],
+    pub width: u32,
+    pub height: u32,
+}
+
+define_raii_wrapper!((struct GpuFramebuffer {}, vk::Framebuffer, ash::Device::destroy_framebuffer) {
+    (create_info: &FramebufferCreateInfo,) => {
+        |device: &ash::Device| { unsafe {
+                    let create_info = vk::FramebufferCreateInfo {
+                    s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
+                    p_next: std::ptr::null(),
+                    flags: FramebufferCreateFlags::empty(),
+                    render_pass: create_info.render_pass.inner,
+
+                    attachment_count: create_info.attachments.len() as _,
+                    p_attachments: *create_info.attachments.as_ptr(),
+                    width: create_info.width,
+                    height: create_info.height,
+
+                    // We only support one single framebuffer
+                    layers: 1,
+            };
+            device.create_framebuffer(&create_info, get_allocation_callbacks()) }}
+    }
+});

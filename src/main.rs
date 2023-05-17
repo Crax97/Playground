@@ -15,19 +15,20 @@ use ash::vk::{
     CommandBufferLevel, CommandPoolCreateFlags, CommandPoolCreateInfo, CompareOp, DependencyFlags,
     DescriptorBufferInfo, DescriptorImageInfo, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
     DescriptorPoolSize, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
-    DescriptorSetLayoutCreateInfo, DescriptorType, Filter, FramebufferCreateFlags,
-    FramebufferCreateInfo, ImageLayout, ImageUsageFlags, ImageView, IndexType, Offset2D,
-    PipelineBindPoint, PipelineStageFlags, PresentModeKHR, Rect2D, SampleCountFlags,
-    SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, ShaderStageFlags,
-    StructureType, SubpassDependency, WriteDescriptorSet, SUBPASS_EXTERNAL,
+    DescriptorSetLayoutCreateInfo, DescriptorType, Filter, FramebufferCreateFlags, ImageLayout,
+    ImageUsageFlags, ImageView, IndexType, Offset2D, PipelineBindPoint, PipelineStageFlags,
+    PresentModeKHR, Rect2D, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags,
+    SamplerCreateInfo, SamplerMipmapMode, ShaderStageFlags, StructureType, SubpassDependency,
+    WriteDescriptorSet, SUBPASS_EXTERNAL,
 };
 
 use gpu::{
     BeginRenderPassInfo, BlendState, BufferCreateInfo, BufferRange, ColorAttachment,
-    DescriptorInfo, DescriptorSetInfo, FragmentStageInfo, GlobalBinding, Gpu, GpuBuffer,
-    GpuConfiguration, GpuDescriptorSet, ImageCreateInfo, Material, MaterialDescription,
-    MemoryDomain, RenderPass, RenderPassDescription, ResourceHandle, SamplerState, TransitionInfo,
-    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
+    DescriptorInfo, DescriptorSetInfo, FragmentStageInfo, FramebufferCreateInfo, GlobalBinding,
+    Gpu, GpuBuffer, GpuConfiguration, GpuDescriptorSet, GpuFramebuffer, ImageCreateInfo, Material,
+    MaterialDescription, MemoryDomain, RenderPass, RenderPassDescription, ResourceHandle,
+    SamplerState, TransitionInfo, VertexAttributeDescription, VertexBindingDescription,
+    VertexStageInfo,
 };
 use image::EncodableLayout;
 use mesh::{Mesh, MeshCreateInfo};
@@ -479,46 +480,32 @@ fn render_frame(
         }]);
 
     let next_image = swapchain.acquire_next_image().unwrap();
-    let framebuffer = unsafe {
-        let create_info = FramebufferCreateInfo {
-            s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
-            p_next: null(),
-            flags: FramebufferCreateFlags::empty(),
-            render_pass: render_pass.inner,
-
-            attachment_count: 1,
-            p_attachments: &next_image as *const ImageView,
+    let framebuffer = GpuFramebuffer::create(
+        gpu.vk_logical_device(),
+        &FramebufferCreateInfo {
+            render_pass,
+            attachments: &[&next_image],
             width: swapchain.extents().width,
             height: swapchain.extents().height,
-            layers: 1,
-        };
-
-        gpu.state
-            .logical_device
-            .create_framebuffer(&create_info, None)
-            .unwrap()
-    };
-    unsafe {
-        render_textured_quad(
-            material,
-            render_pass,
-            framebuffer,
-            swapchain,
-            descriptor_set,
-            gpu,
-            mesh,
-        );
-        let _ = swapchain.present();
-        gpu.state
-            .logical_device
-            .destroy_framebuffer(framebuffer, None);
-    };
+        },
+    )
+    .unwrap();
+    render_textured_quad(
+        material,
+        render_pass,
+        &framebuffer,
+        swapchain,
+        descriptor_set,
+        gpu,
+        mesh,
+    );
+    let _ = swapchain.present();
 }
 
 fn render_textured_quad(
     material: &Material,
     render_pass: &RenderPass,
-    framebuffer: vk::Framebuffer,
+    framebuffer: &GpuFramebuffer,
     swapchain: &mut gpu::Swapchain,
     descriptor_set: &ResourceHandle<GpuDescriptorSet>,
     gpu: &Gpu,
