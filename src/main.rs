@@ -79,28 +79,6 @@ fn main() -> anyhow::Result<()> {
     let vertex_module = utils::read_file_to_vk_module(&device, "./shaders/vertex.spirv")?;
     let fragment_module = utils::read_file_to_vk_module(&device, "./shaders/fragment.spirv")?;
 
-    let command_pool = unsafe {
-        device.create_command_pool(
-            &CommandPoolCreateInfo {
-                s_type: StructureType::COMMAND_POOL_CREATE_INFO,
-                p_next: null(),
-                flags: CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
-                queue_family_index: gpu.graphics_queue_family_index(),
-            },
-            None,
-        )
-    }?;
-
-    let command_buffer = unsafe {
-        device.allocate_command_buffers(&CommandBufferAllocateInfo {
-            s_type: StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
-            p_next: null(),
-            command_pool,
-            level: CommandBufferLevel::PRIMARY,
-            command_buffer_count: 1,
-        })?[0]
-    };
-
     let mesh_data = MeshCreateInfo {
         indices: &[0, 1, 2, 2, 3, 0],
         positions: &[
@@ -408,53 +386,6 @@ fn main() -> anyhow::Result<()> {
         },
     )?;
 
-    let descriptor_set_layout = {
-        let uniform_buffer_binding = DescriptorSetLayoutBinding {
-            binding: 0,
-            descriptor_type: DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: 1,
-            stage_flags: ShaderStageFlags::VERTEX,
-            p_immutable_samplers: null(),
-        };
-        let sampler_binding = DescriptorSetLayoutBinding {
-            binding: 1,
-            descriptor_type: DescriptorType::COMBINED_IMAGE_SAMPLER,
-            descriptor_count: 1,
-            stage_flags: ShaderStageFlags::FRAGMENT,
-            p_immutable_samplers: null(),
-        };
-        let create_info = DescriptorSetLayoutCreateInfo {
-            s_type: StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-            p_next: null(),
-            flags: DescriptorSetLayoutCreateFlags::empty(),
-            binding_count: 2,
-            p_bindings: [uniform_buffer_binding, sampler_binding].as_ptr(),
-        };
-        unsafe { device.create_descriptor_set_layout(&create_info, None) }?
-    };
-
-    let descriptor_pool = unsafe {
-        let pool_size_uniform_buffer = DescriptorPoolSize {
-            ty: DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: 1,
-        };
-        let pool_size_sampler = DescriptorPoolSize {
-            ty: DescriptorType::COMBINED_IMAGE_SAMPLER,
-            descriptor_count: 1,
-        };
-        device.create_descriptor_pool(
-            &DescriptorPoolCreateInfo {
-                s_type: StructureType::DESCRIPTOR_POOL_CREATE_INFO,
-                p_next: null(),
-                flags: DescriptorPoolCreateFlags::empty(),
-                max_sets: 1,
-                pool_size_count: 2,
-                p_pool_sizes: [pool_size_uniform_buffer, pool_size_sampler].as_ptr(),
-            },
-            None,
-        )?
-    };
-
     let descriptor_set = gpu.create_descriptor_set(&DescriptorSetInfo {
         descriptors: &[
             DescriptorInfo {
@@ -524,10 +455,6 @@ fn main() -> anyhow::Result<()> {
             winit::event::Event::RedrawEventsCleared => {}
             winit::event::Event::LoopDestroyed => unsafe {
                 device.device_wait_idle().unwrap();
-                device.destroy_descriptor_set_layout(descriptor_set_layout, None);
-                device.destroy_descriptor_pool(descriptor_pool, None);
-                device.free_command_buffers(command_pool, &[command_buffer]);
-                device.destroy_command_pool(command_pool, None);
             },
         }
     })
@@ -634,20 +561,13 @@ unsafe fn render_textured_quad(
                 },
             });
             render_pass.bind_material(material);
-
-            device.cmd_bind_descriptor_sets(
-                inner_command_buffer,
+            render_pass.bind_descriptor_sets(
                 PipelineBindPoint::GRAPHICS,
-                material.pipeline_layout,
+                material,
                 0,
-                &[gpu
-                    .resource_map
-                    .get(descriptor_set)
-                    .unwrap()
-                    .allocation
-                    .descriptor_set],
-                &[],
+                &[descriptor_set],
             );
+
             device.cmd_bind_index_buffer(
                 inner_command_buffer,
                 *gpu.resource_map.get(&mesh.index_buffer).unwrap().deref(),

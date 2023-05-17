@@ -8,7 +8,7 @@ use ash::{
 };
 use log::trace;
 
-use super::{material::RenderPass, Gpu, Material, QueueType};
+use super::{material::RenderPass, Gpu, GpuDescriptorSet, Material, QueueType, ResourceHandle};
 
 #[derive(Default)]
 pub struct CommandBufferSubmitInfo {
@@ -176,6 +176,40 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         unsafe {
             device.cmd_set_viewport(self.command_buffer.inner(), 0, &[viewport]);
             device.cmd_set_scissor(self.command_buffer.inner(), 0, &[scissor]);
+        }
+    }
+
+    pub(crate) fn bind_descriptor_sets(
+        &self,
+        bind_point: PipelineBindPoint,
+        material: &Material,
+        first_index: u32,
+        descriptor_sets: &[&ResourceHandle<GpuDescriptorSet>],
+    ) {
+        let descriptor_sets: Vec<_> = descriptor_sets
+            .iter()
+            .map(|d| {
+                self.command_buffer
+                    .gpu
+                    .resource_map
+                    .get(d)
+                    .unwrap()
+                    .allocation
+                    .descriptor_set
+            })
+            .collect();
+        unsafe {
+            self.command_buffer
+                .gpu
+                .vk_logical_device()
+                .cmd_bind_descriptor_sets(
+                    self.command_buffer.inner_command_buffer,
+                    bind_point,
+                    material.pipeline_layout,
+                    first_index,
+                    &descriptor_sets,
+                    &[],
+                );
         }
     }
 }
