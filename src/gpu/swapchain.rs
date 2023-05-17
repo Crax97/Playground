@@ -72,7 +72,7 @@ impl Swapchain {
             ash::extensions::khr::Swapchain::new(&state.instance, &state.logical_device);
 
         let next_image_fence = GPUFence::create(
-            &gpu,
+            gpu.vk_logical_device().clone(),
             &FenceCreateInfo {
                 s_type: StructureType::FENCE_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -80,7 +80,7 @@ impl Swapchain {
             },
         )?;
         let in_flight_fence = GPUFence::create(
-            &gpu,
+            gpu.vk_logical_device().clone(),
             &FenceCreateInfo {
                 s_type: StructureType::FENCE_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -89,7 +89,7 @@ impl Swapchain {
         )?;
 
         let render_finished_semaphore = GPUSemaphore::create(
-            &gpu,
+            gpu.vk_logical_device().clone(),
             &SemaphoreCreateInfo {
                 s_type: StructureType::SEMAPHORE_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -98,7 +98,7 @@ impl Swapchain {
         )?;
 
         let image_available_semaphore = GPUSemaphore::create(
-            &gpu,
+            gpu.vk_logical_device().clone(),
             &SemaphoreCreateInfo {
                 s_type: StructureType::SEMAPHORE_CREATE_INFO,
                 p_next: std::ptr::null(),

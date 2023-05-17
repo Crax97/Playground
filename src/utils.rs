@@ -1,15 +1,17 @@
 use std::{path::Path, ptr::null};
 
 use ash::{
-    vk::{ShaderModule, ShaderModuleCreateFlags, ShaderModuleCreateInfo, StructureType},
+    vk::{ShaderModuleCreateFlags, ShaderModuleCreateInfo, StructureType},
     Device,
 };
 use log::info;
 
+use crate::gpu::GpuShaderModule;
+
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
     device: &Device,
     path: P,
-) -> anyhow::Result<ShaderModule> {
+) -> anyhow::Result<GpuShaderModule> {
     info!(
         "Reading path from {:?}",
         path.as_ref()
@@ -25,5 +27,5 @@ pub fn read_file_to_vk_module<P: AsRef<Path>>(
         p_code: input_file.as_ptr() as *const u32,
     };
     let module = unsafe { device.create_shader_module(&create_info, None) }?;
-    Ok(module)
+    Ok(GpuShaderModule::create(device.clone(), &create_info)?)
 }

@@ -950,7 +950,7 @@ impl Gpu {
         &self,
         create_info: &SamplerCreateInfo,
     ) -> VkResult<ResourceHandle<GpuSampler>> {
-        let sampler = GpuSampler::create(self, create_info)?;
+        let sampler = GpuSampler::create(self.vk_logical_device(), create_info)?;
         let id = self.resource_map.add(sampler);
         Ok(id)
     }

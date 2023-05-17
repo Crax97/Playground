@@ -25,7 +25,7 @@ use ash::{
     },
 };
 
-use super::{Gpu, GpuState, ShaderStage};
+use super::{Gpu, GpuShaderModule, GpuState, ShaderStage};
 
 fn vk_bool(b: bool) -> u32 {
     if b {
@@ -90,10 +90,10 @@ pub struct VertexBindingDescription<'a> {
     pub attributes: &'a [VertexAttributeDescription],
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct VertexStageInfo<'a> {
     pub entry_point: &'a str,
-    pub module: vk::ShaderModule,
+    pub module: &'a GpuShaderModule,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -123,10 +123,10 @@ pub struct ColorAttachment {
 
 #[derive(Clone, Copy, Debug)]
 pub struct DepthStencilAttachment {}
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct FragmentStageInfo<'a> {
     pub entry_point: &'a str,
-    pub module: vk::ShaderModule,
+    pub module: &'a GpuShaderModule,
     pub color_attachments: &'a [ColorAttachment],
     pub depth_stencil_attachments: &'a [DepthStencilAttachment],
 }
@@ -441,7 +441,7 @@ impl Material {
                 p_next: std::ptr::null(),
                 flags: PipelineShaderStageCreateFlags::empty(),
                 stage: ShaderStageFlags::VERTEX,
-                module: vs.module,
+                module: vs.module.inner,
                 p_name: vs_entry.as_ptr(),
                 p_specialization_info: std::ptr::null(),
             })
@@ -452,7 +452,7 @@ impl Material {
                 p_next: std::ptr::null(),
                 flags: PipelineShaderStageCreateFlags::empty(),
                 stage: ShaderStageFlags::FRAGMENT,
-                module: fs.module,
+                module: fs.module.inner,
                 p_name: fs_entry.as_ptr(),
                 p_specialization_info: std::ptr::null(),
             })

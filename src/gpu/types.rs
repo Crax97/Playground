@@ -6,7 +6,8 @@ use ash::{
     vk::{
         self, AllocationCallbacks, Buffer, DescriptorSet, FenceCreateInfo, ImageAspectFlags,
         ImageSubresourceRange, ImageViewCreateFlags, ImageViewType, MappedMemoryRange,
-        MemoryMapFlags, SamplerCreateInfo, SemaphoreCreateInfo, StructureType,
+        MemoryMapFlags, SamplerCreateInfo, SemaphoreCreateInfo, ShaderModuleCreateInfo,
+        StructureType,
     },
 };
 
@@ -30,11 +31,11 @@ macro_rules! define_raii_wrapper {
 
         impl $name {
 
-            pub fn create(gpu: &Gpu, $arg_name : $arg_typ, $($mem_name : $mem_ty,)*) -> VkResult<Self> {
+            pub fn create(device: ash::Device, $arg_name : $arg_typ, $($mem_name : $mem_ty,)*) -> VkResult<Self> {
 
-                let inner = $create_impl_block(&gpu)?;
+                let inner = $create_impl_block(&device)?;
                 Ok(Self {
-                    device: gpu.state.logical_device.clone(),
+                    device,
                     inner,
                     $($mem_name),*
                 })
@@ -65,15 +66,15 @@ macro_rules! define_raii_wrapper {
 
 define_raii_wrapper!((struct GPUSemaphore {}, vk::Semaphore, ash::Device::destroy_semaphore) {
     (create_info: &SemaphoreCreateInfo,) => {
-        |gpu: &Gpu| { unsafe {
-            gpu.state.logical_device.create_semaphore(create_info, get_allocation_callbacks())
+        |device: &ash::Device| { unsafe {
+            device.create_semaphore(create_info, get_allocation_callbacks())
         }}
     }
 });
 
 define_raii_wrapper!((struct GPUFence {}, vk::Fence, ash::Device::destroy_fence) {
     (create_info: &FenceCreateInfo,) => {
-        |gpu: &Gpu| { unsafe { gpu.state.logical_device.create_fence(create_info, get_allocation_callbacks()) }}
+        |device: &ash::Device| { unsafe { device.create_fence(create_info, get_allocation_callbacks()) }}
     }
 });
 
@@ -255,7 +256,12 @@ impl Resource for GpuDescriptorSet {}
 
 define_raii_wrapper!((struct GpuSampler {}, vk::Sampler, ash::Device::destroy_sampler) {
     (create_info: &SamplerCreateInfo,) => {
-        |gpu: &Gpu| { unsafe { gpu.state.logical_device.create_sampler(create_info, get_allocation_callbacks()) }}
+        |device: &ash::Device| { unsafe { device.create_sampler(create_info, get_allocation_callbacks()) }}
+    }
+});
+define_raii_wrapper!((struct GpuShaderModule {}, vk::ShaderModule, ash::Device::destroy_shader_module) {
+    (create_info: &ShaderModuleCreateInfo,) => {
+        |device: &ash::Device| { unsafe { device.create_shader_module(create_info, get_allocation_callbacks()) }}
     }
 });
 

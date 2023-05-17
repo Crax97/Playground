@@ -369,11 +369,11 @@ fn main() -> anyhow::Result<()> {
             ],
             vertex_stage: Some(VertexStageInfo {
                 entry_point: "main",
-                module: vertex_module,
+                module: &vertex_module,
             }),
             fragment_stage: Some(FragmentStageInfo {
                 entry_point: "main",
-                module: fragment_module,
+                module: &fragment_module,
                 color_attachments,
                 depth_stencil_attachments: &[],
             }),
@@ -411,10 +411,6 @@ fn main() -> anyhow::Result<()> {
 
     swapchain.select_present_mode(PresentModeKHR::MAILBOX)?;
 
-    unsafe {
-        device.destroy_shader_module(vertex_module, None);
-        device.destroy_shader_module(fragment_module, None);
-    }
     let mut time = 0.0;
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
