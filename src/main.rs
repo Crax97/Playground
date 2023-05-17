@@ -449,9 +449,7 @@ fn main() -> anyhow::Result<()> {
                 );
             }
             winit::event::Event::RedrawEventsCleared => {}
-            winit::event::Event::LoopDestroyed => unsafe {
-                device.device_wait_idle().unwrap();
-            },
+            winit::event::Event::LoopDestroyed => gpu.wait_device_idle().unwrap(),
         }
     })
 }

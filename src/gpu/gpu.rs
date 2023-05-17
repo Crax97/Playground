@@ -737,6 +737,10 @@ impl Gpu {
         }
         Ok(())
     }
+
+    pub(crate) fn wait_device_idle(&self) -> VkResult<()> {
+        unsafe { self.vk_logical_device().device_wait_idle() }
+    }
 }
 
 fn create_staging_buffer(state: &Arc<GpuState>) -> VkResult<GpuBuffer> {
