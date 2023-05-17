@@ -13,15 +13,15 @@ use ash::{
         make_api_version, AccessFlags, ApplicationInfo, BufferCreateFlags, BufferUsageFlags,
         CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
         CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo,
-        CommandPoolResetFlags, DependencyFlags, DescriptorSetLayoutBinding,
-        DescriptorSetLayoutCreateFlags, DescriptorType, DeviceCreateFlags, DeviceCreateInfo,
-        DeviceQueueCreateFlags, DeviceQueueCreateInfo, Extent3D, Fence, ImageAspectFlags,
-        ImageCreateFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceLayers,
-        ImageSubresourceRange, ImageTiling, ImageType, InstanceCreateFlags, InstanceCreateInfo,
-        MemoryHeap, MemoryHeapFlags, Offset3D, PhysicalDevice, PhysicalDeviceFeatures,
-        PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags, Queue, QueueFlags,
-        SampleCountFlags, SamplerCreateInfo, ShaderStageFlags, SharingMode, StructureType,
-        SubmitInfo, API_VERSION_1_3,
+        CommandPoolResetFlags, DependencyFlags, DescriptorBufferInfo, DescriptorImageInfo,
+        DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags, DescriptorType,
+        DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo,
+        Extent3D, Fence, ImageAspectFlags, ImageCreateFlags, ImageLayout, ImageMemoryBarrier,
+        ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType, InstanceCreateFlags,
+        InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D, PhysicalDevice,
+        PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags,
+        Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo, ShaderStageFlags, SharingMode,
+        StructureType, SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
     },
     *,
 };
@@ -604,13 +604,137 @@ impl Gpu {
         }
         trace!("{}", s);
     }
+    /*
+       let descriptor_set = unsafe {
+           let descriptor_set = device.allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo {
+               s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
+               p_next: null(),
+               descriptor_pool,
+               descriptor_set_count: 1,
+               p_set_layouts: addr_of!(descriptor_set_layout),
+           })?[0];
 
+           let buffer_info = DescriptorBufferInfo {
+               buffer: *gpu.resource_map.get(&uniform_buffer).unwrap().deref(),
+               offset: 0,
+               range: vk::WHOLE_SIZE,
+           };
+           let image_info = DescriptorImageInfo {
+               sampler: *gpu.resource_map.get(&sampler).unwrap().deref(),
+               image_view: gpu.resource_map.get(&image).unwrap().view,
+               image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+           };
+
+           device.update_descriptor_sets(
+               &[
+                   WriteDescriptorSet {
+                       s_type: StructureType::WRITE_DESCRIPTOR_SET,
+                       p_next: null(),
+                       dst_set: descriptor_set,
+                       dst_binding: 0,
+                       dst_array_element: 0,
+                       descriptor_count: 1,
+                       descriptor_type: DescriptorType::UNIFORM_BUFFER,
+                       p_image_info: null(),
+                       p_buffer_info: addr_of!(buffer_info),
+                       p_texel_buffer_view: null(),
+                   },
+                   WriteDescriptorSet {
+                       s_type: StructureType::WRITE_DESCRIPTOR_SET,
+                       p_next: null(),
+                       dst_set: descriptor_set,
+                       dst_binding: 1,
+                       dst_array_element: 0,
+                       descriptor_count: 1,
+                       descriptor_type: DescriptorType::COMBINED_IMAGE_SAMPLER,
+                       p_image_info: addr_of!(image_info),
+                       p_buffer_info: null(),
+                       p_texel_buffer_view: null(),
+                   },
+               ],
+               &[],
+           );
+    */
     fn initialize_descriptor_set(
         &self,
         descriptor_set: &vk::DescriptorSet,
         info: &DescriptorSetInfo,
     ) -> VkResult<()> {
-        // todo...
+        let mut buffer_descriptors = vec![];
+        let mut image_descriptors = vec![];
+        info.descriptors.iter().for_each(|i| match &i.element_type {
+            super::DescriptorType::UniformBuffer(buf) => buffer_descriptors.push((
+                i.binding,
+                DescriptorBufferInfo {
+                    buffer: self.resource_map.get(&buf.handle).unwrap().inner,
+                    offset: buf.offset,
+                    range: buf.size,
+                },
+                vk::DescriptorType::UNIFORM_BUFFER,
+            )),
+            super::DescriptorType::StorageBuffer(buf) => buffer_descriptors.push((
+                i.binding,
+                DescriptorBufferInfo {
+                    buffer: self.resource_map.get(&buf.handle).unwrap().inner,
+                    offset: buf.offset,
+                    range: buf.size,
+                },
+                vk::DescriptorType::STORAGE_BUFFER,
+            )),
+            super::DescriptorType::Sampler(sam) => image_descriptors.push((
+                i.binding,
+                DescriptorImageInfo {
+                    sampler: self.resource_map.get(&sam.sampler).unwrap().inner,
+                    image_view: self.resource_map.get(&sam.image_view).unwrap().view,
+                    image_layout: sam.image_layout,
+                },
+                vk::DescriptorType::SAMPLER,
+            )),
+            super::DescriptorType::CombinedImageSampler(sam) => image_descriptors.push((
+                i.binding,
+                DescriptorImageInfo {
+                    sampler: self.resource_map.get(&sam.sampler).unwrap().inner,
+                    image_view: self.resource_map.get(&sam.image_view).unwrap().view,
+                    image_layout: sam.image_layout,
+                },
+                vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            )),
+        });
+
+        let mut write_descriptor_sets = vec![];
+
+        for (bind, desc, ty) in &buffer_descriptors {
+            write_descriptor_sets.push(WriteDescriptorSet {
+                s_type: StructureType::WRITE_DESCRIPTOR_SET,
+                p_next: null(),
+                dst_set: descriptor_set.clone(),
+                dst_binding: *bind,
+                dst_array_element: 0,
+                descriptor_count: 1,
+                descriptor_type: *ty,
+                p_image_info: std::ptr::null(),
+                p_buffer_info: addr_of!(*desc),
+                p_texel_buffer_view: std::ptr::null(),
+            });
+        }
+        for (bind, desc, ty) in &image_descriptors {
+            write_descriptor_sets.push(WriteDescriptorSet {
+                s_type: StructureType::WRITE_DESCRIPTOR_SET,
+                p_next: null(),
+                dst_set: descriptor_set.clone(),
+                dst_binding: *bind,
+                dst_array_element: 0,
+                descriptor_count: 1,
+                descriptor_type: *ty,
+                p_image_info: addr_of!(*desc),
+                p_buffer_info: std::ptr::null(),
+                p_texel_buffer_view: std::ptr::null(),
+            });
+        }
+        unsafe {
+            self.vk_logical_device()
+                .update_descriptor_sets(&write_descriptor_sets, &[]);
+        }
         Ok(())
     }
 }

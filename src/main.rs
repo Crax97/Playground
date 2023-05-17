@@ -467,68 +467,17 @@ fn main() -> anyhow::Result<()> {
                 binding_stage: gpu::ShaderStage::Vertex,
             },
             DescriptorInfo {
-                binding: 0,
+                binding: 1,
                 element_type: gpu::DescriptorType::CombinedImageSampler(SamplerState {
                     sampler: sampler.clone(),
                     image_view: image.clone(),
                     image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 }),
-                binding_stage: gpu::ShaderStage::Vertex,
+                binding_stage: gpu::ShaderStage::Fragment,
             },
         ],
     })?;
 
-    /*
-       let descriptor_set = unsafe {
-           let descriptor_set = device.allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo {
-               s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
-               p_next: null(),
-               descriptor_pool,
-               descriptor_set_count: 1,
-               p_set_layouts: addr_of!(descriptor_set_layout),
-           })?[0];
-
-           let buffer_info = DescriptorBufferInfo {
-               buffer: *gpu.resource_map.get(&uniform_buffer).unwrap().deref(),
-               offset: 0,
-               range: vk::WHOLE_SIZE,
-           };
-           let image_info = DescriptorImageInfo {
-               sampler: *gpu.resource_map.get(&sampler).unwrap().deref(),
-               image_view: gpu.resource_map.get(&image).unwrap().view,
-               image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-           };
-
-           device.update_descriptor_sets(
-               &[
-                   WriteDescriptorSet {
-                       s_type: StructureType::WRITE_DESCRIPTOR_SET,
-                       p_next: null(),
-                       dst_set: descriptor_set,
-                       dst_binding: 0,
-                       dst_array_element: 0,
-                       descriptor_count: 1,
-                       descriptor_type: DescriptorType::UNIFORM_BUFFER,
-                       p_image_info: null(),
-                       p_buffer_info: addr_of!(buffer_info),
-                       p_texel_buffer_view: null(),
-                   },
-                   WriteDescriptorSet {
-                       s_type: StructureType::WRITE_DESCRIPTOR_SET,
-                       p_next: null(),
-                       dst_set: descriptor_set,
-                       dst_binding: 1,
-                       dst_array_element: 0,
-                       descriptor_count: 1,
-                       descriptor_type: DescriptorType::COMBINED_IMAGE_SAMPLER,
-                       p_image_info: addr_of!(image_info),
-                       p_buffer_info: null(),
-                       p_texel_buffer_view: null(),
-                   },
-               ],
-               &[],
-           );
-    */
     swapchain.select_present_mode(PresentModeKHR::MAILBOX)?;
 
     unsafe {
