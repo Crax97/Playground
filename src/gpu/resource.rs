@@ -8,7 +8,7 @@ use thunderdome::{Arena, Index};
 pub trait Resource {}
 
 #[repr(transparent)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Hash)]
 pub(crate) struct ResourceId {
     pub(crate) id: Index,
 }
@@ -33,6 +33,11 @@ where
     resource_map: Weak<RefCell<ResourceMapState>>,
 }
 
+impl<R: Resource + 'static> std::hash::Hash for ResourceHandle<R> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
 impl<R: Resource + 'static> Clone for ResourceHandle<R> {
     fn clone(&self) -> Self {
         Self {

@@ -40,18 +40,21 @@ impl QueueType {
     }
 }
 
+#[derive(Clone, Hash)]
 pub struct BufferRange {
     pub handle: ResourceHandle<GpuBuffer>,
     pub offset: u64,
     pub size: u64,
 }
 
+#[derive(Clone, Hash)]
 pub struct SamplerState {
     pub sampler: ResourceHandle<GpuSampler>,
     pub image_view: ResourceHandle<GpuImage>,
     pub image_layout: ImageLayout,
 }
 
+#[derive(Clone, Hash)]
 pub enum DescriptorType {
     UniformBuffer(BufferRange),
     StorageBuffer(BufferRange),
@@ -59,19 +62,21 @@ pub enum DescriptorType {
     CombinedImageSampler(SamplerState),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Hash, Debug)]
 pub enum ShaderStage {
     Vertex,
     Fragment,
     Compute,
 }
 
+#[derive(Clone, Hash)]
 pub struct DescriptorInfo {
     pub binding: u32,
     pub element_type: DescriptorType,
     pub binding_stage: ShaderStage,
 }
 
+#[derive(Clone, Hash)]
 pub struct DescriptorSetInfo<'a> {
     pub descriptors: &'a [DescriptorInfo],
 }
