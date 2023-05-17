@@ -150,7 +150,19 @@ fn main() -> anyhow::Result<()> {
         buffer
     };
 
-    let uniform_buffer = {
+    let uniform_buffer_1 = {
+        let create_info = BufferCreateInfo {
+            size: std::mem::size_of::<PerObjectData>(),
+            usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
+        };
+        let buffer = gpu.create_buffer(
+            &create_info,
+            MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
+        )?;
+        buffer
+    };
+
+    let uniform_buffer_2 = {
         let create_info = BufferCreateInfo {
             size: std::mem::size_of::<PerObjectData>(),
             usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
@@ -372,12 +384,34 @@ fn main() -> anyhow::Result<()> {
         },
     )?;
 
-    let descriptor_set = gpu.create_descriptor_set(&DescriptorSetInfo {
+    let descriptor_set_1 = gpu.create_descriptor_set(&DescriptorSetInfo {
         descriptors: &[
             DescriptorInfo {
                 binding: 0,
                 element_type: gpu::DescriptorType::UniformBuffer(BufferRange {
-                    handle: uniform_buffer.clone(),
+                    handle: uniform_buffer_1.clone(),
+                    offset: 0,
+                    size: vk::WHOLE_SIZE,
+                }),
+                binding_stage: gpu::ShaderStage::Vertex,
+            },
+            DescriptorInfo {
+                binding: 1,
+                element_type: gpu::DescriptorType::CombinedImageSampler(SamplerState {
+                    sampler: sampler.clone(),
+                    image_view: image.clone(),
+                    image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                }),
+                binding_stage: gpu::ShaderStage::Fragment,
+            },
+        ],
+    })?;
+    let descriptor_set_2 = gpu.create_descriptor_set(&DescriptorSetInfo {
+        descriptors: &[
+            DescriptorInfo {
+                binding: 0,
+                element_type: gpu::DescriptorType::UniformBuffer(BufferRange {
+                    handle: uniform_buffer_2.clone(),
                     offset: 0,
                     size: vk::WHOLE_SIZE,
                 }),
@@ -424,12 +458,12 @@ fn main() -> anyhow::Result<()> {
                 gpu.reset_state().unwrap();
                 render_frame(
                     &gpu,
-                    &uniform_buffer,
+                    &uniform_buffer_1,
                     time,
                     &material,
                     &render_pass,
                     &mut swapchain,
-                    &descriptor_set,
+                    &descriptor_set_1,
                     &mesh,
                 );
             }
@@ -475,25 +509,25 @@ fn render_frame(
     )
     .unwrap();
     render_textured_quad(
+        gpu,
+        mesh,
         material,
         render_pass,
         &framebuffer,
         swapchain,
         descriptor_set,
-        gpu,
-        mesh,
     );
     let _ = swapchain.present();
 }
 
 fn render_textured_quad(
+    gpu: &Gpu,
+    mesh: &Mesh,
     material: &Material,
     render_pass: &RenderPass,
     framebuffer: &GpuFramebuffer,
     swapchain: &mut gpu::Swapchain,
     descriptor_set: &ResourceHandle<GpuDescriptorSet>,
-    gpu: &Gpu,
-    mesh: &Mesh,
 ) {
     {
         let mut command_buffer = gpu::CommandBuffer::new(

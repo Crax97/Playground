@@ -65,7 +65,7 @@ impl PooledDescriptorSetAllocator {
                     s_type: StructureType::DESCRIPTOR_POOL_CREATE_INFO,
                     p_next: std::ptr::null(),
                     flags: DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET,
-                    max_sets: 1,
+                    max_sets: 100,
                     pool_size_count: 4,
                     p_pool_sizes: [
                         pool_size_uniform_buffer,

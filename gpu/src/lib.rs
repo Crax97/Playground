@@ -8,7 +8,7 @@ mod swapchain;
 mod types;
 
 pub use allocator::*;
-use ash::vk::ImageLayout;
+use ash::vk::{self, ImageLayout};
 pub use command_buffer::*;
 pub use gpu::*;
 pub use material::*;
@@ -47,12 +47,18 @@ pub struct SamplerState {
     pub image_layout: ImageLayout,
 }
 
-#[derive(Clone, Hash)]
+#[derive(Clone)]
 pub enum DescriptorType {
     UniformBuffer(BufferRange),
     StorageBuffer(BufferRange),
     Sampler(SamplerState),
     CombinedImageSampler(SamplerState),
+}
+
+impl std::hash::Hash for DescriptorType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+    }
 }
 
 #[derive(Clone, Copy, Hash, Debug)]
