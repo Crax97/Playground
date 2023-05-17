@@ -1116,41 +1116,11 @@ impl Gpu {
         &self,
         info: &DescriptorSetInfo,
     ) -> VkResult<ResourceHandle<GpuDescriptorSet>> {
-        let mut descriptor_set_bindings = vec![];
-        for descriptor_info in info.descriptors {
-            let stage_flags = match descriptor_info.binding_stage {
-                crate::gpu::ShaderStage::Vertex => ShaderStageFlags::VERTEX,
-                crate::gpu::ShaderStage::Fragment => ShaderStageFlags::FRAGMENT,
-                crate::gpu::ShaderStage::Compute => ShaderStageFlags::COMPUTE,
-            };
-            let descriptor_type = match descriptor_info.element_type {
-                crate::gpu::DescriptorType::UniformBuffer(_) => DescriptorType::UNIFORM_BUFFER,
-                crate::gpu::DescriptorType::StorageBuffer(_) => DescriptorType::STORAGE_BUFFER,
-                crate::gpu::DescriptorType::Sampler(_) => DescriptorType::SAMPLER,
-                crate::gpu::DescriptorType::CombinedImageSampler(_) => {
-                    DescriptorType::COMBINED_IMAGE_SAMPLER
-                }
-            };
-            let binding = DescriptorSetLayoutBinding {
-                binding: descriptor_info.binding,
-                descriptor_type,
-                descriptor_count: 1,
-                stage_flags,
-                p_immutable_samplers: std::ptr::null(),
-            };
-
-            descriptor_set_bindings.push(binding);
-        }
-
-        let allocated_descriptor_set = self.state.descriptor_set_allocator.borrow_mut().allocate(
-            &vk::DescriptorSetLayoutCreateInfo {
-                s_type: StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                p_next: std::ptr::null(),
-                flags: DescriptorSetLayoutCreateFlags::empty(),
-                binding_count: descriptor_set_bindings.len() as _,
-                p_bindings: descriptor_set_bindings.as_ptr(),
-            },
-        )?;
+        let allocated_descriptor_set = self
+            .state
+            .descriptor_set_allocator
+            .borrow_mut()
+            .allocate(info)?;
         self.initialize_descriptor_set(&allocated_descriptor_set.descriptor_set, info)?;
         let descriptor_set = GpuDescriptorSet::create(
             self,

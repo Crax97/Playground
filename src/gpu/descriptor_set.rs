@@ -4,10 +4,13 @@ use ash::{
     prelude::VkResult,
     vk::{
         self, DescriptorPool, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
-        DescriptorPoolSize, DescriptorSetLayoutCreateInfo, DescriptorType, StructureType,
+        DescriptorPoolSize, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
+        DescriptorSetLayoutCreateInfo, DescriptorType, ShaderStageFlags, StructureType,
     },
     Device,
 };
+
+use super::DescriptorSetInfo;
 
 pub struct DescriptorSetAllocation {
     pub owner_pool: vk::DescriptorPool,
@@ -16,10 +19,7 @@ pub struct DescriptorSetAllocation {
 }
 
 pub trait DescriptorSetAllocator {
-    fn allocate(
-        &mut self,
-        info: &DescriptorSetLayoutCreateInfo,
-    ) -> VkResult<DescriptorSetAllocation>;
+    fn allocate(&mut self, info: &DescriptorSetInfo) -> VkResult<DescriptorSetAllocation>;
     fn deallocate(&mut self, descriptor_set: &DescriptorSetAllocation) -> VkResult<()>;
 }
 
@@ -92,12 +92,45 @@ impl PooledDescriptorSetAllocator {
 }
 
 impl DescriptorSetAllocator for PooledDescriptorSetAllocator {
-    fn allocate(
-        &mut self,
-        info: &DescriptorSetLayoutCreateInfo,
-    ) -> VkResult<DescriptorSetAllocation> {
-        let descriptor_set_layout =
-            unsafe { self.device.create_descriptor_set_layout(&info, None) }?;
+    fn allocate(&mut self, info: &DescriptorSetInfo) -> VkResult<DescriptorSetAllocation> {
+        let mut descriptor_set_bindings = vec![];
+        for descriptor_info in info.descriptors {
+            let stage_flags = match descriptor_info.binding_stage {
+                crate::gpu::ShaderStage::Vertex => ShaderStageFlags::VERTEX,
+                crate::gpu::ShaderStage::Fragment => ShaderStageFlags::FRAGMENT,
+                crate::gpu::ShaderStage::Compute => ShaderStageFlags::COMPUTE,
+            };
+            let descriptor_type = match descriptor_info.element_type {
+                crate::gpu::DescriptorType::UniformBuffer(_) => DescriptorType::UNIFORM_BUFFER,
+                crate::gpu::DescriptorType::StorageBuffer(_) => DescriptorType::STORAGE_BUFFER,
+                crate::gpu::DescriptorType::Sampler(_) => DescriptorType::SAMPLER,
+                crate::gpu::DescriptorType::CombinedImageSampler(_) => {
+                    DescriptorType::COMBINED_IMAGE_SAMPLER
+                }
+            };
+            let binding = DescriptorSetLayoutBinding {
+                binding: descriptor_info.binding,
+                descriptor_type,
+                descriptor_count: 1,
+                stage_flags,
+                p_immutable_samplers: std::ptr::null(),
+            };
+
+            descriptor_set_bindings.push(binding);
+        }
+
+        let descriptor_set_layout = unsafe {
+            self.device.create_descriptor_set_layout(
+                &vk::DescriptorSetLayoutCreateInfo {
+                    s_type: StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                    p_next: std::ptr::null(),
+                    flags: DescriptorSetLayoutCreateFlags::empty(),
+                    binding_count: descriptor_set_bindings.len() as _,
+                    p_bindings: descriptor_set_bindings.as_ptr(),
+                },
+                None,
+            )
+        }?;
 
         let mut did_try_once = false;
 
