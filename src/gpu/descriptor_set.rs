@@ -9,8 +9,7 @@ use ash::{
     vk::{
         self, DescriptorPool, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
         DescriptorPoolSize, DescriptorSetLayout, DescriptorSetLayoutBinding,
-        DescriptorSetLayoutCreateFlags, DescriptorSetLayoutCreateInfo, DescriptorType,
-        ShaderStageFlags, StructureType,
+        DescriptorSetLayoutCreateFlags, DescriptorType, ShaderStageFlags, StructureType,
     },
     Device,
 };

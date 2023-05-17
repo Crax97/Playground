@@ -3,25 +3,24 @@ use std::{ffi::CString, ptr::addr_of, sync::Arc};
 use ash::{
     prelude::VkResult,
     vk::{
-        self, AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentReference,
-        DependencyFlags, DescriptorSetLayout, DescriptorSetLayoutBinding,
-        DescriptorSetLayoutCreateFlags, DescriptorSetLayoutCreateInfo, DescriptorType,
-        DynamicState, GraphicsPipelineCreateInfo, ImageLayout, Pipeline, PipelineBindPoint,
-        PipelineCache, PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
-        PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
+        self, AttachmentDescription, AttachmentDescriptionFlags, AttachmentReference,
+        DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
+        DescriptorSetLayoutCreateInfo, DescriptorType, DynamicState, GraphicsPipelineCreateInfo,
+        ImageLayout, Pipeline, PipelineBindPoint, PipelineCache, PipelineColorBlendAttachmentState,
+        PipelineColorBlendStateCreateFlags, PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
         PipelineDepthStencilStateCreateFlags, PipelineDepthStencilStateCreateInfo,
         PipelineDynamicStateCreateFlags, PipelineDynamicStateCreateInfo,
         PipelineInputAssemblyStateCreateFlags, PipelineInputAssemblyStateCreateInfo,
         PipelineLayout, PipelineLayoutCreateFlags, PipelineLayoutCreateInfo,
         PipelineMultisampleStateCreateFlags, PipelineMultisampleStateCreateInfo,
         PipelineRasterizationStateCreateFlags, PipelineRasterizationStateCreateInfo,
-        PipelineShaderStageCreateFlags, PipelineShaderStageCreateInfo, PipelineStageFlags,
+        PipelineShaderStageCreateFlags, PipelineShaderStageCreateInfo,
         PipelineTessellationStateCreateFlags, PipelineTessellationStateCreateInfo,
         PipelineVertexInputStateCreateFlags, PipelineVertexInputStateCreateInfo,
         PipelineViewportStateCreateFlags, PipelineViewportStateCreateInfo, RenderPassCreateFlags,
-        RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags, StructureType, SubpassDependency,
+        RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags, StructureType,
         SubpassDescription, SubpassDescriptionFlags, VertexInputAttributeDescription,
-        VertexInputBindingDescription, SUBPASS_EXTERNAL,
+        VertexInputBindingDescription,
     },
 };
 
@@ -331,29 +330,11 @@ impl<'a> MaterialDescription<'a> {
         }
     }
 
-    fn get_output_attachments(
-        &self,
-    ) -> (
-        Vec<AttachmentDescription>,
-        Vec<PipelineColorBlendAttachmentState>,
-    ) {
-        let mut attachment_descriptions = vec![];
+    fn get_output_attachments(&self) -> Vec<PipelineColorBlendAttachmentState> {
         let mut pipeline_color_blend_attachment_states = vec![];
 
         if let Some(fs) = self.fragment_stage {
             for attachment in fs.color_attachments.iter() {
-                attachment_descriptions.push(AttachmentDescription {
-                    flags: AttachmentDescriptionFlags::empty(),
-                    format: attachment.format,
-                    samples: attachment.samples,
-                    load_op: attachment.load_op,
-                    store_op: attachment.store_op,
-                    stencil_load_op: attachment.stencil_load_op,
-                    stencil_store_op: attachment.stencil_store_op,
-                    initial_layout: attachment.initial_layout,
-                    final_layout: attachment.final_layout,
-                });
-
                 pipeline_color_blend_attachment_states.push(PipelineColorBlendAttachmentState {
                     blend_enable: vk_bool(attachment.blend_state.blend_enable),
                     src_color_blend_factor: attachment.blend_state.src_color_blend_factor,
@@ -366,11 +347,7 @@ impl<'a> MaterialDescription<'a> {
                 })
             }
         }
-
-        (
-            attachment_descriptions,
-            pipeline_color_blend_attachment_states,
-        )
+        pipeline_color_blend_attachment_states
     }
 
     fn get_input_bindings_and_attributes(
@@ -420,8 +397,7 @@ impl Material {
         material_description: &MaterialDescription,
     ) -> VkResult<Self> {
         let descriptor_set_layout = material_description.create_descriptor_set_layout(gpu)?;
-        let (output_attachments, color_blend_attachments) =
-            material_description.get_output_attachments();
+        let color_blend_attachments = material_description.get_output_attachments();
         let mut stages = vec![];
 
         let vs_entry = if let Some(vs) = material_description.vertex_stage {

@@ -2,24 +2,15 @@ mod gpu;
 mod mesh;
 mod utils;
 
-use std::{
-    io::BufReader,
-    mem::size_of,
-    ops::Deref,
-    ptr::{addr_of, null},
-};
+use std::{io::BufReader, mem::size_of};
 
 use ash::vk::{
     self, AccessFlags, AttachmentLoadOp, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor,
-    BufferUsageFlags, ClearColorValue, ClearValue, ColorComponentFlags, CommandBufferAllocateInfo,
-    CommandBufferLevel, CommandPoolCreateFlags, CommandPoolCreateInfo, CompareOp, DependencyFlags,
-    DescriptorBufferInfo, DescriptorImageInfo, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
-    DescriptorPoolSize, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
-    DescriptorSetLayoutCreateInfo, DescriptorType, Filter, FramebufferCreateFlags, ImageLayout,
-    ImageUsageFlags, ImageView, IndexType, Offset2D, PipelineBindPoint, PipelineStageFlags,
-    PresentModeKHR, Rect2D, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags,
-    SamplerCreateInfo, SamplerMipmapMode, ShaderStageFlags, StructureType, SubpassDependency,
-    WriteDescriptorSet, SUBPASS_EXTERNAL,
+    BufferUsageFlags, ClearColorValue, ClearValue, ColorComponentFlags, CompareOp, DependencyFlags,
+    Filter, ImageLayout, ImageUsageFlags, IndexType, Offset2D, PipelineBindPoint,
+    PipelineStageFlags, PresentModeKHR, Rect2D, SampleCountFlags, SamplerAddressMode,
+    SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency,
+    SUBPASS_EXTERNAL,
 };
 
 use gpu::{

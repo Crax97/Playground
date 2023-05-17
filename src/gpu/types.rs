@@ -4,7 +4,7 @@ use crate::{gpu::allocator::GpuAllocator, gpu::Gpu};
 use ash::{
     prelude::*,
     vk::{
-        self, AllocationCallbacks, Buffer, DescriptorSet, FenceCreateInfo, FramebufferCreateFlags,
+        self, AllocationCallbacks, Buffer, FenceCreateInfo, FramebufferCreateFlags,
         ImageAspectFlags, ImageSubresourceRange, ImageView, ImageViewCreateFlags, ImageViewType,
         MappedMemoryRange, MemoryMapFlags, SamplerCreateInfo, SemaphoreCreateInfo,
         ShaderModuleCreateInfo, StructureType,

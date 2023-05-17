@@ -6,7 +6,6 @@ use ash::{
         Rect2D, RenderPassBeginInfo, StructureType, SubmitInfo, SubpassContents, Viewport,
     },
 };
-use log::trace;
 
 use super::{
     material::RenderPass, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, Material, QueueType,
