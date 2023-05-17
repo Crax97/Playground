@@ -89,24 +89,21 @@ impl ResourceMap {
         }
     }
 
-    pub(crate) fn get<R: Resource + 'static>(&self, id: &ResourceHandle<R>) -> Option<&R> {
+    pub fn get<R: Resource + 'static>(&self, id: &ResourceHandle<R>) -> Option<&R> {
         let arena_ref = self.get_arena();
         arena_ref.get(id.id.id)
     }
 
-    pub(crate) fn get_mut<R: Resource + 'static>(
-        &mut self,
-        id: &ResourceHandle<R>,
-    ) -> Option<&mut R> {
+    pub fn get_mut<R: Resource + 'static>(&mut self, id: &ResourceHandle<R>) -> Option<&mut R> {
         let arena_ref = self.get_arena();
         arena_ref.get_mut(id.id.id)
     }
 
-    pub(crate) fn len_total(&self) -> usize {
+    pub fn len_total(&self) -> usize {
         self.map.borrow().resources
     }
 
-    pub(crate) fn len<R: Resource + 'static>(&self) -> usize {
+    pub fn len<R: Resource + 'static>(&self) -> usize {
         self.get_arena::<R>().len()
     }
 
@@ -140,15 +137,15 @@ mod test {
 
     #[test]
     fn test_get() {
-        let mut map = ResourceMap::new();
-        let id = map.add(TestResource { val: 10 });
+        let map = ResourceMap::new();
+        let id: crate::ResourceHandle<TestResource> = map.add(TestResource { val: 10 });
 
         assert_eq!(map.get(&id).unwrap().val, 10);
     }
 
     #[test]
     fn test_drop() {
-        let mut map = ResourceMap::new();
+        let map = ResourceMap::new();
         let id_2 = map.add(TestResource { val: 14 });
         let id_3 = map.add(TestResource2 { val2: 142 });
         {
@@ -168,7 +165,7 @@ mod test {
     #[test]
     fn test_shuffle_memory() {
         let (mut map, id_2) = {
-            let mut map = ResourceMap::new();
+            let map = ResourceMap::new();
             let id_2 = map.add(TestResource { val: 14 });
             (map, id_2)
         };
@@ -193,7 +190,7 @@ mod test {
 
     #[test]
     fn test_other_map() {
-        let mut map_1 = ResourceMap::new();
+        let map_1 = ResourceMap::new();
         let id_1 = map_1.add(TestResource { val: 1 });
         drop(map_1);
 

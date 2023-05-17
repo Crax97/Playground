@@ -1,7 +1,7 @@
 use ash::{prelude::VkResult, vk::BufferUsageFlags};
 use nalgebra::{Vector2, Vector3};
 
-use crate::gpu::{BufferCreateInfo, Gpu, GpuBuffer, MemoryDomain, ResourceHandle};
+use gpu::{BufferCreateInfo, Gpu, GpuBuffer, MemoryDomain, ResourceHandle};
 
 pub struct MeshCreateInfo<'a> {
     pub indices: &'a [u32],

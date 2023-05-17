@@ -1,6 +1,6 @@
 use std::{cell::RefCell, ops::Deref, sync::Arc};
 
-use crate::{gpu::allocator::GpuAllocator, gpu::Gpu};
+use super::{allocator::GpuAllocator, gpu::Gpu};
 use ash::{
     prelude::*,
     vk::{
@@ -221,18 +221,15 @@ impl Deref for GpuImage {
 impl Resource for GpuImage {}
 
 pub struct GpuDescriptorSet {
-    device: ash::Device,
     pub(crate) allocation: DescriptorSetAllocation,
     pub(crate) allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
 }
 impl GpuDescriptorSet {
     pub fn create(
-        gpu: &Gpu,
         allocation: DescriptorSetAllocation,
         allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
     ) -> VkResult<Self> {
         Ok(Self {
-            device: gpu.state.logical_device.clone(),
             allocation,
             allocator,
         })

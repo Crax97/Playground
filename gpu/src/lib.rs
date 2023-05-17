@@ -31,13 +31,6 @@ impl QueueType {
             QueueType::Transfer => gpu.thread_local_state.transfer_command_pool,
         }
     }
-    fn get_vk_queue_index(&self, gpu: &Gpu) -> u32 {
-        match self {
-            QueueType::Graphics => gpu.state.queue_families.graphics_family.index,
-            QueueType::AsyncCompute => gpu.state.queue_families.async_compute_family.index,
-            QueueType::Transfer => gpu.state.queue_families.transfer_family.index,
-        }
-    }
 }
 
 #[derive(Clone, Hash)]

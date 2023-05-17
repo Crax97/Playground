@@ -111,15 +111,15 @@ impl PooledDescriptorSetAllocator {
         let mut descriptor_set_bindings = vec![];
         for descriptor_info in info.descriptors {
             let stage_flags = match descriptor_info.binding_stage {
-                crate::gpu::ShaderStage::Vertex => ShaderStageFlags::VERTEX,
-                crate::gpu::ShaderStage::Fragment => ShaderStageFlags::FRAGMENT,
-                crate::gpu::ShaderStage::Compute => ShaderStageFlags::COMPUTE,
+                super::ShaderStage::Vertex => ShaderStageFlags::VERTEX,
+                super::ShaderStage::Fragment => ShaderStageFlags::FRAGMENT,
+                super::ShaderStage::Compute => ShaderStageFlags::COMPUTE,
             };
             let descriptor_type = match descriptor_info.element_type {
-                crate::gpu::DescriptorType::UniformBuffer(_) => DescriptorType::UNIFORM_BUFFER,
-                crate::gpu::DescriptorType::StorageBuffer(_) => DescriptorType::STORAGE_BUFFER,
-                crate::gpu::DescriptorType::Sampler(_) => DescriptorType::SAMPLER,
-                crate::gpu::DescriptorType::CombinedImageSampler(_) => {
+                super::DescriptorType::UniformBuffer(_) => DescriptorType::UNIFORM_BUFFER,
+                super::DescriptorType::StorageBuffer(_) => DescriptorType::STORAGE_BUFFER,
+                super::DescriptorType::Sampler(_) => DescriptorType::SAMPLER,
+                super::DescriptorType::CombinedImageSampler(_) => {
                     DescriptorType::COMBINED_IMAGE_SAMPLER
                 }
             };

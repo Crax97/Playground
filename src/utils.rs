@@ -6,7 +6,7 @@ use ash::{
 };
 use log::info;
 
-use crate::gpu::GpuShaderModule;
+use gpu::GpuShaderModule;
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
     device: &Device,
@@ -26,6 +26,5 @@ pub fn read_file_to_vk_module<P: AsRef<Path>>(
         code_size: input_file.len(),
         p_code: input_file.as_ptr() as *const u32,
     };
-    let module = unsafe { device.create_shader_module(&create_info, None) }?;
     Ok(GpuShaderModule::create(device.clone(), &create_info)?)
 }

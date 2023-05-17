@@ -1,4 +1,4 @@
-use std::{num::NonZeroU32, ops::Deref, sync::Arc};
+use std::{num::NonZeroU32, ptr::addr_of, rc::Rc, sync::Arc};
 
 use ash::{
     extensions::khr::Surface,
@@ -7,14 +7,16 @@ use ash::{
         self, ComponentMapping, ComponentSwizzle, CompositeAlphaFlagsKHR, Extent2D,
         FenceCreateFlags, FenceCreateInfo, Format, Image, ImageAspectFlags, ImageSubresourceRange,
         ImageUsageFlags, ImageView, ImageViewCreateFlags, ImageViewCreateInfo, ImageViewType,
-        PresentInfoKHR, PresentModeKHR, Semaphore, SemaphoreCreateFlags, SemaphoreCreateInfo,
-        SharingMode, StructureType, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR,
+        PresentInfoKHR, PresentModeKHR, SemaphoreCreateFlags, SemaphoreCreateInfo, SharingMode,
+        StructureType, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR,
         SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
     },
 };
 use log::{info, trace, warn};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use winit::window::Window;
+
+use crate::{ResourceHandle, ResourceMap};
 
 use super::{GPUFence, GPUSemaphore, Gpu, GpuState};
 
@@ -54,57 +56,58 @@ pub struct Swapchain {
     pub current_swapchain: SwapchainKHR,
     pub current_swapchain_images: Vec<Image>,
     pub current_swapchain_image_views: Vec<ImageView>,
-    pub next_image_fence: GPUFence,
-    pub in_flight_fence: GPUFence,
-    pub render_finished_semaphore: GPUSemaphore,
-    pub image_available_semaphore: GPUSemaphore,
+    pub next_image_fence: ResourceHandle<GPUFence>,
+    pub in_flight_fence: ResourceHandle<GPUFence>,
+    pub render_finished_semaphore: ResourceHandle<GPUSemaphore>,
+    pub image_available_semaphore: ResourceHandle<GPUSemaphore>,
     pub window: Window,
 
     current_swapchain_index: u32,
     state: Arc<GpuState>,
+    resource_map: Rc<ResourceMap>,
 }
 
 impl Swapchain {
-    pub(crate) fn new(gpu: &Gpu, window: Window) -> VkResult<Self> {
+    pub fn new(gpu: &Gpu, window: Window) -> VkResult<Self> {
         let state = gpu.state.clone();
         let surface_extension = Surface::new(&state.entry, &state.instance);
         let swapchain_extension =
             ash::extensions::khr::Swapchain::new(&state.instance, &state.logical_device);
 
-        let next_image_fence = GPUFence::create(
+        let next_image_fence = gpu.resource_map.add(GPUFence::create(
             gpu.vk_logical_device().clone(),
             &FenceCreateInfo {
                 s_type: StructureType::FENCE_CREATE_INFO,
                 p_next: std::ptr::null(),
                 flags: FenceCreateFlags::empty(),
             },
-        )?;
-        let in_flight_fence = GPUFence::create(
+        )?);
+        let in_flight_fence = gpu.resource_map.add(GPUFence::create(
             gpu.vk_logical_device().clone(),
             &FenceCreateInfo {
                 s_type: StructureType::FENCE_CREATE_INFO,
                 p_next: std::ptr::null(),
                 flags: FenceCreateFlags::empty(),
             },
-        )?;
+        )?);
 
-        let render_finished_semaphore = GPUSemaphore::create(
+        let render_finished_semaphore = gpu.resource_map.add(GPUSemaphore::create(
             gpu.vk_logical_device().clone(),
             &SemaphoreCreateInfo {
                 s_type: StructureType::SEMAPHORE_CREATE_INFO,
                 p_next: std::ptr::null(),
                 flags: SemaphoreCreateFlags::empty(),
             },
-        )?;
+        )?);
 
-        let image_available_semaphore = GPUSemaphore::create(
+        let image_available_semaphore = gpu.resource_map.add(GPUSemaphore::create(
             gpu.vk_logical_device().clone(),
             &SemaphoreCreateInfo {
                 s_type: StructureType::SEMAPHORE_CREATE_INFO,
                 p_next: std::ptr::null(),
                 flags: SemaphoreCreateFlags::empty(),
             },
-        )?;
+        )?);
 
         let present_extent = Extent2D {
             width: window.outer_size().width,
@@ -132,20 +135,24 @@ impl Swapchain {
             image_available_semaphore,
             state,
             window,
+            resource_map: gpu.resource_map.clone(),
         };
         me.recreate_swapchain()?;
         me.log_supported_features();
         Ok(me)
     }
 
-    pub(crate) fn acquire_next_image(&mut self) -> VkResult<ImageView> {
-        let next_image_fence = self.next_image_fence.inner;
+    pub fn acquire_next_image(&mut self) -> VkResult<ImageView> {
+        let next_image_fence = self.resource_map.get(&self.next_image_fence).unwrap().inner;
         loop {
             let (next_image, suboptimal) = unsafe {
                 self.swapchain_extension.acquire_next_image(
                     self.current_swapchain,
                     u64::MAX,
-                    *self.image_available_semaphore,
+                    self.resource_map
+                        .get(&self.image_available_semaphore)
+                        .unwrap()
+                        .inner,
                     next_image_fence,
                 )
             }?;
@@ -167,23 +174,32 @@ impl Swapchain {
         }
     }
 
-    pub(crate) fn present(&self) -> VkResult<bool> {
+    pub fn present(&self) -> VkResult<bool> {
         unsafe {
             self.state
                 .logical_device
-                .wait_for_fences(&[*self.in_flight_fence], true, u64::MAX)
+                .wait_for_fences(
+                    &[self.resource_map.get(&self.in_flight_fence).unwrap().inner],
+                    true,
+                    u64::MAX,
+                )
                 .unwrap();
             self.state
                 .logical_device
-                .reset_fences(&[*self.in_flight_fence])
+                .reset_fences(&[self.resource_map.get(&self.in_flight_fence).unwrap().inner])
                 .unwrap();
+            let wait_semaphore = self
+                .resource_map
+                .get(&self.render_finished_semaphore)
+                .unwrap()
+                .inner;
             self.swapchain_extension.queue_present(
                 self.state.graphics_queue,
                 &PresentInfoKHR {
                     s_type: StructureType::PRESENT_INFO_KHR,
                     p_next: std::ptr::null(),
                     wait_semaphore_count: 1,
-                    p_wait_semaphores: self.render_finished_semaphore.deref() as *const Semaphore,
+                    p_wait_semaphores: addr_of!(wait_semaphore),
                     swapchain_count: 1,
                     p_swapchains: &self.current_swapchain as *const SwapchainKHR,
                     p_image_indices: &self.current_swapchain_index as *const u32,
@@ -204,7 +220,7 @@ impl Swapchain {
         return supported_formats[0].clone();
     }
 
-    pub(crate) fn recreate_swapchain(&mut self) -> VkResult<()> {
+    pub fn recreate_swapchain(&mut self) -> VkResult<()> {
         unsafe {
             self.swapchain_extension
                 .destroy_swapchain(self.current_swapchain, None);
@@ -439,12 +455,12 @@ impl Swapchain {
         self.drop_swapchain_structs();
     }
 
-    pub(crate) fn select_present_mode(&mut self, present_mode: PresentModeKHR) -> VkResult<()> {
+    pub fn select_present_mode(&mut self, present_mode: PresentModeKHR) -> VkResult<()> {
         self.present_mode = present_mode;
         self.recreate_swapchain()
     }
 
-    pub(crate) fn extents(&self) -> Extent2D {
+    pub fn extents(&self) -> Extent2D {
         self.present_extent
     }
 }

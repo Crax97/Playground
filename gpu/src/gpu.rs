@@ -3,6 +3,7 @@ use std::{
     ffi::{CStr, CString},
     ops::Deref,
     ptr::{addr_of, null},
+    rc::Rc,
     sync::Arc,
 };
 
@@ -30,7 +31,7 @@ use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 use winit::window::Window;
 
-use crate::gpu::descriptor_set::PooledDescriptorSetAllocator;
+use super::descriptor_set::PooledDescriptorSetAllocator;
 
 use super::{
     allocator::{GpuAllocator, PasstroughAllocator},
@@ -141,7 +142,7 @@ pub struct Gpu {
     pub state: Arc<GpuState>,
     pub thread_local_state: GpuThreadLocalState,
     pub staging_buffer: ResourceHandle<GpuBuffer>,
-    pub resource_map: ResourceMap,
+    pub resource_map: Rc<ResourceMap>,
 }
 
 pub struct GpuConfiguration<'a> {
@@ -279,7 +280,7 @@ impl Gpu {
             state,
             thread_local_state,
             staging_buffer,
-            resource_map,
+            resource_map: Rc::new(resource_map),
         })
     }
 
@@ -546,7 +547,7 @@ impl Gpu {
         Ok(())
     }
 
-    pub(crate) fn vk_logical_device(&self) -> Device {
+    pub fn vk_logical_device(&self) -> Device {
         self.state.logical_device.clone()
     }
 
@@ -737,7 +738,7 @@ impl Gpu {
         Ok(())
     }
 
-    pub(crate) fn wait_device_idle(&self) -> VkResult<()> {
+    pub fn wait_device_idle(&self) -> VkResult<()> {
         unsafe { self.vk_logical_device().device_wait_idle() }
     }
 }
@@ -864,7 +865,7 @@ impl Gpu {
         Ok(id)
     }
 
-    pub(crate) fn write_buffer_data<T: Copy>(
+    pub fn write_buffer_data<T: Copy>(
         &self,
         buffer: &ResourceHandle<GpuBuffer>,
         data: &[T],
@@ -1250,7 +1251,6 @@ impl Gpu {
             .allocate(info)?;
         self.initialize_descriptor_set(&allocated_descriptor_set.descriptor_set, info)?;
         let descriptor_set = GpuDescriptorSet::create(
-            self,
             allocated_descriptor_set,
             self.state.descriptor_set_allocator.clone(),
         )?;

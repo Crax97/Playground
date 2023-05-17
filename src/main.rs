@@ -1,4 +1,3 @@
-mod gpu;
 mod mesh;
 mod utils;
 
@@ -202,10 +201,7 @@ fn main() -> anyhow::Result<()> {
             MemoryDomain::HostCached | MemoryDomain::HostVisible,
         )?
     };
-    gpu.resource_map
-        .get(&staging_buffer)
-        .unwrap()
-        .write_data(cpu_image.as_bytes());
+    gpu.write_buffer_data(&staging_buffer, cpu_image.as_bytes())?;
     gpu.copy_buffer_to_image(
         &staging_buffer,
         &image,
@@ -455,10 +451,9 @@ fn render_frame(
     descriptor_set: &ResourceHandle<GpuDescriptorSet>,
     mesh: &Mesh,
 ) {
-    gpu.resource_map
-        .get(&uniform_buffer)
-        .unwrap()
-        .write_data(&[PerObjectData {
+    gpu.write_buffer_data(
+        uniform_buffer,
+        &[PerObjectData {
             model: nalgebra::Matrix4::new_rotation(vector![0.0, 0.0, time]),
             view: nalgebra::Matrix4::look_at_rh(
                 &point![2.0, 2.0, 2.0],
@@ -466,7 +461,9 @@ fn render_frame(
                 &vector![0.0, 0.0, -1.0],
             ),
             projection: nalgebra::Matrix4::new_perspective(1240.0 / 720.0, 45.0, 0.1, 10.0),
-        }]);
+        }],
+    )
+    .unwrap();
 
     let next_image = swapchain.acquire_next_image().unwrap();
     let framebuffer = GpuFramebuffer::create(
@@ -504,10 +501,10 @@ fn render_textured_quad(
         let mut command_buffer = gpu::CommandBuffer::new(
             gpu,
             gpu::CommandBufferSubmitInfo {
-                wait_semaphores: vec![swapchain.image_available_semaphore.inner],
+                wait_semaphores: vec![swapchain.image_available_semaphore.clone()],
                 wait_stages: vec![PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
-                signal_semaphores: vec![swapchain.render_finished_semaphore.inner],
-                fence: Some(swapchain.in_flight_fence.inner),
+                signal_semaphores: vec![swapchain.render_finished_semaphore.clone()],
+                fence: Some(swapchain.in_flight_fence.clone()),
                 target_queue: gpu::QueueType::Graphics,
             },
         )

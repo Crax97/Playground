@@ -7,6 +7,8 @@ use ash::{
     },
 };
 
+use crate::{GPUFence, GPUSemaphore};
+
 use super::{
     material::RenderPass, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, Material, QueueType,
     ResourceHandle,
@@ -14,10 +16,10 @@ use super::{
 
 #[derive(Default)]
 pub struct CommandBufferSubmitInfo {
-    pub wait_semaphores: Vec<vk::Semaphore>,
+    pub wait_semaphores: Vec<ResourceHandle<GPUSemaphore>>,
     pub wait_stages: Vec<PipelineStageFlags>,
-    pub signal_semaphores: Vec<vk::Semaphore>,
-    pub fence: Option<vk::Fence>,
+    pub signal_semaphores: Vec<ResourceHandle<GPUSemaphore>>,
+    pub fence: Option<ResourceHandle<GPUFence>>,
     pub target_queue: QueueType,
 }
 
@@ -130,7 +132,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         }
     }
 
-    pub(crate) fn draw_indexed(
+    pub fn draw_indexed(
         &mut self,
         index_count: u32,
         instance_count: u32,
@@ -181,7 +183,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         }
     }
 
-    pub(crate) fn bind_descriptor_sets(
+    pub fn bind_descriptor_sets(
         &self,
         bind_point: PipelineBindPoint,
         material: &Material,
@@ -214,7 +216,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 );
         }
     }
-    pub(crate) fn bind_index_buffer(
+    pub fn bind_index_buffer(
         &self,
         buffer: &ResourceHandle<GpuBuffer>,
         offset: vk::DeviceSize,
@@ -237,7 +239,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
             );
         }
     }
-    pub(crate) fn bind_vertex_buffer(
+    pub fn bind_vertex_buffer(
         &self,
         first_binding: u32,
         buffers: &[&ResourceHandle<GpuBuffer>],
@@ -284,22 +286,36 @@ impl<'g> Drop for CommandBuffer<'g> {
                 QueueType::Transfer => self.gpu.state.transfer_queue.clone(),
             };
 
+            let wait_semaphores: Vec<_> = self
+                .info
+                .wait_semaphores
+                .iter()
+                .map(|s| self.gpu.resource_map.get(s).unwrap().inner)
+                .collect();
+
+            let signal_semaphores: Vec<_> = self
+                .info
+                .signal_semaphores
+                .iter()
+                .map(|s| self.gpu.resource_map.get(s).unwrap().inner)
+                .collect();
+
             device
                 .queue_submit(
                     target_queue,
                     &[SubmitInfo {
                         s_type: StructureType::SUBMIT_INFO,
                         p_next: std::ptr::null(),
-                        wait_semaphore_count: self.info.wait_semaphores.len() as _,
-                        p_wait_semaphores: self.info.wait_semaphores.as_ptr(),
+                        wait_semaphore_count: wait_semaphores.len() as _,
+                        p_wait_semaphores: wait_semaphores.as_ptr(),
                         p_wait_dst_stage_mask: self.info.wait_stages.as_ptr(),
                         command_buffer_count: 1,
                         p_command_buffers: [self.inner_command_buffer].as_ptr(),
-                        signal_semaphore_count: self.info.signal_semaphores.len() as _,
-                        p_signal_semaphores: self.info.signal_semaphores.as_ptr(),
+                        signal_semaphore_count: signal_semaphores.len() as _,
+                        p_signal_semaphores: signal_semaphores.as_ptr(),
                     }],
-                    if let Some(fence) = self.info.fence {
-                        fence
+                    if let Some(fence) = &self.info.fence {
+                        self.gpu.resource_map.get(fence).unwrap().inner
                     } else {
                         vk::Fence::null()
                     },
