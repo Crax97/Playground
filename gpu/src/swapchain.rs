@@ -43,19 +43,19 @@ mod util {
     }
 }
 pub struct Swapchain {
-    pub surface_extension: Surface,
-    pub swapchain_extension: ash::extensions::khr::Swapchain,
-    pub surface: SurfaceKHR,
-    pub present_mode: PresentModeKHR,
-    pub swapchain_image_count: NonZeroU32,
-    pub present_extent: Extent2D,
-    pub present_format: SurfaceFormatKHR,
-    pub supported_present_modes: Vec<PresentModeKHR>,
-    pub supported_presentation_formats: Vec<SurfaceFormatKHR>,
-    pub surface_capabilities: SurfaceCapabilitiesKHR,
-    pub current_swapchain: SwapchainKHR,
-    pub current_swapchain_images: Vec<Image>,
-    pub current_swapchain_image_views: Vec<ImageView>,
+    pub(super) surface_extension: Surface,
+    pub(super) swapchain_extension: ash::extensions::khr::Swapchain,
+    pub(super) surface: SurfaceKHR,
+    pub(super) present_mode: PresentModeKHR,
+    pub(super) swapchain_image_count: NonZeroU32,
+    pub(super) present_extent: Extent2D,
+    pub(super) present_format: SurfaceFormatKHR,
+    pub(super) supported_present_modes: Vec<PresentModeKHR>,
+    pub(super) supported_presentation_formats: Vec<SurfaceFormatKHR>,
+    pub(super) surface_capabilities: SurfaceCapabilitiesKHR,
+    pub(super) current_swapchain: SwapchainKHR,
+    pub(super) current_swapchain_images: Vec<Image>,
+    pub(super) current_swapchain_image_views: Vec<ImageView>,
     pub next_image_fence: ResourceHandle<GPUFence>,
     pub in_flight_fence: ResourceHandle<GPUFence>,
     pub render_finished_semaphore: ResourceHandle<GPUSemaphore>,
@@ -462,6 +462,10 @@ impl Swapchain {
 
     pub fn extents(&self) -> Extent2D {
         self.present_extent
+    }
+
+    pub fn present_format(&self) -> Format {
+        self.present_format.format
     }
 }
 

@@ -236,9 +236,7 @@ fn main() -> anyhow::Result<()> {
         mip_lod_bias: 0.0,
         anisotropy_enable: vk::TRUE,
         max_anisotropy: gpu
-            .state
-            .physical_device
-            .device_properties
+            .physical_device_properties()
             .limits
             .max_sampler_anisotropy,
         compare_enable: vk::FALSE,
@@ -250,7 +248,7 @@ fn main() -> anyhow::Result<()> {
     })?;
 
     let color_attachments = &[ColorAttachment {
-        format: swapchain.present_format.format,
+        format: swapchain.present_format(),
         samples: SampleCountFlags::TYPE_1,
         load_op: AttachmentLoadOp::CLEAR,
         store_op: AttachmentStoreOp::STORE,

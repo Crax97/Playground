@@ -25,8 +25,8 @@ macro_rules! define_raii_wrapper {
     ((struct $name:ident { $($mem_name:ident : $mem_ty : ty,)* }, $vk_type:ty, $drop_fn:path) {($arg_name:ident : $arg_typ:ty,) => $create_impl_block:tt}) => {
         pub struct $name {
             device: ash::Device,
-            pub(crate) inner: $vk_type,
-            $(pub(crate) $mem_name : $mem_ty,)*
+            pub(super) inner: $vk_type,
+            $(pub(super) $mem_name : $mem_ty,)*
         }
 
         impl $name {
@@ -80,10 +80,10 @@ define_raii_wrapper!((struct GPUFence {}, vk::Fence, ash::Device::destroy_fence)
 
 pub struct GpuBuffer {
     device: ash::Device,
-    pub(crate) inner: vk::Buffer,
-    pub(crate) memory_domain: MemoryDomain,
-    pub(crate) allocation: MemoryAllocation,
-    pub(crate) allocator: Arc<RefCell<dyn GpuAllocator>>,
+    pub(super) inner: vk::Buffer,
+    pub(super) memory_domain: MemoryDomain,
+    pub(super) allocation: MemoryAllocation,
+    pub(super) allocator: Arc<RefCell<dyn GpuAllocator>>,
 }
 impl GpuBuffer {
     pub fn create(
@@ -155,10 +155,10 @@ impl GpuBuffer {
 
 pub struct GpuImage {
     device: ash::Device,
-    pub(crate) inner: vk::Image,
-    pub(crate) view: vk::ImageView,
-    pub(crate) allocation: MemoryAllocation,
-    pub(crate) allocator: Arc<RefCell<dyn GpuAllocator>>,
+    pub(super) inner: vk::Image,
+    pub(super) view: vk::ImageView,
+    pub(super) allocation: MemoryAllocation,
+    pub(super) allocator: Arc<RefCell<dyn GpuAllocator>>,
 }
 impl GpuImage {
     pub fn create(
@@ -221,8 +221,8 @@ impl Deref for GpuImage {
 impl Resource for GpuImage {}
 
 pub struct GpuDescriptorSet {
-    pub(crate) allocation: DescriptorSetAllocation,
-    pub(crate) allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
+    pub(super) allocation: DescriptorSetAllocation,
+    pub(super) allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
 }
 impl GpuDescriptorSet {
     pub fn create(

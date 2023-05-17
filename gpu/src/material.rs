@@ -243,7 +243,7 @@ impl<'a> RenderPassDescription<'a> {
 }
 
 pub struct RenderPass {
-    pub inner: vk::RenderPass,
+    pub(super) inner: vk::RenderPass,
     state: Arc<GpuState>,
 }
 
@@ -384,8 +384,8 @@ impl<'a> MaterialDescription<'a> {
 }
 
 pub struct Material {
-    pub pipeline: Pipeline,
-    pub pipeline_layout: PipelineLayout,
+    pub(super) pipeline: Pipeline,
+    pub(super) pipeline_layout: PipelineLayout,
 
     shared_state: Arc<GpuState>,
 }

@@ -139,10 +139,10 @@ impl Drop for GpuThreadLocalState {
 }
 
 pub struct Gpu {
-    pub state: Arc<GpuState>,
-    pub thread_local_state: GpuThreadLocalState,
-    pub staging_buffer: ResourceHandle<GpuBuffer>,
-    pub resource_map: Rc<ResourceMap>,
+    pub(super) state: Arc<GpuState>,
+    pub(super) thread_local_state: GpuThreadLocalState,
+    pub(super) staging_buffer: ResourceHandle<GpuBuffer>,
+    pub(super) resource_map: Rc<ResourceMap>,
 }
 
 pub struct GpuConfiguration<'a> {
@@ -740,6 +740,10 @@ impl Gpu {
 
     pub fn wait_device_idle(&self) -> VkResult<()> {
         unsafe { self.vk_logical_device().device_wait_idle() }
+    }
+
+    pub fn physical_device_properties(&self) -> PhysicalDeviceProperties {
+        self.state.physical_device.device_properties
     }
 }
 
