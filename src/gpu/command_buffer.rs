@@ -2,13 +2,15 @@ use ash::{
     prelude::VkResult,
     vk::{
         self, ClearValue, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
-        CommandBufferUsageFlags, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D,
-        RenderPassBeginInfo, StructureType, SubmitInfo, SubpassContents, Viewport,
+        CommandBufferUsageFlags, IndexType, Offset2D, PipelineBindPoint, PipelineStageFlags,
+        Rect2D, RenderPassBeginInfo, StructureType, SubmitInfo, SubpassContents, Viewport,
     },
 };
 use log::trace;
 
-use super::{material::RenderPass, Gpu, GpuDescriptorSet, Material, QueueType, ResourceHandle};
+use super::{
+    material::RenderPass, Gpu, GpuBuffer, GpuDescriptorSet, Material, QueueType, ResourceHandle,
+};
 
 #[derive(Default)]
 pub struct CommandBufferSubmitInfo {
@@ -210,6 +212,50 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                     &descriptor_sets,
                     &[],
                 );
+        }
+    }
+    pub(crate) fn bind_index_buffer(
+        &self,
+        buffer: &ResourceHandle<GpuBuffer>,
+        offset: vk::DeviceSize,
+        index_type: IndexType,
+    ) {
+        let device = self.command_buffer.gpu.vk_logical_device();
+        let index_buffer = self
+            .command_buffer
+            .gpu
+            .resource_map
+            .get(buffer)
+            .unwrap()
+            .inner;
+        unsafe {
+            device.cmd_bind_index_buffer(
+                self.command_buffer.inner_command_buffer,
+                index_buffer,
+                offset,
+                index_type,
+            );
+        }
+    }
+    pub(crate) fn bind_vertex_buffer(
+        &self,
+        first_binding: u32,
+        buffers: &[&ResourceHandle<GpuBuffer>],
+        offsets: &[vk::DeviceSize],
+    ) {
+        assert!(buffers.len() == offsets.len());
+        let device = self.command_buffer.gpu.vk_logical_device();
+        let vertex_buffers: Vec<_> = buffers
+            .iter()
+            .map(|b| self.command_buffer.gpu.resource_map.get(b).unwrap().inner)
+            .collect();
+        unsafe {
+            device.cmd_bind_vertex_buffers(
+                self.command_buffer.inner_command_buffer,
+                first_binding,
+                &vertex_buffers,
+                offsets,
+            );
         }
     }
 }

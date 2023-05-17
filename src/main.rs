@@ -447,7 +447,6 @@ fn main() -> anyhow::Result<()> {
                     &material,
                     &render_pass,
                     &mut swapchain,
-                    &device,
                     &descriptor_set,
                     &mesh,
                 );
@@ -467,7 +466,6 @@ fn render_frame(
     material: &Material,
     render_pass: &RenderPass,
     swapchain: &mut gpu::Swapchain,
-    device: &ash::Device,
     descriptor_set: &ResourceHandle<GpuDescriptorSet>,
     mesh: &Mesh,
 ) {
@@ -506,7 +504,6 @@ fn render_frame(
     };
     unsafe {
         render_textured_quad(
-            device,
             material,
             render_pass,
             framebuffer,
@@ -522,8 +519,7 @@ fn render_frame(
     };
 }
 
-unsafe fn render_textured_quad(
-    device: &ash::Device,
+fn render_textured_quad(
     material: &Material,
     render_pass: &RenderPass,
     framebuffer: vk::Framebuffer,
@@ -546,7 +542,6 @@ unsafe fn render_textured_quad(
         .unwrap();
 
         {
-            let inner_command_buffer = command_buffer.inner();
             let mut render_pass = command_buffer.begin_render_pass(&BeginRenderPassInfo {
                 framebuffer,
                 render_pass,
@@ -568,53 +563,17 @@ unsafe fn render_textured_quad(
                 &[descriptor_set],
             );
 
-            device.cmd_bind_index_buffer(
-                inner_command_buffer,
-                *gpu.resource_map.get(&mesh.index_buffer).unwrap().deref(),
+            render_pass.bind_index_buffer(&mesh.index_buffer, 0, IndexType::UINT32);
+            render_pass.bind_vertex_buffer(
                 0,
-                IndexType::UINT32,
-            );
-            device.cmd_bind_vertex_buffers(
-                inner_command_buffer,
-                0,
-                &[*gpu
-                    .resource_map
-                    .get(&mesh.position_component)
-                    .unwrap()
-                    .deref()],
-                &[0],
-            );
-            device.cmd_bind_vertex_buffers(
-                inner_command_buffer,
-                1,
-                &[*gpu.resource_map.get(&mesh.color_component).unwrap().deref()],
-                &[0],
-            );
-            device.cmd_bind_vertex_buffers(
-                inner_command_buffer,
-                2,
-                &[*gpu
-                    .resource_map
-                    .get(&mesh.normal_component)
-                    .unwrap()
-                    .deref()],
-                &[0],
-            );
-            device.cmd_bind_vertex_buffers(
-                inner_command_buffer,
-                3,
-                &[*gpu
-                    .resource_map
-                    .get(&mesh.tangent_component)
-                    .unwrap()
-                    .deref()],
-                &[0],
-            );
-            device.cmd_bind_vertex_buffers(
-                inner_command_buffer,
-                4,
-                &[*gpu.resource_map.get(&mesh.uv_component).unwrap().deref()],
-                &[0],
+                &[
+                    &mesh.position_component,
+                    &mesh.color_component,
+                    &mesh.normal_component,
+                    &mesh.tangent_component,
+                    &mesh.uv_component,
+                ],
+                &[0, 0, 0, 0, 0],
             );
             render_pass.draw_indexed(6, 1, 0, 0, 0);
         }
