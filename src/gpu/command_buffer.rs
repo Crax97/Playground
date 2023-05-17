@@ -193,7 +193,6 @@ impl<'g> Drop for CommandBuffer<'g> {
             return;
         }
 
-        trace!("Submitting command buffer");
         let device = self.gpu.vk_logical_device();
         unsafe {
             device

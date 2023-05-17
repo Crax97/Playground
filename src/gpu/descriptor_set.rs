@@ -1,14 +1,20 @@
-use std::ptr::addr_of;
+use std::{
+    collections::{hash_map::DefaultHasher, HashMap},
+    hash::{Hash, Hasher},
+    ptr::addr_of,
+};
 
 use ash::{
     prelude::VkResult,
     vk::{
         self, DescriptorPool, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
-        DescriptorPoolSize, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
-        DescriptorSetLayoutCreateInfo, DescriptorType, ShaderStageFlags, StructureType,
+        DescriptorPoolSize, DescriptorSetLayout, DescriptorSetLayoutBinding,
+        DescriptorSetLayoutCreateFlags, DescriptorSetLayoutCreateInfo, DescriptorType,
+        ShaderStageFlags, StructureType,
     },
     Device,
 };
+use log::trace;
 
 use super::DescriptorSetInfo;
 
@@ -29,6 +35,7 @@ each time a descriptor set allocation fails
  */
 pub struct PooledDescriptorSetAllocator {
     usable_descriptor_pools: Vec<DescriptorPool>,
+    hashed_layouts: HashMap<u64, DescriptorSetLayout>,
     device: ash::Device,
 }
 impl PooledDescriptorSetAllocator {
@@ -76,23 +83,32 @@ impl PooledDescriptorSetAllocator {
         self.usable_descriptor_pools.push(descriptor_pool);
         Ok(())
     }
-}
 
-impl PooledDescriptorSetAllocator {
-    pub fn new(device: Device) -> VkResult<Self> {
-        let mut me = Self {
-            usable_descriptor_pools: vec![],
-            device,
-        };
+    fn get_descriptor_set_layout(
+        &mut self,
+        info: &DescriptorSetInfo,
+    ) -> VkResult<vk::DescriptorSetLayout> {
+        let mut hasher = DefaultHasher::new();
+        info.hash(&mut hasher);
+        let hash = hasher.finish();
 
-        me.allocate_new_descriptor_pool()?;
-
-        Ok(me)
+        if let Some(layout) = self.hashed_layouts.get(&hash) {
+            Ok(layout.clone())
+        } else {
+            let new_layout = self.construct_descriptor_set_layout(info)?;
+            self.hashed_layouts.insert(hash, new_layout.clone());
+            trace!(
+                "Created a new descriptor set layout! There are {} layouts allocated",
+                self.hashed_layouts.len()
+            );
+            Ok(new_layout)
+        }
     }
-}
 
-impl DescriptorSetAllocator for PooledDescriptorSetAllocator {
-    fn allocate(&mut self, info: &DescriptorSetInfo) -> VkResult<DescriptorSetAllocation> {
+    fn construct_descriptor_set_layout(
+        &self,
+        info: &DescriptorSetInfo,
+    ) -> VkResult<DescriptorSetLayout> {
         let mut descriptor_set_bindings = vec![];
         for descriptor_info in info.descriptors {
             let stage_flags = match descriptor_info.binding_stage {
@@ -118,8 +134,7 @@ impl DescriptorSetAllocator for PooledDescriptorSetAllocator {
 
             descriptor_set_bindings.push(binding);
         }
-
-        let descriptor_set_layout = unsafe {
+        unsafe {
             self.device.create_descriptor_set_layout(
                 &vk::DescriptorSetLayoutCreateInfo {
                     s_type: StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -130,7 +145,27 @@ impl DescriptorSetAllocator for PooledDescriptorSetAllocator {
                 },
                 None,
             )
-        }?;
+        }
+    }
+}
+
+impl PooledDescriptorSetAllocator {
+    pub fn new(device: Device) -> VkResult<Self> {
+        let mut me = Self {
+            usable_descriptor_pools: vec![],
+            device,
+            hashed_layouts: HashMap::new(),
+        };
+
+        me.allocate_new_descriptor_pool()?;
+
+        Ok(me)
+    }
+}
+
+impl DescriptorSetAllocator for PooledDescriptorSetAllocator {
+    fn allocate(&mut self, info: &DescriptorSetInfo) -> VkResult<DescriptorSetAllocation> {
+        let descriptor_set_layout = self.get_descriptor_set_layout(info)?;
 
         let mut did_try_once = false;
 
@@ -172,9 +207,22 @@ impl DescriptorSetAllocator for PooledDescriptorSetAllocator {
     fn deallocate(&mut self, allocation: &DescriptorSetAllocation) -> VkResult<()> {
         unsafe {
             self.device
-                .destroy_descriptor_set_layout(allocation.descriptor_set_layout, None);
-            self.device
                 .free_descriptor_sets(allocation.owner_pool, &[allocation.descriptor_set])
+        }
+    }
+}
+
+impl Drop for PooledDescriptorSetAllocator {
+    fn drop(&mut self) {
+        for layout in self.hashed_layouts.values() {
+            unsafe {
+                self.device
+                    .destroy_descriptor_set_layout(layout.clone(), None);
+                trace!(
+                    "Destroyed a descriptor set layout! There are {} layouts allocated",
+                    self.hashed_layouts.len()
+                );
+            }
         }
     }
 }
