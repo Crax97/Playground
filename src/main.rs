@@ -455,17 +455,37 @@ fn main() -> anyhow::Result<()> {
             }
             winit::event::Event::RedrawRequested(..) => {
                 time += 0.001;
+
+                let next_image = swapchain.acquire_next_image().unwrap();
+                let framebuffer = GpuFramebuffer::create(
+                    gpu.vk_logical_device(),
+                    &FramebufferCreateInfo {
+                        render_pass: &render_pass,
+                        attachments: &[&next_image],
+                        width: swapchain.extents().width,
+                        height: swapchain.extents().height,
+                    },
+                )
+                .unwrap();
                 gpu.reset_state().unwrap();
-                render_frame(
+                render_textured_quads(
                     &gpu,
-                    &uniform_buffer_1,
+                    &mesh,
+                    &[
+                        (&uniform_buffer_1, &Vector3::zeros(), &descriptor_set_1),
+                        (
+                            &uniform_buffer_2,
+                            &vector![0.0, 0.0, -1.0],
+                            &descriptor_set_2,
+                        ),
+                    ],
                     time,
                     &material,
                     &render_pass,
+                    &framebuffer,
                     &mut swapchain,
-                    &descriptor_set_1,
-                    &mesh,
                 );
+                let _ = swapchain.present();
             }
             winit::event::Event::RedrawEventsCleared => {}
             winit::event::Event::LoopDestroyed => gpu.wait_device_idle().unwrap(),
@@ -473,62 +493,36 @@ fn main() -> anyhow::Result<()> {
     })
 }
 
-fn render_frame(
+fn render_textured_quads(
     gpu: &Gpu,
-    uniform_buffer: &ResourceHandle<GpuBuffer>,
+    mesh: &Mesh,
+    infos: &[(
+        &ResourceHandle<GpuBuffer>,
+        &Vector3<f32>,
+        &ResourceHandle<GpuDescriptorSet>,
+    )],
     time: f32,
-    material: &Material,
-    render_pass: &RenderPass,
-    swapchain: &mut gpu::Swapchain,
-    descriptor_set: &ResourceHandle<GpuDescriptorSet>,
-    mesh: &Mesh,
-) {
-    gpu.write_buffer_data(
-        uniform_buffer,
-        &[PerObjectData {
-            model: nalgebra::Matrix4::new_rotation(vector![0.0, 0.0, time]),
-            view: nalgebra::Matrix4::look_at_rh(
-                &point![2.0, 2.0, 2.0],
-                &point![0.0, 0.0, 0.0],
-                &vector![0.0, 0.0, -1.0],
-            ),
-            projection: nalgebra::Matrix4::new_perspective(1240.0 / 720.0, 45.0, 0.1, 10.0),
-        }],
-    )
-    .unwrap();
-
-    let next_image = swapchain.acquire_next_image().unwrap();
-    let framebuffer = GpuFramebuffer::create(
-        gpu.vk_logical_device(),
-        &FramebufferCreateInfo {
-            render_pass,
-            attachments: &[&next_image],
-            width: swapchain.extents().width,
-            height: swapchain.extents().height,
-        },
-    )
-    .unwrap();
-    render_textured_quad(
-        gpu,
-        mesh,
-        material,
-        render_pass,
-        &framebuffer,
-        swapchain,
-        descriptor_set,
-    );
-    let _ = swapchain.present();
-}
-
-fn render_textured_quad(
-    gpu: &Gpu,
-    mesh: &Mesh,
     material: &Material,
     render_pass: &RenderPass,
     framebuffer: &GpuFramebuffer,
     swapchain: &mut gpu::Swapchain,
-    descriptor_set: &ResourceHandle<GpuDescriptorSet>,
 ) {
+    for (buf, off, _) in infos {
+        gpu.write_buffer_data(
+            buf,
+            &[PerObjectData {
+                model: nalgebra::Matrix4::new_rotation(vector![0.0, 0.0, time])
+                    * nalgebra::Matrix4::new_translation(off),
+                view: nalgebra::Matrix4::look_at_rh(
+                    &point![2.0, 2.0, 2.0],
+                    &point![0.0, 0.0, 0.0],
+                    &vector![0.0, 0.0, -1.0],
+                ),
+                projection: nalgebra::Matrix4::new_perspective(1240.0 / 720.0, 45.0, 0.1, 10.0),
+            }],
+        )
+        .unwrap();
+    }
     {
         let mut command_buffer = gpu::CommandBuffer::new(
             gpu,
@@ -557,26 +551,23 @@ fn render_textured_quad(
                 },
             });
             render_pass.bind_material(material);
-            render_pass.bind_descriptor_sets(
-                PipelineBindPoint::GRAPHICS,
-                material,
-                0,
-                &[descriptor_set],
-            );
+            for (_, _, set) in infos {
+                render_pass.bind_descriptor_sets(PipelineBindPoint::GRAPHICS, material, 0, &[set]);
 
-            render_pass.bind_index_buffer(&mesh.index_buffer, 0, IndexType::UINT32);
-            render_pass.bind_vertex_buffer(
-                0,
-                &[
-                    &mesh.position_component,
-                    &mesh.color_component,
-                    &mesh.normal_component,
-                    &mesh.tangent_component,
-                    &mesh.uv_component,
-                ],
-                &[0, 0, 0, 0, 0],
-            );
-            render_pass.draw_indexed(6, 1, 0, 0, 0);
+                render_pass.bind_index_buffer(&mesh.index_buffer, 0, IndexType::UINT32);
+                render_pass.bind_vertex_buffer(
+                    0,
+                    &[
+                        &mesh.position_component,
+                        &mesh.color_component,
+                        &mesh.normal_component,
+                        &mesh.tangent_component,
+                        &mesh.uv_component,
+                    ],
+                    &[0, 0, 0, 0, 0],
+                );
+                render_pass.draw_indexed(6, 1, 0, 0, 0);
+            }
         }
     }
 }
