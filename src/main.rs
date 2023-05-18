@@ -4,21 +4,23 @@ mod utils;
 use std::{io::BufReader, mem::size_of};
 
 use ash::vk::{
-    self, AccessFlags, AttachmentLoadOp, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor,
-    BufferUsageFlags, ClearColorValue, ClearValue, ColorComponentFlags, CompareOp, DependencyFlags,
-    Filter, ImageLayout, ImageUsageFlags, IndexType, Offset2D, PipelineBindPoint,
-    PipelineStageFlags, PresentModeKHR, Rect2D, SampleCountFlags, SamplerAddressMode,
-    SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency,
+    self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor,
+    BlendOp, BorderColor, BufferUsageFlags, ClearColorValue, ClearDepthStencilValue, ClearValue,
+    ColorComponentFlags, CompareOp, ComponentMapping, DependencyFlags, Filter, Format,
+    ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType,
+    IndexType, Offset2D, PipelineBindPoint, PipelineStageFlags, PresentModeKHR, Rect2D,
+    SampleCountFlags, SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode,
+    StencilOp, StencilOpState, StructureType, SubpassDependency, SubpassDescriptionFlags,
     SUBPASS_EXTERNAL,
 };
 
 use gpu::{
-    BeginRenderPassInfo, BlendState, BufferCreateInfo, BufferRange, ColorAttachment,
+    BeginRenderPassInfo, BlendState, BufferCreateInfo, BufferRange, DepthStencilState,
     DescriptorInfo, DescriptorSetInfo, FragmentStageInfo, FramebufferCreateInfo, GlobalBinding,
     Gpu, GpuBuffer, GpuConfiguration, GpuDescriptorSet, GpuFramebuffer, ImageCreateInfo, Material,
-    MaterialDescription, MemoryDomain, RenderPass, RenderPassDescription, ResourceHandle,
-    SamplerState, TransitionInfo, VertexAttributeDescription, VertexBindingDescription,
-    VertexStageInfo,
+    MaterialDescription, MemoryDomain, RenderPass, RenderPassAttachment, RenderPassDescription,
+    ResourceHandle, SamplerState, SubpassDescription, TransitionInfo, VertexAttributeDescription,
+    VertexBindingDescription, VertexStageInfo,
 };
 use image::EncodableLayout;
 use mesh::{Mesh, MeshCreateInfo};
@@ -184,6 +186,44 @@ fn main() -> anyhow::Result<()> {
         MemoryDomain::DeviceLocal,
     )?;
 
+    let image_view = gpu.create_image_view(&gpu::ImageViewCreateInfo {
+        image: &image,
+        view_type: ImageViewType::TYPE_2D,
+        format: Format::R8G8B8A8_UNORM,
+        components: ComponentMapping::default(),
+        subresource_range: ImageSubresourceRange {
+            aspect_mask: ImageAspectFlags::COLOR,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
+        },
+    })?;
+
+    let depth_image = gpu.create_image(
+        &ImageCreateInfo {
+            width: swapchain.extents().width,
+            height: swapchain.extents().height,
+            format: vk::Format::D16_UNORM,
+            usage: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+        },
+        MemoryDomain::DeviceLocal,
+    )?;
+
+    let depth_image_view = gpu.create_image_view(&gpu::ImageViewCreateInfo {
+        image: &depth_image,
+        view_type: ImageViewType::TYPE_2D,
+        format: Format::D16_UNORM,
+        components: ComponentMapping::default(),
+        subresource_range: ImageSubresourceRange {
+            aspect_mask: ImageAspectFlags::DEPTH,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
+        },
+    })?;
+
     gpu.write_buffer_data(&vertex_buffer, vertex_data)?;
     gpu.write_buffer_data(&index_buffer, indices)?;
 
@@ -199,6 +239,7 @@ fn main() -> anyhow::Result<()> {
             access_mask: AccessFlags::TRANSFER_WRITE,
             stage_mask: PipelineStageFlags::TRANSFER,
         },
+        ImageAspectFlags::COLOR,
     )?;
 
     let mb_16 = 1024 * 1024 * 16;
@@ -233,6 +274,22 @@ fn main() -> anyhow::Result<()> {
             access_mask: AccessFlags::SHADER_READ,
             stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
         },
+        ImageAspectFlags::COLOR,
+    )?;
+
+    gpu.transition_image_layout(
+        &depth_image,
+        TransitionInfo {
+            layout: ImageLayout::UNDEFINED,
+            access_mask: AccessFlags::empty(),
+            stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+        },
+        TransitionInfo {
+            layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+            stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+        },
+        ImageAspectFlags::DEPTH,
     )?;
 
     let sampler = gpu.create_sampler(&SamplerCreateInfo {
@@ -259,31 +316,68 @@ fn main() -> anyhow::Result<()> {
         unnormalized_coordinates: vk::FALSE,
     })?;
 
-    let color_attachments = &[ColorAttachment {
-        format: swapchain.present_format(),
-        samples: SampleCountFlags::TYPE_1,
-        load_op: AttachmentLoadOp::CLEAR,
-        store_op: AttachmentStoreOp::STORE,
-        stencil_load_op: AttachmentLoadOp::DONT_CARE,
-        stencil_store_op: AttachmentStoreOp::DONT_CARE,
-        initial_layout: ImageLayout::UNDEFINED,
-        final_layout: ImageLayout::PRESENT_SRC_KHR,
-        blend_state: BlendState {
-            blend_enable: true,
-            src_color_blend_factor: BlendFactor::ONE,
-            dst_color_blend_factor: BlendFactor::ZERO,
-            color_blend_op: BlendOp::ADD,
-            src_alpha_blend_factor: BlendFactor::ONE,
-            dst_alpha_blend_factor: BlendFactor::ZERO,
-            alpha_blend_op: BlendOp::ADD,
-            color_write_mask: ColorComponentFlags::RGBA,
+    let attachments = &[
+        RenderPassAttachment {
+            format: swapchain.present_format(),
+            samples: SampleCountFlags::TYPE_1,
+            load_op: AttachmentLoadOp::CLEAR,
+            store_op: AttachmentStoreOp::STORE,
+            stencil_load_op: AttachmentLoadOp::DONT_CARE,
+            stencil_store_op: AttachmentStoreOp::DONT_CARE,
+            initial_layout: ImageLayout::UNDEFINED,
+            final_layout: ImageLayout::PRESENT_SRC_KHR,
+            blend_state: BlendState {
+                blend_enable: true,
+                src_color_blend_factor: BlendFactor::ONE,
+                dst_color_blend_factor: BlendFactor::ZERO,
+                color_blend_op: BlendOp::ADD,
+                src_alpha_blend_factor: BlendFactor::ONE,
+                dst_alpha_blend_factor: BlendFactor::ZERO,
+                alpha_blend_op: BlendOp::ADD,
+                color_write_mask: ColorComponentFlags::RGBA,
+            },
         },
-    }];
+        RenderPassAttachment {
+            format: Format::D16_UNORM,
+            samples: SampleCountFlags::TYPE_1,
+            load_op: AttachmentLoadOp::CLEAR,
+            store_op: AttachmentStoreOp::STORE,
+            stencil_load_op: AttachmentLoadOp::DONT_CARE,
+            stencil_store_op: AttachmentStoreOp::DONT_CARE,
+            initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            blend_state: BlendState {
+                blend_enable: false,
+                src_color_blend_factor: BlendFactor::ONE,
+                dst_color_blend_factor: BlendFactor::ZERO,
+                color_blend_op: BlendOp::ADD,
+                src_alpha_blend_factor: BlendFactor::ONE,
+                dst_alpha_blend_factor: BlendFactor::ZERO,
+                alpha_blend_op: BlendOp::ADD,
+                color_write_mask: ColorComponentFlags::RGBA,
+            },
+        },
+    ];
 
     let render_pass = RenderPass::new(
         &gpu,
         &RenderPassDescription {
-            color_attachments,
+            attachments,
+            subpasses: &[SubpassDescription {
+                flags: SubpassDescriptionFlags::empty(),
+                pipeline_bind_point: PipelineBindPoint::GRAPHICS,
+                input_attachments: &[],
+                color_attachments: &[AttachmentReference {
+                    attachment: 0,
+                    layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                }],
+                resolve_attachments: &[],
+                depth_stencil_attachment: &[AttachmentReference {
+                    attachment: 1,
+                    layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                }],
+                preserve_attachments: &[],
+            }],
             dependencies: &[SubpassDependency {
                 src_subpass: SUBPASS_EXTERNAL,
                 dst_subpass: 0,
@@ -293,7 +387,6 @@ fn main() -> anyhow::Result<()> {
                 dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
                 dependency_flags: DependencyFlags::empty(),
             }],
-            ..Default::default()
         },
     )?;
 
@@ -372,7 +465,26 @@ fn main() -> anyhow::Result<()> {
             fragment_stage: Some(FragmentStageInfo {
                 entry_point: "main",
                 module: &fragment_module,
-                color_attachments,
+                color_attachments: &[RenderPassAttachment {
+                    format: swapchain.present_format(),
+                    samples: SampleCountFlags::TYPE_1,
+                    load_op: AttachmentLoadOp::CLEAR,
+                    store_op: AttachmentStoreOp::STORE,
+                    stencil_load_op: AttachmentLoadOp::DONT_CARE,
+                    stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                    initial_layout: ImageLayout::UNDEFINED,
+                    final_layout: ImageLayout::PRESENT_SRC_KHR,
+                    blend_state: BlendState {
+                        blend_enable: true,
+                        src_color_blend_factor: BlendFactor::ONE,
+                        dst_color_blend_factor: BlendFactor::ZERO,
+                        color_blend_op: BlendOp::ADD,
+                        src_alpha_blend_factor: BlendFactor::ONE,
+                        dst_alpha_blend_factor: BlendFactor::ZERO,
+                        alpha_blend_op: BlendOp::ADD,
+                        color_write_mask: ColorComponentFlags::RGBA,
+                    },
+                }],
                 depth_stencil_attachments: &[],
             }),
             input_topology: gpu::PrimitiveTopology::TriangleList,
@@ -380,6 +492,17 @@ fn main() -> anyhow::Result<()> {
             polygon_mode: gpu::PolygonMode::Fill,
             cull_mode: gpu::CullMode::Back,
             front_face: gpu::FrontFace::ClockWise,
+            depth_stencil_state: DepthStencilState {
+                depth_test_enable: true,
+                depth_write_enable: true,
+                depth_compare_op: CompareOp::LESS,
+                stencil_test_enable: false,
+                front: StencilOpState::default(),
+                back: StencilOpState::default(),
+                min_depth_bounds: 0.0,
+                max_depth_bounds: 1.0,
+            },
+
             ..Default::default()
         },
     )?;
@@ -399,7 +522,7 @@ fn main() -> anyhow::Result<()> {
                 binding: 1,
                 element_type: gpu::DescriptorType::CombinedImageSampler(SamplerState {
                     sampler: sampler.clone(),
-                    image_view: image.clone(),
+                    image_view: image_view.clone(),
                     image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 }),
                 binding_stage: gpu::ShaderStage::Fragment,
@@ -421,7 +544,7 @@ fn main() -> anyhow::Result<()> {
                 binding: 1,
                 element_type: gpu::DescriptorType::CombinedImageSampler(SamplerState {
                     sampler: sampler.clone(),
-                    image_view: image.clone(),
+                    image_view: image_view.clone(),
                     image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 }),
                 binding_stage: gpu::ShaderStage::Fragment,
@@ -457,11 +580,17 @@ fn main() -> anyhow::Result<()> {
                 time += 0.001;
 
                 let next_image = swapchain.acquire_next_image().unwrap();
+                let depth_image_view = gpu
+                    .resource_map
+                    .get(&depth_image_view)
+                    .unwrap()
+                    .inner_image_view();
+
                 let framebuffer = GpuFramebuffer::create(
                     gpu.vk_logical_device(),
                     &FramebufferCreateInfo {
                         render_pass: &render_pass,
-                        attachments: &[&next_image],
+                        attachments: &[next_image, depth_image_view],
                         width: swapchain.extents().width,
                         height: swapchain.extents().height,
                     },
@@ -475,7 +604,7 @@ fn main() -> anyhow::Result<()> {
                         (&uniform_buffer_1, &Vector3::zeros(), &descriptor_set_1),
                         (
                             &uniform_buffer_2,
-                            &vector![0.0, 0.0, -1.0],
+                            &vector![0.0, 0.0, (time * 10.0).sin()],
                             &descriptor_set_2,
                         ),
                     ],
@@ -540,11 +669,19 @@ fn render_textured_quads(
             let mut render_pass = command_buffer.begin_render_pass(&BeginRenderPassInfo {
                 framebuffer,
                 render_pass,
-                clear_color_values: &[ClearValue {
-                    color: ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 1.0],
+                clear_color_values: &[
+                    ClearValue {
+                        color: ClearColorValue {
+                            float32: [0.0, 0.0, 0.0, 1.0],
+                        },
                     },
-                }],
+                    ClearValue {
+                        depth_stencil: ClearDepthStencilValue {
+                            depth: 1.0,
+                            stencil: 0,
+                        },
+                    },
+                ],
                 render_area: Rect2D {
                     offset: Offset2D { x: 0, y: 0 },
                     extent: swapchain.extents(),

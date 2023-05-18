@@ -19,8 +19,7 @@ use ash::{
         PipelineVertexInputStateCreateFlags, PipelineVertexInputStateCreateInfo,
         PipelineViewportStateCreateFlags, PipelineViewportStateCreateInfo, RenderPassCreateFlags,
         RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags, StructureType,
-        SubpassDescription, SubpassDescriptionFlags, VertexInputAttributeDescription,
-        VertexInputBindingDescription,
+        SubpassDescriptionFlags, VertexInputAttributeDescription, VertexInputBindingDescription,
     },
 };
 
@@ -108,7 +107,7 @@ pub struct BlendState {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct ColorAttachment {
+pub struct RenderPassAttachment {
     pub format: vk::Format,
     pub samples: SampleCountFlags,
     pub load_op: vk::AttachmentLoadOp,
@@ -126,7 +125,7 @@ pub struct DepthStencilAttachment {}
 pub struct FragmentStageInfo<'a> {
     pub entry_point: &'a str,
     pub module: &'a GpuShaderModule,
-    pub color_attachments: &'a [ColorAttachment],
+    pub color_attachments: &'a [RenderPassAttachment],
     pub depth_stencil_attachments: &'a [DepthStencilAttachment],
 }
 
@@ -163,7 +162,6 @@ pub struct DepthStencilState {
     pub depth_test_enable: bool,
     pub depth_write_enable: bool,
     pub depth_compare_op: vk::CompareOp,
-    pub depth_bounds_test_enable: bool,
     pub stencil_test_enable: bool,
     pub front: vk::StencilOpState,
     pub back: vk::StencilOpState,
@@ -216,16 +214,27 @@ impl From<LogicOp> for vk::LogicOp {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
+pub struct SubpassDescription<'a> {
+    pub flags: SubpassDescriptionFlags,
+    pub pipeline_bind_point: PipelineBindPoint,
+    pub input_attachments: &'a [AttachmentReference],
+    pub color_attachments: &'a [AttachmentReference],
+    pub resolve_attachments: &'a [AttachmentReference],
+    pub depth_stencil_attachment: &'a [AttachmentReference],
+    pub preserve_attachments: &'a [u32],
+}
+
+#[derive(Debug, Clone, Copy, Default)]
 pub struct RenderPassDescription<'a> {
-    pub color_attachments: &'a [ColorAttachment],
-    pub depth_stencil_attachments: &'a [DepthStencilAttachment],
+    pub attachments: &'a [RenderPassAttachment],
+    pub subpasses: &'a [SubpassDescription<'a>],
     pub dependencies: &'a [vk::SubpassDependency],
 }
 impl<'a> RenderPassDescription<'a> {
     fn get_output_attachments(&self) -> Vec<AttachmentDescription> {
         let mut attachment_descriptions = vec![];
 
-        for attachment in self.color_attachments.iter() {
+        for attachment in self.attachments.iter() {
             attachment_descriptions.push(AttachmentDescription {
                 flags: AttachmentDescriptionFlags::empty(),
                 format: attachment.format,
@@ -239,6 +248,32 @@ impl<'a> RenderPassDescription<'a> {
             });
         }
         attachment_descriptions
+    }
+
+    fn get_subpasses(&self) -> Vec<vk::SubpassDescription> {
+        self.subpasses
+            .iter()
+            .map(|s| vk::SubpassDescription {
+                flags: s.flags,
+                pipeline_bind_point: s.pipeline_bind_point,
+                input_attachment_count: s.input_attachments.len() as _,
+                p_input_attachments: p_or_null(s.input_attachments),
+                color_attachment_count: s.color_attachments.len() as _,
+                p_color_attachments: p_or_null(s.color_attachments),
+                p_resolve_attachments: p_or_null(s.resolve_attachments),
+                p_depth_stencil_attachment: p_or_null(s.depth_stencil_attachment),
+                preserve_attachment_count: s.preserve_attachments.len() as _,
+                p_preserve_attachments: p_or_null(s.preserve_attachments),
+            })
+            .collect()
+    }
+}
+
+fn p_or_null<T>(slice: &[T]) -> *const T {
+    if slice.len() > 0 {
+        slice.as_ptr()
+    } else {
+        std::ptr::null()
     }
 }
 
@@ -259,28 +294,15 @@ impl Drop for RenderPass {
 impl RenderPass {
     pub fn new(gpu: &Gpu, pass_description: &RenderPassDescription) -> VkResult<Self> {
         let output_attachments = pass_description.get_output_attachments();
+        let subpasses = pass_description.get_subpasses();
         let pass_info = RenderPassCreateInfo {
             s_type: StructureType::RENDER_PASS_CREATE_INFO,
             p_next: std::ptr::null(),
             flags: RenderPassCreateFlags::empty(),
             attachment_count: output_attachments.len() as _,
             p_attachments: output_attachments.as_ptr(),
-            subpass_count: 1,
-            p_subpasses: &[SubpassDescription {
-                flags: SubpassDescriptionFlags::empty(),
-                pipeline_bind_point: PipelineBindPoint::GRAPHICS,
-                input_attachment_count: 0,
-                p_input_attachments: std::ptr::null(),
-                color_attachment_count: 1,
-                p_color_attachments: &[AttachmentReference {
-                    attachment: 0,
-                    layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                }] as *const AttachmentReference,
-                p_resolve_attachments: std::ptr::null(),
-                p_depth_stencil_attachment: std::ptr::null(),
-                preserve_attachment_count: vk::FALSE,
-                p_preserve_attachments: std::ptr::null(),
-            }] as *const SubpassDescription,
+            subpass_count: subpasses.len() as _,
+            p_subpasses: subpasses.as_ptr(),
             dependency_count: pass_description.dependencies.len() as _,
             p_dependencies: pass_description.dependencies.as_ptr(),
         };
@@ -550,11 +572,7 @@ impl Material {
                     material_description.depth_stencil_state.depth_write_enable,
                 ),
                 depth_compare_op: material_description.depth_stencil_state.depth_compare_op,
-                depth_bounds_test_enable: vk_bool(
-                    material_description
-                        .depth_stencil_state
-                        .depth_bounds_test_enable,
-                ),
+                depth_bounds_test_enable: vk::FALSE,
                 stencil_test_enable: vk_bool(
                     material_description.depth_stencil_state.stencil_test_enable,
                 ),

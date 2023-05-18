@@ -17,11 +17,12 @@ use ash::{
         CommandPoolResetFlags, DependencyFlags, DescriptorBufferInfo, DescriptorImageInfo,
         DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo,
         Extent3D, Fence, ImageAspectFlags, ImageCreateFlags, ImageLayout, ImageMemoryBarrier,
-        ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType, InstanceCreateFlags,
-        InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D, PhysicalDevice,
-        PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags,
-        Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo, SharingMode, StructureType,
-        SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
+        ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType,
+        ImageViewCreateFlags, ImageViewType, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap,
+        MemoryHeapFlags, Offset3D, PhysicalDevice, PhysicalDeviceFeatures,
+        PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags, Queue, QueueFlags,
+        SampleCountFlags, SamplerCreateInfo, SharingMode, StructureType, SubmitInfo,
+        WriteDescriptorSet, API_VERSION_1_3,
     },
     *,
 };
@@ -30,6 +31,8 @@ use log::{error, trace};
 use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 use winit::window::Window;
+
+use crate::GpuImageView;
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
 
@@ -142,7 +145,7 @@ pub struct Gpu {
     pub(super) state: Arc<GpuState>,
     pub(super) thread_local_state: GpuThreadLocalState,
     pub(super) staging_buffer: ResourceHandle<GpuBuffer>,
-    pub(super) resource_map: Rc<ResourceMap>,
+    pub resource_map: Rc<ResourceMap>,
 }
 
 pub struct GpuConfiguration<'a> {
@@ -604,57 +607,7 @@ impl Gpu {
         }
         trace!("{}", s);
     }
-    /*
-       let descriptor_set = unsafe {
-           let descriptor_set = device.allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo {
-               s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
-               p_next: null(),
-               descriptor_pool,
-               descriptor_set_count: 1,
-               p_set_layouts: addr_of!(descriptor_set_layout),
-           })?[0];
 
-           let buffer_info = DescriptorBufferInfo {
-               buffer: *gpu.resource_map.get(&uniform_buffer).unwrap().deref(),
-               offset: 0,
-               range: vk::WHOLE_SIZE,
-           };
-           let image_info = DescriptorImageInfo {
-               sampler: *gpu.resource_map.get(&sampler).unwrap().deref(),
-               image_view: gpu.resource_map.get(&image).unwrap().view,
-               image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-           };
-
-           device.update_descriptor_sets(
-               &[
-                   WriteDescriptorSet {
-                       s_type: StructureType::WRITE_DESCRIPTOR_SET,
-                       p_next: null(),
-                       dst_set: descriptor_set,
-                       dst_binding: 0,
-                       dst_array_element: 0,
-                       descriptor_count: 1,
-                       descriptor_type: DescriptorType::UNIFORM_BUFFER,
-                       p_image_info: null(),
-                       p_buffer_info: addr_of!(buffer_info),
-                       p_texel_buffer_view: null(),
-                   },
-                   WriteDescriptorSet {
-                       s_type: StructureType::WRITE_DESCRIPTOR_SET,
-                       p_next: null(),
-                       dst_set: descriptor_set,
-                       dst_binding: 1,
-                       dst_array_element: 0,
-                       descriptor_count: 1,
-                       descriptor_type: DescriptorType::COMBINED_IMAGE_SAMPLER,
-                       p_image_info: addr_of!(image_info),
-                       p_buffer_info: null(),
-                       p_texel_buffer_view: null(),
-                   },
-               ],
-               &[],
-           );
-    */
     fn initialize_descriptor_set(
         &self,
         descriptor_set: &vk::DescriptorSet,
@@ -685,7 +638,7 @@ impl Gpu {
                 i.binding,
                 DescriptorImageInfo {
                     sampler: self.resource_map.get(&sam.sampler).unwrap().inner,
-                    image_view: self.resource_map.get(&sam.image_view).unwrap().view,
+                    image_view: self.resource_map.get(&sam.image_view).unwrap().inner,
                     image_layout: sam.image_layout,
                 },
                 vk::DescriptorType::SAMPLER,
@@ -694,7 +647,7 @@ impl Gpu {
                 i.binding,
                 DescriptorImageInfo {
                     sampler: self.resource_map.get(&sam.sampler).unwrap().inner,
-                    image_view: self.resource_map.get(&sam.image_view).unwrap().view,
+                    image_view: self.resource_map.get(&sam.image_view).unwrap().inner,
                     image_layout: sam.image_layout,
                 },
                 vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
@@ -798,6 +751,13 @@ pub struct ImageCreateInfo {
     pub usage: vk::ImageUsageFlags,
 }
 
+pub struct ImageViewCreateInfo<'a> {
+    pub image: &'a ResourceHandle<GpuImage>,
+    pub view_type: ImageViewType,
+    pub format: vk::Format,
+    pub components: vk::ComponentMapping,
+    pub subresource_range: ImageSubresourceRange,
+}
 pub struct BufferCreateInfo {
     pub size: usize,
     pub usage: BufferUsageFlags,
@@ -954,6 +914,25 @@ impl Gpu {
         Ok(id)
     }
 
+    pub fn create_image_view(
+        &self,
+        create_info: &ImageViewCreateInfo,
+    ) -> VkResult<ResourceHandle<GpuImageView>> {
+        let image = self.resource_map.get(create_info.image).unwrap().inner;
+        let create_info = vk::ImageViewCreateInfo {
+            s_type: StructureType::IMAGE_VIEW_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: ImageViewCreateFlags::empty(),
+            image,
+            view_type: create_info.view_type,
+            format: create_info.format,
+            components: create_info.components,
+            subresource_range: create_info.subresource_range,
+        };
+
+        let resource = GpuImageView::create(self.vk_logical_device(), &create_info)?;
+        Ok(self.resource_map.add(resource))
+    }
     pub fn create_sampler(
         &self,
         create_info: &SamplerCreateInfo,
@@ -1052,6 +1031,7 @@ impl Gpu {
         image: &ResourceHandle<GpuImage>,
         old_layout: TransitionInfo,
         new_layout: TransitionInfo,
+        aspect_mask: ImageAspectFlags,
     ) -> VkResult<()> {
         unsafe {
             let command_pool = self.state.logical_device.create_command_pool(
@@ -1096,7 +1076,7 @@ impl Gpu {
                 dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
                 image: *self.resource_map.get(image).unwrap().deref(),
                 subresource_range: ImageSubresourceRange {
-                    aspect_mask: ImageAspectFlags::COLOR,
+                    aspect_mask,
                     base_mip_level: 0,
                     level_count: 1,
                     base_array_layer: 0,

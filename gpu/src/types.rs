@@ -1,10 +1,12 @@
 use std::{cell::RefCell, ops::Deref, sync::Arc};
 
+use crate::ResourceHandle;
+
 use super::{allocator::GpuAllocator, gpu::Gpu};
 use ash::{
     prelude::*,
     vk::{
-        self, AllocationCallbacks, Buffer, FenceCreateInfo, FramebufferCreateFlags,
+        self, AllocationCallbacks, Buffer, FenceCreateInfo, Format, FramebufferCreateFlags,
         ImageAspectFlags, ImageSubresourceRange, ImageView, ImageViewCreateFlags, ImageViewType,
         MappedMemoryRange, MemoryMapFlags, SamplerCreateInfo, SemaphoreCreateInfo,
         ShaderModuleCreateInfo, StructureType,
@@ -156,7 +158,6 @@ impl GpuBuffer {
 pub struct GpuImage {
     device: ash::Device,
     pub(super) inner: vk::Image,
-    pub(super) view: vk::ImageView,
     pub(super) allocation: MemoryAllocation,
     pub(super) allocator: Arc<RefCell<dyn GpuAllocator>>,
 }
@@ -168,32 +169,9 @@ impl GpuImage {
         allocation: MemoryAllocation,
         allocator: Arc<RefCell<dyn GpuAllocator>>,
     ) -> VkResult<Self> {
-        let view = unsafe {
-            gpu.state.logical_device.create_image_view(
-                &vk::ImageViewCreateInfo {
-                    s_type: StructureType::IMAGE_VIEW_CREATE_INFO,
-                    p_next: std::ptr::null(),
-                    flags: ImageViewCreateFlags::empty(),
-                    image,
-                    view_type: ImageViewType::TYPE_2D,
-                    format,
-                    components: vk::ComponentMapping::default(),
-                    subresource_range: ImageSubresourceRange {
-                        aspect_mask: ImageAspectFlags::COLOR,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1,
-                    },
-                },
-                get_allocation_callbacks(),
-            )
-        }?;
-
         Ok(Self {
             device: gpu.state.logical_device.clone(),
             inner: image,
-            view,
             allocation,
             allocator,
         })
@@ -206,8 +184,6 @@ impl Drop for GpuImage {
             .deallocate(&self.device, &self.allocation);
         unsafe {
             self.device
-                .destroy_image_view(self.view, get_allocation_callbacks());
-            self.device
                 .destroy_image(self.inner, self::get_allocation_callbacks());
         }
     }
@@ -219,6 +195,22 @@ impl Deref for GpuImage {
     }
 }
 impl Resource for GpuImage {}
+
+define_raii_wrapper!((struct GpuImageView{}, vk::ImageView, ash::Device::destroy_image_view) {
+    (create_info: &vk::ImageViewCreateInfo,) => {
+        |device: &ash::Device| {
+            unsafe {
+                device.create_image_view(create_info, get_allocation_callbacks())
+            }
+        }
+    }
+});
+
+impl GpuImageView {
+    pub fn inner_image_view(&self) -> vk::ImageView {
+        self.inner
+    }
+}
 
 pub struct GpuDescriptorSet {
     pub(super) allocation: DescriptorSetAllocation,
@@ -264,7 +256,7 @@ define_raii_wrapper!((struct GpuShaderModule {}, vk::ShaderModule, ash::Device::
 
 pub struct FramebufferCreateInfo<'a> {
     pub render_pass: &'a RenderPass,
-    pub attachments: &'a [&'a ImageView],
+    pub attachments: &'a [ImageView],
     pub width: u32,
     pub height: u32,
 }
@@ -279,7 +271,7 @@ define_raii_wrapper!((struct GpuFramebuffer {}, vk::Framebuffer, ash::Device::de
                     render_pass: create_info.render_pass.inner,
 
                     attachment_count: create_info.attachments.len() as _,
-                    p_attachments: *create_info.attachments.as_ptr(),
+                    p_attachments: create_info.attachments.as_ptr(),
                     width: create_info.width,
                     height: create_info.height,
 

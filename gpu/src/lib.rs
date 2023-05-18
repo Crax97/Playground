@@ -8,7 +8,7 @@ mod swapchain;
 mod types;
 
 pub use allocator::*;
-use ash::vk::{self, ImageLayout};
+use ash::vk::ImageLayout;
 pub use command_buffer::*;
 pub use gpu::*;
 pub use material::*;
@@ -43,7 +43,7 @@ pub struct BufferRange {
 #[derive(Clone, Hash)]
 pub struct SamplerState {
     pub sampler: ResourceHandle<GpuSampler>,
-    pub image_view: ResourceHandle<GpuImage>,
+    pub image_view: ResourceHandle<GpuImageView>,
     pub image_layout: ImageLayout,
 }
 
