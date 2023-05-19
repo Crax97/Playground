@@ -579,27 +579,14 @@ fn main() -> anyhow::Result<()> {
                 time += 0.001;
 
                 let next_image = swapchain.acquire_next_image().unwrap();
-                let depth_image_view = gpu
-                    .resource_map
-                    .get(&depth_image_view)
-                    .unwrap()
-                    .inner_image_view();
-                let next_image = gpu
-                    .resource_map
-                    .get(&next_image)
-                    .unwrap()
-                    .inner_image_view();
-
-                let framebuffer = GpuFramebuffer::create(
-                    gpu.vk_logical_device(),
-                    &FramebufferCreateInfo {
+                let framebuffer = gpu
+                    .create_framebuffer(&FramebufferCreateInfo {
                         render_pass: &render_pass,
-                        attachments: &[next_image, depth_image_view],
+                        attachments: &[&next_image, &depth_image_view],
                         width: swapchain.extents().width,
                         height: swapchain.extents().height,
-                    },
-                )
-                .unwrap();
+                    })
+                    .unwrap();
                 gpu.reset_state().unwrap();
                 render_textured_quads(
                     &gpu,
@@ -637,7 +624,7 @@ fn render_textured_quads(
     time: f32,
     material: &Material,
     render_pass: &RenderPass,
-    framebuffer: &GpuFramebuffer,
+    framebuffer: &ResourceHandle<GpuFramebuffer>,
     swapchain: &mut gpu::Swapchain,
 ) {
     for (buf, off, _) in infos {

@@ -86,7 +86,7 @@ impl<'g> CommandBuffer<'g> {
 
 #[derive(Clone, Copy)]
 pub struct BeginRenderPassInfo<'a> {
-    pub framebuffer: &'a GpuFramebuffer,
+    pub framebuffer: &'a ResourceHandle<GpuFramebuffer>,
     pub render_pass: &'a RenderPass,
     pub clear_color_values: &'a [ClearValue],
     pub render_area: Rect2D,
@@ -95,11 +95,17 @@ pub struct BeginRenderPassInfo<'a> {
 impl<'c, 'g> RenderPassCommand<'c, 'g> {
     fn new(command_buffer: &'c mut CommandBuffer<'g>, info: &BeginRenderPassInfo<'c>) -> Self {
         let device = command_buffer.gpu.vk_logical_device();
+        let framebuffer = command_buffer
+            .gpu
+            .resource_map
+            .get(&info.framebuffer)
+            .unwrap()
+            .inner;
         let create_info = RenderPassBeginInfo {
             s_type: StructureType::RENDER_PASS_BEGIN_INFO,
             p_next: std::ptr::null(),
             render_pass: info.render_pass.inner,
-            framebuffer: info.framebuffer.inner,
+            framebuffer,
             render_area: info.render_area,
             clear_value_count: info.clear_color_values.len() as _,
             p_clear_values: info.clear_color_values.as_ptr(),

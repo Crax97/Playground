@@ -16,8 +16,8 @@ use ash::{
         CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo,
         CommandPoolResetFlags, DependencyFlags, DescriptorBufferInfo, DescriptorImageInfo,
         DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo,
-        Extent3D, Fence, ImageAspectFlags, ImageCreateFlags, ImageLayout, ImageMemoryBarrier,
-        ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType,
+        Extent3D, Fence, FramebufferCreateFlags, ImageAspectFlags, ImageCreateFlags, ImageLayout,
+        ImageMemoryBarrier, ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType,
         ImageViewCreateFlags, ImageViewType, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap,
         MemoryHeapFlags, Offset3D, PhysicalDevice, PhysicalDeviceFeatures,
         PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags, Queue, QueueFlags,
@@ -32,7 +32,7 @@ use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 use winit::window::Window;
 
-use crate::GpuImageView;
+use crate::{GpuFramebuffer, GpuImageView, RenderPass};
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
 
@@ -768,6 +768,13 @@ pub struct TransitionInfo {
     pub stage_mask: PipelineStageFlags,
 }
 
+pub struct FramebufferCreateInfo<'a> {
+    pub render_pass: &'a RenderPass,
+    pub attachments: &'a [&'a ResourceHandle<GpuImageView>],
+    pub width: u32,
+    pub height: u32,
+}
+
 impl Gpu {
     pub fn create_buffer(
         &self,
@@ -940,6 +947,35 @@ impl Gpu {
         let sampler = GpuSampler::create(self.vk_logical_device(), create_info)?;
         let id = self.resource_map.add(sampler);
         Ok(id)
+    }
+
+    pub fn create_framebuffer(
+        &self,
+        create_info: &FramebufferCreateInfo,
+    ) -> VkResult<ResourceHandle<GpuFramebuffer>> {
+        let attachments: Vec<_> = create_info
+            .attachments
+            .iter()
+            .map(|a| self.resource_map.get(a).unwrap().inner)
+            .collect();
+        let create_info = vk::FramebufferCreateInfo {
+            s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: FramebufferCreateFlags::empty(),
+            render_pass: create_info.render_pass.inner,
+
+            attachment_count: attachments.len() as _,
+            p_attachments: attachments.as_ptr(),
+            width: create_info.width,
+            height: create_info.height,
+
+            // We only support one single framebuffer
+            layers: 1,
+        };
+
+        let fb = GpuFramebuffer::create(self.vk_logical_device(), &create_info)?;
+
+        Ok(self.resource_map.add(fb))
     }
 
     pub fn copy_buffer(
