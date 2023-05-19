@@ -1,4 +1,4 @@
-use std::{num::NonZeroU32, ptr::addr_of, rc::Rc, sync::Arc};
+use std::{mem::MaybeUninit, num::NonZeroU32, ptr::addr_of, rc::Rc, sync::Arc};
 
 use ash::{
     extensions::khr::Surface,
@@ -6,17 +6,17 @@ use ash::{
     vk::{
         self, ComponentMapping, ComponentSwizzle, CompositeAlphaFlagsKHR, Extent2D,
         FenceCreateFlags, FenceCreateInfo, Format, Image, ImageAspectFlags, ImageSubresourceRange,
-        ImageUsageFlags, ImageView, ImageViewCreateFlags, ImageViewCreateInfo, ImageViewType,
-        PresentInfoKHR, PresentModeKHR, SemaphoreCreateFlags, SemaphoreCreateInfo, SharingMode,
-        StructureType, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR,
-        SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
+        ImageUsageFlags, ImageViewCreateFlags, ImageViewCreateInfo, ImageViewType, PresentInfoKHR,
+        PresentModeKHR, SemaphoreCreateFlags, SemaphoreCreateInfo, SharingMode, StructureType,
+        SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR, SwapchainCreateFlagsKHR,
+        SwapchainCreateInfoKHR, SwapchainKHR,
     },
 };
 use log::{info, trace, warn};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use winit::window::Window;
 
-use crate::{ResourceHandle, ResourceMap};
+use crate::{GpuImageView, ResourceHandle, ResourceMap};
 
 use super::{GPUFence, GPUSemaphore, Gpu, GpuState};
 
@@ -55,7 +55,7 @@ pub struct Swapchain {
     pub(super) surface_capabilities: SurfaceCapabilitiesKHR,
     pub(super) current_swapchain: SwapchainKHR,
     pub(super) current_swapchain_images: Vec<Image>,
-    pub(super) current_swapchain_image_views: Vec<ImageView>,
+    pub(super) current_swapchain_image_views: Vec<MaybeUninit<ResourceHandle<GpuImageView>>>,
     pub next_image_fence: ResourceHandle<GPUFence>,
     pub in_flight_fence: ResourceHandle<GPUFence>,
     pub render_finished_semaphore: ResourceHandle<GPUSemaphore>,
@@ -142,7 +142,7 @@ impl Swapchain {
         Ok(me)
     }
 
-    pub fn acquire_next_image(&mut self) -> VkResult<ImageView> {
+    pub fn acquire_next_image(&mut self) -> VkResult<ResourceHandle<GpuImageView>> {
         let next_image_fence = self.resource_map.get(&self.next_image_fence).unwrap().inner;
         loop {
             let (next_image, suboptimal) = unsafe {
@@ -165,9 +165,12 @@ impl Swapchain {
                     .reset_fences(&[next_image_fence])?;
             }
             if !suboptimal {
-                let image_view = self.current_swapchain_image_views.get(next_image as usize);
+                let image_view = self
+                    .current_swapchain_image_views
+                    .get(next_image as usize)
+                    .unwrap();
                 self.current_swapchain_index = next_image;
-                return Ok(image_view.unwrap().clone());
+                return Ok(unsafe { image_view.assume_init_ref().clone() });
             } else {
                 self.recreate_swapchain()?;
             }
@@ -371,9 +374,11 @@ impl Swapchain {
     }
 
     fn recreate_swapchain_image_views(&mut self) -> VkResult<()> {
-        self.drop_image_views();
+        self.current_swapchain_image_views.clear();
         self.current_swapchain_image_views
-            .resize(self.current_swapchain_images.len(), ImageView::null());
+            .resize_with(self.current_swapchain_images.len(), || {
+                MaybeUninit::zeroed()
+            });
         for (i, image) in self.current_swapchain_images.iter().enumerate() {
             let view_info = ImageViewCreateInfo {
                 s_type: StructureType::IMAGE_VIEW_CREATE_INFO,
@@ -396,12 +401,9 @@ impl Swapchain {
                     layer_count: 1,
                 },
             };
-            let view: ImageView = unsafe {
-                self.state
-                    .logical_device
-                    .create_image_view(&view_info, None)?
-            };
-            self.current_swapchain_image_views[i] = view;
+            self.current_swapchain_image_views[i] = MaybeUninit::new(self.resource_map.add(
+                GpuImageView::create(self.state.logical_device.clone(), &view_info)?,
+            ));
         }
 
         Ok(())
@@ -435,14 +437,6 @@ impl Swapchain {
         );
     }
 
-    fn drop_image_views(&self) {
-        for view in self.current_swapchain_image_views.iter() {
-            unsafe {
-                self.state.logical_device.destroy_image_view(*view, None);
-            }
-        }
-    }
-
     fn drop_swapchain_structs(&self) {
         unsafe {
             self.swapchain_extension
@@ -451,7 +445,6 @@ impl Swapchain {
         }
     }
     pub(crate) fn drop_swapchain(&mut self) {
-        self.drop_image_views();
         self.drop_swapchain_structs();
     }
 

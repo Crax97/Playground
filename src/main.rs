@@ -10,8 +10,7 @@ use ash::vk::{
     ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType,
     IndexType, Offset2D, PipelineBindPoint, PipelineStageFlags, PresentModeKHR, Rect2D,
     SampleCountFlags, SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode,
-    StencilOp, StencilOpState, StructureType, SubpassDependency, SubpassDescriptionFlags,
-    SUBPASS_EXTERNAL,
+    StencilOpState, StructureType, SubpassDependency, SubpassDescriptionFlags, SUBPASS_EXTERNAL,
 };
 
 use gpu::{
@@ -583,6 +582,11 @@ fn main() -> anyhow::Result<()> {
                 let depth_image_view = gpu
                     .resource_map
                     .get(&depth_image_view)
+                    .unwrap()
+                    .inner_image_view();
+                let next_image = gpu
+                    .resource_map
+                    .get(&next_image)
                     .unwrap()
                     .inner_image_view();
 
