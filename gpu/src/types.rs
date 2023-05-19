@@ -29,7 +29,7 @@ macro_rules! define_raii_wrapper {
 
         impl $name {
 
-            pub fn create(device: ash::Device, $arg_name : $arg_typ, $($mem_name : $mem_ty,)*) -> VkResult<Self> {
+            pub(super) fn create(device: ash::Device, $arg_name : $arg_typ, $($mem_name : $mem_ty,)*) -> VkResult<Self> {
 
                 let inner = $create_impl_block(&device)?;
                 Ok(Self {
@@ -84,7 +84,7 @@ pub struct GpuBuffer {
     pub(super) allocator: Arc<RefCell<dyn GpuAllocator>>,
 }
 impl GpuBuffer {
-    pub fn create(
+    pub(super) fn create(
         device: ash::Device,
         buffer: Buffer,
         memory_domain: MemoryDomain,
@@ -158,10 +158,9 @@ pub struct GpuImage {
     pub(super) allocator: Arc<RefCell<dyn GpuAllocator>>,
 }
 impl GpuImage {
-    pub fn create(
+    pub(super) fn create(
         gpu: &Gpu,
         image: vk::Image,
-        format: vk::Format,
         allocation: MemoryAllocation,
         allocator: Arc<RefCell<dyn GpuAllocator>>,
     ) -> VkResult<Self> {

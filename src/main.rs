@@ -67,9 +67,8 @@ fn main() -> anyhow::Result<()> {
     )?;
     let cpu_image = cpu_image.into_rgba8();
 
-    let device = gpu.vk_logical_device();
-    let vertex_module = utils::read_file_to_vk_module(&device, "./shaders/vertex.spirv")?;
-    let fragment_module = utils::read_file_to_vk_module(&device, "./shaders/fragment.spirv")?;
+    let vertex_module = utils::read_file_to_vk_module(&gpu, "./shaders/vertex.spirv")?;
+    let fragment_module = utils::read_file_to_vk_module(&gpu, "./shaders/fragment.spirv")?;
 
     let mesh_data = MeshCreateInfo {
         indices: &[0, 1, 2, 2, 3, 0],

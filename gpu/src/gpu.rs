@@ -21,8 +21,8 @@ use ash::{
         ImageViewCreateFlags, ImageViewType, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap,
         MemoryHeapFlags, Offset3D, PhysicalDevice, PhysicalDeviceFeatures,
         PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags, Queue, QueueFlags,
-        SampleCountFlags, SamplerCreateInfo, SharingMode, StructureType, SubmitInfo,
-        WriteDescriptorSet, API_VERSION_1_3,
+        SampleCountFlags, SamplerCreateInfo, ShaderModuleCreateFlags, SharingMode, StructureType,
+        SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
     },
     *,
 };
@@ -32,7 +32,7 @@ use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 use winit::window::Window;
 
-use crate::{GpuFramebuffer, GpuImageView, RenderPass};
+use crate::{GpuFramebuffer, GpuImageView, GpuShaderModule, RenderPass};
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
 
@@ -145,7 +145,7 @@ pub struct Gpu {
     pub(super) state: Arc<GpuState>,
     pub(super) thread_local_state: GpuThreadLocalState,
     pub(super) staging_buffer: ResourceHandle<GpuBuffer>,
-    pub resource_map: Rc<ResourceMap>,
+    pub(super) resource_map: Rc<ResourceMap>,
 }
 
 pub struct GpuConfiguration<'a> {
@@ -550,7 +550,7 @@ impl Gpu {
         Ok(())
     }
 
-    pub fn vk_logical_device(&self) -> Device {
+    pub(crate) fn vk_logical_device(&self) -> Device {
         self.state.logical_device.clone()
     }
 
@@ -698,6 +698,31 @@ impl Gpu {
     pub fn physical_device_properties(&self) -> PhysicalDeviceProperties {
         self.state.physical_device.device_properties
     }
+
+    pub fn create_shader_module(
+        &self,
+        create_info: &ShaderModuleCreateInfo,
+    ) -> VkResult<ResourceHandle<GpuShaderModule>> {
+        let code = bytemuck::cast_slice(&create_info.code);
+        let p_code = code.as_ptr();
+
+        assert!(
+            p_code as u32 % 4 == 0,
+            "Pointers to shader modules code must be 4 byte aligned"
+        );
+
+        let create_info = vk::ShaderModuleCreateInfo {
+            s_type: StructureType::SHADER_MODULE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: create_info.flags,
+            code_size: create_info.code.len() as _,
+            p_code,
+        };
+
+        let shader = GpuShaderModule::create(self.vk_logical_device(), &create_info)?;
+
+        Ok(self.resource_map.add(shader))
+    }
 }
 
 fn create_staging_buffer(state: &Arc<GpuState>) -> VkResult<GpuBuffer> {
@@ -773,6 +798,11 @@ pub struct FramebufferCreateInfo<'a> {
     pub attachments: &'a [&'a ResourceHandle<GpuImageView>],
     pub width: u32,
     pub height: u32,
+}
+
+pub struct ShaderModuleCreateInfo<'a> {
+    pub flags: ShaderModuleCreateFlags,
+    pub code: &'a [u8],
 }
 
 impl Gpu {
@@ -912,7 +942,6 @@ impl Gpu {
         let image: GpuImage = GpuImage::create(
             self,
             image,
-            create_info.format,
             allocation,
             self.state.gpu_memory_allocator.clone(),
         )?;

@@ -6,7 +6,7 @@ use ash::{
         self, AttachmentDescription, AttachmentDescriptionFlags, AttachmentReference,
         DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
         DescriptorSetLayoutCreateInfo, DescriptorType, DynamicState, GraphicsPipelineCreateInfo,
-        ImageLayout, Pipeline, PipelineBindPoint, PipelineCache, PipelineColorBlendAttachmentState,
+        Pipeline, PipelineBindPoint, PipelineCache, PipelineColorBlendAttachmentState,
         PipelineColorBlendStateCreateFlags, PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
         PipelineDepthStencilStateCreateFlags, PipelineDepthStencilStateCreateInfo,
         PipelineDynamicStateCreateFlags, PipelineDynamicStateCreateInfo,
@@ -22,6 +22,8 @@ use ash::{
         SubpassDescriptionFlags, VertexInputAttributeDescription, VertexInputBindingDescription,
     },
 };
+
+use crate::ResourceHandle;
 
 use super::{Gpu, GpuShaderModule, GpuState, ShaderStage};
 
@@ -91,7 +93,7 @@ pub struct VertexBindingDescription<'a> {
 #[derive(Clone, Copy)]
 pub struct VertexStageInfo<'a> {
     pub entry_point: &'a str,
-    pub module: &'a GpuShaderModule,
+    pub module: &'a ResourceHandle<GpuShaderModule>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -124,7 +126,7 @@ pub struct DepthStencilAttachment {}
 #[derive(Clone, Copy)]
 pub struct FragmentStageInfo<'a> {
     pub entry_point: &'a str,
-    pub module: &'a GpuShaderModule,
+    pub module: &'a ResourceHandle<GpuShaderModule>,
     pub color_attachments: &'a [RenderPassAttachment],
     pub depth_stencil_attachments: &'a [DepthStencilAttachment],
 }
@@ -434,23 +436,25 @@ impl Material {
         };
 
         if let Some(vs) = material_description.vertex_stage {
+            let module = gpu.resource_map.get(&vs.module).unwrap().inner;
             stages.push(PipelineShaderStageCreateInfo {
                 s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
                 p_next: std::ptr::null(),
                 flags: PipelineShaderStageCreateFlags::empty(),
                 stage: ShaderStageFlags::VERTEX,
-                module: vs.module.inner,
+                module,
                 p_name: vs_entry.as_ptr(),
                 p_specialization_info: std::ptr::null(),
             })
         }
         if let Some(fs) = material_description.fragment_stage {
+            let module = gpu.resource_map.get(&fs.module).unwrap().inner;
             stages.push(PipelineShaderStageCreateInfo {
                 s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
                 p_next: std::ptr::null(),
                 flags: PipelineShaderStageCreateFlags::empty(),
                 stage: ShaderStageFlags::FRAGMENT,
-                module: fs.module.inner,
+                module,
                 p_name: fs_entry.as_ptr(),
                 p_specialization_info: std::ptr::null(),
             })

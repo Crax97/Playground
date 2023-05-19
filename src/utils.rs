@@ -1,17 +1,14 @@
-use std::{path::Path, ptr::null};
+use std::path::Path;
 
-use ash::{
-    vk::{ShaderModuleCreateFlags, ShaderModuleCreateInfo, StructureType},
-    Device,
-};
+use ash::vk::ShaderModuleCreateFlags;
 use log::info;
 
-use gpu::GpuShaderModule;
+use gpu::{Gpu, GpuShaderModule, ResourceHandle, ShaderModuleCreateInfo};
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
-    device: &Device,
+    gpu: &Gpu,
     path: P,
-) -> anyhow::Result<GpuShaderModule> {
+) -> anyhow::Result<ResourceHandle<GpuShaderModule>> {
     info!(
         "Reading path from {:?}",
         path.as_ref()
@@ -20,11 +17,8 @@ pub fn read_file_to_vk_module<P: AsRef<Path>>(
     );
     let input_file = std::fs::read(path)?;
     let create_info = ShaderModuleCreateInfo {
-        s_type: StructureType::SHADER_MODULE_CREATE_INFO,
-        p_next: null(),
         flags: ShaderModuleCreateFlags::empty(),
-        code_size: input_file.len(),
-        p_code: input_file.as_ptr() as *const u32,
+        code: &input_file,
     };
-    Ok(GpuShaderModule::create(device.clone(), &create_info)?)
+    Ok(gpu.create_shader_module(&create_info)?)
 }
