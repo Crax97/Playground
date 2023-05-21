@@ -15,7 +15,7 @@ use ash::{
         CommandPoolResetFlags, DependencyFlags, DescriptorBufferInfo, DescriptorImageInfo,
         DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo,
         Extent3D, Fence, FramebufferCreateFlags, ImageAspectFlags, ImageCreateFlags, ImageLayout,
-        ImageMemoryBarrier, ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType,
+        ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType,
         ImageViewCreateFlags, ImageViewType, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap,
         MemoryHeapFlags, Offset3D, PhysicalDevice, PhysicalDeviceFeatures,
         PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags, Queue, QueueFlags,
@@ -30,7 +30,10 @@ use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 use winit::window::Window;
 
-use crate::{GpuFramebuffer, GpuImageView, GpuShaderModule, RenderPass};
+use crate::{
+    GpuFramebuffer, GpuImageView, GpuShaderModule, ImageMemoryBarrier, PipelineBarrierInfo,
+    QueueType, RenderPass,
+};
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
 
@@ -687,6 +690,15 @@ impl Gpu {
     pub fn wait_device_idle(&self) -> VkResult<()> {
         unsafe { self.vk_logical_device().device_wait_idle() }
     }
+    pub fn wait_queue_idle(&self, queue_type: QueueType) -> VkResult<()> {
+        unsafe {
+            self.vk_logical_device().queue_wait_idle(match queue_type {
+                QueueType::Graphics => self.state.graphics_queue,
+                QueueType::AsyncCompute => self.state.async_compute_queue,
+                QueueType::Transfer => self.state.transfer_queue,
+            })
+        }
+    }
 
     pub fn physical_device_properties(&self) -> PhysicalDeviceProperties {
         self.state.physical_device.device_properties
@@ -1061,97 +1073,33 @@ impl Gpu {
         new_layout: TransitionInfo,
         aspect_mask: ImageAspectFlags,
     ) -> VkResult<()> {
-        unsafe {
-            let command_pool = self.state.logical_device.create_command_pool(
-                &CommandPoolCreateInfo {
-                    s_type: StructureType::COMMAND_POOL_CREATE_INFO,
-                    p_next: std::ptr::null(),
-                    flags: CommandPoolCreateFlags::empty(),
-                    queue_family_index: self.graphics_queue_family_index(),
-                },
-                None,
-            )?;
+        let mut command_buffer = super::CommandBuffer::new(self, crate::QueueType::Graphics)?;
 
-            let command_buffer =
-                self.state
-                    .logical_device
-                    .allocate_command_buffers(&CommandBufferAllocateInfo {
-                        s_type: StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
-                        p_next: std::ptr::null(),
-                        command_pool,
-                        level: CommandBufferLevel::PRIMARY,
-                        command_buffer_count: 1,
-                    })?[0];
-
-            self.state.logical_device.begin_command_buffer(
-                command_buffer,
-                &CommandBufferBeginInfo {
-                    s_type: StructureType::COMMAND_BUFFER_BEGIN_INFO,
-                    p_next: std::ptr::null(),
-                    flags: CommandBufferUsageFlags::ONE_TIME_SUBMIT,
-                    p_inheritance_info: std::ptr::null(),
-                },
-            )?;
-
-            let memory_barrier = ImageMemoryBarrier {
-                s_type: StructureType::IMAGE_MEMORY_BARRIER,
-                p_next: std::ptr::null(),
-                src_access_mask: old_layout.access_mask,
-                dst_access_mask: new_layout.access_mask,
-                old_layout: old_layout.layout,
-                new_layout: new_layout.layout,
-                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                image: image.inner,
-                subresource_range: ImageSubresourceRange {
-                    aspect_mask,
-                    base_mip_level: 0,
-                    level_count: 1,
-                    base_array_layer: 0,
-                    layer_count: 1,
-                },
-            };
-
-            self.state.logical_device.cmd_pipeline_barrier(
-                command_buffer,
-                old_layout.stage_mask,
-                new_layout.stage_mask,
-                DependencyFlags::empty(),
-                &[],
-                &[],
-                &[memory_barrier],
-            );
-
-            self.state
-                .logical_device
-                .end_command_buffer(command_buffer)?;
-            self.state.logical_device.queue_submit(
-                self.state.graphics_queue,
-                &[SubmitInfo {
-                    s_type: StructureType::SUBMIT_INFO,
-                    p_next: std::ptr::null(),
-                    wait_semaphore_count: 0,
-                    p_wait_semaphores: std::ptr::null(),
-                    p_wait_dst_stage_mask: std::ptr::null(),
-                    command_buffer_count: 1,
-                    p_command_buffers: addr_of!(command_buffer),
-                    signal_semaphore_count: 0,
-                    p_signal_semaphores: std::ptr::null(),
-                }],
-                Fence::null(),
-            )?;
-            self.state
-                .logical_device
-                .queue_wait_idle(self.graphics_queue())?;
-
-            self.state
-                .logical_device
-                .free_command_buffers(command_pool, &[command_buffer]);
-            self.state
-                .logical_device
-                .destroy_command_pool(command_pool, None);
+        let memory_barrier = ImageMemoryBarrier {
+            src_access_mask: old_layout.access_mask,
+            dst_access_mask: new_layout.access_mask,
+            old_layout: old_layout.layout,
+            new_layout: new_layout.layout,
+            src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            image,
+            subresource_range: ImageSubresourceRange {
+                aspect_mask,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
         };
-        Ok(())
+        command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+            src_stage_mask: old_layout.stage_mask,
+            dst_stage_mask: new_layout.stage_mask,
+            dependency_flags: DependencyFlags::empty(),
+            image_memory_barriers: &[memory_barrier],
+            ..Default::default()
+        });
+        command_buffer.submit(&crate::CommandBufferSubmitInfo::default())?;
+        self.wait_queue_idle(QueueType::Graphics)
     }
 
     pub fn copy_buffer_to_image(

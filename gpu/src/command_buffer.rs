@@ -118,13 +118,14 @@ impl<'a> ToVk for ImageMemoryBarrier<'a> {
     }
 }
 
+#[derive(Default)]
 pub struct PipelineBarrierInfo<'a> {
-    src_stage_mask: PipelineStageFlags,
-    dst_stage_mask: PipelineStageFlags,
-    dependency_flags: DependencyFlags,
-    memory_barriers: &'a [MemoryBarrier],
-    buffer_memory_barriers: &'a [BufferMemoryBarrier<'a>],
-    image_memory_barriers: &'a [ImageMemoryBarrier<'a>],
+    pub src_stage_mask: PipelineStageFlags,
+    pub dst_stage_mask: PipelineStageFlags,
+    pub dependency_flags: DependencyFlags,
+    pub memory_barriers: &'a [MemoryBarrier],
+    pub buffer_memory_barriers: &'a [BufferMemoryBarrier<'a>],
+    pub image_memory_barriers: &'a [ImageMemoryBarrier<'a>],
 }
 
 impl<'g> CommandBuffer<'g> {
@@ -167,7 +168,8 @@ impl<'g> CommandBuffer<'g> {
         RenderPassCommand::<'p, 'g>::new(self, &info)
     }
 
-    pub fn pipeline_barrier(&self, barrier_info: &PipelineBarrierInfo) {
+    pub fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo) {
+        self.has_recorded_anything = true;
         let device = self.gpu.vk_logical_device();
         let memory_barriers: Vec<_> = barrier_info
             .memory_barriers
