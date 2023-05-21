@@ -1,3 +1,5 @@
+use core::panic;
+
 use ash::{
     prelude::VkResult,
     vk::{
@@ -26,6 +28,7 @@ pub struct CommandBuffer<'g> {
     gpu: &'g Gpu,
     inner_command_buffer: vk::CommandBuffer,
     has_recorded_anything: bool,
+    has_been_submitted: bool,
     target_queue: vk::Queue,
 }
 
@@ -68,6 +71,7 @@ impl<'g> CommandBuffer<'g> {
             gpu,
             inner_command_buffer,
             has_recorded_anything: false,
+            has_been_submitted: false,
             target_queue: target_queue.get_vk_queue(gpu),
         })
     }
@@ -78,10 +82,12 @@ impl<'g> CommandBuffer<'g> {
         RenderPassCommand::<'p, 'g>::new(self, &info)
     }
 
-    pub fn submit(self, submit_info: &CommandBufferSubmitInfo) -> VkResult<()> {
+    pub fn submit(mut self, submit_info: &CommandBufferSubmitInfo) -> VkResult<()> {
         if !self.has_recorded_anything {
             return Ok(());
         }
+
+        self.has_been_submitted = true;
 
         let device = self.gpu.vk_logical_device();
         unsafe {
@@ -126,6 +132,14 @@ impl<'g> CommandBuffer<'g> {
 
     pub fn inner(&self) -> vk::CommandBuffer {
         self.inner_command_buffer.clone()
+    }
+}
+
+impl<'g> Drop for CommandBuffer<'g> {
+    fn drop(&mut self) {
+        if !self.has_been_submitted {
+            panic!("CommandBuffer::submit hasn't been called!");
+        }
     }
 }
 
