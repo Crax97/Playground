@@ -24,11 +24,18 @@ pub enum QueueType {
     Transfer,
 }
 impl QueueType {
-    fn get_vk_queue(&self, gpu: &Gpu) -> ash::vk::CommandPool {
+    fn get_vk_command_pool(&self, gpu: &Gpu) -> ash::vk::CommandPool {
         match self {
             QueueType::Graphics => gpu.thread_local_state.graphics_command_pool,
             QueueType::AsyncCompute => gpu.thread_local_state.compute_command_pool,
             QueueType::Transfer => gpu.thread_local_state.transfer_command_pool,
+        }
+    }
+    fn get_vk_queue(&self, gpu: &Gpu) -> ash::vk::Queue {
+        match self {
+            QueueType::Graphics => gpu.state.graphics_queue,
+            QueueType::AsyncCompute => gpu.state.async_compute_queue,
+            QueueType::Transfer => gpu.state.transfer_queue,
         }
     }
 }

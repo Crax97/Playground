@@ -15,19 +15,18 @@ use super::{
 };
 
 #[derive(Default)]
-pub struct CommandBufferSubmitInfo {
-    pub wait_semaphores: Vec<ResourceHandle<GPUSemaphore>>,
-    pub wait_stages: Vec<PipelineStageFlags>,
-    pub signal_semaphores: Vec<ResourceHandle<GPUSemaphore>>,
-    pub fence: Option<ResourceHandle<GPUFence>>,
-    pub target_queue: QueueType,
+pub struct CommandBufferSubmitInfo<'a> {
+    pub wait_semaphores: &'a [&'a ResourceHandle<GPUSemaphore>],
+    pub wait_stages: &'a [PipelineStageFlags],
+    pub signal_semaphores: &'a [&'a ResourceHandle<GPUSemaphore>],
+    pub fence: Option<&'a ResourceHandle<GPUFence>>,
 }
 
 pub struct CommandBuffer<'g> {
     gpu: &'g Gpu,
     inner_command_buffer: vk::CommandBuffer,
     has_recorded_anything: bool,
-    info: CommandBufferSubmitInfo,
+    target_queue: vk::Queue,
 }
 
 pub struct RenderPassCommand<'c, 'g>
@@ -41,13 +40,13 @@ where
     render_area: Rect2D,
 }
 impl<'g> CommandBuffer<'g> {
-    pub fn new(gpu: &'g Gpu, info: CommandBufferSubmitInfo) -> VkResult<Self> {
+    pub fn new(gpu: &'g Gpu, target_queue: QueueType) -> VkResult<Self> {
         let device = gpu.vk_logical_device();
         let inner_command_buffer = unsafe {
             device.allocate_command_buffers(&CommandBufferAllocateInfo {
                 s_type: StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
                 p_next: std::ptr::null(),
-                command_pool: info.target_queue.get_vk_queue(gpu),
+                command_pool: target_queue.get_vk_command_pool(gpu),
                 level: CommandBufferLevel::PRIMARY,
                 command_buffer_count: 1,
             })
@@ -69,7 +68,7 @@ impl<'g> CommandBuffer<'g> {
             gpu,
             inner_command_buffer,
             has_recorded_anything: false,
-            info,
+            target_queue: target_queue.get_vk_queue(gpu),
         })
     }
     pub fn begin_render_pass<'p>(
@@ -77,6 +76,52 @@ impl<'g> CommandBuffer<'g> {
         info: &BeginRenderPassInfo<'p>,
     ) -> RenderPassCommand<'p, 'g> {
         RenderPassCommand::<'p, 'g>::new(self, &info)
+    }
+
+    pub fn submit(self, submit_info: &CommandBufferSubmitInfo) -> VkResult<()> {
+        if !self.has_recorded_anything {
+            return Ok(());
+        }
+
+        let device = self.gpu.vk_logical_device();
+        unsafe {
+            device
+                .end_command_buffer(self.inner())
+                .expect("Failed to end inner command buffer");
+            let target_queue = self.target_queue;
+
+            let wait_semaphores: Vec<_> = submit_info
+                .wait_semaphores
+                .iter()
+                .map(|s| self.gpu.resource_map.get(s).unwrap().inner)
+                .collect();
+
+            let signal_semaphores: Vec<_> = submit_info
+                .signal_semaphores
+                .iter()
+                .map(|s| self.gpu.resource_map.get(s).unwrap().inner)
+                .collect();
+
+            device.queue_submit(
+                target_queue,
+                &[SubmitInfo {
+                    s_type: StructureType::SUBMIT_INFO,
+                    p_next: std::ptr::null(),
+                    wait_semaphore_count: wait_semaphores.len() as _,
+                    p_wait_semaphores: wait_semaphores.as_ptr(),
+                    p_wait_dst_stage_mask: submit_info.wait_stages.as_ptr(),
+                    command_buffer_count: 1,
+                    p_command_buffers: [self.inner_command_buffer].as_ptr(),
+                    signal_semaphore_count: signal_semaphores.len() as _,
+                    p_signal_semaphores: signal_semaphores.as_ptr(),
+                }],
+                if let Some(fence) = &submit_info.fence {
+                    self.gpu.resource_map.get(fence).unwrap().inner
+                } else {
+                    vk::Fence::null()
+                },
+            )
+        }
     }
 
     pub fn inner(&self) -> vk::CommandBuffer {
@@ -272,61 +317,5 @@ impl<'c, 'g> Drop for RenderPassCommand<'c, 'g> {
     fn drop(&mut self) {
         let device = &self.command_buffer.gpu.vk_logical_device();
         unsafe { device.cmd_end_render_pass(self.command_buffer.inner_command_buffer) };
-    }
-}
-
-impl<'g> Drop for CommandBuffer<'g> {
-    fn drop(&mut self) {
-        if !self.has_recorded_anything {
-            return;
-        }
-
-        let device = self.gpu.vk_logical_device();
-        unsafe {
-            device
-                .end_command_buffer(self.inner())
-                .expect("Failed to end inner command buffer");
-            let target_queue = match self.info.target_queue {
-                QueueType::Graphics => self.gpu.state.graphics_queue.clone(),
-                QueueType::AsyncCompute => self.gpu.state.async_compute_queue.clone(),
-                QueueType::Transfer => self.gpu.state.transfer_queue.clone(),
-            };
-
-            let wait_semaphores: Vec<_> = self
-                .info
-                .wait_semaphores
-                .iter()
-                .map(|s| self.gpu.resource_map.get(s).unwrap().inner)
-                .collect();
-
-            let signal_semaphores: Vec<_> = self
-                .info
-                .signal_semaphores
-                .iter()
-                .map(|s| self.gpu.resource_map.get(s).unwrap().inner)
-                .collect();
-
-            device
-                .queue_submit(
-                    target_queue,
-                    &[SubmitInfo {
-                        s_type: StructureType::SUBMIT_INFO,
-                        p_next: std::ptr::null(),
-                        wait_semaphore_count: wait_semaphores.len() as _,
-                        p_wait_semaphores: wait_semaphores.as_ptr(),
-                        p_wait_dst_stage_mask: self.info.wait_stages.as_ptr(),
-                        command_buffer_count: 1,
-                        p_command_buffers: [self.inner_command_buffer].as_ptr(),
-                        signal_semaphore_count: signal_semaphores.len() as _,
-                        p_signal_semaphores: signal_semaphores.as_ptr(),
-                    }],
-                    if let Some(fence) = &self.info.fence {
-                        self.gpu.resource_map.get(fence).unwrap().inner
-                    } else {
-                        vk::Fence::null()
-                    },
-                )
-                .unwrap();
-        }
     }
 }

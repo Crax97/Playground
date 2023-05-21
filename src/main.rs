@@ -643,17 +643,7 @@ fn render_textured_quads(
         .unwrap();
     }
     {
-        let mut command_buffer = gpu::CommandBuffer::new(
-            gpu,
-            gpu::CommandBufferSubmitInfo {
-                wait_semaphores: vec![swapchain.image_available_semaphore.clone()],
-                wait_stages: vec![PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
-                signal_semaphores: vec![swapchain.render_finished_semaphore.clone()],
-                fence: Some(swapchain.in_flight_fence.clone()),
-                target_queue: gpu::QueueType::Graphics,
-            },
-        )
-        .unwrap();
+        let mut command_buffer = gpu::CommandBuffer::new(gpu, gpu::QueueType::Graphics).unwrap();
 
         {
             let mut render_pass = command_buffer.begin_render_pass(&BeginRenderPassInfo {
@@ -696,5 +686,14 @@ fn render_textured_quads(
                 render_pass.draw_indexed(6, 1, 0, 0, 0);
             }
         }
+
+        command_buffer
+            .submit(&gpu::CommandBufferSubmitInfo {
+                wait_semaphores: &[&swapchain.image_available_semaphore],
+                wait_stages: &[PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
+                signal_semaphores: &[&swapchain.render_finished_semaphore],
+                fence: Some(&swapchain.in_flight_fence),
+            })
+            .unwrap();
     }
 }
