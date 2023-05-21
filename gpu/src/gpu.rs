@@ -1,9 +1,7 @@
 use std::{
     cell::RefCell,
     ffi::{CStr, CString},
-    ops::Deref,
     ptr::{addr_of, null},
-    rc::Rc,
     sync::Arc,
 };
 
@@ -39,7 +37,6 @@ use super::descriptor_set::PooledDescriptorSetAllocator;
 use super::{
     allocator::{GpuAllocator, PasstroughAllocator},
     descriptor_set::DescriptorSetAllocator,
-    resource::{ResourceHandle, ResourceMap},
     AllocationRequirements, DescriptorSetInfo, GpuBuffer, GpuDescriptorSet, GpuImage, GpuSampler,
     MemoryDomain,
 };
@@ -144,8 +141,7 @@ impl Drop for GpuThreadLocalState {
 pub struct Gpu {
     pub(super) state: Arc<GpuState>,
     pub(super) thread_local_state: GpuThreadLocalState,
-    pub(super) staging_buffer: ResourceHandle<GpuBuffer>,
-    pub(super) resource_map: Rc<ResourceMap>,
+    pub(super) staging_buffer: GpuBuffer,
 }
 
 pub struct GpuConfiguration<'a> {
@@ -277,13 +273,10 @@ impl Gpu {
         let thread_local_state = GpuThreadLocalState::new(state.clone())?;
 
         let staging_buffer = create_staging_buffer(&state)?;
-        let resource_map = ResourceMap::new();
-        let staging_buffer = resource_map.add(staging_buffer);
         Ok(Gpu {
             state,
             thread_local_state,
             staging_buffer,
-            resource_map: Rc::new(resource_map),
         })
     }
 
@@ -619,7 +612,7 @@ impl Gpu {
             super::DescriptorType::UniformBuffer(buf) => buffer_descriptors.push((
                 i.binding,
                 DescriptorBufferInfo {
-                    buffer: self.resource_map.get(&buf.handle).unwrap().inner,
+                    buffer: buf.handle.inner,
                     offset: buf.offset,
                     range: buf.size,
                 },
@@ -628,7 +621,7 @@ impl Gpu {
             super::DescriptorType::StorageBuffer(buf) => buffer_descriptors.push((
                 i.binding,
                 DescriptorBufferInfo {
-                    buffer: self.resource_map.get(&buf.handle).unwrap().inner,
+                    buffer: buf.handle.inner,
                     offset: buf.offset,
                     range: buf.size,
                 },
@@ -637,8 +630,8 @@ impl Gpu {
             super::DescriptorType::Sampler(sam) => image_descriptors.push((
                 i.binding,
                 DescriptorImageInfo {
-                    sampler: self.resource_map.get(&sam.sampler).unwrap().inner,
-                    image_view: self.resource_map.get(&sam.image_view).unwrap().inner,
+                    sampler: sam.sampler.inner,
+                    image_view: sam.image_view.inner,
                     image_layout: sam.image_layout,
                 },
                 vk::DescriptorType::SAMPLER,
@@ -646,8 +639,8 @@ impl Gpu {
             super::DescriptorType::CombinedImageSampler(sam) => image_descriptors.push((
                 i.binding,
                 DescriptorImageInfo {
-                    sampler: self.resource_map.get(&sam.sampler).unwrap().inner,
-                    image_view: self.resource_map.get(&sam.image_view).unwrap().inner,
+                    sampler: sam.sampler.inner,
+                    image_view: sam.image_view.inner,
                     image_layout: sam.image_layout,
                 },
                 vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
@@ -702,7 +695,7 @@ impl Gpu {
     pub fn create_shader_module(
         &self,
         create_info: &ShaderModuleCreateInfo,
-    ) -> VkResult<ResourceHandle<GpuShaderModule>> {
+    ) -> VkResult<GpuShaderModule> {
         let code = bytemuck::cast_slice(&create_info.code);
         let p_code = code.as_ptr();
 
@@ -721,7 +714,7 @@ impl Gpu {
 
         let shader = GpuShaderModule::create(self.vk_logical_device(), &create_info)?;
 
-        Ok(self.resource_map.add(shader))
+        Ok(shader)
     }
 }
 
@@ -777,7 +770,7 @@ pub struct ImageCreateInfo {
 }
 
 pub struct ImageViewCreateInfo<'a> {
-    pub image: &'a ResourceHandle<GpuImage>,
+    pub image: &'a GpuImage,
     pub view_type: ImageViewType,
     pub format: vk::Format,
     pub components: vk::ComponentMapping,
@@ -795,7 +788,7 @@ pub struct TransitionInfo {
 
 pub struct FramebufferCreateInfo<'a> {
     pub render_pass: &'a RenderPass,
-    pub attachments: &'a [&'a ResourceHandle<GpuImageView>],
+    pub attachments: &'a [&'a GpuImageView],
     pub width: u32,
     pub height: u32,
 }
@@ -810,7 +803,7 @@ impl Gpu {
         &self,
         create_info: &BufferCreateInfo,
         memory_domain: MemoryDomain,
-    ) -> VkResult<ResourceHandle<GpuBuffer>> {
+    ) -> VkResult<GpuBuffer> {
         let family = self.state.queue_families.clone();
         let create_info = vk::BufferCreateInfo {
             s_type: StructureType::BUFFER_CREATE_INFO,
@@ -854,31 +847,20 @@ impl Gpu {
                 .logical_device
                 .bind_buffer_memory(buffer, allocation.device_memory, 0)
         }?;
-        let buffer = GpuBuffer::create(
+        GpuBuffer::create(
             self.vk_logical_device(),
             buffer,
             memory_domain,
             allocation,
             self.state.gpu_memory_allocator.clone(),
-        )?;
-
-        let id = self.resource_map.add(buffer);
-        Ok(id)
+        )
     }
 
-    pub fn write_buffer_data<T: Copy>(
-        &self,
-        buffer: &ResourceHandle<GpuBuffer>,
-        data: &[T],
-    ) -> VkResult<()> {
-        let gpu_buffer = self.resource_map.get(buffer).unwrap();
-        if gpu_buffer.memory_domain.contains(MemoryDomain::HostVisible) {
-            gpu_buffer.write_data(data);
+    pub fn write_buffer_data<T: Copy>(&self, buffer: &GpuBuffer, data: &[T]) -> VkResult<()> {
+        if buffer.memory_domain.contains(MemoryDomain::HostVisible) {
+            buffer.write_data(data);
         } else {
-            self.resource_map
-                .get(&self.staging_buffer)
-                .unwrap()
-                .write_data(data);
+            self.staging_buffer.write_data(data);
             self.copy_buffer(
                 &self.staging_buffer,
                 buffer,
@@ -891,7 +873,7 @@ impl Gpu {
         &self,
         create_info: &ImageCreateInfo,
         memory_domain: MemoryDomain,
-    ) -> VkResult<ResourceHandle<GpuImage>> {
+    ) -> VkResult<GpuImage> {
         let image = unsafe {
             let create_info = vk::ImageCreateInfo {
                 s_type: StructureType::IMAGE_CREATE_INFO,
@@ -939,22 +921,16 @@ impl Gpu {
                 .logical_device
                 .bind_image_memory(image, allocation.device_memory, 0)
         }?;
-        let image: GpuImage = GpuImage::create(
+        GpuImage::create(
             self,
             image,
             allocation,
             self.state.gpu_memory_allocator.clone(),
-        )?;
-
-        let id = self.resource_map.add(image);
-        Ok(id)
+        )
     }
 
-    pub fn create_image_view(
-        &self,
-        create_info: &ImageViewCreateInfo,
-    ) -> VkResult<ResourceHandle<GpuImageView>> {
-        let image = self.resource_map.get(create_info.image).unwrap().inner;
+    pub fn create_image_view(&self, create_info: &ImageViewCreateInfo) -> VkResult<GpuImageView> {
+        let image = create_info.image.inner;
         let create_info = vk::ImageViewCreateInfo {
             s_type: StructureType::IMAGE_VIEW_CREATE_INFO,
             p_next: std::ptr::null(),
@@ -965,28 +941,17 @@ impl Gpu {
             components: create_info.components,
             subresource_range: create_info.subresource_range,
         };
-
-        let resource = GpuImageView::create(self.vk_logical_device(), &create_info)?;
-        Ok(self.resource_map.add(resource))
+        GpuImageView::create(self.vk_logical_device(), &create_info)
     }
-    pub fn create_sampler(
-        &self,
-        create_info: &SamplerCreateInfo,
-    ) -> VkResult<ResourceHandle<GpuSampler>> {
-        let sampler = GpuSampler::create(self.vk_logical_device(), create_info)?;
-        let id = self.resource_map.add(sampler);
-        Ok(id)
+    pub fn create_sampler(&self, create_info: &SamplerCreateInfo) -> VkResult<GpuSampler> {
+        GpuSampler::create(self.vk_logical_device(), create_info)
     }
 
     pub fn create_framebuffer(
         &self,
         create_info: &FramebufferCreateInfo,
-    ) -> VkResult<ResourceHandle<GpuFramebuffer>> {
-        let attachments: Vec<_> = create_info
-            .attachments
-            .iter()
-            .map(|a| self.resource_map.get(a).unwrap().inner)
-            .collect();
+    ) -> VkResult<GpuFramebuffer> {
+        let attachments: Vec<_> = create_info.attachments.iter().map(|a| a.inner).collect();
         let create_info = vk::FramebufferCreateInfo {
             s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
             p_next: std::ptr::null(),
@@ -1002,15 +967,13 @@ impl Gpu {
             layers: 1,
         };
 
-        let fb = GpuFramebuffer::create(self.vk_logical_device(), &create_info)?;
-
-        Ok(self.resource_map.add(fb))
+        GpuFramebuffer::create(self.vk_logical_device(), &create_info)
     }
 
     pub fn copy_buffer(
         &self,
-        source_buffer: &ResourceHandle<GpuBuffer>,
-        dest_buffer: &ResourceHandle<GpuBuffer>,
+        source_buffer: &GpuBuffer,
+        dest_buffer: &GpuBuffer,
         size: usize,
     ) -> VkResult<()> {
         unsafe {
@@ -1045,8 +1008,8 @@ impl Gpu {
                 },
             )?;
 
-            let src_buffer = self.resource_map.get(source_buffer).unwrap().inner;
-            let dst_buffer = self.resource_map.get(dest_buffer).unwrap().inner;
+            let src_buffer = source_buffer.inner;
+            let dst_buffer = dest_buffer.inner;
 
             self.state.logical_device.cmd_copy_buffer(
                 command_buffer,
@@ -1093,7 +1056,7 @@ impl Gpu {
 
     pub fn transition_image_layout(
         &self,
-        image: &ResourceHandle<GpuImage>,
+        image: &GpuImage,
         old_layout: TransitionInfo,
         new_layout: TransitionInfo,
         aspect_mask: ImageAspectFlags,
@@ -1139,7 +1102,7 @@ impl Gpu {
                 new_layout: new_layout.layout,
                 src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
                 dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                image: *self.resource_map.get(image).unwrap().deref(),
+                image: image.inner,
                 subresource_range: ImageSubresourceRange {
                     aspect_mask,
                     base_mip_level: 0,
@@ -1193,8 +1156,8 @@ impl Gpu {
 
     pub fn copy_buffer_to_image(
         &self,
-        source_buffer: &ResourceHandle<GpuBuffer>,
-        dest_image: &ResourceHandle<GpuImage>,
+        source_buffer: &GpuBuffer,
+        dest_image: &GpuImage,
         width: u32,
         height: u32,
     ) -> VkResult<()> {
@@ -1230,8 +1193,8 @@ impl Gpu {
                 },
             )?;
 
-            let src_buffer = self.resource_map.get(source_buffer).unwrap().inner;
-            let dst_image = self.resource_map.get(dest_image).unwrap().inner;
+            let src_buffer = source_buffer.inner;
+            let dst_image = dest_image.inner;
 
             self.state.logical_device.cmd_copy_buffer_to_image(
                 command_buffer,
@@ -1289,20 +1252,16 @@ impl Gpu {
         Ok(())
     }
 
-    pub fn create_descriptor_set(
-        &self,
-        info: &DescriptorSetInfo,
-    ) -> VkResult<ResourceHandle<GpuDescriptorSet>> {
+    pub fn create_descriptor_set(&self, info: &DescriptorSetInfo) -> VkResult<GpuDescriptorSet> {
         let allocated_descriptor_set = self
             .state
             .descriptor_set_allocator
             .borrow_mut()
             .allocate(info)?;
         self.initialize_descriptor_set(&allocated_descriptor_set.descriptor_set, info)?;
-        let descriptor_set = GpuDescriptorSet::create(
+        GpuDescriptorSet::create(
             allocated_descriptor_set,
             self.state.descriptor_set_allocator.clone(),
-        )?;
-        Ok(self.resource_map.add(descriptor_set))
+        )
     }
 }

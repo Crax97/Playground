@@ -11,7 +11,6 @@ use ash::{
 
 use super::{
     descriptor_set::{DescriptorSetAllocation, DescriptorSetAllocator},
-    resource::Resource,
     MemoryAllocation, MemoryDomain,
 };
 
@@ -19,6 +18,15 @@ pub fn get_allocation_callbacks() -> Option<&'static AllocationCallbacks> {
     None
 }
 
+macro_rules! impl_raii_wrapper_hash {
+    ($name:ident) => {
+        impl std::hash::Hash for $name {
+            fn hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
+                self.inner.hash(hasher)
+            }
+        }
+    };
+}
 macro_rules! define_raii_wrapper {
     ((struct $name:ident { $($mem_name:ident : $mem_ty : ty,)* }, $vk_type:ty, $drop_fn:path) {($arg_name:ident : $arg_typ:ty,) => $create_impl_block:tt}) => {
         pub struct $name {
@@ -56,9 +64,8 @@ macro_rules! define_raii_wrapper {
             }
         }
 
-        impl Resource for $name {
+        impl_raii_wrapper_hash!($name);
 
-        }
     };
 }
 
@@ -116,7 +123,6 @@ impl Deref for GpuBuffer {
         &self.inner
     }
 }
-impl Resource for GpuBuffer {}
 
 impl GpuBuffer {
     pub fn write_data<I: Sized + Copy>(&self, data: &[I]) {
@@ -150,6 +156,8 @@ impl GpuBuffer {
         unsafe { self.device.unmap_memory(self.allocation.device_memory) };
     }
 }
+
+impl_raii_wrapper_hash!(GpuBuffer);
 
 pub struct GpuImage {
     device: ash::Device,
@@ -189,7 +197,7 @@ impl Deref for GpuImage {
         &self.inner
     }
 }
-impl Resource for GpuImage {}
+impl_raii_wrapper_hash!(GpuImage);
 
 define_raii_wrapper!((struct GpuImageView{}, vk::ImageView, ash::Device::destroy_image_view) {
     (create_info: &vk::ImageViewCreateInfo,) => {
@@ -208,6 +216,7 @@ impl GpuImageView {
 }
 
 pub struct GpuDescriptorSet {
+    pub(super) inner: vk::DescriptorSet,
     pub(super) allocation: DescriptorSetAllocation,
     pub(super) allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
 }
@@ -217,6 +226,7 @@ impl GpuDescriptorSet {
         allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
     ) -> VkResult<Self> {
         Ok(Self {
+            inner: allocation.descriptor_set,
             allocation,
             allocator,
         })
@@ -236,7 +246,7 @@ impl Deref for GpuDescriptorSet {
         &self.allocation.descriptor_set
     }
 }
-impl Resource for GpuDescriptorSet {}
+impl_raii_wrapper_hash!(GpuDescriptorSet);
 
 define_raii_wrapper!((struct GpuSampler {}, vk::Sampler, ash::Device::destroy_sampler) {
     (create_info: &SamplerCreateInfo,) => {

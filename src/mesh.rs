@@ -1,7 +1,7 @@
 use ash::{prelude::VkResult, vk::BufferUsageFlags};
 use nalgebra::{Vector2, Vector3};
 
-use gpu::{BufferCreateInfo, Gpu, GpuBuffer, MemoryDomain, ResourceHandle};
+use gpu::{BufferCreateInfo, Gpu, GpuBuffer, MemoryDomain};
 
 pub struct MeshCreateInfo<'a> {
     pub indices: &'a [u32],
@@ -13,12 +13,12 @@ pub struct MeshCreateInfo<'a> {
 }
 
 pub struct Mesh {
-    pub index_buffer: ResourceHandle<GpuBuffer>,
-    pub position_component: ResourceHandle<GpuBuffer>,
-    pub color_component: ResourceHandle<GpuBuffer>,
-    pub normal_component: ResourceHandle<GpuBuffer>,
-    pub tangent_component: ResourceHandle<GpuBuffer>,
-    pub uv_component: ResourceHandle<GpuBuffer>,
+    pub index_buffer: GpuBuffer,
+    pub position_component: GpuBuffer,
+    pub color_component: GpuBuffer,
+    pub normal_component: GpuBuffer,
+    pub tangent_component: GpuBuffer,
+    pub uv_component: GpuBuffer,
 }
 
 impl Mesh {

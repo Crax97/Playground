@@ -18,7 +18,7 @@ use gpu::{
     DescriptorInfo, DescriptorSetInfo, FragmentStageInfo, FramebufferCreateInfo, GlobalBinding,
     Gpu, GpuBuffer, GpuConfiguration, GpuDescriptorSet, GpuFramebuffer, ImageCreateInfo,
     MemoryDomain, Pipeline, PipelineDescription, RenderPass, RenderPassAttachment,
-    RenderPassDescription, ResourceHandle, SamplerState, SubpassDescription, TransitionInfo,
+    RenderPassDescription, SamplerState, SubpassDescription, TransitionInfo,
     VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
 use image::EncodableLayout;
@@ -510,7 +510,7 @@ fn main() -> anyhow::Result<()> {
             DescriptorInfo {
                 binding: 0,
                 element_type: gpu::DescriptorType::UniformBuffer(BufferRange {
-                    handle: uniform_buffer_1.clone(),
+                    handle: &uniform_buffer_1,
                     offset: 0,
                     size: vk::WHOLE_SIZE,
                 }),
@@ -519,8 +519,8 @@ fn main() -> anyhow::Result<()> {
             DescriptorInfo {
                 binding: 1,
                 element_type: gpu::DescriptorType::CombinedImageSampler(SamplerState {
-                    sampler: sampler.clone(),
-                    image_view: image_view.clone(),
+                    sampler: &sampler,
+                    image_view: &image_view,
                     image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 }),
                 binding_stage: gpu::ShaderStage::Fragment,
@@ -532,7 +532,7 @@ fn main() -> anyhow::Result<()> {
             DescriptorInfo {
                 binding: 0,
                 element_type: gpu::DescriptorType::UniformBuffer(BufferRange {
-                    handle: uniform_buffer_2.clone(),
+                    handle: &uniform_buffer_2,
                     offset: 0,
                     size: vk::WHOLE_SIZE,
                 }),
@@ -541,8 +541,8 @@ fn main() -> anyhow::Result<()> {
             DescriptorInfo {
                 binding: 1,
                 element_type: gpu::DescriptorType::CombinedImageSampler(SamplerState {
-                    sampler: sampler.clone(),
-                    image_view: image_view.clone(),
+                    sampler: &sampler,
+                    image_view: &image_view,
                     image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 }),
                 binding_stage: gpu::ShaderStage::Fragment,
@@ -577,13 +577,14 @@ fn main() -> anyhow::Result<()> {
             winit::event::Event::RedrawRequested(..) => {
                 time += 0.001;
 
+                let sw_extents = swapchain.extents();
                 let next_image = swapchain.acquire_next_image().unwrap();
                 let framebuffer = gpu
                     .create_framebuffer(&FramebufferCreateInfo {
                         render_pass: &render_pass,
                         attachments: &[&next_image, &depth_image_view],
-                        width: swapchain.extents().width,
-                        height: swapchain.extents().height,
+                        width: sw_extents.width,
+                        height: sw_extents.height,
                     })
                     .unwrap();
                 gpu.reset_state().unwrap();
@@ -615,15 +616,11 @@ fn main() -> anyhow::Result<()> {
 fn render_textured_quads(
     gpu: &Gpu,
     mesh: &Mesh,
-    infos: &[(
-        &ResourceHandle<GpuBuffer>,
-        &Vector3<f32>,
-        &ResourceHandle<GpuDescriptorSet>,
-    )],
+    infos: &[(&GpuBuffer, &Vector3<f32>, &GpuDescriptorSet)],
     time: f32,
     material: &Pipeline,
     render_pass: &RenderPass,
-    framebuffer: &ResourceHandle<GpuFramebuffer>,
+    framebuffer: &GpuFramebuffer,
     swapchain: &mut gpu::Swapchain,
 ) {
     for (buf, off, _) in infos {

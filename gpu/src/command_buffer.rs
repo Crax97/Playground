@@ -13,15 +13,14 @@ use crate::{GPUFence, GPUSemaphore};
 
 use super::{
     material::RenderPass, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, Pipeline, QueueType,
-    ResourceHandle,
 };
 
 #[derive(Default)]
 pub struct CommandBufferSubmitInfo<'a> {
-    pub wait_semaphores: &'a [&'a ResourceHandle<GPUSemaphore>],
+    pub wait_semaphores: &'a [&'a GPUSemaphore],
     pub wait_stages: &'a [PipelineStageFlags],
-    pub signal_semaphores: &'a [&'a ResourceHandle<GPUSemaphore>],
-    pub fence: Option<&'a ResourceHandle<GPUFence>>,
+    pub signal_semaphores: &'a [&'a GPUSemaphore],
+    pub fence: Option<&'a GPUFence>,
 }
 
 pub struct CommandBuffer<'g> {
@@ -99,13 +98,13 @@ impl<'g> CommandBuffer<'g> {
             let wait_semaphores: Vec<_> = submit_info
                 .wait_semaphores
                 .iter()
-                .map(|s| self.gpu.resource_map.get(s).unwrap().inner)
+                .map(|s| s.inner)
                 .collect();
 
             let signal_semaphores: Vec<_> = submit_info
                 .signal_semaphores
                 .iter()
-                .map(|s| self.gpu.resource_map.get(s).unwrap().inner)
+                .map(|s| s.inner)
                 .collect();
 
             device.queue_submit(
@@ -122,7 +121,7 @@ impl<'g> CommandBuffer<'g> {
                     p_signal_semaphores: signal_semaphores.as_ptr(),
                 }],
                 if let Some(fence) = &submit_info.fence {
-                    self.gpu.resource_map.get(fence).unwrap().inner
+                    fence.inner
                 } else {
                     vk::Fence::null()
                 },
@@ -145,7 +144,7 @@ impl<'g> Drop for CommandBuffer<'g> {
 
 #[derive(Clone, Copy)]
 pub struct BeginRenderPassInfo<'a> {
-    pub framebuffer: &'a ResourceHandle<GpuFramebuffer>,
+    pub framebuffer: &'a GpuFramebuffer,
     pub render_pass: &'a RenderPass,
     pub clear_color_values: &'a [ClearValue],
     pub render_area: Rect2D,
@@ -154,12 +153,7 @@ pub struct BeginRenderPassInfo<'a> {
 impl<'c, 'g> RenderPassCommand<'c, 'g> {
     fn new(command_buffer: &'c mut CommandBuffer<'g>, info: &BeginRenderPassInfo<'c>) -> Self {
         let device = command_buffer.gpu.vk_logical_device();
-        let framebuffer = command_buffer
-            .gpu
-            .resource_map
-            .get(&info.framebuffer)
-            .unwrap()
-            .inner;
+        let framebuffer = info.framebuffer.inner;
         let create_info = RenderPassBeginInfo {
             s_type: StructureType::RENDER_PASS_BEGIN_INFO,
             p_next: std::ptr::null(),
@@ -253,19 +247,11 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         bind_point: PipelineBindPoint,
         material: &Pipeline,
         first_index: u32,
-        descriptor_sets: &[&ResourceHandle<GpuDescriptorSet>],
+        descriptor_sets: &[&GpuDescriptorSet],
     ) {
         let descriptor_sets: Vec<_> = descriptor_sets
             .iter()
-            .map(|d| {
-                self.command_buffer
-                    .gpu
-                    .resource_map
-                    .get(d)
-                    .unwrap()
-                    .allocation
-                    .descriptor_set
-            })
+            .map(|d| d.allocation.descriptor_set)
             .collect();
         unsafe {
             self.command_buffer
@@ -283,18 +269,12 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
     }
     pub fn bind_index_buffer(
         &self,
-        buffer: &ResourceHandle<GpuBuffer>,
+        buffer: &GpuBuffer,
         offset: vk::DeviceSize,
         index_type: IndexType,
     ) {
         let device = self.command_buffer.gpu.vk_logical_device();
-        let index_buffer = self
-            .command_buffer
-            .gpu
-            .resource_map
-            .get(buffer)
-            .unwrap()
-            .inner;
+        let index_buffer = buffer.inner;
         unsafe {
             device.cmd_bind_index_buffer(
                 self.command_buffer.inner_command_buffer,
@@ -307,15 +287,12 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
     pub fn bind_vertex_buffer(
         &self,
         first_binding: u32,
-        buffers: &[&ResourceHandle<GpuBuffer>],
+        buffers: &[&GpuBuffer],
         offsets: &[vk::DeviceSize],
     ) {
         assert!(buffers.len() == offsets.len());
         let device = self.command_buffer.gpu.vk_logical_device();
-        let vertex_buffers: Vec<_> = buffers
-            .iter()
-            .map(|b| self.command_buffer.gpu.resource_map.get(b).unwrap().inner)
-            .collect();
+        let vertex_buffers: Vec<_> = buffers.iter().map(|b| b.inner).collect();
         unsafe {
             device.cmd_bind_vertex_buffers(
                 self.command_buffer.inner_command_buffer,

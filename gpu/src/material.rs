@@ -23,8 +23,6 @@ use ash::{
     },
 };
 
-use crate::ResourceHandle;
-
 use super::{Gpu, GpuShaderModule, GpuState, ShaderStage};
 
 fn vk_bool(b: bool) -> u32 {
@@ -93,7 +91,7 @@ pub struct VertexBindingDescription<'a> {
 #[derive(Clone, Copy)]
 pub struct VertexStageInfo<'a> {
     pub entry_point: &'a str,
-    pub module: &'a ResourceHandle<GpuShaderModule>,
+    pub module: &'a GpuShaderModule,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -126,7 +124,7 @@ pub struct DepthStencilAttachment {}
 #[derive(Clone, Copy)]
 pub struct FragmentStageInfo<'a> {
     pub entry_point: &'a str,
-    pub module: &'a ResourceHandle<GpuShaderModule>,
+    pub module: &'a GpuShaderModule,
     pub color_attachments: &'a [RenderPassAttachment],
     pub depth_stencil_attachments: &'a [DepthStencilAttachment],
 }
@@ -436,7 +434,7 @@ impl Pipeline {
         };
 
         if let Some(vs) = pipeline_description.vertex_stage {
-            let module = gpu.resource_map.get(&vs.module).unwrap().inner;
+            let module = vs.module.inner;
             stages.push(PipelineShaderStageCreateInfo {
                 s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -448,7 +446,7 @@ impl Pipeline {
             })
         }
         if let Some(fs) = pipeline_description.fragment_stage {
-            let module = gpu.resource_map.get(&fs.module).unwrap().inner;
+            let module = fs.module.inner;
             stages.push(PipelineShaderStageCreateInfo {
                 s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
                 p_next: std::ptr::null(),

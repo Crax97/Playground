@@ -137,8 +137,8 @@ mod test {
 
     #[test]
     fn test_get() {
-        let map = ResourceMap::new();
-        let id: crate::ResourceHandle<TestResource> = map.add(TestResource { val: 10 });
+        let map: ResourceMap = ResourceMap::new();
+        let id: super::ResourceHandle<TestResource> = map.add(TestResource { val: 10 });
 
         assert_eq!(map.get(&id).unwrap().val, 10);
     }

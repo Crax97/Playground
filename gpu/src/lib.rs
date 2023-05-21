@@ -3,7 +3,6 @@ mod command_buffer;
 mod descriptor_set;
 mod gpu;
 mod material;
-mod resource;
 mod swapchain;
 mod types;
 
@@ -12,7 +11,6 @@ use ash::vk::ImageLayout;
 pub use command_buffer::*;
 pub use gpu::*;
 pub use material::*;
-pub use resource::*;
 pub use swapchain::Swapchain;
 pub use types::*;
 
@@ -41,28 +39,28 @@ impl QueueType {
 }
 
 #[derive(Clone, Hash)]
-pub struct BufferRange {
-    pub handle: ResourceHandle<GpuBuffer>,
+pub struct BufferRange<'a> {
+    pub handle: &'a GpuBuffer,
     pub offset: u64,
     pub size: u64,
 }
 
 #[derive(Clone, Hash)]
-pub struct SamplerState {
-    pub sampler: ResourceHandle<GpuSampler>,
-    pub image_view: ResourceHandle<GpuImageView>,
+pub struct SamplerState<'a> {
+    pub sampler: &'a GpuSampler,
+    pub image_view: &'a GpuImageView,
     pub image_layout: ImageLayout,
 }
 
 #[derive(Clone)]
-pub enum DescriptorType {
-    UniformBuffer(BufferRange),
-    StorageBuffer(BufferRange),
-    Sampler(SamplerState),
-    CombinedImageSampler(SamplerState),
+pub enum DescriptorType<'a> {
+    UniformBuffer(BufferRange<'a>),
+    StorageBuffer(BufferRange<'a>),
+    Sampler(SamplerState<'a>),
+    CombinedImageSampler(SamplerState<'a>),
 }
 
-impl std::hash::Hash for DescriptorType {
+impl<'a> std::hash::Hash for DescriptorType<'a> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
     }
@@ -76,13 +74,13 @@ pub enum ShaderStage {
 }
 
 #[derive(Clone, Hash)]
-pub struct DescriptorInfo {
+pub struct DescriptorInfo<'a> {
     pub binding: u32,
-    pub element_type: DescriptorType,
+    pub element_type: DescriptorType<'a>,
     pub binding_stage: ShaderStage,
 }
 
 #[derive(Clone, Hash)]
 pub struct DescriptorSetInfo<'a> {
-    pub descriptors: &'a [DescriptorInfo],
+    pub descriptors: &'a [DescriptorInfo<'a>],
 }
