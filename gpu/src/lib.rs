@@ -2,7 +2,7 @@ mod allocator;
 mod command_buffer;
 mod descriptor_set;
 mod gpu;
-mod material;
+mod pipeline;
 mod swapchain;
 mod types;
 
@@ -10,7 +10,7 @@ pub use allocator::*;
 use ash::vk::ImageLayout;
 pub use command_buffer::*;
 pub use gpu::*;
-pub use material::*;
+pub use pipeline::*;
 pub use swapchain::Swapchain;
 pub use types::*;
 

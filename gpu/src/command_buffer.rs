@@ -13,7 +13,7 @@ use ash::{
 use crate::{GPUFence, GPUSemaphore, GpuImage, ToVk};
 
 use super::{
-    material::RenderPass, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, Pipeline, QueueType,
+    pipeline::RenderPass, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, Pipeline, QueueType,
 };
 
 #[derive(Default)]
