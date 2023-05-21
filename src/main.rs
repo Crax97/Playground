@@ -16,10 +16,10 @@ use ash::vk::{
 use gpu::{
     BeginRenderPassInfo, BlendState, BufferCreateInfo, BufferRange, DepthStencilState,
     DescriptorInfo, DescriptorSetInfo, FragmentStageInfo, FramebufferCreateInfo, GlobalBinding,
-    Gpu, GpuBuffer, GpuConfiguration, GpuDescriptorSet, GpuFramebuffer, ImageCreateInfo, Material,
-    MaterialDescription, MemoryDomain, RenderPass, RenderPassAttachment, RenderPassDescription,
-    ResourceHandle, SamplerState, SubpassDescription, TransitionInfo, VertexAttributeDescription,
-    VertexBindingDescription, VertexStageInfo,
+    Gpu, GpuBuffer, GpuConfiguration, GpuDescriptorSet, GpuFramebuffer, ImageCreateInfo,
+    MemoryDomain, Pipeline, PipelineDescription, RenderPass, RenderPassAttachment,
+    RenderPassDescription, ResourceHandle, SamplerState, SubpassDescription, TransitionInfo,
+    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
 use image::EncodableLayout;
 use mesh::{Mesh, MeshCreateInfo};
@@ -388,10 +388,10 @@ fn main() -> anyhow::Result<()> {
         },
     )?;
 
-    let material = Material::new(
+    let material = Pipeline::new(
         &gpu,
         &render_pass,
-        &MaterialDescription {
+        &PipelineDescription {
             global_bindings: &[
                 GlobalBinding {
                     binding_type: gpu::BindingType::Uniform,
@@ -621,7 +621,7 @@ fn render_textured_quads(
         &ResourceHandle<GpuDescriptorSet>,
     )],
     time: f32,
-    material: &Material,
+    material: &Pipeline,
     render_pass: &RenderPass,
     framebuffer: &ResourceHandle<GpuFramebuffer>,
     swapchain: &mut gpu::Swapchain,
@@ -667,7 +667,7 @@ fn render_textured_quads(
                     extent: swapchain.extents(),
                 },
             });
-            render_pass.bind_material(material);
+            render_pass.bind_pipeline(material);
             for (_, _, set) in infos {
                 render_pass.bind_descriptor_sets(PipelineBindPoint::GRAPHICS, material, 0, &[set]);
 

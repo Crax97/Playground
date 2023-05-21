@@ -6,7 +6,7 @@ use ash::{
         self, AttachmentDescription, AttachmentDescriptionFlags, AttachmentReference,
         DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
         DescriptorSetLayoutCreateInfo, DescriptorType, DynamicState, GraphicsPipelineCreateInfo,
-        Pipeline, PipelineBindPoint, PipelineCache, PipelineColorBlendAttachmentState,
+        PipelineBindPoint, PipelineCache, PipelineColorBlendAttachmentState,
         PipelineColorBlendStateCreateFlags, PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
         PipelineDepthStencilStateCreateFlags, PipelineDepthStencilStateCreateInfo,
         PipelineDynamicStateCreateFlags, PipelineDynamicStateCreateInfo,
@@ -321,7 +321,7 @@ impl RenderPass {
 }
 
 #[derive(Clone, Copy, Default)]
-pub struct MaterialDescription<'a> {
+pub struct PipelineDescription<'a> {
     pub global_bindings: &'a [GlobalBinding],
     pub vertex_inputs: &'a [VertexBindingDescription<'a>],
     pub vertex_stage: Option<VertexStageInfo<'a>>,
@@ -335,7 +335,7 @@ pub struct MaterialDescription<'a> {
     pub logic_op: Option<LogicOp>,
 }
 
-impl<'a> MaterialDescription<'a> {
+impl<'a> PipelineDescription<'a> {
     fn create_descriptor_set_layout(&self, gpu: &Gpu) -> VkResult<DescriptorSetLayout> {
         let bindings: Vec<DescriptorSetLayoutBinding> =
             self.global_bindings.iter().map(|b| b.into()).collect();
@@ -407,35 +407,35 @@ impl<'a> MaterialDescription<'a> {
     }
 }
 
-pub struct Material {
-    pub(super) pipeline: Pipeline,
+pub struct Pipeline {
+    pub(super) pipeline: vk::Pipeline,
     pub(super) pipeline_layout: PipelineLayout,
 
     shared_state: Arc<GpuState>,
 }
 
-impl Material {
+impl Pipeline {
     pub fn new(
         gpu: &Gpu,
         target_render_pass: &RenderPass,
-        material_description: &MaterialDescription,
+        pipeline_description: &PipelineDescription,
     ) -> VkResult<Self> {
-        let descriptor_set_layout = material_description.create_descriptor_set_layout(gpu)?;
-        let color_blend_attachments = material_description.get_output_attachments();
+        let descriptor_set_layout = pipeline_description.create_descriptor_set_layout(gpu)?;
+        let color_blend_attachments = pipeline_description.get_output_attachments();
         let mut stages = vec![];
 
-        let vs_entry = if let Some(vs) = material_description.vertex_stage {
+        let vs_entry = if let Some(vs) = pipeline_description.vertex_stage {
             CString::new(vs.entry_point).unwrap()
         } else {
             CString::new("").unwrap()
         };
-        let fs_entry = if let Some(fs) = material_description.vertex_stage {
+        let fs_entry = if let Some(fs) = pipeline_description.vertex_stage {
             CString::new(fs.entry_point).unwrap()
         } else {
             CString::new("").unwrap()
         };
 
-        if let Some(vs) = material_description.vertex_stage {
+        if let Some(vs) = pipeline_description.vertex_stage {
             let module = gpu.resource_map.get(&vs.module).unwrap().inner;
             stages.push(PipelineShaderStageCreateInfo {
                 s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -447,7 +447,7 @@ impl Material {
                 p_specialization_info: std::ptr::null(),
             })
         }
-        if let Some(fs) = material_description.fragment_stage {
+        if let Some(fs) = pipeline_description.fragment_stage {
             let module = gpu.resource_map.get(&fs.module).unwrap().inner;
             stages.push(PipelineShaderStageCreateInfo {
                 s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -461,7 +461,7 @@ impl Material {
         }
 
         let (input_binding_descriptions, input_attribute_descriptions) =
-            material_description.get_input_bindings_and_attributes();
+            pipeline_description.get_input_bindings_and_attributes();
 
         let pipeline_layout = unsafe {
             let layout_infos = PipelineLayoutCreateInfo {
@@ -494,10 +494,10 @@ impl Material {
                 s_type: StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
                 p_next: std::ptr::null(),
                 flags: PipelineInputAssemblyStateCreateFlags::empty(),
-                topology: match material_description.input_topology {
+                topology: match pipeline_description.input_topology {
                     PrimitiveTopology::TriangleList => vk::PrimitiveTopology::TRIANGLE_LIST,
                 },
-                primitive_restart_enable: if material_description.primitive_restart {
+                primitive_restart_enable: if pipeline_description.primitive_restart {
                     vk::TRUE
                 } else {
                     vk::FALSE
@@ -522,7 +522,7 @@ impl Material {
                 p_scissors: std::ptr::null(),
             };
 
-            let line_width = match material_description.polygon_mode {
+            let line_width = match pipeline_description.polygon_mode {
                 PolygonMode::Line(w) => w,
                 _ => 1.0,
             };
@@ -533,16 +533,16 @@ impl Material {
                 flags: PipelineRasterizationStateCreateFlags::empty(),
                 depth_clamp_enable: vk::FALSE,
                 rasterizer_discard_enable: vk::FALSE,
-                polygon_mode: match material_description.polygon_mode {
+                polygon_mode: match pipeline_description.polygon_mode {
                     PolygonMode::Fill => vk::PolygonMode::FILL,
                     PolygonMode::Line(_) => vk::PolygonMode::LINE,
                     PolygonMode::Point => vk::PolygonMode::POINT,
                 },
-                cull_mode: match material_description.cull_mode {
+                cull_mode: match pipeline_description.cull_mode {
                     CullMode::Back => vk::CullModeFlags::BACK,
                     CullMode::Front => vk::CullModeFlags::FRONT,
                 },
-                front_face: match material_description.front_face {
+                front_face: match pipeline_description.front_face {
                     FrontFace::CounterClockWise => vk::FrontFace::COUNTER_CLOCKWISE,
                     FrontFace::ClockWise => vk::FrontFace::CLOCKWISE,
                 },
@@ -570,23 +570,23 @@ impl Material {
                 p_next: std::ptr::null(),
                 flags: PipelineDepthStencilStateCreateFlags::empty(),
                 depth_test_enable: vk_bool(
-                    material_description.depth_stencil_state.depth_test_enable,
+                    pipeline_description.depth_stencil_state.depth_test_enable,
                 ),
                 depth_write_enable: vk_bool(
-                    material_description.depth_stencil_state.depth_write_enable,
+                    pipeline_description.depth_stencil_state.depth_write_enable,
                 ),
-                depth_compare_op: material_description.depth_stencil_state.depth_compare_op,
+                depth_compare_op: pipeline_description.depth_stencil_state.depth_compare_op,
                 depth_bounds_test_enable: vk::FALSE,
                 stencil_test_enable: vk_bool(
-                    material_description.depth_stencil_state.stencil_test_enable,
+                    pipeline_description.depth_stencil_state.stencil_test_enable,
                 ),
-                front: material_description.depth_stencil_state.front,
-                back: material_description.depth_stencil_state.back,
-                min_depth_bounds: material_description.depth_stencil_state.min_depth_bounds,
-                max_depth_bounds: material_description.depth_stencil_state.max_depth_bounds,
+                front: pipeline_description.depth_stencil_state.front,
+                back: pipeline_description.depth_stencil_state.back,
+                min_depth_bounds: pipeline_description.depth_stencil_state.min_depth_bounds,
+                max_depth_bounds: pipeline_description.depth_stencil_state.max_depth_bounds,
             };
 
-            let (logic_op_enable, logic_op) = match material_description.logic_op {
+            let (logic_op_enable, logic_op) = match pipeline_description.logic_op {
                 Some(op) => (vk_bool(true), op.into()),
                 None => (vk_bool(false), vk::LogicOp::NO_OP),
             };
@@ -632,7 +632,7 @@ impl Material {
                 layout: pipeline_layout,
                 render_pass: target_render_pass.inner,
                 subpass: 0,
-                base_pipeline_handle: Pipeline::null(),
+                base_pipeline_handle: vk::Pipeline::null(),
                 base_pipeline_index: 0,
             }];
 
@@ -653,7 +653,7 @@ impl Material {
     }
 }
 
-impl Drop for Material {
+impl Drop for Pipeline {
     fn drop(&mut self) {
         unsafe {
             self.shared_state

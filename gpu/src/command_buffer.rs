@@ -12,7 +12,7 @@ use ash::{
 use crate::{GPUFence, GPUSemaphore};
 
 use super::{
-    material::RenderPass, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, Material, QueueType,
+    material::RenderPass, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, Pipeline, QueueType,
     ResourceHandle,
 };
 
@@ -186,7 +186,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         }
     }
 
-    pub fn bind_material(&mut self, material: &Material) {
+    pub fn bind_pipeline(&mut self, material: &Pipeline) {
         let device = self.command_buffer.gpu.vk_logical_device();
         unsafe {
             device.cmd_bind_pipeline(
@@ -251,7 +251,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
     pub fn bind_descriptor_sets(
         &self,
         bind_point: PipelineBindPoint,
-        material: &Material,
+        material: &Pipeline,
         first_index: u32,
         descriptor_sets: &[&ResourceHandle<GpuDescriptorSet>],
     ) {
