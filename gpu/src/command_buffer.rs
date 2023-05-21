@@ -4,12 +4,13 @@ use ash::{
     prelude::VkResult,
     vk::{
         self, ClearValue, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
-        CommandBufferUsageFlags, IndexType, Offset2D, PipelineBindPoint, PipelineStageFlags,
-        Rect2D, RenderPassBeginInfo, StructureType, SubmitInfo, SubpassContents, Viewport,
+        CommandBufferUsageFlags, DependencyFlags, IndexType, Offset2D, PipelineBindPoint,
+        PipelineStageFlags, Rect2D, RenderPassBeginInfo, StructureType, SubmitInfo,
+        SubpassContents, Viewport,
     },
 };
 
-use crate::{GPUFence, GPUSemaphore};
+use crate::{GPUFence, GPUSemaphore, GpuImage, ToVk};
 
 use super::{
     material::RenderPass, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, Pipeline, QueueType,
@@ -41,6 +42,91 @@ where
     has_draw_command: bool,
     render_area: Rect2D,
 }
+pub struct MemoryBarrier {
+    pub src_access_mask: vk::AccessFlags,
+    pub dst_access_mask: vk::AccessFlags,
+}
+
+impl ToVk for MemoryBarrier {
+    type Inner = vk::MemoryBarrier;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            s_type: StructureType::MEMORY_BARRIER,
+            p_next: std::ptr::null(),
+            src_access_mask: self.src_access_mask,
+            dst_access_mask: self.dst_access_mask,
+        }
+    }
+}
+
+pub struct BufferMemoryBarrier<'a> {
+    pub src_access_mask: vk::AccessFlags,
+    pub dst_access_mask: vk::AccessFlags,
+    pub src_queue_family_index: u32,
+    pub dst_queue_family_index: u32,
+    pub buffer: &'a GpuBuffer,
+    pub offset: vk::DeviceSize,
+    pub size: vk::DeviceSize,
+}
+
+impl<'a> ToVk for BufferMemoryBarrier<'a> {
+    type Inner = vk::BufferMemoryBarrier;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            s_type: StructureType::BUFFER_MEMORY_BARRIER,
+            p_next: std::ptr::null(),
+            src_access_mask: self.src_access_mask,
+            dst_access_mask: self.dst_access_mask,
+            src_queue_family_index: self.src_queue_family_index,
+            dst_queue_family_index: self.dst_queue_family_index,
+            buffer: self.buffer.inner,
+            offset: self.offset,
+            size: self.size,
+        }
+    }
+}
+
+pub struct ImageMemoryBarrier<'a> {
+    pub src_access_mask: vk::AccessFlags,
+    pub dst_access_mask: vk::AccessFlags,
+    pub old_layout: vk::ImageLayout,
+    pub new_layout: vk::ImageLayout,
+    pub src_queue_family_index: u32,
+    pub dst_queue_family_index: u32,
+    pub image: &'a GpuImage,
+    pub subresource_range: vk::ImageSubresourceRange,
+}
+
+impl<'a> ToVk for ImageMemoryBarrier<'a> {
+    type Inner = vk::ImageMemoryBarrier;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            s_type: StructureType::IMAGE_MEMORY_BARRIER,
+            p_next: std::ptr::null(),
+            src_access_mask: self.src_access_mask,
+            dst_access_mask: self.dst_access_mask,
+            src_queue_family_index: self.src_queue_family_index,
+            dst_queue_family_index: self.dst_queue_family_index,
+            old_layout: self.old_layout,
+            new_layout: self.new_layout,
+            image: self.image.inner,
+            subresource_range: self.subresource_range,
+        }
+    }
+}
+
+pub struct PipelineBarrierInfo<'a> {
+    src_stage_mask: PipelineStageFlags,
+    dst_stage_mask: PipelineStageFlags,
+    dependency_flags: DependencyFlags,
+    memory_barriers: &'a [MemoryBarrier],
+    buffer_memory_barriers: &'a [BufferMemoryBarrier<'a>],
+    image_memory_barriers: &'a [ImageMemoryBarrier<'a>],
+}
+
 impl<'g> CommandBuffer<'g> {
     pub fn new(gpu: &'g Gpu, target_queue: QueueType) -> VkResult<Self> {
         let device = gpu.vk_logical_device();
@@ -79,6 +165,36 @@ impl<'g> CommandBuffer<'g> {
         info: &BeginRenderPassInfo<'p>,
     ) -> RenderPassCommand<'p, 'g> {
         RenderPassCommand::<'p, 'g>::new(self, &info)
+    }
+
+    pub fn pipeline_barrier(&self, barrier_info: &PipelineBarrierInfo) {
+        let device = self.gpu.vk_logical_device();
+        let memory_barriers: Vec<_> = barrier_info
+            .memory_barriers
+            .iter()
+            .map(|b| b.to_vk())
+            .collect();
+        let buffer_memory_barriers: Vec<_> = barrier_info
+            .buffer_memory_barriers
+            .iter()
+            .map(|b| b.to_vk())
+            .collect();
+        let image_memory_barriers: Vec<_> = barrier_info
+            .image_memory_barriers
+            .iter()
+            .map(|b| b.to_vk())
+            .collect();
+        unsafe {
+            device.cmd_pipeline_barrier(
+                self.inner_command_buffer,
+                barrier_info.src_stage_mask,
+                barrier_info.dst_stage_mask,
+                barrier_info.dependency_flags,
+                &memory_barriers,
+                &buffer_memory_barriers,
+                &image_memory_barriers,
+            )
+        };
     }
 
     pub fn submit(mut self, submit_info: &CommandBufferSubmitInfo) -> VkResult<()> {

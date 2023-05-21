@@ -18,11 +18,27 @@ pub fn get_allocation_callbacks() -> Option<&'static AllocationCallbacks> {
     None
 }
 
+pub trait ToVk {
+    type Inner;
+
+    fn to_vk(&self) -> Self::Inner;
+}
+
 macro_rules! impl_raii_wrapper_hash {
     ($name:ident) => {
         impl std::hash::Hash for $name {
             fn hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
                 self.inner.hash(hasher)
+            }
+        }
+    };
+}
+macro_rules! impl_raii_wrapper_to_vk {
+    ($name:ident, $inner:ty) => {
+        impl ToVk for $name {
+            type Inner = $inner;
+            fn to_vk(&self) -> Self::Inner {
+                self.inner
             }
         }
     };
@@ -65,6 +81,7 @@ macro_rules! define_raii_wrapper {
         }
 
         impl_raii_wrapper_hash!($name);
+        impl_raii_wrapper_to_vk!($name, $vk_type);
 
     };
 }
@@ -158,6 +175,7 @@ impl GpuBuffer {
 }
 
 impl_raii_wrapper_hash!(GpuBuffer);
+impl_raii_wrapper_to_vk!(GpuBuffer, vk::Buffer);
 
 pub struct GpuImage {
     device: ash::Device,
@@ -198,6 +216,7 @@ impl Deref for GpuImage {
     }
 }
 impl_raii_wrapper_hash!(GpuImage);
+impl_raii_wrapper_to_vk!(GpuImage, vk::Image);
 
 define_raii_wrapper!((struct GpuImageView{}, vk::ImageView, ash::Device::destroy_image_view) {
     (create_info: &vk::ImageViewCreateInfo,) => {
@@ -247,6 +266,7 @@ impl Deref for GpuDescriptorSet {
     }
 }
 impl_raii_wrapper_hash!(GpuDescriptorSet);
+impl_raii_wrapper_to_vk!(GpuDescriptorSet, vk::DescriptorSet);
 
 define_raii_wrapper!((struct GpuSampler {}, vk::Sampler, ash::Device::destroy_sampler) {
     (create_info: &SamplerCreateInfo,) => {
