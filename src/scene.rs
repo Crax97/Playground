@@ -17,16 +17,12 @@ pub struct ScenePrimitive {
 }
 
 pub struct Scene {
-    resource_map: Rc<ResourceMap>,
     primitives: Vec<ScenePrimitive>,
 }
 
 impl Scene {
-    pub fn new(map: Rc<ResourceMap>) -> Self {
-        Self {
-            resource_map: map.clone(),
-            primitives: vec![],
-        }
+    pub fn new() -> Self {
+        Self { primitives: vec![] }
     }
 
     pub fn add(&mut self, primitive: ScenePrimitive) -> usize {
@@ -112,6 +108,7 @@ impl<'a> SceneRenderer for ForwardNaiveRenderer<'a> {
                 let transform = primitive.transform;
                 let mesh = self.resource_map.get(&primitive.mesh);
                 let material = self.resource_map.get(&primitive.material);
+                let pipeline = self.resource_map.get(&material.pipeline);
                 gpu.write_buffer_data(
                     &material.uniform_buffers[0],
                     &[PerObjectData {
@@ -130,10 +127,10 @@ impl<'a> SceneRenderer for ForwardNaiveRenderer<'a> {
                     }],
                 )
                 .unwrap();
-                render_pass.bind_pipeline(&material.pipeline);
+                render_pass.bind_pipeline(&pipeline.0);
                 render_pass.bind_descriptor_sets(
                     PipelineBindPoint::GRAPHICS,
-                    &material.pipeline,
+                    &pipeline.0,
                     0,
                     &[&material.resources_descriptor_set],
                 );

@@ -1,3 +1,4 @@
+mod gpu_pipeline;
 mod material;
 mod mesh;
 mod scene;
@@ -23,6 +24,7 @@ use gpu::{
     VertexStageInfo,
 };
 
+use gpu_pipeline::GpuPipeline;
 use material::Material;
 use mesh::{Mesh, MeshCreateInfo};
 use nalgebra::*;
@@ -301,7 +303,7 @@ fn main() -> anyhow::Result<()> {
         },
     )?;
 
-    let pipeline_1 = Pipeline::new(
+    let pipeline = GpuPipeline(Pipeline::new(
         &gpu,
         &render_pass,
         &PipelineDescription {
@@ -416,136 +418,20 @@ fn main() -> anyhow::Result<()> {
 
             ..Default::default()
         },
-    )?;
-
-    let pipeline_2 = Pipeline::new(
-        &gpu,
-        &render_pass,
-        &PipelineDescription {
-            global_bindings: &[
-                GlobalBinding {
-                    binding_type: gpu::BindingType::Uniform,
-                    index: 0,
-                    stage: gpu::ShaderStage::Vertex,
-                },
-                GlobalBinding {
-                    binding_type: gpu::BindingType::CombinedImageSampler,
-                    index: 1,
-                    stage: gpu::ShaderStage::Fragment,
-                },
-            ],
-            vertex_inputs: &[
-                VertexBindingDescription {
-                    binding: 0,
-                    input_rate: gpu::InputRate::PerVertex,
-                    stride: size_of::<Vector3<f32>>() as u32,
-                    attributes: &[VertexAttributeDescription {
-                        location: 0,
-                        format: vk::Format::R32G32B32_SFLOAT,
-                        offset: 0,
-                    }],
-                },
-                VertexBindingDescription {
-                    binding: 1,
-                    input_rate: gpu::InputRate::PerVertex,
-                    stride: size_of::<Vector3<f32>>() as u32,
-                    attributes: &[VertexAttributeDescription {
-                        location: 1,
-                        format: vk::Format::R32G32B32_SFLOAT,
-                        offset: 0,
-                    }],
-                },
-                VertexBindingDescription {
-                    binding: 2,
-                    input_rate: gpu::InputRate::PerVertex,
-                    stride: size_of::<Vector3<f32>>() as u32,
-                    attributes: &[VertexAttributeDescription {
-                        location: 2,
-                        format: vk::Format::R32G32B32_SFLOAT,
-                        offset: 0,
-                    }],
-                },
-                VertexBindingDescription {
-                    binding: 3,
-                    input_rate: gpu::InputRate::PerVertex,
-                    stride: size_of::<Vector3<f32>>() as u32,
-                    attributes: &[VertexAttributeDescription {
-                        location: 3,
-                        format: vk::Format::R32G32B32_SFLOAT,
-                        offset: 0,
-                    }],
-                },
-                VertexBindingDescription {
-                    binding: 4,
-                    input_rate: gpu::InputRate::PerVertex,
-                    stride: size_of::<Vector2<f32>>() as u32,
-                    attributes: &[VertexAttributeDescription {
-                        location: 4,
-                        format: vk::Format::R32G32_SFLOAT,
-                        offset: 0,
-                    }],
-                },
-            ],
-            vertex_stage: Some(VertexStageInfo {
-                entry_point: "main",
-                module: &vertex_module,
-            }),
-            fragment_stage: Some(FragmentStageInfo {
-                entry_point: "main",
-                module: &fragment_module,
-                color_attachments: &[RenderPassAttachment {
-                    format: swapchain.present_format(),
-                    samples: SampleCountFlags::TYPE_1,
-                    load_op: AttachmentLoadOp::CLEAR,
-                    store_op: AttachmentStoreOp::STORE,
-                    stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                    stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                    initial_layout: ImageLayout::UNDEFINED,
-                    final_layout: ImageLayout::PRESENT_SRC_KHR,
-                    blend_state: BlendState {
-                        blend_enable: true,
-                        src_color_blend_factor: BlendFactor::ONE,
-                        dst_color_blend_factor: BlendFactor::ZERO,
-                        color_blend_op: BlendOp::ADD,
-                        src_alpha_blend_factor: BlendFactor::ONE,
-                        dst_alpha_blend_factor: BlendFactor::ZERO,
-                        alpha_blend_op: BlendOp::ADD,
-                        color_write_mask: ColorComponentFlags::RGBA,
-                    },
-                }],
-                depth_stencil_attachments: &[],
-            }),
-            input_topology: gpu::PrimitiveTopology::TriangleList,
-            primitive_restart: false,
-            polygon_mode: gpu::PolygonMode::Fill,
-            cull_mode: gpu::CullMode::Back,
-            front_face: gpu::FrontFace::ClockWise,
-            depth_stencil_state: DepthStencilState {
-                depth_test_enable: true,
-                depth_write_enable: true,
-                depth_compare_op: CompareOp::LESS,
-                stencil_test_enable: false,
-                front: StencilOpState::default(),
-                back: StencilOpState::default(),
-                min_depth_bounds: 0.0,
-                max_depth_bounds: 1.0,
-            },
-
-            ..Default::default()
-        },
-    )?;
+    )?);
+    let pipeline = resource_map.add(pipeline);
 
     let material_1 = Material::new(
         &gpu,
         resource_map.clone(),
-        pipeline_1,
+        pipeline.clone(),
         vec![uniform_buffer_1],
         vec![texture.clone()],
     )?;
     let material_2 = Material::new(
         &gpu,
         resource_map.clone(),
-        pipeline_2,
+        pipeline,
         vec![uniform_buffer_2],
         vec![texture.clone()],
     )?;
@@ -554,7 +440,7 @@ fn main() -> anyhow::Result<()> {
 
     swapchain.select_present_mode(PresentModeKHR::MAILBOX)?;
 
-    let mut scene = Scene::new(resource_map.clone());
+    let mut scene = Scene::new();
 
     scene.add(ScenePrimitive {
         mesh: mesh.clone(),

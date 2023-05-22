@@ -5,15 +5,14 @@ use ash::{
     vk::{self, ImageLayout},
 };
 use gpu::{
-    BufferRange, DescriptorInfo, DescriptorSetInfo, Gpu, GpuBuffer, GpuDescriptorSet, Pipeline,
-    SamplerState,
+    BufferRange, DescriptorInfo, DescriptorSetInfo, Gpu, GpuBuffer, GpuDescriptorSet, SamplerState,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 
-use crate::texture::Texture;
+use crate::{gpu_pipeline::GpuPipeline, texture::Texture};
 
 pub struct Material {
-    pub pipeline: Pipeline,
+    pub pipeline: ResourceHandle<GpuPipeline>,
     pub uniform_buffers: Vec<GpuBuffer>,
     pub textures: Vec<ResourceHandle<Texture>>,
     pub resources_descriptor_set: GpuDescriptorSet,
@@ -23,7 +22,7 @@ impl Material {
     pub fn new(
         gpu: &Gpu,
         resource_map: Rc<ResourceMap>,
-        pipeline: Pipeline,
+        pipeline: ResourceHandle<GpuPipeline>,
         uniform_buffers: Vec<GpuBuffer>,
         textures: Vec<ResourceHandle<Texture>>,
     ) -> VkResult<Self> {
