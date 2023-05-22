@@ -5,7 +5,9 @@ use std::{
 };
 use thunderdome::{Arena, Index};
 
-pub trait Resource {}
+pub trait Resource {
+    fn get_description(&self) -> &str;
+}
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Hash)]
@@ -66,7 +68,7 @@ impl<R: Resource + 'static> Drop for ResourceHandle<R> {
 }
 
 impl ResourceMap {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         let state = ResourceMapState {
             types_map: anymap::AnyMap::new(),
             resources: 0,
@@ -77,7 +79,7 @@ impl ResourceMap {
         }
     }
 
-    pub(crate) fn add<R: Resource + 'static>(&self, resource: R) -> ResourceHandle<R> {
+    pub fn add<R: Resource + 'static>(&self, resource: R) -> ResourceHandle<R> {
         self.map.borrow_mut().resources += 1;
         let store = self.get_arena::<R>();
         let id = store.insert(resource);
@@ -89,12 +91,20 @@ impl ResourceMap {
         }
     }
 
-    pub fn get<R: Resource + 'static>(&self, id: &ResourceHandle<R>) -> Option<&R> {
+    pub fn get<R: Resource + 'static>(&self, id: &ResourceHandle<R>) -> &R {
+        self.try_get(id).unwrap()
+    }
+
+    pub fn get_mut<R: Resource + 'static>(&mut self, id: &ResourceHandle<R>) -> &mut R {
+        self.try_get_mut(id).unwrap()
+    }
+
+    pub fn try_get<R: Resource + 'static>(&self, id: &ResourceHandle<R>) -> Option<&R> {
         let arena_ref = self.get_arena();
         arena_ref.get(id.id.id)
     }
 
-    pub fn get_mut<R: Resource + 'static>(&mut self, id: &ResourceHandle<R>) -> Option<&mut R> {
+    pub fn try_get_mut<R: Resource + 'static>(&mut self, id: &ResourceHandle<R>) -> Option<&mut R> {
         let arena_ref = self.get_arena();
         arena_ref.get_mut(id.id.id)
     }
@@ -128,19 +138,27 @@ mod test {
         val: u32,
     }
 
-    impl Resource for TestResource {}
+    impl Resource for TestResource {
+        fn get_description(&self) -> &str {
+            "test resource"
+        }
+    }
     struct TestResource2 {
         val2: u32,
     }
 
-    impl Resource for TestResource2 {}
+    impl Resource for TestResource2 {
+        fn get_description(&self) -> &str {
+            "test resource 2"
+        }
+    }
 
     #[test]
     fn test_get() {
         let map: ResourceMap = ResourceMap::new();
         let id: super::ResourceHandle<TestResource> = map.add(TestResource { val: 10 });
 
-        assert_eq!(map.get(&id).unwrap().val, 10);
+        assert_eq!(map.get(&id).val, 10);
     }
 
     #[test]
@@ -150,16 +168,16 @@ mod test {
         let id_3 = map.add(TestResource2 { val2: 142 });
         {
             let id = map.add(TestResource { val: 10 });
-            assert_eq!(map.get(&id).unwrap().val, 10);
-            assert_eq!(map.get(&id_2).unwrap().val, 14);
+            assert_eq!(map.get(&id).val, 10);
+            assert_eq!(map.get(&id_2).val, 14);
 
             assert_eq!(map.len::<TestResource>(), 2);
         }
 
         assert_eq!(map.len::<TestResource>(), 1);
         assert_eq!(map.len::<TestResource2>(), 1);
-        assert_eq!(map.get(&id_2).unwrap().val, 14);
-        assert_eq!(map.get(&id_3).unwrap().val2, 142);
+        assert_eq!(map.get(&id_2).val, 14);
+        assert_eq!(map.get(&id_3).val2, 142);
     }
 
     #[test]
@@ -174,8 +192,8 @@ mod test {
             let id = map.add(TestResource { val: 10 });
 
             let do_checks = |map: ResourceMap| {
-                assert_eq!(map.get(&id).unwrap().val, 10);
-                assert_eq!(map.get(&id_2).unwrap().val, 14);
+                assert_eq!(map.get(&id).val, 10);
+                assert_eq!(map.get(&id_2).val, 14);
 
                 assert_eq!(map.len::<TestResource>(), 2);
                 map
@@ -185,7 +203,7 @@ mod test {
         }
 
         assert_eq!(map.len::<TestResource>(), 1);
-        assert_eq!(map.get(&id_2).unwrap().val, 14);
+        assert_eq!(map.get(&id_2).val, 14);
     }
 
     #[test]
@@ -195,7 +213,7 @@ mod test {
         drop(map_1);
 
         let map_2 = ResourceMap::new();
-        let value = map_2.get(&id_1);
+        let value = map_2.try_get(&id_1);
         assert!(value.is_none());
     }
 }

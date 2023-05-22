@@ -14,8 +14,8 @@ use ash::{
         CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo,
         CommandPoolResetFlags, DependencyFlags, DescriptorBufferInfo, DescriptorImageInfo,
         DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo,
-        Extent3D, Fence, FramebufferCreateFlags, ImageAspectFlags, ImageCreateFlags, ImageLayout,
-        ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType,
+        Extent2D, Extent3D, Fence, FramebufferCreateFlags, ImageAspectFlags, ImageCreateFlags,
+        ImageLayout, ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType,
         ImageViewCreateFlags, ImageViewType, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap,
         MemoryHeapFlags, Offset3D, PhysicalDevice, PhysicalDeviceFeatures,
         PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags, Queue, QueueFlags,
@@ -881,6 +881,48 @@ impl Gpu {
         }
         Ok(())
     }
+
+    pub fn write_image_data(&self, image: &GpuImage, data: &[u8]) -> VkResult<()> {
+        self.staging_buffer.write_data(data);
+
+        self.transition_image_layout(
+            image,
+            TransitionInfo {
+                layout: ImageLayout::UNDEFINED,
+                access_mask: AccessFlags::empty(),
+                stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+            },
+            TransitionInfo {
+                layout: ImageLayout::TRANSFER_DST_OPTIMAL,
+                access_mask: AccessFlags::TRANSFER_WRITE,
+                stage_mask: PipelineStageFlags::TRANSFER,
+            },
+            ImageAspectFlags::COLOR,
+        )?;
+
+        self.copy_buffer_to_image(
+            &self.staging_buffer,
+            image,
+            image.extents.width,
+            image.extents.height,
+        )?;
+        self.transition_image_layout(
+            image,
+            TransitionInfo {
+                layout: ImageLayout::TRANSFER_DST_OPTIMAL,
+                access_mask: AccessFlags::TRANSFER_WRITE,
+                stage_mask: PipelineStageFlags::TRANSFER,
+            },
+            TransitionInfo {
+                layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                access_mask: AccessFlags::SHADER_READ,
+                stage_mask: PipelineStageFlags::FRAGMENT_SHADER | PipelineStageFlags::VERTEX_SHADER,
+            },
+            ImageAspectFlags::COLOR,
+        )?;
+        Ok(())
+    }
+
     pub fn create_image(
         &self,
         create_info: &ImageCreateInfo,
@@ -938,6 +980,10 @@ impl Gpu {
             image,
             allocation,
             self.state.gpu_memory_allocator.clone(),
+            Extent2D {
+                width: create_info.width,
+                height: create_info.height,
+            },
         )
     }
 

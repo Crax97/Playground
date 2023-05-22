@@ -2,6 +2,7 @@ use ash::{prelude::VkResult, vk::BufferUsageFlags};
 use nalgebra::{Vector2, Vector3};
 
 use gpu::{BufferCreateInfo, Gpu, GpuBuffer, MemoryDomain};
+use resource_map::Resource;
 
 pub struct MeshCreateInfo<'a> {
     pub indices: &'a [u32],
@@ -79,5 +80,11 @@ impl Mesh {
             tangent_component,
             uv_component,
         })
+    }
+}
+
+impl Resource for Mesh {
+    fn get_description(&self) -> &str {
+        "todo"
     }
 }

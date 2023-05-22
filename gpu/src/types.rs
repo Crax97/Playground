@@ -4,8 +4,9 @@ use super::{allocator::GpuAllocator, gpu::Gpu};
 use ash::{
     prelude::*,
     vk::{
-        self, AllocationCallbacks, Buffer, FenceCreateInfo, MappedMemoryRange, MemoryMapFlags,
-        SamplerCreateInfo, SemaphoreCreateInfo, ShaderModuleCreateInfo, StructureType,
+        self, AllocationCallbacks, Buffer, Extent2D, FenceCreateInfo, MappedMemoryRange,
+        MemoryMapFlags, SamplerCreateInfo, SemaphoreCreateInfo, ShaderModuleCreateInfo,
+        StructureType,
     },
 };
 
@@ -182,6 +183,7 @@ pub struct GpuImage {
     pub(super) inner: vk::Image,
     pub(super) allocation: MemoryAllocation,
     pub(super) allocator: Arc<RefCell<dyn GpuAllocator>>,
+    pub(super) extents: Extent2D,
 }
 impl GpuImage {
     pub(super) fn create(
@@ -189,12 +191,14 @@ impl GpuImage {
         image: vk::Image,
         allocation: MemoryAllocation,
         allocator: Arc<RefCell<dyn GpuAllocator>>,
+        extents: Extent2D,
     ) -> VkResult<Self> {
         Ok(Self {
             device: gpu.state.logical_device.clone(),
             inner: image,
             allocation,
             allocator,
+            extents,
         })
     }
 }
