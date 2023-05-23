@@ -8,7 +8,7 @@ use gpu::{BeginRenderPassInfo, Gpu, GpuFramebuffer, RenderPass, Swapchain};
 use nalgebra::{point, vector, Matrix4};
 use resource_map::{ResourceHandle, ResourceMap};
 
-use crate::{material::Material, mesh::Mesh, PerObjectData};
+use crate::{material::Material, mesh::Mesh, PerFrameData};
 
 pub struct ScenePrimitive {
     pub mesh: ResourceHandle<Mesh>,
@@ -105,14 +105,12 @@ impl<'a> SceneRenderer for ForwardNaiveRenderer<'a> {
                 },
             });
             for primitive in scene.all_primitives() {
-                let transform = primitive.transform;
                 let mesh = self.resource_map.get(&primitive.mesh);
                 let material = self.resource_map.get(&primitive.material);
                 let pipeline = self.resource_map.get(&material.pipeline);
                 gpu.write_buffer_data(
                     &material.uniform_buffers[0],
-                    &[PerObjectData {
-                        model: transform,
+                    &[PerFrameData {
                         view: nalgebra::Matrix4::look_at_rh(
                             &point![2.0, 2.0, 2.0],
                             &point![0.0, 0.0, 0.0],
@@ -147,6 +145,7 @@ impl<'a> SceneRenderer for ForwardNaiveRenderer<'a> {
                     ],
                     &[0, 0, 0, 0, 0],
                 );
+                render_pass.push_constant(&pipeline.0, &primitive.transform, 0);
                 render_pass.draw_indexed(6, 1, 0, 0, 0);
             }
         }

@@ -5,8 +5,8 @@ use ash::{
     vk::{
         self, ClearValue, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
         CommandBufferUsageFlags, DependencyFlags, IndexType, Offset2D, PipelineBindPoint,
-        PipelineStageFlags, Rect2D, RenderPassBeginInfo, StructureType, SubmitInfo,
-        SubpassContents, Viewport,
+        PipelineStageFlags, Rect2D, RenderPassBeginInfo, ShaderStageFlags, StructureType,
+        SubmitInfo, SubpassContents, Viewport,
     },
 };
 
@@ -417,6 +417,21 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 first_binding,
                 &vertex_buffers,
                 offsets,
+            );
+        }
+    }
+
+    pub fn push_constant<T: Copy + Sized>(&self, pipeline: &Pipeline, data: &T, offset: u32) {
+        let device = self.command_buffer.gpu.vk_logical_device();
+        unsafe {
+            let ptr: *const u8 = std::mem::transmute(data);
+            let slice = std::slice::from_raw_parts(ptr, std::mem::size_of::<T>());
+            device.cmd_push_constants(
+                self.command_buffer.inner_command_buffer,
+                pipeline.pipeline_layout,
+                ShaderStageFlags::ALL,
+                offset,
+                slice,
             );
         }
     }

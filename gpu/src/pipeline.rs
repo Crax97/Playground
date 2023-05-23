@@ -17,9 +17,10 @@ use ash::{
         PipelineShaderStageCreateFlags, PipelineShaderStageCreateInfo,
         PipelineTessellationStateCreateFlags, PipelineTessellationStateCreateInfo,
         PipelineVertexInputStateCreateFlags, PipelineVertexInputStateCreateInfo,
-        PipelineViewportStateCreateFlags, PipelineViewportStateCreateInfo, RenderPassCreateFlags,
-        RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags, StructureType,
-        SubpassDescriptionFlags, VertexInputAttributeDescription, VertexInputBindingDescription,
+        PipelineViewportStateCreateFlags, PipelineViewportStateCreateInfo, PushConstantRange,
+        RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags,
+        StructureType, SubpassDescriptionFlags, VertexInputAttributeDescription,
+        VertexInputBindingDescription,
     },
 };
 
@@ -331,6 +332,7 @@ pub struct PipelineDescription<'a> {
     pub front_face: FrontFace,
     pub depth_stencil_state: DepthStencilState,
     pub logic_op: Option<LogicOp>,
+    pub push_constant_ranges: &'a [PushConstantRange],
 }
 
 impl<'a> PipelineDescription<'a> {
@@ -468,8 +470,8 @@ impl Pipeline {
                 flags: PipelineLayoutCreateFlags::empty(),
                 set_layout_count: 1,
                 p_set_layouts: addr_of!(descriptor_set_layout),
-                push_constant_range_count: 0,
-                p_push_constant_ranges: std::ptr::null(),
+                push_constant_range_count: pipeline_description.push_constant_ranges.len() as _,
+                p_push_constant_ranges: pipeline_description.push_constant_ranges.as_ptr(),
             };
             let pipeline_layout = gpu
                 .vk_logical_device()

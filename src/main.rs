@@ -12,8 +12,8 @@ use ash::vk::{
     self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor,
     BlendOp, BufferUsageFlags, ColorComponentFlags, CompareOp, ComponentMapping, DependencyFlags,
     Format, ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType,
-    PipelineBindPoint, PipelineStageFlags, PresentModeKHR, SampleCountFlags, StencilOpState,
-    SubpassDependency, SubpassDescriptionFlags, SUBPASS_EXTERNAL,
+    PipelineBindPoint, PipelineStageFlags, PresentModeKHR, PushConstantRange, SampleCountFlags,
+    ShaderStageFlags, StencilOpState, SubpassDependency, SubpassDescriptionFlags, SUBPASS_EXTERNAL,
 };
 
 use gpu::{
@@ -35,8 +35,7 @@ use winit::{dpi::PhysicalSize, event_loop::ControlFlow};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct PerObjectData {
-    model: nalgebra::Matrix4<f32>,
+struct PerFrameData {
     view: nalgebra::Matrix4<f32>,
     projection: nalgebra::Matrix4<f32>,
 }
@@ -162,7 +161,7 @@ fn main() -> anyhow::Result<()> {
 
     let uniform_buffer_1 = {
         let create_info = BufferCreateInfo {
-            size: std::mem::size_of::<PerObjectData>(),
+            size: std::mem::size_of::<PerFrameData>(),
             usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
         };
         let buffer = gpu.create_buffer(
@@ -174,7 +173,7 @@ fn main() -> anyhow::Result<()> {
 
     let uniform_buffer_2 = {
         let create_info = BufferCreateInfo {
-            size: std::mem::size_of::<PerObjectData>(),
+            size: std::mem::size_of::<PerFrameData>(),
             usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
         };
         let buffer = gpu.create_buffer(
@@ -415,7 +414,11 @@ fn main() -> anyhow::Result<()> {
                 min_depth_bounds: 0.0,
                 max_depth_bounds: 1.0,
             },
-
+            push_constant_ranges: &[PushConstantRange {
+                stage_flags: ShaderStageFlags::ALL,
+                offset: 0,
+                size: std::mem::size_of::<Matrix4<f32>>() as u32,
+            }],
             ..Default::default()
         },
     )?);
