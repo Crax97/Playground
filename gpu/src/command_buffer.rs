@@ -1,4 +1,5 @@
 use core::panic;
+use std::ops::Deref;
 
 use ash::{
     prelude::VkResult,
@@ -199,6 +200,29 @@ impl<'g> CommandBuffer<'g> {
         };
     }
 
+    pub fn bind_descriptor_sets(
+        &self,
+        bind_point: PipelineBindPoint,
+        material: &Pipeline,
+        first_index: u32,
+        descriptor_sets: &[&GpuDescriptorSet],
+    ) {
+        let descriptor_sets: Vec<_> = descriptor_sets
+            .iter()
+            .map(|d| d.allocation.descriptor_set)
+            .collect();
+        unsafe {
+            self.gpu.vk_logical_device().cmd_bind_descriptor_sets(
+                self.inner_command_buffer,
+                bind_point,
+                material.pipeline_layout,
+                first_index,
+                &descriptor_sets,
+                &[],
+            );
+        }
+    }
+
     pub fn submit(mut self, submit_info: &CommandBufferSubmitInfo) -> VkResult<()> {
         if !self.has_recorded_anything {
             return Ok(());
@@ -360,31 +384,6 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         }
     }
 
-    pub fn bind_descriptor_sets(
-        &self,
-        bind_point: PipelineBindPoint,
-        material: &Pipeline,
-        first_index: u32,
-        descriptor_sets: &[&GpuDescriptorSet],
-    ) {
-        let descriptor_sets: Vec<_> = descriptor_sets
-            .iter()
-            .map(|d| d.allocation.descriptor_set)
-            .collect();
-        unsafe {
-            self.command_buffer
-                .gpu
-                .vk_logical_device()
-                .cmd_bind_descriptor_sets(
-                    self.command_buffer.inner_command_buffer,
-                    bind_point,
-                    material.pipeline_layout,
-                    first_index,
-                    &descriptor_sets,
-                    &[],
-                );
-        }
-    }
     pub fn bind_index_buffer(
         &self,
         buffer: &GpuBuffer,
@@ -434,6 +433,20 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 slice,
             );
         }
+    }
+}
+
+impl<'c, 'g> AsRef<CommandBuffer<'g>> for RenderPassCommand<'c, 'g> {
+    fn as_ref(&self) -> &CommandBuffer<'g> {
+        &self.command_buffer
+    }
+}
+
+impl<'c, 'g> Deref for RenderPassCommand<'c, 'g> {
+    type Target = CommandBuffer<'g>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.command_buffer
     }
 }
 

@@ -6,7 +6,7 @@ layout(location = 2) in vec3 inNormal;
 layout(location = 3) in vec3 inTangent;
 layout(location = 4) in vec2 inUv;
 
-layout(binding = 0) uniform PerFrameData {
+layout(set = 0, binding = 0) uniform PerFrameData {
     mat4 view;
     mat4 proj;
 } pfd;
