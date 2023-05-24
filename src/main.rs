@@ -17,9 +17,9 @@ use ash::vk::{
 };
 
 use gpu::{
-    BlendState, BufferCreateInfo, DepthStencilState, FragmentStageInfo, FramebufferCreateInfo,
-    GlobalBinding, Gpu, GpuConfiguration, ImageCreateInfo, MemoryDomain, Pipeline,
-    PipelineDescription, RenderPass, RenderPassAttachment, RenderPassDescription,
+    BindingElement, BlendState, BufferCreateInfo, DepthStencilState, FragmentStageInfo,
+    FramebufferCreateInfo, GlobalBinding, Gpu, GpuConfiguration, ImageCreateInfo, MemoryDomain,
+    Pipeline, PipelineDescription, RenderPass, RenderPassAttachment, RenderPassDescription,
     SubpassDescription, TransitionInfo, VertexAttributeDescription, VertexBindingDescription,
     VertexStageInfo,
 };
@@ -159,30 +159,6 @@ fn main() -> anyhow::Result<()> {
         buffer
     };
 
-    let uniform_buffer_1 = {
-        let create_info = BufferCreateInfo {
-            size: std::mem::size_of::<PerFrameData>(),
-            usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
-        };
-        let buffer = gpu.create_buffer(
-            &create_info,
-            MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
-        )?;
-        buffer
-    };
-
-    let uniform_buffer_2 = {
-        let create_info = BufferCreateInfo {
-            size: std::mem::size_of::<PerFrameData>(),
-            usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
-        };
-        let buffer = gpu.create_buffer(
-            &create_info,
-            MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
-        )?;
-        buffer
-    };
-
     let texture = Texture::new_with_data(&gpu, cpu_image.width(), cpu_image.height(), &cpu_image)?;
     let texture = resource_map.add(texture);
 
@@ -309,14 +285,20 @@ fn main() -> anyhow::Result<()> {
             &PipelineDescription {
                 global_bindings: &[
                     GlobalBinding {
-                        binding_type: gpu::BindingType::Uniform,
-                        index: 0,
-                        stage: gpu::ShaderStage::Vertex,
+                        set_index: 0,
+                        elements: &[BindingElement {
+                            binding_type: gpu::BindingType::Uniform,
+                            index: 0,
+                            stage: gpu::ShaderStage::Vertex,
+                        }],
                     },
                     GlobalBinding {
-                        binding_type: gpu::BindingType::CombinedImageSampler,
-                        index: 1,
-                        stage: gpu::ShaderStage::Fragment,
+                        set_index: 1,
+                        elements: &[BindingElement {
+                            binding_type: gpu::BindingType::CombinedImageSampler,
+                            index: 0,
+                            stage: gpu::ShaderStage::Fragment,
+                        }],
                     },
                 ],
                 vertex_inputs: &[
@@ -432,18 +414,17 @@ fn main() -> anyhow::Result<()> {
         &gpu,
         resource_map.clone(),
         pipeline.clone(),
-        vec![uniform_buffer_1],
+        vec![],
         vec![texture.clone()],
     )?;
     let material_2 = Material::new(
         &gpu,
         resource_map.clone(),
         pipeline.clone(),
-        vec![uniform_buffer_2],
+        vec![],
         vec![texture.clone()],
     )?;
-    let material_1 = resource_map.add(material_1);
-    let material_2 = resource_map.add(material_2);
+    let material = resource_map.add(material_1);
 
     swapchain.select_present_mode(PresentModeKHR::MAILBOX)?;
 
@@ -451,16 +432,22 @@ fn main() -> anyhow::Result<()> {
 
     scene.add(ScenePrimitive {
         mesh: mesh.clone(),
-        material: material_1.clone(),
+        material: material.clone(),
         transform: Matrix4::identity(),
     });
     scene.add(ScenePrimitive {
         mesh: mesh.clone(),
-        material: material_2.clone(),
+        material: material.clone(),
         transform: Matrix4::new_translation(&vector![0.0, 0.0, 1.0]),
     });
+    scene.add(ScenePrimitive {
+        mesh: mesh.clone(),
+        material: material.clone(),
+        transform: Matrix4::new_translation(&vector![0.0, 0.0, -1.0]),
+    });
 
-    let mut scene_renderer = ForwardNaiveRenderer::new(resource_map.clone(), swapchain.extents());
+    let mut scene_renderer =
+        ForwardNaiveRenderer::new(&gpu, resource_map.clone(), swapchain.extents())?;
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
 

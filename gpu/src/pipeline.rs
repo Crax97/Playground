@@ -42,14 +42,20 @@ pub enum BindingType {
 }
 
 #[derive(Clone, Copy)]
-pub struct GlobalBinding {
+pub struct BindingElement {
     pub binding_type: BindingType,
     pub index: u32,
     pub stage: ShaderStage,
 }
 
-impl From<&GlobalBinding> for DescriptorSetLayoutBinding {
-    fn from(b: &GlobalBinding) -> Self {
+#[derive(Clone)]
+pub struct GlobalBinding<'a> {
+    pub set_index: u32,
+    pub elements: &'a [BindingElement],
+}
+
+impl From<&BindingElement> for DescriptorSetLayoutBinding {
+    fn from(b: &BindingElement) -> Self {
         Self {
             binding: b.index,
             descriptor_type: match b.binding_type {
@@ -321,7 +327,7 @@ impl RenderPass {
 
 #[derive(Clone, Copy, Default)]
 pub struct PipelineDescription<'a> {
-    pub global_bindings: &'a [GlobalBinding],
+    pub global_bindings: &'a [GlobalBinding<'a>],
     pub vertex_inputs: &'a [VertexBindingDescription<'a>],
     pub vertex_stage: Option<VertexStageInfo<'a>>,
     pub fragment_stage: Option<FragmentStageInfo<'a>>,
@@ -336,22 +342,28 @@ pub struct PipelineDescription<'a> {
 }
 
 impl<'a> PipelineDescription<'a> {
-    fn create_descriptor_set_layout(&self, gpu: &Gpu) -> VkResult<DescriptorSetLayout> {
-        let bindings: Vec<DescriptorSetLayoutBinding> =
-            self.global_bindings.iter().map(|b| b.into()).collect();
+    fn create_descriptor_set_layouts(&self, gpu: &Gpu) -> VkResult<Vec<DescriptorSetLayout>> {
+        let mut layouts: Vec<DescriptorSetLayout> = vec![];
+        for element in self.global_bindings.iter() {
+            let bindings: Vec<DescriptorSetLayoutBinding> =
+                element.elements.iter().map(|b| b.into()).collect();
 
-        let create_info = DescriptorSetLayoutCreateInfo {
-            s_type: StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: DescriptorSetLayoutCreateFlags::empty(),
-            binding_count: bindings.len() as _,
-            p_bindings: bindings.as_ptr(),
-        };
-        unsafe {
-            gpu.state
-                .logical_device
-                .create_descriptor_set_layout(&create_info, None)
+            let create_info = DescriptorSetLayoutCreateInfo {
+                s_type: StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                p_next: std::ptr::null(),
+                flags: DescriptorSetLayoutCreateFlags::empty(),
+                binding_count: bindings.len() as _,
+                p_bindings: bindings.as_ptr(),
+            };
+            unsafe {
+                let layout = gpu
+                    .state
+                    .logical_device
+                    .create_descriptor_set_layout(&create_info, None)?;
+                layouts.push(layout);
+            }
         }
+        Ok(layouts)
     }
 
     fn get_output_attachments(&self) -> Vec<PipelineColorBlendAttachmentState> {
@@ -434,7 +446,7 @@ impl Pipeline {
         target_render_pass: &RenderPass,
         pipeline_description: &PipelineDescription,
     ) -> VkResult<Self> {
-        let descriptor_set_layout = pipeline_description.create_descriptor_set_layout(gpu)?;
+        let descriptor_set_layouts = pipeline_description.create_descriptor_set_layouts(gpu)?;
         let color_blend_attachments = pipeline_description.get_output_attachments();
         let mut stages = vec![];
 
@@ -482,8 +494,8 @@ impl Pipeline {
                 s_type: StructureType::PIPELINE_LAYOUT_CREATE_INFO,
                 p_next: std::ptr::null(),
                 flags: PipelineLayoutCreateFlags::empty(),
-                set_layout_count: 1,
-                p_set_layouts: addr_of!(descriptor_set_layout),
+                set_layout_count: descriptor_set_layouts.len() as _,
+                p_set_layouts: descriptor_set_layouts.as_ptr(),
                 push_constant_range_count: pipeline_description.push_constant_ranges.len() as _,
                 p_push_constant_ranges: pipeline_description.push_constant_ranges.as_ptr(),
             };

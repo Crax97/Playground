@@ -1,10 +1,16 @@
 use std::{collections::HashMap, rc::Rc};
 
-use ash::vk::{
-    ClearColorValue, ClearDepthStencilValue, ClearValue, Extent2D, IndexType, Offset2D,
-    PipelineBindPoint, PipelineStageFlags, Rect2D,
+use ash::{
+    prelude::VkResult,
+    vk::{
+        self, BufferUsageFlags, ClearColorValue, ClearDepthStencilValue, ClearValue, Extent2D,
+        IndexType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D,
+    },
 };
-use gpu::{BeginRenderPassInfo, Gpu, GpuFramebuffer, Swapchain};
+use gpu::{
+    BeginRenderPassInfo, BufferCreateInfo, BufferRange, DescriptorInfo, DescriptorSetInfo, Gpu,
+    GpuBuffer, GpuDescriptorSet, GpuFramebuffer, MemoryDomain, Swapchain,
+};
 use nalgebra::{point, vector, Matrix4};
 use resource_map::{ResourceHandle, ResourceMap};
 
@@ -57,13 +63,42 @@ pub trait SceneRenderer {
 pub struct ForwardNaiveRenderer {
     resource_map: Rc<ResourceMap>,
     extents: Extent2D,
+
+    camera_buffer: GpuBuffer,
+    camera_buffer_descriptor_set: GpuDescriptorSet,
 }
 impl ForwardNaiveRenderer {
-    pub fn new(resource_map: Rc<ResourceMap>, extents: Extent2D) -> Self {
-        Self {
+    pub fn new(gpu: &Gpu, resource_map: Rc<ResourceMap>, extents: Extent2D) -> VkResult<Self> {
+        let camera_buffer = {
+            let create_info = BufferCreateInfo {
+                size: std::mem::size_of::<PerFrameData>(),
+                usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
+            };
+            let buffer = gpu.create_buffer(
+                &create_info,
+                MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
+            )?;
+            buffer
+        };
+
+        let camera_buffer_descriptor_set = gpu.create_descriptor_set(&DescriptorSetInfo {
+            descriptors: &[DescriptorInfo {
+                binding: 0,
+                element_type: gpu::DescriptorType::UniformBuffer(BufferRange {
+                    handle: &camera_buffer,
+                    offset: 0,
+                    size: vk::WHOLE_SIZE,
+                }),
+                binding_stage: gpu::ShaderStage::Vertex,
+            }],
+        })?;
+
+        Ok(Self {
+            camera_buffer,
             resource_map,
             extents,
-        }
+            camera_buffer_descriptor_set,
+        })
     }
 }
 
@@ -89,6 +124,12 @@ impl SceneRenderer for ForwardNaiveRenderer {
         for (pipeline, primitives) in pipeline_hashmap.iter() {
             {
                 let pipeline = self.resource_map.get(pipeline);
+                command_buffer.bind_descriptor_sets(
+                    PipelineBindPoint::GRAPHICS,
+                    &pipeline.0,
+                    0,
+                    &[&self.camera_buffer_descriptor_set],
+                );
                 let mut render_pass = command_buffer.begin_render_pass(&BeginRenderPassInfo {
                     framebuffer,
                     render_pass: &pipeline.1,
@@ -114,7 +155,7 @@ impl SceneRenderer for ForwardNaiveRenderer {
                     let mesh = self.resource_map.get(&primitive.mesh);
                     let material = self.resource_map.get(&primitive.material);
                     gpu.write_buffer_data(
-                        &material.uniform_buffers[0],
+                        &self.camera_buffer,
                         &[PerFrameData {
                             view: nalgebra::Matrix4::look_at_rh(
                                 &point![2.0, 2.0, 2.0],
@@ -134,7 +175,7 @@ impl SceneRenderer for ForwardNaiveRenderer {
                     render_pass.bind_descriptor_sets(
                         PipelineBindPoint::GRAPHICS,
                         &pipeline.0,
-                        0,
+                        1,
                         &[&material.resources_descriptor_set],
                     );
 
