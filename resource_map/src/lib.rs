@@ -35,6 +35,14 @@ where
     resource_map: Weak<RefCell<ResourceMapState>>,
 }
 
+impl<R: Resource + 'static> PartialEq for ResourceHandle<R> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id.id == other.id.id
+    }
+}
+
+impl<R: Resource + 'static> Eq for ResourceHandle<R> {}
+
 impl<R: Resource + 'static> std::hash::Hash for ResourceHandle<R> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);

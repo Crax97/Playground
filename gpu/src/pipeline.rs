@@ -414,6 +414,20 @@ pub struct Pipeline {
     shared_state: Arc<GpuState>,
 }
 
+impl Eq for Pipeline {}
+
+impl PartialEq for Pipeline {
+    fn eq(&self, other: &Self) -> bool {
+        self.pipeline == other.pipeline
+    }
+}
+
+impl std::hash::Hash for Pipeline {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.pipeline.hash(state);
+    }
+}
+
 impl Pipeline {
     pub fn new(
         gpu: &Gpu,
