@@ -1,14 +1,10 @@
-use std::{
-    collections::{hash_map::DefaultHasher, HashMap},
-    hash::{Hash, Hasher},
-    rc::Rc,
-};
+use std::{collections::HashMap, rc::Rc};
 
 use ash::vk::{
     ClearColorValue, ClearDepthStencilValue, ClearValue, Extent2D, IndexType, Offset2D,
     PipelineBindPoint, PipelineStageFlags, Rect2D,
 };
-use gpu::{BeginRenderPassInfo, Gpu, GpuFramebuffer, RenderPass, Swapchain};
+use gpu::{BeginRenderPassInfo, Gpu, GpuFramebuffer, Swapchain};
 use nalgebra::{point, vector, Matrix4};
 use resource_map::{ResourceHandle, ResourceMap};
 
@@ -58,26 +54,20 @@ pub trait SceneRenderer {
     );
 }
 
-pub struct ForwardNaiveRenderer<'a> {
+pub struct ForwardNaiveRenderer {
     resource_map: Rc<ResourceMap>,
     extents: Extent2D,
-    render_pass: &'a RenderPass,
 }
-impl<'a> ForwardNaiveRenderer<'a> {
-    pub fn new(
-        resource_map: Rc<ResourceMap>,
-        extents: Extent2D,
-        render_pass: &'a RenderPass,
-    ) -> Self {
+impl ForwardNaiveRenderer {
+    pub fn new(resource_map: Rc<ResourceMap>, extents: Extent2D) -> Self {
         Self {
             resource_map,
             extents,
-            render_pass,
         }
     }
 }
 
-impl<'a> SceneRenderer for ForwardNaiveRenderer<'a> {
+impl SceneRenderer for ForwardNaiveRenderer {
     fn render(
         &mut self,
         gpu: &Gpu,
@@ -98,9 +88,10 @@ impl<'a> SceneRenderer for ForwardNaiveRenderer<'a> {
         let mut command_buffer = gpu::CommandBuffer::new(gpu, gpu::QueueType::Graphics).unwrap();
         for (pipeline, primitives) in pipeline_hashmap.iter() {
             {
+                let pipeline = self.resource_map.get(pipeline);
                 let mut render_pass = command_buffer.begin_render_pass(&BeginRenderPassInfo {
                     framebuffer,
-                    render_pass: &self.render_pass,
+                    render_pass: &pipeline.1,
                     clear_color_values: &[
                         ClearValue {
                             color: ClearColorValue {
@@ -122,7 +113,6 @@ impl<'a> SceneRenderer for ForwardNaiveRenderer<'a> {
                 for primitive in primitives.iter() {
                     let mesh = self.resource_map.get(&primitive.mesh);
                     let material = self.resource_map.get(&primitive.material);
-                    let pipeline = self.resource_map.get(&pipeline);
                     gpu.write_buffer_data(
                         &material.uniform_buffers[0],
                         &[PerFrameData {

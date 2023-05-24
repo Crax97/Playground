@@ -1,8 +1,7 @@
-use gpu::Pipeline;
+use gpu::{Pipeline, RenderPass};
 use resource_map::Resource;
 
-#[derive(PartialEq, Eq)]
-pub struct GpuPipeline(pub Pipeline);
+pub struct GpuPipeline(pub Pipeline, pub RenderPass);
 
 impl Resource for GpuPipeline {
     fn get_description(&self) -> &str {
