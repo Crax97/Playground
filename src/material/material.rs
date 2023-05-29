@@ -11,6 +11,11 @@ use resource_map::{Resource, ResourceHandle, ResourceMap};
 
 use crate::{gpu_pipeline::GpuPipeline, texture::Texture};
 
+#[derive(PartialEq, Eq, Hash, Copy, Clone)]
+pub enum MaterialDomain {
+    Surface,
+}
+
 pub struct Material {
     pub pipeline: ResourceHandle<GpuPipeline>,
     pub uniform_buffers: Vec<GpuBuffer>,

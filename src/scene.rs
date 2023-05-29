@@ -14,8 +14,21 @@ use gpu::{
 use nalgebra::{point, vector, Matrix4};
 use resource_map::{ResourceHandle, ResourceMap};
 
-use crate::{gpu_pipeline::GpuPipeline, material::Material, mesh::Mesh, PerFrameData};
+use crate::{
+    gpu_pipeline::GpuPipeline,
+    material::{Material, MaterialContext, MaterialDomain},
+    mesh::Mesh,
+    PerFrameData,
+};
 
+use ash::vk::{
+    AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
+    ColorComponentFlags, DependencyFlags, Format, ImageLayout, SampleCountFlags, SubpassDependency,
+    SubpassDescriptionFlags, SUBPASS_EXTERNAL,
+};
+use gpu::{
+    BlendState, RenderPass, RenderPassAttachment, RenderPassDescription, SubpassDescription,
+};
 #[derive(Clone)]
 pub struct ScenePrimitive {
     pub mesh: ResourceHandle<Mesh>,
@@ -51,6 +64,7 @@ impl Scene {
 }
 
 pub trait SceneRenderer {
+    type ConcreteMaterialContext: MaterialContext;
     fn render(
         &mut self,
         gpu: &Gpu,
@@ -58,6 +72,8 @@ pub trait SceneRenderer {
         framebuffer: &GpuFramebuffer,
         swapchain: &mut Swapchain,
     );
+
+    fn get_context(&self) -> &Self::ConcreteMaterialContext;
 }
 
 pub struct ForwardNaiveRenderer {
@@ -66,9 +82,10 @@ pub struct ForwardNaiveRenderer {
 
     camera_buffer: GpuBuffer,
     camera_buffer_descriptor_set: GpuDescriptorSet,
+    material_context: ForwardRendererMaterialContext,
 }
 impl ForwardNaiveRenderer {
-    pub fn new(gpu: &Gpu, resource_map: Rc<ResourceMap>, extents: Extent2D) -> VkResult<Self> {
+    pub fn new(gpu: &Gpu, resource_map: Rc<ResourceMap>, swapchain: &Swapchain) -> VkResult<Self> {
         let camera_buffer = {
             let create_info = BufferCreateInfo {
                 size: std::mem::size_of::<PerFrameData>(),
@@ -93,16 +110,111 @@ impl ForwardNaiveRenderer {
             }],
         })?;
 
+        let material_context = ForwardRendererMaterialContext::new(gpu, swapchain)?;
         Ok(Self {
             camera_buffer,
             resource_map,
-            extents,
+            extents: swapchain.extents(),
             camera_buffer_descriptor_set,
+            material_context,
         })
     }
 }
 
+pub struct ForwardRendererMaterialContext {
+    render_passes: HashMap<MaterialDomain, RenderPass>,
+}
+
+impl ForwardRendererMaterialContext {
+    pub fn new(gpu: &Gpu, swapchain: &Swapchain) -> VkResult<Self> {
+        let mut render_passes: HashMap<MaterialDomain, RenderPass> = HashMap::new();
+
+        let attachments = &[
+            RenderPassAttachment {
+                format: swapchain.present_format(),
+                samples: SampleCountFlags::TYPE_1,
+                load_op: AttachmentLoadOp::CLEAR,
+                store_op: AttachmentStoreOp::STORE,
+                stencil_load_op: AttachmentLoadOp::DONT_CARE,
+                stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                initial_layout: ImageLayout::UNDEFINED,
+                final_layout: ImageLayout::PRESENT_SRC_KHR,
+                blend_state: BlendState {
+                    blend_enable: true,
+                    src_color_blend_factor: BlendFactor::ONE,
+                    dst_color_blend_factor: BlendFactor::ZERO,
+                    color_blend_op: BlendOp::ADD,
+                    src_alpha_blend_factor: BlendFactor::ONE,
+                    dst_alpha_blend_factor: BlendFactor::ZERO,
+                    alpha_blend_op: BlendOp::ADD,
+                    color_write_mask: ColorComponentFlags::RGBA,
+                },
+            },
+            RenderPassAttachment {
+                format: Format::D16_UNORM,
+                samples: SampleCountFlags::TYPE_1,
+                load_op: AttachmentLoadOp::CLEAR,
+                store_op: AttachmentStoreOp::STORE,
+                stencil_load_op: AttachmentLoadOp::DONT_CARE,
+                stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                blend_state: BlendState {
+                    blend_enable: false,
+                    src_color_blend_factor: BlendFactor::ONE,
+                    dst_color_blend_factor: BlendFactor::ZERO,
+                    color_blend_op: BlendOp::ADD,
+                    src_alpha_blend_factor: BlendFactor::ONE,
+                    dst_alpha_blend_factor: BlendFactor::ZERO,
+                    alpha_blend_op: BlendOp::ADD,
+                    color_write_mask: ColorComponentFlags::RGBA,
+                },
+            },
+        ];
+        let surface_render_pass = RenderPass::new(
+            &gpu,
+            &RenderPassDescription {
+                attachments,
+                subpasses: &[SubpassDescription {
+                    flags: SubpassDescriptionFlags::empty(),
+                    pipeline_bind_point: PipelineBindPoint::GRAPHICS,
+                    input_attachments: &[],
+                    color_attachments: &[AttachmentReference {
+                        attachment: 0,
+                        layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                    }],
+                    resolve_attachments: &[],
+                    depth_stencil_attachment: &[AttachmentReference {
+                        attachment: 1,
+                        layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    }],
+                    preserve_attachments: &[],
+                }],
+                dependencies: &[SubpassDependency {
+                    src_subpass: SUBPASS_EXTERNAL,
+                    dst_subpass: 0,
+                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    src_access_mask: AccessFlags::empty(),
+                    dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                    dependency_flags: DependencyFlags::empty(),
+                }],
+            },
+        )?;
+
+        render_passes.insert(MaterialDomain::Surface, surface_render_pass);
+
+        Ok(Self { render_passes })
+    }
+}
+impl MaterialContext for ForwardRendererMaterialContext {
+    fn get_material_render_pass(&self, domain: MaterialDomain) -> &RenderPass {
+        self.render_passes.get(&domain).unwrap()
+    }
+}
+
 impl SceneRenderer for ForwardNaiveRenderer {
+    type ConcreteMaterialContext = ForwardRendererMaterialContext;
     fn render(
         &mut self,
         gpu: &Gpu,
@@ -132,7 +244,9 @@ impl SceneRenderer for ForwardNaiveRenderer {
                 );
                 let mut render_pass = command_buffer.begin_render_pass(&BeginRenderPassInfo {
                     framebuffer,
-                    render_pass: &pipeline.1,
+                    render_pass: self
+                        .material_context
+                        .get_material_render_pass(MaterialDomain::Surface),
                     clear_color_values: &[
                         ClearValue {
                             color: ClearColorValue {
@@ -205,5 +319,9 @@ impl SceneRenderer for ForwardNaiveRenderer {
                 fence: Some(&swapchain.in_flight_fence),
             })
             .unwrap();
+    }
+
+    fn get_context(&self) -> &Self::ConcreteMaterialContext {
+        &self.material_context
     }
 }

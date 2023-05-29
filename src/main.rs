@@ -6,26 +6,37 @@ mod static_deferred_renderer;
 mod texture;
 mod utils;
 
+/*
+
+    init_material_domains()
+
+    material = {
+        domain: (surface | post process), \\ tramite la quale si ottiene la render pass
+
+        vertex: vertex_shader.vs,
+        fragment: fragment_shader.vs,
+
+    }
+*/
+
 use std::{io::BufReader, mem::size_of, rc::Rc};
 
 use ash::vk::{
-    self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor,
-    BlendOp, BufferUsageFlags, ColorComponentFlags, CompareOp, ComponentMapping, DependencyFlags,
-    Format, ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType,
-    PipelineBindPoint, PipelineStageFlags, PresentModeKHR, PushConstantRange, SampleCountFlags,
-    ShaderStageFlags, StencilOpState, SubpassDependency, SubpassDescriptionFlags, SUBPASS_EXTERNAL,
+    self, AccessFlags, AttachmentLoadOp, AttachmentStoreOp, BlendFactor, BlendOp, BufferUsageFlags,
+    ColorComponentFlags, CompareOp, ComponentMapping, Format, ImageAspectFlags, ImageLayout,
+    ImageSubresourceRange, ImageUsageFlags, ImageViewType, PipelineStageFlags, PresentModeKHR,
+    PushConstantRange, SampleCountFlags, ShaderStageFlags, StencilOpState,
 };
 
 use gpu::{
     BindingElement, BlendState, BufferCreateInfo, DepthStencilState, FragmentStageInfo,
     FramebufferCreateInfo, GlobalBinding, Gpu, GpuConfiguration, ImageCreateInfo, MemoryDomain,
-    Pipeline, PipelineDescription, RenderPass, RenderPassAttachment, RenderPassDescription,
-    SubpassDescription, TransitionInfo, VertexAttributeDescription, VertexBindingDescription,
-    VertexStageInfo,
+    Pipeline, PipelineDescription, RenderPassAttachment, TransitionInfo,
+    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
 
 use gpu_pipeline::GpuPipeline;
-use material::Material;
+use material::{Material, MaterialContext, MaterialDomain};
 use mesh::{Mesh, MeshCreateInfo};
 use nalgebra::*;
 use resource_map::ResourceMap;
@@ -204,220 +215,139 @@ fn main() -> anyhow::Result<()> {
         ImageAspectFlags::DEPTH,
     )?;
 
-    let attachments = &[
-        RenderPassAttachment {
-            format: swapchain.present_format(),
-            samples: SampleCountFlags::TYPE_1,
-            load_op: AttachmentLoadOp::CLEAR,
-            store_op: AttachmentStoreOp::STORE,
-            stencil_load_op: AttachmentLoadOp::DONT_CARE,
-            stencil_store_op: AttachmentStoreOp::DONT_CARE,
-            initial_layout: ImageLayout::UNDEFINED,
-            final_layout: ImageLayout::PRESENT_SRC_KHR,
-            blend_state: BlendState {
-                blend_enable: true,
-                src_color_blend_factor: BlendFactor::ONE,
-                dst_color_blend_factor: BlendFactor::ZERO,
-                color_blend_op: BlendOp::ADD,
-                src_alpha_blend_factor: BlendFactor::ONE,
-                dst_alpha_blend_factor: BlendFactor::ZERO,
-                alpha_blend_op: BlendOp::ADD,
-                color_write_mask: ColorComponentFlags::RGBA,
-            },
-        },
-        RenderPassAttachment {
-            format: Format::D16_UNORM,
-            samples: SampleCountFlags::TYPE_1,
-            load_op: AttachmentLoadOp::CLEAR,
-            store_op: AttachmentStoreOp::STORE,
-            stencil_load_op: AttachmentLoadOp::DONT_CARE,
-            stencil_store_op: AttachmentStoreOp::DONT_CARE,
-            initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            blend_state: BlendState {
-                blend_enable: false,
-                src_color_blend_factor: BlendFactor::ONE,
-                dst_color_blend_factor: BlendFactor::ZERO,
-                color_blend_op: BlendOp::ADD,
-                src_alpha_blend_factor: BlendFactor::ONE,
-                dst_alpha_blend_factor: BlendFactor::ZERO,
-                alpha_blend_op: BlendOp::ADD,
-                color_write_mask: ColorComponentFlags::RGBA,
-            },
-        },
-    ];
-
-    let render_pass = RenderPass::new(
+    let mut scene_renderer = ForwardNaiveRenderer::new(&gpu, resource_map.clone(), &swapchain)?;
+    let pipeline = GpuPipeline(Pipeline::new(
         &gpu,
-        &RenderPassDescription {
-            attachments,
-            subpasses: &[SubpassDescription {
-                flags: SubpassDescriptionFlags::empty(),
-                pipeline_bind_point: PipelineBindPoint::GRAPHICS,
-                input_attachments: &[],
-                color_attachments: &[AttachmentReference {
-                    attachment: 0,
-                    layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                }],
-                resolve_attachments: &[],
-                depth_stencil_attachment: &[AttachmentReference {
-                    attachment: 1,
-                    layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                }],
-                preserve_attachments: &[],
-            }],
-            dependencies: &[SubpassDependency {
-                src_subpass: SUBPASS_EXTERNAL,
-                dst_subpass: 0,
-                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                src_access_mask: AccessFlags::empty(),
-                dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                dependency_flags: DependencyFlags::empty(),
-            }],
-        },
-    )?;
-
-    let pipeline = GpuPipeline(
-        Pipeline::new(
-            &gpu,
-            &render_pass,
-            &PipelineDescription {
-                global_bindings: &[
-                    GlobalBinding {
-                        set_index: 0,
-                        elements: &[BindingElement {
-                            binding_type: gpu::BindingType::Uniform,
-                            index: 0,
-                            stage: gpu::ShaderStage::Vertex,
-                        }],
-                    },
-                    GlobalBinding {
-                        set_index: 1,
-                        elements: &[BindingElement {
-                            binding_type: gpu::BindingType::CombinedImageSampler,
-                            index: 0,
-                            stage: gpu::ShaderStage::Fragment,
-                        }],
-                    },
-                ],
-                vertex_inputs: &[
-                    VertexBindingDescription {
-                        binding: 0,
-                        input_rate: gpu::InputRate::PerVertex,
-                        stride: size_of::<Vector3<f32>>() as u32,
-                        attributes: &[VertexAttributeDescription {
-                            location: 0,
-                            format: vk::Format::R32G32B32_SFLOAT,
-                            offset: 0,
-                        }],
-                    },
-                    VertexBindingDescription {
-                        binding: 1,
-                        input_rate: gpu::InputRate::PerVertex,
-                        stride: size_of::<Vector3<f32>>() as u32,
-                        attributes: &[VertexAttributeDescription {
-                            location: 1,
-                            format: vk::Format::R32G32B32_SFLOAT,
-                            offset: 0,
-                        }],
-                    },
-                    VertexBindingDescription {
-                        binding: 2,
-                        input_rate: gpu::InputRate::PerVertex,
-                        stride: size_of::<Vector3<f32>>() as u32,
-                        attributes: &[VertexAttributeDescription {
-                            location: 2,
-                            format: vk::Format::R32G32B32_SFLOAT,
-                            offset: 0,
-                        }],
-                    },
-                    VertexBindingDescription {
-                        binding: 3,
-                        input_rate: gpu::InputRate::PerVertex,
-                        stride: size_of::<Vector3<f32>>() as u32,
-                        attributes: &[VertexAttributeDescription {
-                            location: 3,
-                            format: vk::Format::R32G32B32_SFLOAT,
-                            offset: 0,
-                        }],
-                    },
-                    VertexBindingDescription {
-                        binding: 4,
-                        input_rate: gpu::InputRate::PerVertex,
-                        stride: size_of::<Vector2<f32>>() as u32,
-                        attributes: &[VertexAttributeDescription {
-                            location: 4,
-                            format: vk::Format::R32G32_SFLOAT,
-                            offset: 0,
-                        }],
-                    },
-                ],
-                vertex_stage: Some(VertexStageInfo {
-                    entry_point: "main",
-                    module: &vertex_module,
-                }),
-                fragment_stage: Some(FragmentStageInfo {
-                    entry_point: "main",
-                    module: &fragment_module,
-                    color_attachments: &[RenderPassAttachment {
-                        format: swapchain.present_format(),
-                        samples: SampleCountFlags::TYPE_1,
-                        load_op: AttachmentLoadOp::CLEAR,
-                        store_op: AttachmentStoreOp::STORE,
-                        stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                        stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                        initial_layout: ImageLayout::UNDEFINED,
-                        final_layout: ImageLayout::PRESENT_SRC_KHR,
-                        blend_state: BlendState {
-                            blend_enable: true,
-                            src_color_blend_factor: BlendFactor::ONE,
-                            dst_color_blend_factor: BlendFactor::ZERO,
-                            color_blend_op: BlendOp::ADD,
-                            src_alpha_blend_factor: BlendFactor::ONE,
-                            dst_alpha_blend_factor: BlendFactor::ZERO,
-                            alpha_blend_op: BlendOp::ADD,
-                            color_write_mask: ColorComponentFlags::RGBA,
-                        },
+        scene_renderer
+            .get_context()
+            .get_material_render_pass(MaterialDomain::Surface),
+        &PipelineDescription {
+            global_bindings: &[
+                GlobalBinding {
+                    set_index: 0,
+                    elements: &[BindingElement {
+                        binding_type: gpu::BindingType::Uniform,
+                        index: 0,
+                        stage: gpu::ShaderStage::Vertex,
                     }],
-                    depth_stencil_attachments: &[],
-                }),
-                input_topology: gpu::PrimitiveTopology::TriangleList,
-                primitive_restart: false,
-                polygon_mode: gpu::PolygonMode::Fill,
-                cull_mode: gpu::CullMode::Back,
-                front_face: gpu::FrontFace::ClockWise,
-                depth_stencil_state: DepthStencilState {
-                    depth_test_enable: true,
-                    depth_write_enable: true,
-                    depth_compare_op: CompareOp::LESS,
-                    stencil_test_enable: false,
-                    front: StencilOpState::default(),
-                    back: StencilOpState::default(),
-                    min_depth_bounds: 0.0,
-                    max_depth_bounds: 1.0,
                 },
-                push_constant_ranges: &[PushConstantRange {
-                    stage_flags: ShaderStageFlags::ALL,
-                    offset: 0,
-                    size: std::mem::size_of::<Matrix4<f32>>() as u32,
+                GlobalBinding {
+                    set_index: 1,
+                    elements: &[BindingElement {
+                        binding_type: gpu::BindingType::CombinedImageSampler,
+                        index: 0,
+                        stage: gpu::ShaderStage::Fragment,
+                    }],
+                },
+            ],
+            vertex_inputs: &[
+                VertexBindingDescription {
+                    binding: 0,
+                    input_rate: gpu::InputRate::PerVertex,
+                    stride: size_of::<Vector3<f32>>() as u32,
+                    attributes: &[VertexAttributeDescription {
+                        location: 0,
+                        format: vk::Format::R32G32B32_SFLOAT,
+                        offset: 0,
+                    }],
+                },
+                VertexBindingDescription {
+                    binding: 1,
+                    input_rate: gpu::InputRate::PerVertex,
+                    stride: size_of::<Vector3<f32>>() as u32,
+                    attributes: &[VertexAttributeDescription {
+                        location: 1,
+                        format: vk::Format::R32G32B32_SFLOAT,
+                        offset: 0,
+                    }],
+                },
+                VertexBindingDescription {
+                    binding: 2,
+                    input_rate: gpu::InputRate::PerVertex,
+                    stride: size_of::<Vector3<f32>>() as u32,
+                    attributes: &[VertexAttributeDescription {
+                        location: 2,
+                        format: vk::Format::R32G32B32_SFLOAT,
+                        offset: 0,
+                    }],
+                },
+                VertexBindingDescription {
+                    binding: 3,
+                    input_rate: gpu::InputRate::PerVertex,
+                    stride: size_of::<Vector3<f32>>() as u32,
+                    attributes: &[VertexAttributeDescription {
+                        location: 3,
+                        format: vk::Format::R32G32B32_SFLOAT,
+                        offset: 0,
+                    }],
+                },
+                VertexBindingDescription {
+                    binding: 4,
+                    input_rate: gpu::InputRate::PerVertex,
+                    stride: size_of::<Vector2<f32>>() as u32,
+                    attributes: &[VertexAttributeDescription {
+                        location: 4,
+                        format: vk::Format::R32G32_SFLOAT,
+                        offset: 0,
+                    }],
+                },
+            ],
+            vertex_stage: Some(VertexStageInfo {
+                entry_point: "main",
+                module: &vertex_module,
+            }),
+            fragment_stage: Some(FragmentStageInfo {
+                entry_point: "main",
+                module: &fragment_module,
+                color_attachments: &[RenderPassAttachment {
+                    format: swapchain.present_format(),
+                    samples: SampleCountFlags::TYPE_1,
+                    load_op: AttachmentLoadOp::CLEAR,
+                    store_op: AttachmentStoreOp::STORE,
+                    stencil_load_op: AttachmentLoadOp::DONT_CARE,
+                    stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                    initial_layout: ImageLayout::UNDEFINED,
+                    final_layout: ImageLayout::PRESENT_SRC_KHR,
+                    blend_state: BlendState {
+                        blend_enable: true,
+                        src_color_blend_factor: BlendFactor::ONE,
+                        dst_color_blend_factor: BlendFactor::ZERO,
+                        color_blend_op: BlendOp::ADD,
+                        src_alpha_blend_factor: BlendFactor::ONE,
+                        dst_alpha_blend_factor: BlendFactor::ZERO,
+                        alpha_blend_op: BlendOp::ADD,
+                        color_write_mask: ColorComponentFlags::RGBA,
+                    },
                 }],
-                ..Default::default()
+                depth_stencil_attachments: &[],
+            }),
+            input_topology: gpu::PrimitiveTopology::TriangleList,
+            primitive_restart: false,
+            polygon_mode: gpu::PolygonMode::Fill,
+            cull_mode: gpu::CullMode::Back,
+            front_face: gpu::FrontFace::ClockWise,
+            depth_stencil_state: DepthStencilState {
+                depth_test_enable: true,
+                depth_write_enable: true,
+                depth_compare_op: CompareOp::LESS,
+                stencil_test_enable: false,
+                front: StencilOpState::default(),
+                back: StencilOpState::default(),
+                min_depth_bounds: 0.0,
+                max_depth_bounds: 1.0,
             },
-        )?,
-        render_pass,
-    );
+            push_constant_ranges: &[PushConstantRange {
+                stage_flags: ShaderStageFlags::ALL,
+                offset: 0,
+                size: std::mem::size_of::<Matrix4<f32>>() as u32,
+            }],
+            ..Default::default()
+        },
+    )?);
 
     let pipeline = resource_map.add(pipeline);
 
     let material_1 = Material::new(
-        &gpu,
-        resource_map.clone(),
-        pipeline.clone(),
-        vec![],
-        vec![texture.clone()],
-    )?;
-    let material_2 = Material::new(
         &gpu,
         resource_map.clone(),
         pipeline.clone(),
@@ -445,9 +375,6 @@ fn main() -> anyhow::Result<()> {
         material: material.clone(),
         transform: Matrix4::new_translation(&vector![0.0, 0.0, -1.0]),
     });
-
-    let mut scene_renderer =
-        ForwardNaiveRenderer::new(&gpu, resource_map.clone(), swapchain.extents())?;
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
 
@@ -476,12 +403,13 @@ fn main() -> anyhow::Result<()> {
                         primitive.transform * Matrix4::new_rotation(vector![0.0, 0.0, 0.002 * mul]);
                 }
 
-                let pipeline = resource_map.get(&pipeline);
                 let sw_extents = swapchain.extents();
                 let next_image = swapchain.acquire_next_image().unwrap();
                 let framebuffer = gpu
                     .create_framebuffer(&FramebufferCreateInfo {
-                        render_pass: &pipeline.1,
+                        render_pass: scene_renderer
+                            .get_context()
+                            .get_material_render_pass(MaterialDomain::Surface),
                         attachments: &[&next_image, &depth_image_view],
                         width: sw_extents.width,
                         height: sw_extents.height,
