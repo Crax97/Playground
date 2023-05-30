@@ -1,4 +1,4 @@
-use std::{ffi::CString, ptr::addr_of, sync::Arc};
+use std::{ffi::CString, sync::Arc};
 
 use ash::{
     prelude::VkResult,

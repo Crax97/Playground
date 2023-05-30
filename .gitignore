@@ -1,4 +1,6 @@
 /target
 /gpu/target
 /resource_map/target
+/engine/target
+
 /shaders

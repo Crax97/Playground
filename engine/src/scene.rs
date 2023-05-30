@@ -14,8 +14,15 @@ use gpu::{
     GpuDescriptorSet, GpuFramebuffer, MemoryDomain, Pipeline, PipelineDescription, Swapchain,
     VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
-use nalgebra::{point, vector, Matrix4, Vector2, Vector3};
+use nalgebra::{Matrix4, Vector2, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct PerFrameData {
+    view: nalgebra::Matrix4<f32>,
+    projection: nalgebra::Matrix4<f32>,
+}
 
 use crate::{
     app_state::AppState,
@@ -23,7 +30,6 @@ use crate::{
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     mesh::Mesh,
-    PerFrameData,
 };
 
 use ash::vk::{

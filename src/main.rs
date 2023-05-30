@@ -1,41 +1,24 @@
-mod app_state;
-mod camera;
-mod gpu_pipeline;
-mod material;
-mod mesh;
-mod scene;
-mod static_deferred_renderer;
-mod texture;
 mod utils;
 
 use std::{io::BufReader, mem::size_of, rc::Rc};
 
-use app_state::AppState;
 use ash::vk::{
     self, AccessFlags, BufferUsageFlags, ComponentMapping, Format, ImageAspectFlags, ImageLayout,
     ImageSubresourceRange, ImageUsageFlags, ImageViewType, PipelineStageFlags, PresentModeKHR,
 };
 
-use camera::Camera;
 use gpu::{
     BufferCreateInfo, FramebufferCreateInfo, Gpu, GpuConfiguration, ImageCreateInfo, MemoryDomain,
     TransitionInfo,
 };
 
-use material::{MaterialDescription, MaterialDomain};
-use mesh::{Mesh, MeshCreateInfo};
+use engine::{
+    AppState, Camera, ForwardRenderingPipeline, MaterialDescription, MaterialDomain, Mesh,
+    MeshCreateInfo, RenderingPipeline, Scene, ScenePrimitive, Texture,
+};
 use nalgebra::*;
 use resource_map::ResourceMap;
-use scene::{ForwardRenderingPipeline, RenderingPipeline, Scene, ScenePrimitive};
-use texture::Texture;
-use winit::{dpi::PhysicalSize, event_loop::ControlFlow};
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct PerFrameData {
-    view: nalgebra::Matrix4<f32>,
-    projection: nalgebra::Matrix4<f32>,
-}
+use winit::{dpi::PhysicalSize, event::VirtualKeyCode, event_loop::ControlFlow};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -258,7 +241,18 @@ fn main() -> anyhow::Result<()> {
                 }
                 _ => {}
             },
-            winit::event::Event::DeviceEvent { .. } => {}
+            winit::event::Event::DeviceEvent { event, .. } => match event {
+                winit::event::DeviceEvent::Key(input) => {
+                    if let Some(scancode) = input.virtual_keycode {
+                        if scancode == VirtualKeyCode::W {
+                            camera.location += camera.forward * 1.0;
+                        } else if scancode == VirtualKeyCode::S {
+                            camera.location += camera.forward * -1.0;
+                        }
+                    }
+                }
+                _ => {}
+            },
             winit::event::Event::UserEvent(_) => {}
             winit::event::Event::Suspended => {}
             winit::event::Event::Resumed => {}

@@ -1,5 +1,5 @@
 [package]
-name = "vulkan_learning"
+name = "engine"
 version = "0.1.0"
 edition = "2021"
 
@@ -19,9 +19,5 @@ image = "0.24.6"
 
 env_logger = "0.10.0"
 
-gpu = { path = "./gpu" }
-resource_map = { path = "./resource_map" }
-engine = { path = "./engine" }
-
-[build-dependencies]
-shaderc = "0.8.2"
+gpu = { path = "../gpu" }
+resource_map = { path = "../resource_map" }
