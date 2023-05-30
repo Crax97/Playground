@@ -1,6 +1,6 @@
 mod utils;
 
-use std::{io::BufReader, mem::size_of, rc::Rc};
+use std::{f32::consts::PI, io::BufReader, mem::size_of, rc::Rc};
 
 use ash::vk::{
     self, AccessFlags, BufferUsageFlags, ComponentMapping, Format, ImageAspectFlags, ImageLayout,
@@ -18,7 +18,11 @@ use engine::{
 };
 use nalgebra::*;
 use resource_map::ResourceMap;
-use winit::{dpi::PhysicalSize, event::VirtualKeyCode, event_loop::ControlFlow};
+use winit::{
+    dpi::PhysicalSize,
+    event::{ButtonId, ElementState, VirtualKeyCode},
+    event_loop::ControlFlow,
+};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -223,12 +227,24 @@ fn main() -> anyhow::Result<()> {
 
     let mut camera = Camera {
         location: point![2.0, 2.0, 2.0],
-        forward: vector![-2.0, -2.0, -2.0].normalize(),
+        forward: vector![0.0, -1.0, -1.0].normalize(),
         ..Default::default()
     };
 
+    let mut forward_movement = 0.0;
+    let mut rotation_movement = 0.0;
+
+    let mut rot_x = 45.0;
+    let mut rot_z = 55.0;
+    let mut dist = 5.0;
+
+    let mut movement: Vector3<f32> = vector![0.0, 0.0, 0.0];
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
+
+        const SPEED: f32 = 0.1;
+        const ROTATION_SPEED: f32 = 3.0;
+        const MIN_DELTA: f32 = 1.0;
 
         match event {
             winit::event::Event::NewEvents(_) => {}
@@ -242,16 +258,25 @@ fn main() -> anyhow::Result<()> {
                 _ => {}
             },
             winit::event::Event::DeviceEvent { event, .. } => match event {
-                winit::event::DeviceEvent::Key(input) => {
-                    if let Some(scancode) = input.virtual_keycode {
-                        if scancode == VirtualKeyCode::W {
-                            camera.location +=
-                                camera.forward * 1.0 * app_state.time().delta_frame();
-                        } else if scancode == VirtualKeyCode::S {
-                            camera.location +=
-                                camera.forward * -1.0 * app_state.time().delta_frame();
-                        }
+                winit::event::DeviceEvent::Button { button, state } => {
+                    let mul = if state == ElementState::Pressed {
+                        1.0
+                    } else {
+                        0.0
+                    };
+                    if button == 3 {
+                        rotation_movement = mul;
+                    } else if button == 1 {
+                        forward_movement = mul;
                     }
+                }
+                winit::event::DeviceEvent::MouseMotion { delta } => {
+                    movement.x = (delta.0.abs() as f32 - MIN_DELTA).max(0.0)
+                        * delta.0.signum() as f32
+                        * ROTATION_SPEED;
+                    movement.y = (delta.1.abs() as f32 - MIN_DELTA).max(0.0)
+                        * delta.1.signum() as f32 as f32
+                        * ROTATION_SPEED;
                 }
                 _ => {}
             },
@@ -262,16 +287,33 @@ fn main() -> anyhow::Result<()> {
                 app_state.swapchain.window.request_redraw();
             }
             winit::event::Event::RedrawRequested(..) => {
-                app_state.begin_frame().unwrap();
-                for (idx, primitive) in scene.edit_all_primitives().iter_mut().enumerate() {
-                    let mul = if idx % 2 == 0 { 1.0 } else { -1.0 };
-                    primitive.transform = primitive.transform
-                        * Matrix4::new_rotation(vector![
-                            0.0,
-                            0.0,
-                            mul * app_state.time().delta_frame()
-                        ]);
+                if rotation_movement > 0.0 {
+                    rot_z += movement.y;
+                    rot_z = rot_z.clamp(-89.0, 89.0);
+                    rot_x += movement.x;
+                } else {
+                    dist += movement.y * forward_movement * SPEED;
                 }
+
+                let new_forward = Rotation::<f32, 3>::from_axis_angle(
+                    &Unit::new_normalize(vector![0.0, 0.0, 1.0]),
+                    rot_x.to_radians(),
+                ) * Rotation::<f32, 3>::from_axis_angle(
+                    &Unit::new_normalize(vector![0.0, 1.0, 0.0]),
+                    -rot_z.to_radians(),
+                );
+                let new_forward = new_forward.to_homogeneous();
+                let new_forward = new_forward.column(0);
+
+                let direction = vector![new_forward[0], new_forward[1], new_forward[2]];
+                let new_position = direction * dist;
+                let new_position = point![new_position.x, new_position.y, new_position.z];
+                camera.location = new_position;
+
+                let direction = vector![new_forward[0], new_forward[1], new_forward[2]];
+                camera.forward = -direction;
+
+                app_state.begin_frame().unwrap();
 
                 let sw_extents = app_state.swapchain.extents();
                 let next_image = app_state.swapchain.acquire_next_image().unwrap();
