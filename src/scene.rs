@@ -1,22 +1,25 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, mem::size_of, rc::Rc};
 
 use ash::{
     prelude::VkResult,
     vk::{
-        self, BufferUsageFlags, ClearColorValue, ClearDepthStencilValue, ClearValue, Extent2D,
-        IndexType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D,
+        self, BufferUsageFlags, ClearColorValue, ClearDepthStencilValue, ClearValue, CompareOp,
+        Extent2D, IndexType, Offset2D, PipelineBindPoint, PipelineStageFlags, PushConstantRange,
+        Rect2D, ShaderStageFlags, StencilOpState,
     },
 };
 use gpu::{
-    BeginRenderPassInfo, BufferCreateInfo, BufferRange, DescriptorInfo, DescriptorSetInfo, Gpu,
-    GpuBuffer, GpuDescriptorSet, GpuFramebuffer, MemoryDomain, Swapchain,
+    BeginRenderPassInfo, BindingElement, BufferCreateInfo, BufferRange, DepthStencilState,
+    DescriptorInfo, DescriptorSetInfo, FragmentStageInfo, GlobalBinding, Gpu, GpuBuffer,
+    GpuDescriptorSet, GpuFramebuffer, MemoryDomain, Pipeline, PipelineDescription, Swapchain,
+    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
-use nalgebra::{point, vector, Matrix4};
+use nalgebra::{point, vector, Matrix4, Vector2, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
 
 use crate::{
     gpu_pipeline::GpuPipeline,
-    material::{Material, MaterialContext, MaterialDomain},
+    material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     mesh::Mesh,
     PerFrameData,
 };
@@ -63,8 +66,7 @@ impl Scene {
     }
 }
 
-pub trait SceneRenderer {
-    type ConcreteMaterialContext: MaterialContext;
+pub trait RenderingPipeline {
     fn render(
         &mut self,
         gpu: &Gpu,
@@ -73,10 +75,10 @@ pub trait SceneRenderer {
         swapchain: &mut Swapchain,
     );
 
-    fn get_context(&self) -> &Self::ConcreteMaterialContext;
+    fn get_context(&self) -> &dyn MaterialContext;
 }
 
-pub struct ForwardNaiveRenderer {
+pub struct ForwardRenderingPipeline {
     resource_map: Rc<ResourceMap>,
     extents: Extent2D,
 
@@ -84,7 +86,7 @@ pub struct ForwardNaiveRenderer {
     camera_buffer_descriptor_set: GpuDescriptorSet,
     material_context: ForwardRendererMaterialContext,
 }
-impl ForwardNaiveRenderer {
+impl ForwardRenderingPipeline {
     pub fn new(gpu: &Gpu, resource_map: Rc<ResourceMap>, swapchain: &Swapchain) -> VkResult<Self> {
         let camera_buffer = {
             let create_info = BufferCreateInfo {
@@ -123,6 +125,7 @@ impl ForwardNaiveRenderer {
 
 pub struct ForwardRendererMaterialContext {
     render_passes: HashMap<MaterialDomain, RenderPass>,
+    swapchain_present_format: Format,
 }
 
 impl ForwardRendererMaterialContext {
@@ -204,17 +207,192 @@ impl ForwardRendererMaterialContext {
 
         render_passes.insert(MaterialDomain::Surface, surface_render_pass);
 
-        Ok(Self { render_passes })
+        Ok(Self {
+            render_passes,
+            swapchain_present_format: swapchain.present_format(),
+        })
+    }
+
+    fn create_pipeline<'a>(
+        &self,
+        gpu: &Gpu,
+        material_description: &'a MaterialDescription<'a>,
+    ) -> VkResult<Pipeline> {
+        match material_description.domain {
+            MaterialDomain::Surface => {
+                self.create_surface_material_pipeline(gpu, material_description)
+            }
+        }
+    }
+
+    fn create_surface_material_pipeline<'a>(
+        &self,
+        gpu: &Gpu,
+        material_description: &'a MaterialDescription<'a>,
+    ) -> VkResult<Pipeline> {
+        let texture_bindings: Vec<_> = material_description
+            .input_textures
+            .iter()
+            .enumerate()
+            .map(|(i, _)| BindingElement {
+                binding_type: gpu::BindingType::CombinedImageSampler,
+                index: i as _,
+                stage: gpu::ShaderStage::Fragment,
+            })
+            .collect();
+
+        let color_attachments = &[RenderPassAttachment {
+            format: self.swapchain_present_format,
+            samples: SampleCountFlags::TYPE_1,
+            load_op: AttachmentLoadOp::CLEAR,
+            store_op: AttachmentStoreOp::STORE,
+            stencil_load_op: AttachmentLoadOp::DONT_CARE,
+            stencil_store_op: AttachmentStoreOp::DONT_CARE,
+            initial_layout: ImageLayout::UNDEFINED,
+            final_layout: ImageLayout::PRESENT_SRC_KHR,
+            blend_state: BlendState {
+                blend_enable: true,
+                src_color_blend_factor: BlendFactor::ONE,
+                dst_color_blend_factor: BlendFactor::ZERO,
+                color_blend_op: BlendOp::ADD,
+                src_alpha_blend_factor: BlendFactor::ONE,
+                dst_alpha_blend_factor: BlendFactor::ZERO,
+                alpha_blend_op: BlendOp::ADD,
+                color_write_mask: ColorComponentFlags::RGBA,
+            },
+        }];
+
+        let descfription = PipelineDescription {
+            global_bindings: &[
+                GlobalBinding {
+                    set_index: 0,
+                    elements: &[BindingElement {
+                        binding_type: gpu::BindingType::Uniform,
+                        index: 0,
+                        stage: gpu::ShaderStage::Vertex,
+                    }],
+                },
+                GlobalBinding {
+                    set_index: 1,
+                    elements: &texture_bindings,
+                },
+            ],
+            vertex_inputs: &[
+                VertexBindingDescription {
+                    binding: 0,
+                    input_rate: gpu::InputRate::PerVertex,
+                    stride: size_of::<Vector3<f32>>() as u32,
+                    attributes: &[VertexAttributeDescription {
+                        location: 0,
+                        format: vk::Format::R32G32B32_SFLOAT,
+                        offset: 0,
+                    }],
+                },
+                VertexBindingDescription {
+                    binding: 1,
+                    input_rate: gpu::InputRate::PerVertex,
+                    stride: size_of::<Vector3<f32>>() as u32,
+                    attributes: &[VertexAttributeDescription {
+                        location: 1,
+                        format: vk::Format::R32G32B32_SFLOAT,
+                        offset: 0,
+                    }],
+                },
+                VertexBindingDescription {
+                    binding: 2,
+                    input_rate: gpu::InputRate::PerVertex,
+                    stride: size_of::<Vector3<f32>>() as u32,
+                    attributes: &[VertexAttributeDescription {
+                        location: 2,
+                        format: vk::Format::R32G32B32_SFLOAT,
+                        offset: 0,
+                    }],
+                },
+                VertexBindingDescription {
+                    binding: 3,
+                    input_rate: gpu::InputRate::PerVertex,
+                    stride: size_of::<Vector3<f32>>() as u32,
+                    attributes: &[VertexAttributeDescription {
+                        location: 3,
+                        format: vk::Format::R32G32B32_SFLOAT,
+                        offset: 0,
+                    }],
+                },
+                VertexBindingDescription {
+                    binding: 4,
+                    input_rate: gpu::InputRate::PerVertex,
+                    stride: size_of::<Vector2<f32>>() as u32,
+                    attributes: &[VertexAttributeDescription {
+                        location: 4,
+                        format: vk::Format::R32G32_SFLOAT,
+                        offset: 0,
+                    }],
+                },
+            ],
+            vertex_stage: Some(VertexStageInfo {
+                entry_point: "main",
+                module: &material_description.vertex_module,
+            }),
+            fragment_stage: Some(FragmentStageInfo {
+                entry_point: "main",
+                module: &material_description.fragment_module,
+                color_attachments,
+                depth_stencil_attachments: &[],
+            }),
+            input_topology: gpu::PrimitiveTopology::TriangleList,
+            primitive_restart: false,
+            polygon_mode: gpu::PolygonMode::Fill,
+            cull_mode: gpu::CullMode::Back,
+            front_face: gpu::FrontFace::ClockWise,
+            depth_stencil_state: DepthStencilState {
+                depth_test_enable: true,
+                depth_write_enable: true,
+                depth_compare_op: CompareOp::LESS,
+                stencil_test_enable: false,
+                front: StencilOpState::default(),
+                back: StencilOpState::default(),
+                min_depth_bounds: 0.0,
+                max_depth_bounds: 1.0,
+            },
+            push_constant_ranges: &[PushConstantRange {
+                stage_flags: ShaderStageFlags::ALL,
+                offset: 0,
+                size: std::mem::size_of::<Matrix4<f32>>() as u32,
+            }],
+            ..Default::default()
+        };
+        Pipeline::new(
+            gpu,
+            self.get_material_render_pass(MaterialDomain::Surface),
+            &descfription,
+        )
     }
 }
 impl MaterialContext for ForwardRendererMaterialContext {
+    fn create_material(
+        &self,
+        gpu: &Gpu,
+        resource_map: &ResourceMap,
+        material_description: MaterialDescription,
+    ) -> VkResult<Material> {
+        let pipeline = self.create_pipeline(gpu, &material_description)?;
+
+        let pipeline = resource_map.add(GpuPipeline(pipeline));
+
+        Material::new(
+            gpu,
+            resource_map,
+            pipeline,
+            material_description.uniform_buffers,
+            material_description.input_textures,
+        )
+    }
     fn get_material_render_pass(&self, domain: MaterialDomain) -> &RenderPass {
         self.render_passes.get(&domain).unwrap()
     }
 }
 
-impl SceneRenderer for ForwardNaiveRenderer {
-    type ConcreteMaterialContext = ForwardRendererMaterialContext;
+impl RenderingPipeline for ForwardRenderingPipeline {
     fn render(
         &mut self,
         gpu: &Gpu,
@@ -321,7 +499,7 @@ impl SceneRenderer for ForwardNaiveRenderer {
             .unwrap();
     }
 
-    fn get_context(&self) -> &Self::ConcreteMaterialContext {
+    fn get_context(&self) -> &dyn MaterialContext {
         &self.material_context
     }
 }

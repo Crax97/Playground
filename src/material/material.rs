@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use ash::{
     prelude::VkResult,
     vk::{self, ImageLayout},
@@ -26,7 +24,7 @@ pub struct Material {
 impl Material {
     pub fn new(
         gpu: &Gpu,
-        resource_map: Rc<ResourceMap>,
+        resource_map: &ResourceMap,
         pipeline: ResourceHandle<GpuPipeline>,
         uniform_buffers: Vec<GpuBuffer>,
         textures: Vec<ResourceHandle<Texture>>,

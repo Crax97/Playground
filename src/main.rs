@@ -22,25 +22,20 @@ mod utils;
 use std::{io::BufReader, mem::size_of, rc::Rc};
 
 use ash::vk::{
-    self, AccessFlags, AttachmentLoadOp, AttachmentStoreOp, BlendFactor, BlendOp, BufferUsageFlags,
-    ColorComponentFlags, CompareOp, ComponentMapping, Format, ImageAspectFlags, ImageLayout,
+    self, AccessFlags, BufferUsageFlags, ComponentMapping, Format, ImageAspectFlags, ImageLayout,
     ImageSubresourceRange, ImageUsageFlags, ImageViewType, PipelineStageFlags, PresentModeKHR,
-    PushConstantRange, SampleCountFlags, ShaderStageFlags, StencilOpState,
 };
 
 use gpu::{
-    BindingElement, BlendState, BufferCreateInfo, DepthStencilState, FragmentStageInfo,
-    FramebufferCreateInfo, GlobalBinding, Gpu, GpuConfiguration, ImageCreateInfo, MemoryDomain,
-    Pipeline, PipelineDescription, RenderPassAttachment, TransitionInfo,
-    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
+    BufferCreateInfo, FramebufferCreateInfo, Gpu, GpuConfiguration, ImageCreateInfo, MemoryDomain,
+    TransitionInfo,
 };
 
-use gpu_pipeline::GpuPipeline;
-use material::{Material, MaterialContext, MaterialDomain};
+use material::{MaterialDescription, MaterialDomain};
 use mesh::{Mesh, MeshCreateInfo};
 use nalgebra::*;
 use resource_map::ResourceMap;
-use scene::{ForwardNaiveRenderer, Scene, ScenePrimitive, SceneRenderer};
+use scene::{ForwardRenderingPipeline, RenderingPipeline, Scene, ScenePrimitive};
 use texture::Texture;
 use winit::{dpi::PhysicalSize, event_loop::ControlFlow};
 
@@ -215,144 +210,18 @@ fn main() -> anyhow::Result<()> {
         ImageAspectFlags::DEPTH,
     )?;
 
-    let mut scene_renderer = ForwardNaiveRenderer::new(&gpu, resource_map.clone(), &swapchain)?;
-    let pipeline = GpuPipeline(Pipeline::new(
+    let mut scene_renderer = ForwardRenderingPipeline::new(&gpu, resource_map.clone(), &swapchain)?;
+
+    let material_1 = scene_renderer.get_context().create_material(
         &gpu,
-        scene_renderer
-            .get_context()
-            .get_material_render_pass(MaterialDomain::Surface),
-        &PipelineDescription {
-            global_bindings: &[
-                GlobalBinding {
-                    set_index: 0,
-                    elements: &[BindingElement {
-                        binding_type: gpu::BindingType::Uniform,
-                        index: 0,
-                        stage: gpu::ShaderStage::Vertex,
-                    }],
-                },
-                GlobalBinding {
-                    set_index: 1,
-                    elements: &[BindingElement {
-                        binding_type: gpu::BindingType::CombinedImageSampler,
-                        index: 0,
-                        stage: gpu::ShaderStage::Fragment,
-                    }],
-                },
-            ],
-            vertex_inputs: &[
-                VertexBindingDescription {
-                    binding: 0,
-                    input_rate: gpu::InputRate::PerVertex,
-                    stride: size_of::<Vector3<f32>>() as u32,
-                    attributes: &[VertexAttributeDescription {
-                        location: 0,
-                        format: vk::Format::R32G32B32_SFLOAT,
-                        offset: 0,
-                    }],
-                },
-                VertexBindingDescription {
-                    binding: 1,
-                    input_rate: gpu::InputRate::PerVertex,
-                    stride: size_of::<Vector3<f32>>() as u32,
-                    attributes: &[VertexAttributeDescription {
-                        location: 1,
-                        format: vk::Format::R32G32B32_SFLOAT,
-                        offset: 0,
-                    }],
-                },
-                VertexBindingDescription {
-                    binding: 2,
-                    input_rate: gpu::InputRate::PerVertex,
-                    stride: size_of::<Vector3<f32>>() as u32,
-                    attributes: &[VertexAttributeDescription {
-                        location: 2,
-                        format: vk::Format::R32G32B32_SFLOAT,
-                        offset: 0,
-                    }],
-                },
-                VertexBindingDescription {
-                    binding: 3,
-                    input_rate: gpu::InputRate::PerVertex,
-                    stride: size_of::<Vector3<f32>>() as u32,
-                    attributes: &[VertexAttributeDescription {
-                        location: 3,
-                        format: vk::Format::R32G32B32_SFLOAT,
-                        offset: 0,
-                    }],
-                },
-                VertexBindingDescription {
-                    binding: 4,
-                    input_rate: gpu::InputRate::PerVertex,
-                    stride: size_of::<Vector2<f32>>() as u32,
-                    attributes: &[VertexAttributeDescription {
-                        location: 4,
-                        format: vk::Format::R32G32_SFLOAT,
-                        offset: 0,
-                    }],
-                },
-            ],
-            vertex_stage: Some(VertexStageInfo {
-                entry_point: "main",
-                module: &vertex_module,
-            }),
-            fragment_stage: Some(FragmentStageInfo {
-                entry_point: "main",
-                module: &fragment_module,
-                color_attachments: &[RenderPassAttachment {
-                    format: swapchain.present_format(),
-                    samples: SampleCountFlags::TYPE_1,
-                    load_op: AttachmentLoadOp::CLEAR,
-                    store_op: AttachmentStoreOp::STORE,
-                    stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                    stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                    initial_layout: ImageLayout::UNDEFINED,
-                    final_layout: ImageLayout::PRESENT_SRC_KHR,
-                    blend_state: BlendState {
-                        blend_enable: true,
-                        src_color_blend_factor: BlendFactor::ONE,
-                        dst_color_blend_factor: BlendFactor::ZERO,
-                        color_blend_op: BlendOp::ADD,
-                        src_alpha_blend_factor: BlendFactor::ONE,
-                        dst_alpha_blend_factor: BlendFactor::ZERO,
-                        alpha_blend_op: BlendOp::ADD,
-                        color_write_mask: ColorComponentFlags::RGBA,
-                    },
-                }],
-                depth_stencil_attachments: &[],
-            }),
-            input_topology: gpu::PrimitiveTopology::TriangleList,
-            primitive_restart: false,
-            polygon_mode: gpu::PolygonMode::Fill,
-            cull_mode: gpu::CullMode::Back,
-            front_face: gpu::FrontFace::ClockWise,
-            depth_stencil_state: DepthStencilState {
-                depth_test_enable: true,
-                depth_write_enable: true,
-                depth_compare_op: CompareOp::LESS,
-                stencil_test_enable: false,
-                front: StencilOpState::default(),
-                back: StencilOpState::default(),
-                min_depth_bounds: 0.0,
-                max_depth_bounds: 1.0,
-            },
-            push_constant_ranges: &[PushConstantRange {
-                stage_flags: ShaderStageFlags::ALL,
-                offset: 0,
-                size: std::mem::size_of::<Matrix4<f32>>() as u32,
-            }],
-            ..Default::default()
+        &resource_map,
+        MaterialDescription {
+            domain: MaterialDomain::Surface,
+            uniform_buffers: vec![],
+            input_textures: vec![texture.clone()],
+            fragment_module: &fragment_module,
+            vertex_module: &vertex_module,
         },
-    )?);
-
-    let pipeline = resource_map.add(pipeline);
-
-    let material_1 = Material::new(
-        &gpu,
-        resource_map.clone(),
-        pipeline.clone(),
-        vec![],
-        vec![texture.clone()],
     )?;
     let material = resource_map.add(material_1);
 
