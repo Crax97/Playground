@@ -1,3 +1,4 @@
+mod app_state;
 mod gpu_pipeline;
 mod material;
 mod mesh;
@@ -21,6 +22,7 @@ mod utils;
 
 use std::{io::BufReader, mem::size_of, rc::Rc};
 
+use app_state::AppState;
 use ash::vk::{
     self, AccessFlags, BufferUsageFlags, ComponentMapping, Format, ImageAspectFlags, ImageLayout,
     ImageSubresourceRange, ImageUsageFlags, ImageViewType, PipelineStageFlags, PresentModeKHR,
@@ -227,6 +229,8 @@ fn main() -> anyhow::Result<()> {
 
     swapchain.select_present_mode(PresentModeKHR::MAILBOX)?;
 
+    let mut app_state = AppState { gpu, swapchain };
+
     let mut scene = Scene::new();
 
     scene.add(ScenePrimitive {
@@ -254,7 +258,7 @@ fn main() -> anyhow::Result<()> {
                     *control_flow = ControlFlow::ExitWithCode(0)
                 }
                 winit::event::WindowEvent::Resized(_) => {
-                    swapchain.recreate_swapchain().unwrap();
+                    app_state.swapchain.recreate_swapchain().unwrap();
                 }
                 _ => {}
             },
@@ -263,7 +267,7 @@ fn main() -> anyhow::Result<()> {
             winit::event::Event::Suspended => {}
             winit::event::Event::Resumed => {}
             winit::event::Event::MainEventsCleared => {
-                swapchain.window.request_redraw();
+                app_state.swapchain.window.request_redraw();
             }
             winit::event::Event::RedrawRequested(..) => {
                 for (idx, primitive) in scene.edit_all_primitives().iter_mut().enumerate() {
@@ -272,9 +276,10 @@ fn main() -> anyhow::Result<()> {
                         primitive.transform * Matrix4::new_rotation(vector![0.0, 0.0, 0.002 * mul]);
                 }
 
-                let sw_extents = swapchain.extents();
-                let next_image = swapchain.acquire_next_image().unwrap();
-                let framebuffer = gpu
+                let sw_extents = app_state.swapchain.extents();
+                let next_image = app_state.swapchain.acquire_next_image().unwrap();
+                let framebuffer = app_state
+                    .gpu
                     .create_framebuffer(&FramebufferCreateInfo {
                         render_pass: scene_renderer
                             .get_context()
@@ -284,12 +289,12 @@ fn main() -> anyhow::Result<()> {
                         height: sw_extents.height,
                     })
                     .unwrap();
-                gpu.reset_state().unwrap();
-                scene_renderer.render(&gpu, &scene, &framebuffer, &mut swapchain);
-                let _ = swapchain.present();
+                app_state.gpu.reset_state().unwrap();
+                scene_renderer.render(&mut app_state, &scene, &framebuffer);
+                let _ = app_state.swapchain.present();
             }
             winit::event::Event::RedrawEventsCleared => {}
-            winit::event::Event::LoopDestroyed => gpu.wait_device_idle().unwrap(),
+            winit::event::Event::LoopDestroyed => app_state.gpu.wait_device_idle().unwrap(),
         }
     })
 }

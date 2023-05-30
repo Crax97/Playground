@@ -18,6 +18,7 @@ use nalgebra::{point, vector, Matrix4, Vector2, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
 
 use crate::{
+    app_state::AppState,
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     mesh::Mesh,
@@ -67,13 +68,7 @@ impl Scene {
 }
 
 pub trait RenderingPipeline {
-    fn render(
-        &mut self,
-        gpu: &Gpu,
-        scene: &Scene,
-        framebuffer: &GpuFramebuffer,
-        swapchain: &mut Swapchain,
-    );
+    fn render(&mut self, app_state: &mut AppState, scene: &Scene, framebuffer: &GpuFramebuffer);
 
     fn get_context(&self) -> &dyn MaterialContext;
 }
@@ -393,13 +388,7 @@ impl MaterialContext for ForwardRendererMaterialContext {
 }
 
 impl RenderingPipeline for ForwardRenderingPipeline {
-    fn render(
-        &mut self,
-        gpu: &Gpu,
-        scene: &Scene,
-        framebuffer: &GpuFramebuffer,
-        swapchain: &mut Swapchain,
-    ) {
+    fn render(&mut self, app_state: &mut AppState, scene: &Scene, framebuffer: &GpuFramebuffer) {
         let mut pipeline_hashmap: HashMap<ResourceHandle<GpuPipeline>, Vec<ScenePrimitive>> =
             HashMap::new();
 
@@ -410,7 +399,8 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 .or_default()
                 .push(primitive.clone());
         }
-        let mut command_buffer = gpu::CommandBuffer::new(gpu, gpu::QueueType::Graphics).unwrap();
+        let mut command_buffer =
+            gpu::CommandBuffer::new(&app_state.gpu, gpu::QueueType::Graphics).unwrap();
         for (pipeline, primitives) in pipeline_hashmap.iter() {
             {
                 let pipeline = self.resource_map.get(pipeline);
@@ -446,23 +436,25 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 for primitive in primitives.iter() {
                     let mesh = self.resource_map.get(&primitive.mesh);
                     let material = self.resource_map.get(&primitive.material);
-                    gpu.write_buffer_data(
-                        &self.camera_buffer,
-                        &[PerFrameData {
-                            view: nalgebra::Matrix4::look_at_rh(
-                                &point![2.0, 2.0, 2.0],
-                                &point![0.0, 0.0, 0.0],
-                                &vector![0.0, 0.0, -1.0],
-                            ),
-                            projection: nalgebra::Matrix4::new_perspective(
-                                1240.0 / 720.0,
-                                45.0,
-                                0.1,
-                                10.0,
-                            ),
-                        }],
-                    )
-                    .unwrap();
+                    app_state
+                        .gpu
+                        .write_buffer_data(
+                            &self.camera_buffer,
+                            &[PerFrameData {
+                                view: nalgebra::Matrix4::look_at_rh(
+                                    &point![2.0, 2.0, 2.0],
+                                    &point![0.0, 0.0, 0.0],
+                                    &vector![0.0, 0.0, -1.0],
+                                ),
+                                projection: nalgebra::Matrix4::new_perspective(
+                                    1240.0 / 720.0,
+                                    45.0,
+                                    0.1,
+                                    10.0,
+                                ),
+                            }],
+                        )
+                        .unwrap();
                     render_pass.bind_pipeline(&pipeline.0);
                     render_pass.bind_descriptor_sets(
                         PipelineBindPoint::GRAPHICS,
@@ -491,10 +483,10 @@ impl RenderingPipeline for ForwardRenderingPipeline {
 
         command_buffer
             .submit(&gpu::CommandBufferSubmitInfo {
-                wait_semaphores: &[&swapchain.image_available_semaphore],
+                wait_semaphores: &[&app_state.swapchain.image_available_semaphore],
                 wait_stages: &[PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
-                signal_semaphores: &[&swapchain.render_finished_semaphore],
-                fence: Some(&swapchain.in_flight_fence),
+                signal_semaphores: &[&app_state.swapchain.render_finished_semaphore],
+                fence: Some(&app_state.swapchain.in_flight_fence),
             })
             .unwrap();
     }
