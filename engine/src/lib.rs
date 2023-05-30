@@ -6,6 +6,7 @@ mod mesh;
 mod scene;
 mod static_deferred_renderer;
 mod texture;
+mod time;
 
 pub use app_state::*;
 pub use camera::*;
@@ -15,3 +16,4 @@ pub use mesh::*;
 pub use scene::*;
 pub use static_deferred_renderer::*;
 pub use texture::*;
+pub use time::*;

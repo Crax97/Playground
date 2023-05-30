@@ -201,7 +201,7 @@ fn main() -> anyhow::Result<()> {
 
     swapchain.select_present_mode(PresentModeKHR::MAILBOX)?;
 
-    let mut app_state = AppState { gpu, swapchain };
+    let mut app_state = AppState::new(gpu, swapchain);
 
     let mut scene = Scene::new();
 
@@ -245,9 +245,11 @@ fn main() -> anyhow::Result<()> {
                 winit::event::DeviceEvent::Key(input) => {
                     if let Some(scancode) = input.virtual_keycode {
                         if scancode == VirtualKeyCode::W {
-                            camera.location += camera.forward * 1.0;
+                            camera.location +=
+                                camera.forward * 1.0 * app_state.time().delta_frame();
                         } else if scancode == VirtualKeyCode::S {
-                            camera.location += camera.forward * -1.0;
+                            camera.location +=
+                                camera.forward * -1.0 * app_state.time().delta_frame();
                         }
                     }
                 }
@@ -260,10 +262,15 @@ fn main() -> anyhow::Result<()> {
                 app_state.swapchain.window.request_redraw();
             }
             winit::event::Event::RedrawRequested(..) => {
+                app_state.begin_frame().unwrap();
                 for (idx, primitive) in scene.edit_all_primitives().iter_mut().enumerate() {
                     let mul = if idx % 2 == 0 { 1.0 } else { -1.0 };
-                    primitive.transform =
-                        primitive.transform * Matrix4::new_rotation(vector![0.0, 0.0, 0.002 * mul]);
+                    primitive.transform = primitive.transform
+                        * Matrix4::new_rotation(vector![
+                            0.0,
+                            0.0,
+                            mul * app_state.time().delta_frame()
+                        ]);
                 }
 
                 let sw_extents = app_state.swapchain.extents();
@@ -279,7 +286,7 @@ fn main() -> anyhow::Result<()> {
                         height: sw_extents.height,
                     })
                     .unwrap();
-                app_state.gpu.reset_state().unwrap();
+                app_state.end_frame().unwrap();
                 scene_renderer.render(&mut app_state, &camera, &scene, &framebuffer);
                 let _ = app_state.swapchain.present();
             }
