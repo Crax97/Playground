@@ -19,6 +19,7 @@ use resource_map::{ResourceHandle, ResourceMap};
 
 use crate::{
     app_state::AppState,
+    camera::Camera,
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     mesh::Mesh,
@@ -68,7 +69,13 @@ impl Scene {
 }
 
 pub trait RenderingPipeline {
-    fn render(&mut self, app_state: &mut AppState, scene: &Scene, framebuffer: &GpuFramebuffer);
+    fn render(
+        &mut self,
+        app_state: &mut AppState,
+        pov: &Camera,
+        scene: &Scene,
+        framebuffer: &GpuFramebuffer,
+    );
 
     fn get_context(&self) -> &dyn MaterialContext;
 }
@@ -386,9 +393,27 @@ impl MaterialContext for ForwardRendererMaterialContext {
         self.render_passes.get(&domain).unwrap()
     }
 }
+#[rustfmt::skip]
+mod constants {
+    use nalgebra::Matrix4;
+    pub(super) const Z_INVERT_MATRIX: Matrix4<f32> = 
+
+        Matrix4::<f32>::new(
+        -1.0, 0.0, 0.0, 0.0, 
+        0.0, -1.0, 0.0, 0.0, 
+        0.0, 0.0, 1.0, 0.0, 
+        0.0, 0.0, 0.0, 1.0,
+    );
+}
 
 impl RenderingPipeline for ForwardRenderingPipeline {
-    fn render(&mut self, app_state: &mut AppState, scene: &Scene, framebuffer: &GpuFramebuffer) {
+    fn render(
+        &mut self,
+        app_state: &mut AppState,
+        pov: &Camera,
+        scene: &Scene,
+        framebuffer: &GpuFramebuffer,
+    ) {
         let mut pipeline_hashmap: HashMap<ResourceHandle<GpuPipeline>, Vec<ScenePrimitive>> =
             HashMap::new();
 
@@ -401,6 +426,16 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         }
         let mut command_buffer =
             gpu::CommandBuffer::new(&app_state.gpu, gpu::QueueType::Graphics).unwrap();
+        app_state
+            .gpu
+            .write_buffer_data(
+                &self.camera_buffer,
+                &[PerFrameData {
+                    view: constants::Z_INVERT_MATRIX * pov.view(),
+                    projection: pov.projection(),
+                }],
+            )
+            .unwrap();
         for (pipeline, primitives) in pipeline_hashmap.iter() {
             {
                 let pipeline = self.resource_map.get(pipeline);
@@ -436,25 +471,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 for primitive in primitives.iter() {
                     let mesh = self.resource_map.get(&primitive.mesh);
                     let material = self.resource_map.get(&primitive.material);
-                    app_state
-                        .gpu
-                        .write_buffer_data(
-                            &self.camera_buffer,
-                            &[PerFrameData {
-                                view: nalgebra::Matrix4::look_at_rh(
-                                    &point![2.0, 2.0, 2.0],
-                                    &point![0.0, 0.0, 0.0],
-                                    &vector![0.0, 0.0, -1.0],
-                                ),
-                                projection: nalgebra::Matrix4::new_perspective(
-                                    1240.0 / 720.0,
-                                    45.0,
-                                    0.1,
-                                    10.0,
-                                ),
-                            }],
-                        )
-                        .unwrap();
+
                     render_pass.bind_pipeline(&pipeline.0);
                     render_pass.bind_descriptor_sets(
                         PipelineBindPoint::GRAPHICS,

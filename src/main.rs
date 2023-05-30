@@ -1,4 +1,5 @@
 mod app_state;
+mod camera;
 mod gpu_pipeline;
 mod material;
 mod mesh;
@@ -6,19 +7,6 @@ mod scene;
 mod static_deferred_renderer;
 mod texture;
 mod utils;
-
-/*
-
-    init_material_domains()
-
-    material = {
-        domain: (surface | post process), \\ tramite la quale si ottiene la render pass
-
-        vertex: vertex_shader.vs,
-        fragment: fragment_shader.vs,
-
-    }
-*/
 
 use std::{io::BufReader, mem::size_of, rc::Rc};
 
@@ -28,6 +16,7 @@ use ash::vk::{
     ImageSubresourceRange, ImageUsageFlags, ImageViewType, PipelineStageFlags, PresentModeKHR,
 };
 
+use camera::Camera;
 use gpu::{
     BufferCreateInfo, FramebufferCreateInfo, Gpu, GpuConfiguration, ImageCreateInfo, MemoryDomain,
     TransitionInfo,
@@ -248,6 +237,13 @@ fn main() -> anyhow::Result<()> {
         material: material.clone(),
         transform: Matrix4::new_translation(&vector![0.0, 0.0, -1.0]),
     });
+
+    let mut camera = Camera {
+        location: point![2.0, 2.0, 2.0],
+        forward: vector![-2.0, -2.0, -2.0].normalize(),
+        ..Default::default()
+    };
+
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
 
@@ -290,7 +286,7 @@ fn main() -> anyhow::Result<()> {
                     })
                     .unwrap();
                 app_state.gpu.reset_state().unwrap();
-                scene_renderer.render(&mut app_state, &scene, &framebuffer);
+                scene_renderer.render(&mut app_state, &camera, &scene, &framebuffer);
                 let _ = app_state.swapchain.present();
             }
             winit::event::Event::RedrawEventsCleared => {}
