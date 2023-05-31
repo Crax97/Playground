@@ -37,6 +37,10 @@ impl GlobalState {
 
 static mut STATE: GlobalState = GlobalState::UNINIT;
 
+/*
+    Creates a global AppState, which is going to belong to a single thread.
+    The AppState can be only accessed by the thread that ran engine::init()
+*/
 pub fn init(app_name: &str, window: winit::window::Window) -> anyhow::Result<()> {
     unsafe {
         assert!(

@@ -77,7 +77,6 @@ impl Scene {
 pub trait RenderingPipeline {
     fn render(
         &mut self,
-        app_state: &mut AppState,
         pov: &Camera,
         scene: &Scene,
         framebuffer: &GpuFramebuffer,
@@ -415,7 +414,6 @@ mod constants {
 impl RenderingPipeline for ForwardRenderingPipeline {
     fn render(
         &mut self,
-        app_state: &mut AppState,
         pov: &Camera,
         scene: &Scene,
         framebuffer: &GpuFramebuffer,
@@ -431,8 +429,8 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 .push(primitive.clone());
         }
         let mut command_buffer =
-            gpu::CommandBuffer::new(&app_state.gpu, gpu::QueueType::Graphics).unwrap();
-        app_state
+            gpu::CommandBuffer::new(&super::app_state() .gpu, gpu::QueueType::Graphics).unwrap();
+            super::app_state()
             .gpu
             .write_buffer_data(
                 &self.camera_buffer,
@@ -506,10 +504,10 @@ impl RenderingPipeline for ForwardRenderingPipeline {
 
         command_buffer
             .submit(&gpu::CommandBufferSubmitInfo {
-                wait_semaphores: &[&app_state.swapchain.image_available_semaphore],
+                wait_semaphores: &[&super::app_state().swapchain.image_available_semaphore],
                 wait_stages: &[PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
-                signal_semaphores: &[&app_state.swapchain.render_finished_semaphore],
-                fence: Some(&app_state.swapchain.in_flight_fence),
+                signal_semaphores: &[&super::app_state().swapchain.render_finished_semaphore],
+                fence: Some(&super::app_state().swapchain.in_flight_fence),
             })
             .unwrap();
     }

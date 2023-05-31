@@ -342,9 +342,8 @@ fn main() -> anyhow::Result<()> {
                         height: sw_extents.height,
                     })
                     .unwrap();
+                scene_renderer.render(&camera, &scene, &framebuffer);
                 engine::app_state_mut().end_frame().unwrap();
-                scene_renderer.render(engine::app_state_mut(), &camera, &scene, &framebuffer);
-                let _ = engine::app_state().swapchain.present();
             }
             winit::event::Event::RedrawEventsCleared => {}
             winit::event::Event::LoopDestroyed => {

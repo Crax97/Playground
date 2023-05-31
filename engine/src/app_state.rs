@@ -23,6 +23,7 @@ impl AppState {
     }
 
     pub fn end_frame(&mut self) -> VkResult<()> {
+        let _ = self.swapchain.present();
         self.gpu.reset_state()?;
         Ok(())
     }
