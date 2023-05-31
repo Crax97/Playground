@@ -32,7 +32,7 @@ impl Default for Camera {
             width: 1240.0,
             height: 720.0,
             near: 0.1,
-            far: 10.0,
+            far: 100.0,
         }
     }
 }
