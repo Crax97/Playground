@@ -1,28 +1,21 @@
 mod utils;
 
-use std::{f32::consts::PI, io::BufReader, mem::size_of, rc::Rc};
+use std::{io::BufReader, mem::size_of, rc::Rc};
 
 use ash::vk::{
     self, AccessFlags, BufferUsageFlags, ComponentMapping, Format, ImageAspectFlags, ImageLayout,
     ImageSubresourceRange, ImageUsageFlags, ImageViewType, PipelineStageFlags, PresentModeKHR,
 };
 
-use gpu::{
-    BufferCreateInfo, FramebufferCreateInfo, Gpu, GpuConfiguration, ImageCreateInfo, MemoryDomain,
-    TransitionInfo,
-};
+use gpu::{BufferCreateInfo, FramebufferCreateInfo, ImageCreateInfo, MemoryDomain, TransitionInfo};
 
 use engine::{
-    AppState, Camera, ForwardRenderingPipeline, MaterialDescription, MaterialDomain, Mesh,
-    MeshCreateInfo, RenderingPipeline, Scene, ScenePrimitive, Texture,
+    Camera, ForwardRenderingPipeline, MaterialDescription, MaterialDomain, Mesh, MeshCreateInfo,
+    RenderingPipeline, Scene, ScenePrimitive, Texture,
 };
 use nalgebra::*;
 use resource_map::ResourceMap;
-use winit::{
-    dpi::PhysicalSize,
-    event::{ButtonId, ElementState, VirtualKeyCode},
-    event_loop::ControlFlow,
-};
+use winit::{dpi::PhysicalSize, event::ElementState, event_loop::ControlFlow};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -44,14 +37,7 @@ fn main() -> anyhow::Result<()> {
         })
         .build(&event_loop)?;
 
-    let gpu = Gpu::new(GpuConfiguration {
-        app_name: "Hello World!",
-        engine_name: "Hello Engine!",
-        enable_validation_layer: if cfg!(debug_assertions) { true } else { false },
-        window: &window,
-    })?;
-
-    let mut swapchain = gpu::Swapchain::new(&gpu, window)?;
+    engine::init("Hello World!", window)?;
 
     let cpu_image = image::load(
         BufReader::new(std::fs::File::open("images/texture.jpg")?),
@@ -59,8 +45,10 @@ fn main() -> anyhow::Result<()> {
     )?;
     let cpu_image = cpu_image.into_rgba8();
 
-    let vertex_module = utils::read_file_to_vk_module(&gpu, "./shaders/vertex.spirv")?;
-    let fragment_module = utils::read_file_to_vk_module(&gpu, "./shaders/fragment.spirv")?;
+    let vertex_module =
+        utils::read_file_to_vk_module(&engine::app_state().gpu, "./shaders/vertex.spirv")?;
+    let fragment_module =
+        utils::read_file_to_vk_module(&engine::app_state().gpu, "./shaders/fragment.spirv")?;
 
     let mesh_data = MeshCreateInfo {
         indices: &[0, 1, 2, 2, 3, 0],
@@ -96,7 +84,7 @@ fn main() -> anyhow::Result<()> {
         ],
     };
 
-    let mesh = Mesh::new(&gpu, &mesh_data)?;
+    let mesh = Mesh::new(&engine::app_state().gpu, &mesh_data)?;
     let mesh = resource_map.add(mesh);
 
     let vertex_data = &[
@@ -128,7 +116,9 @@ fn main() -> anyhow::Result<()> {
             size: data_size,
             usage: BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
         };
-        let buffer = gpu.create_buffer(&create_info, MemoryDomain::DeviceLocal)?;
+        let buffer = engine::app_state()
+            .gpu
+            .create_buffer(&create_info, MemoryDomain::DeviceLocal)?;
         buffer
     };
 
@@ -139,41 +129,55 @@ fn main() -> anyhow::Result<()> {
             size: index_size,
             usage: BufferUsageFlags::INDEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
         };
-        let buffer = gpu.create_buffer(&create_info, MemoryDomain::DeviceLocal)?;
+        let buffer = engine::app_state()
+            .gpu
+            .create_buffer(&create_info, MemoryDomain::DeviceLocal)?;
         buffer
     };
 
-    let texture = Texture::new_with_data(&gpu, cpu_image.width(), cpu_image.height(), &cpu_image)?;
+    let texture = Texture::new_with_data(
+        &engine::app_state().gpu,
+        cpu_image.width(),
+        cpu_image.height(),
+        &cpu_image,
+    )?;
     let texture = resource_map.add(texture);
 
-    let depth_image = gpu.create_image(
+    let depth_image = engine::app_state().gpu.create_image(
         &ImageCreateInfo {
-            width: swapchain.extents().width,
-            height: swapchain.extents().height,
+            width: engine::app_state().swapchain.extents().width,
+            height: engine::app_state().swapchain.extents().height,
             format: vk::Format::D16_UNORM,
             usage: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
         },
         MemoryDomain::DeviceLocal,
     )?;
 
-    let depth_image_view = gpu.create_image_view(&gpu::ImageViewCreateInfo {
-        image: &depth_image,
-        view_type: ImageViewType::TYPE_2D,
-        format: Format::D16_UNORM,
-        components: ComponentMapping::default(),
-        subresource_range: ImageSubresourceRange {
-            aspect_mask: ImageAspectFlags::DEPTH,
-            base_mip_level: 0,
-            level_count: 1,
-            base_array_layer: 0,
-            layer_count: 1,
-        },
-    })?;
+    let depth_image_view =
+        engine::app_state()
+            .gpu
+            .create_image_view(&gpu::ImageViewCreateInfo {
+                image: &depth_image,
+                view_type: ImageViewType::TYPE_2D,
+                format: Format::D16_UNORM,
+                components: ComponentMapping::default(),
+                subresource_range: ImageSubresourceRange {
+                    aspect_mask: ImageAspectFlags::DEPTH,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+            })?;
 
-    gpu.write_buffer_data(&vertex_buffer, vertex_data)?;
-    gpu.write_buffer_data(&index_buffer, indices)?;
+    engine::app_state()
+        .gpu
+        .write_buffer_data(&vertex_buffer, vertex_data)?;
+    engine::app_state()
+        .gpu
+        .write_buffer_data(&index_buffer, indices)?;
 
-    gpu.transition_image_layout(
+    engine::app_state().gpu.transition_image_layout(
         &depth_image,
         TransitionInfo {
             layout: ImageLayout::UNDEFINED,
@@ -188,10 +192,14 @@ fn main() -> anyhow::Result<()> {
         ImageAspectFlags::DEPTH,
     )?;
 
-    let mut scene_renderer = ForwardRenderingPipeline::new(&gpu, resource_map.clone(), &swapchain)?;
+    let mut scene_renderer = ForwardRenderingPipeline::new(
+        &engine::app_state().gpu,
+        resource_map.clone(),
+        &engine::app_state().swapchain,
+    )?;
 
     let material_1 = scene_renderer.get_context().create_material(
-        &gpu,
+        &engine::app_state().gpu,
         &resource_map,
         MaterialDescription {
             domain: MaterialDomain::Surface,
@@ -203,9 +211,9 @@ fn main() -> anyhow::Result<()> {
     )?;
     let material = resource_map.add(material_1);
 
-    swapchain.select_present_mode(PresentModeKHR::MAILBOX)?;
-
-    let mut app_state = AppState::new(gpu, swapchain);
+    engine::app_state_mut()
+        .swapchain
+        .select_present_mode(PresentModeKHR::MAILBOX)?;
 
     let mut scene = Scene::new();
 
@@ -253,7 +261,10 @@ fn main() -> anyhow::Result<()> {
                     *control_flow = ControlFlow::ExitWithCode(0)
                 }
                 winit::event::WindowEvent::Resized(_) => {
-                    app_state.swapchain.recreate_swapchain().unwrap();
+                    engine::app_state_mut()
+                        .swapchain
+                        .recreate_swapchain()
+                        .unwrap();
                 }
                 _ => {}
             },
@@ -284,7 +295,7 @@ fn main() -> anyhow::Result<()> {
             winit::event::Event::Suspended => {}
             winit::event::Event::Resumed => {}
             winit::event::Event::MainEventsCleared => {
-                app_state.swapchain.window.request_redraw();
+                engine::app_state().swapchain.window.request_redraw();
             }
             winit::event::Event::RedrawRequested(..) => {
                 if rotation_movement > 0.0 {
@@ -313,11 +324,14 @@ fn main() -> anyhow::Result<()> {
                 let direction = vector![new_forward[0], new_forward[1], new_forward[2]];
                 camera.forward = -direction;
 
-                app_state.begin_frame().unwrap();
+                engine::app_state_mut().begin_frame().unwrap();
 
-                let sw_extents = app_state.swapchain.extents();
-                let next_image = app_state.swapchain.acquire_next_image().unwrap();
-                let framebuffer = app_state
+                let sw_extents = engine::app_state().swapchain.extents();
+                let next_image = engine::app_state_mut()
+                    .swapchain
+                    .acquire_next_image()
+                    .unwrap();
+                let framebuffer = engine::app_state()
                     .gpu
                     .create_framebuffer(&FramebufferCreateInfo {
                         render_pass: scene_renderer
@@ -328,12 +342,14 @@ fn main() -> anyhow::Result<()> {
                         height: sw_extents.height,
                     })
                     .unwrap();
-                app_state.end_frame().unwrap();
-                scene_renderer.render(&mut app_state, &camera, &scene, &framebuffer);
-                let _ = app_state.swapchain.present();
+                engine::app_state_mut().end_frame().unwrap();
+                scene_renderer.render(engine::app_state_mut(), &camera, &scene, &framebuffer);
+                let _ = engine::app_state().swapchain.present();
             }
             winit::event::Event::RedrawEventsCleared => {}
-            winit::event::Event::LoopDestroyed => app_state.gpu.wait_device_idle().unwrap(),
+            winit::event::Event::LoopDestroyed => {
+                engine::app_state().gpu.wait_device_idle().unwrap()
+            }
         }
     })
 }
