@@ -36,12 +36,12 @@ pub struct ImageDescription {
     pub samples: u32,
 }
 
-#[derive(Hash)]
+#[derive(Hash, Copy, Clone)]
 pub enum AllocationType {
     Image(ImageDescription),
 }
 
-#[derive(Hash)]
+#[derive(Hash, Clone, Copy)]
 pub struct ResourceInfo {
     ty: AllocationType,
 }
@@ -52,9 +52,9 @@ pub struct RenderGraph {
     persistent_resources: HashSet<ResourceId>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CompileError {
-    ResourceAlreadyDefined(ResourceId),
+    ResourceAlreadyDefined(ResourceId, String),
 }
 
 pub type GraphResult<T> = Result<T, CompileError>;
@@ -70,8 +70,14 @@ impl RenderPass {
     pub fn write(&mut self, handle: ResourceId) {
         self.writes.push(handle);
     }
+    pub fn writes(&mut self, handles: &[ResourceId]) {
+        self.writes.append(&mut Vec::from(handles))
+    }
     pub fn read(&mut self, handle: ResourceId) {
         self.reads.push(handle);
+    }
+    pub fn reads(&mut self, handles: &[ResourceId]) {
+        self.reads.append(&mut Vec::from(handles))
     }
 
     fn id(&self) -> u64 {
@@ -91,6 +97,7 @@ impl RenderPassHandle {}
 #[derive(Default)]
 pub struct CompiledRenderGraph<'g> {
     passes: Vec<RenderPass>,
+    resources_used: HashMap<ResourceId, ResourceInfo>,
     callbacks: HashMap<u64, Box<dyn Fn(&Gpu, &mut CommandBuffer) + 'g>>,
 }
 impl<'g> CompiledRenderGraph<'g> {
@@ -121,7 +128,7 @@ impl RenderGraph {
         let id = ResourceId::make(label);
 
         if self.allocations.contains_key(&id) {
-            return Err(CompileError::ResourceAlreadyDefined(id));
+            return Err(CompileError::ResourceAlreadyDefined(id, label.to_owned()));
         }
 
         let allocation = ResourceInfo {
@@ -165,37 +172,44 @@ impl RenderGraph {
             .iter()
             .map(|r| r.clone())
             .collect();
+        let mut used_resources = working_set.clone();
         while !working_set.is_empty() {
-            println!("Current working set: {:?}", &working_set);
-
             let mut remove = None;
 
             for (index, pass) in self.passes.iter().enumerate().rev() {
-                println!("Checking pass {}", &pass.label);
-                for target in &working_set {
+                let mut found = false;
+                for target in &used_resources {
                     if pass.writes.contains(target) {
-                        println!(
-                            "Pass {:?} writes to elemet {:?} of working set",
-                            &pass.label, target
-                        );
                         compiled.passes.push(pass.clone());
                         remove = Some(index);
                         working_set = pass.reads.clone();
+                        used_resources.append(&mut pass.reads.clone());
+                        found = true;
                         break;
                     }
+                }
+                if found {
+                    break;
                 }
             }
             if let Some(index) = remove {
                 self.passes.remove(index);
             }
         }
+
+        for used_resource in used_resources {
+            compiled
+                .resources_used
+                .insert(used_resource, self.allocations[&used_resource]);
+        }
+
         compiled.passes.reverse();
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::CompileError;
+    use crate::{CompileError, ResourceId};
 
     use super::{ImageDescription, RenderGraph, RenderGraphRunner};
 
@@ -260,8 +274,12 @@ mod test {
             .unwrap();
         let color_component_2 = render_graph.allocate_image("Color component", &image_desc);
 
-        let is_defined = color_component_2
-            .is_err_and(|id| id == CompileError::ResourceAlreadyDefined(color_component_1));
+        let is_defined = color_component_2.is_err_and(|id| {
+            id == CompileError::ResourceAlreadyDefined(
+                color_component_1,
+                "Color component".to_owned(),
+            )
+        });
         assert!(is_defined)
     }
 
@@ -397,5 +415,89 @@ mod test {
         assert_eq!(render_graph.passes.len(), 2);
         assert_eq!(render_graph.passes[0].label, "gbuffer");
         assert_eq!(render_graph.passes[1].label, "compose_gbuffer");
+    }
+
+    fn alloc(name: &str, rg: &mut RenderGraph) -> ResourceId {
+        let description = ImageDescription {
+            width: 1240,
+            height: 720,
+            format: gpu::ImageFormat::Rgba8,
+            samples: 1,
+        };
+
+        rg.allocate_image(name, &description).unwrap()
+    }
+
+    #[test]
+    pub fn big_graph() {
+        let gpu = GpuDebugger::default();
+        let mut render_graph = RenderGraph::new();
+
+        let r1 = alloc("r1", &mut render_graph);
+        let r2 = alloc("r2", &mut render_graph);
+        let r3 = alloc("r3", &mut render_graph);
+        let r4 = alloc("r4", &mut render_graph);
+        let rb = alloc("rb", &mut render_graph);
+
+        let mut p1 = render_graph.begin_render_pass("p1");
+        p1.writes(&[r1, r2, r3, r4]);
+        render_graph.commit_render_pass(p1);
+
+        let mut p2 = render_graph.begin_render_pass("p2");
+        let r5 = alloc("r5", &mut render_graph);
+        p2.reads(&[r1, r3]);
+        p2.writes(&[r5]);
+        render_graph.commit_render_pass(p2);
+
+        let mut p3 = render_graph.begin_render_pass("p3");
+        let r6 = alloc("r6", &mut render_graph);
+        let r7 = alloc("r7", &mut render_graph);
+        let r8 = alloc("r8", &mut render_graph);
+        p3.reads(&[r2, r4]);
+        p3.writes(&[r6, r7, r8]);
+        render_graph.commit_render_pass(p3);
+
+        // pruned
+        let mut u1 = render_graph.begin_render_pass("u1");
+        let ru1 = alloc("ru1", &mut render_graph);
+        let ru2 = alloc("ru2", &mut render_graph);
+        u1.reads(&[r7, r8]);
+        u1.writes(&[ru1, ru2]);
+
+        let mut p4 = render_graph.begin_render_pass("p4");
+        p4.reads(&[r7, r8]);
+        p4.writes(&[r5, r6]);
+        render_graph.commit_render_pass(p4);
+
+        let mut pb = render_graph.begin_render_pass("pb");
+        pb.reads(&[r5, r6]);
+        pb.writes(&[rb]);
+        render_graph.commit_render_pass(pb);
+
+        render_graph.persist_resource(&rb);
+
+        let render_graph = render_graph.compile().unwrap();
+        assert_eq!(render_graph.passes.len(), 5);
+        assert_eq!(render_graph.passes[0].label, "p1");
+        assert_eq!(render_graph.passes[1].label, "p2");
+        assert_eq!(render_graph.passes[2].label, "p3");
+        assert_eq!(render_graph.passes[3].label, "p4");
+        assert_eq!(render_graph.passes[4].label, "pb");
+        assert!(render_graph
+            .passes
+            .iter()
+            .find(|p| p.label == "u1")
+            .is_none());
+        assert_eq!(render_graph.resources_used.len(), 9);
+        assert!(render_graph
+            .resources_used
+            .iter()
+            .find(|(id, _)| id == &&ru1)
+            .is_none());
+        assert!(render_graph
+            .resources_used
+            .iter()
+            .find(|(id, _)| id == &&ru2)
+            .is_none());
     }
 }
