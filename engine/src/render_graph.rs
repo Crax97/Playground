@@ -285,7 +285,7 @@ mod test {
         let tangent_component = render_graph.allocate_image("Tangent component", &image_desc);
         let normal_component = render_graph.allocate_image("Normal component", &image_desc);
         let output_image = render_graph.allocate_image("Output image", &image_desc);
-        let unused = render_graph.allocate_image("Output image", &image_desc);
+        let unused = render_graph.allocate_image("Unused resource", &image_desc);
 
         let mut gbuffer = render_graph.begin_render_pass("gbuffer");
         gbuffer.write(color_component);
