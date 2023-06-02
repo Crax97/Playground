@@ -14,7 +14,7 @@ pub trait RenderGraphRunner {}
 
 impl RenderGraphRunner for Gpu {}
 
-#[derive(Hash, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Hash, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct ResourceId {
     raw: u64,
 }
@@ -142,20 +142,27 @@ impl RenderGraph {
     pub fn compile(&mut self) -> GraphResult<CompiledRenderGraph> {
         let mut compiled = CompiledRenderGraph::default();
 
-        let mut current_reads: Vec<_> = self
+        let mut working_set: Vec<_> = self
             .persistent_resources
             .iter()
             .map(|r| r.clone())
             .collect();
-        while !current_reads.is_empty() {
+        while !working_set.is_empty() {
+            println!("Current working set: {:?}", &working_set);
+
             let mut remove = None;
 
             for (index, pass) in self.passes.iter().enumerate().rev() {
-                for read in &current_reads {
-                    if pass.writes.contains(read) {
+                println!("Checking pass {}", &pass.label);
+                for target in &working_set {
+                    if pass.writes.contains(target) {
+                        println!(
+                            "Pass {:?} writes to elemet {:?} of working set",
+                            &pass.label, target
+                        );
                         compiled.passes.push(pass.clone());
                         remove = Some(index);
-                        current_reads = pass.reads.clone();
+                        working_set = pass.reads.clone();
                         break;
                     }
                 }
@@ -164,6 +171,7 @@ impl RenderGraph {
                 self.passes.remove(index);
             }
         }
+        compiled.passes.reverse();
 
         Ok(compiled)
     }
@@ -228,23 +236,36 @@ mod test {
         let position_component = render_graph.allocate_image("Position component", &image_desc);
         let tangent_component = render_graph.allocate_image("Tangent component", &image_desc);
         let normal_component = render_graph.allocate_image("Normal component", &image_desc);
+        let output_image = render_graph.allocate_image("Output image", &image_desc);
 
         let mut gbuffer = render_graph.begin_render_pass("gbuffer");
         gbuffer.write(color_component);
         gbuffer.write(position_component);
         gbuffer.write(tangent_component);
         gbuffer.write(normal_component);
-
         let gbuffer = render_graph.commit_render_pass(gbuffer);
-        // We need the color component: this will let the 'gbuffer' render pass live
-        render_graph.persist_resource(&color_component);
 
+        let mut compose_gbuffer = render_graph.begin_render_pass("compose_gbuffer");
+        compose_gbuffer.read(color_component);
+        compose_gbuffer.read(position_component);
+        compose_gbuffer.read(tangent_component);
+        compose_gbuffer.read(normal_component);
+        compose_gbuffer.write(output_image);
+        let compose_gbuffer = render_graph.commit_render_pass(compose_gbuffer);
+
+        // We need the color component: this will let the 'gbuffer' render pass live
+        render_graph.persist_resource(&output_image);
+
+        assert_eq!(render_graph.passes[0].label, "gbuffer");
+        assert_eq!(render_graph.passes[1].label, "compose_gbuffer");
         let mut render_graph = render_graph.compile().unwrap();
         render_graph.register_callback(&gbuffer, |gpu, render_pass| {
             // for each primitive draw in render_pass
         });
         render_graph.exec(&gpu);
-        assert_eq!(render_graph.passes.len(), 1);
+        assert_eq!(render_graph.passes.len(), 2);
+        assert_eq!(render_graph.passes[0].label, "gbuffer");
+        assert_eq!(render_graph.passes[1].label, "compose_gbuffer");
     }
 
     #[test]
@@ -282,7 +303,7 @@ mod test {
         let compose_gbuffer = render_graph.commit_render_pass(compose_gbuffer);
 
         // adding an empty pass that outputs to an unused buffer
-        let mut unused_pass = render_graph.begin_render_pass("compose_gbuffer");
+        let mut unused_pass = render_graph.begin_render_pass("unused");
         unused_pass.read(color_component);
         unused_pass.read(position_component);
         unused_pass.read(tangent_component);
@@ -292,6 +313,8 @@ mod test {
 
         render_graph.persist_resource(&output_image);
 
+        assert_eq!(render_graph.passes[0].label, "gbuffer");
+        assert_eq!(render_graph.passes[1].label, "compose_gbuffer");
         let mut render_graph = render_graph.compile().unwrap();
         render_graph.register_callback(&gbuffer, |gpu, render_pass| {
             // for each primitive draw in render_pass
@@ -305,5 +328,7 @@ mod test {
         render_graph.exec(&gpu);
 
         assert_eq!(render_graph.passes.len(), 2);
+        assert_eq!(render_graph.passes[0].label, "gbuffer");
+        assert_eq!(render_graph.passes[1].label, "compose_gbuffer");
     }
 }
