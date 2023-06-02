@@ -53,7 +53,7 @@ pub fn init(app_name: &str, window: winit::window::Window) -> anyhow::Result<()>
         let gpu = Gpu::new(GpuConfiguration {
             app_name,
             engine_name: "Hello Engine",
-            enable_validation_layer: if cfg!(debug_assertions) { true } else { false },
+            enable_debug_utilities: if cfg!(debug_assertions) { true } else { false },
             window: &window,
         })?;
 

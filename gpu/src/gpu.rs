@@ -150,7 +150,7 @@ pub struct Gpu {
 pub struct GpuConfiguration<'a> {
     pub app_name: &'a str,
     pub engine_name: &'a str,
-    pub enable_validation_layer: bool,
+    pub enable_debug_utilities: bool,
     pub window: &'a Window,
 }
 
@@ -326,12 +326,12 @@ impl Gpu {
             p_next: null(),
             flags: InstanceCreateFlags::empty(),
             p_application_info: addr_of!(app_info),
-            enabled_layer_count: if configuration.enable_validation_layer {
+            enabled_layer_count: if configuration.enable_debug_utilities {
                 1
             } else {
                 0
             },
-            pp_enabled_layer_names: if configuration.enable_validation_layer {
+            pp_enabled_layer_names: if configuration.enable_debug_utilities {
                 addr_of!(vk_layer_khronos_validation)
             } else {
                 null()
@@ -459,12 +459,12 @@ impl Gpu {
             flags: DeviceCreateFlags::empty(),
             queue_create_info_count: 3,
             p_queue_create_infos: queue_create_infos.as_ptr(),
-            enabled_layer_count: if configuration.enable_validation_layer {
+            enabled_layer_count: if configuration.enable_debug_utilities {
                 1
             } else {
                 0
             },
-            pp_enabled_layer_names: if configuration.enable_validation_layer {
+            pp_enabled_layer_names: if configuration.enable_debug_utilities {
                 addr_of!(vk_layer_khronos_validation)
             } else {
                 null()
