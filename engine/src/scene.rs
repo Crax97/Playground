@@ -96,6 +96,7 @@ impl ForwardRenderingPipeline {
     pub fn new(gpu: &Gpu, resource_map: Rc<ResourceMap>, swapchain: &Swapchain) -> VkResult<Self> {
         let camera_buffer = {
             let create_info = BufferCreateInfo {
+                label: Some("Forward Renderer - Camera buffer"),
                 size: std::mem::size_of::<PerFrameData>(),
                 usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
             };

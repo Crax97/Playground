@@ -7,20 +7,22 @@ use std::{
 
 use anyhow::Result;
 use ash::{
+    extensions::ext::DebugUtils,
     prelude::*,
     vk::{
         make_api_version, AccessFlags, ApplicationInfo, BufferCreateFlags, BufferUsageFlags,
         CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
         CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo,
-        CommandPoolResetFlags, DependencyFlags, DescriptorBufferInfo, DescriptorImageInfo,
-        DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo,
-        Extent2D, Extent3D, Fence, FramebufferCreateFlags, ImageAspectFlags, ImageCreateFlags,
-        ImageLayout, ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType,
-        ImageViewCreateFlags, ImageViewType, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap,
-        MemoryHeapFlags, Offset3D, PhysicalDevice, PhysicalDeviceFeatures,
-        PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags, Queue, QueueFlags,
-        SampleCountFlags, SamplerCreateInfo, ShaderModuleCreateFlags, SharingMode, StructureType,
-        SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
+        CommandPoolResetFlags, DebugUtilsObjectNameInfoEXT, DependencyFlags, DescriptorBufferInfo,
+        DescriptorImageInfo, DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags,
+        DeviceQueueCreateInfo, Extent2D, Extent3D, Fence, FramebufferCreateFlags, Handle,
+        ImageAspectFlags, ImageCreateFlags, ImageLayout, ImageSubresourceLayers,
+        ImageSubresourceRange, ImageTiling, ImageType, ImageViewCreateFlags, ImageViewType,
+        InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D,
+        PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType,
+        PipelineStageFlags, Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo,
+        ShaderModuleCreateFlags, SharingMode, StructureType, SubmitInfo, WriteDescriptorSet,
+        API_VERSION_1_3,
     },
     *,
 };
@@ -54,7 +56,7 @@ impl GpuDescription {
         let name =
             unsafe { CStr::from_ptr(physical_device.device_properties.device_name.as_ptr()) };
         let name = name.to_str().expect("Invalid device name");
-        let name = String::from(name);
+        let name = name.to_owned();
 
         Self { name }
     }
@@ -72,6 +74,7 @@ pub struct GpuState {
     pub description: GpuDescription,
     pub gpu_memory_allocator: Arc<RefCell<dyn GpuAllocator>>,
     pub descriptor_set_allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
+    pub debug_utilities: Option<DebugUtils>,
 }
 
 pub struct GpuThreadLocalState {
@@ -202,12 +205,16 @@ impl Gpu {
     pub fn new(configuration: GpuConfiguration) -> Result<Self> {
         let entry = Entry::linked();
 
-        let instance_extensions =
+        let mut instance_extensions =
             ash_window::enumerate_required_extensions(configuration.window.raw_display_handle())?
                 .iter()
                 .map(|c_ext| unsafe { CStr::from_ptr(*c_ext) })
                 .map(|c_str| c_str.to_string_lossy().to_string())
                 .collect::<Vec<_>>();
+
+        if configuration.enable_debug_utilities {
+            instance_extensions.push("VK_EXT_debug_utils".into());
+        }
 
         Self::ensure_required_instance_extensions_are_available(&instance_extensions, &entry)?;
 
@@ -259,6 +266,12 @@ impl Gpu {
 
         let descriptor_set_allocator = PooledDescriptorSetAllocator::new(logical_device.clone())?;
 
+        let debug_utilities = if configuration.enable_debug_utilities {
+            Some(DebugUtils::new(&entry, &instance))
+        } else {
+            None
+        };
+
         let state = Arc::new(GpuState {
             entry,
             instance,
@@ -269,6 +282,7 @@ impl Gpu {
             transfer_queue,
             description,
             queue_families,
+            debug_utilities,
             gpu_memory_allocator: Arc::new(RefCell::new(gpu_memory_allocator)),
             descriptor_set_allocator: Arc::new(RefCell::new(descriptor_set_allocator)),
         });
@@ -565,7 +579,7 @@ impl Gpu {
 
         let stringify_memory_heap = |heap: MemoryHeap| {
             let flags_str = {
-                let mut s = String::from("{ ");
+                let mut s = "{ ".to_owned();
                 if heap.flags.contains(MemoryHeapFlags::DEVICE_LOCAL) {
                     s += "DEVICE_LOCAL | ";
                 }
@@ -774,7 +788,8 @@ fn create_staging_buffer(state: &Arc<GpuState>) -> VkResult<GpuBuffer> {
     Ok(buffer)
 }
 
-pub struct ImageCreateInfo {
+pub struct ImageCreateInfo<'a> {
+    pub label: Option<&'a str>,
     pub width: u32,
     pub height: u32,
     pub format: vk::Format,
@@ -788,7 +803,8 @@ pub struct ImageViewCreateInfo<'a> {
     pub components: vk::ComponentMapping,
     pub subresource_range: ImageSubresourceRange,
 }
-pub struct BufferCreateInfo {
+pub struct BufferCreateInfo<'a> {
+    pub label: Option<&'a str>,
     pub size: usize,
     pub usage: BufferUsageFlags,
 }
@@ -817,7 +833,7 @@ impl Gpu {
         memory_domain: MemoryDomain,
     ) -> VkResult<GpuBuffer> {
         let family = self.state.queue_families.clone();
-        let create_info = vk::BufferCreateInfo {
+        let create_info_vk = vk::BufferCreateInfo {
             s_type: StructureType::BUFFER_CREATE_INFO,
             p_next: std::ptr::null(),
             flags: BufferCreateFlags::empty(),
@@ -837,7 +853,11 @@ impl Gpu {
             ]
             .as_ptr(),
         };
-        let buffer = unsafe { self.state.logical_device.create_buffer(&create_info, None) }?;
+        let buffer = unsafe {
+            self.state
+                .logical_device
+                .create_buffer(&create_info_vk, None)
+        }?;
         let memory_requirements = unsafe {
             self.state
                 .logical_device
@@ -859,6 +879,9 @@ impl Gpu {
                 .logical_device
                 .bind_buffer_memory(buffer, allocation.device_memory, 0)
         }?;
+
+        self.set_object_debug_name(create_info.label, buffer)?;
+
         GpuBuffer::create(
             self.vk_logical_device(),
             buffer,
@@ -866,6 +889,34 @@ impl Gpu {
             allocation,
             self.state.gpu_memory_allocator.clone(),
         )
+    }
+
+    fn set_object_debug_name<T: Handle>(
+        &self,
+        label: Option<&str>,
+        object: T,
+    ) -> Result<(), vk::Result> {
+        if !cfg!(debug_assertions) {
+            return Ok(());
+        }
+
+        match (label, &self.state.debug_utilities) {
+            (Some(label), Some(debug)) => unsafe {
+                let c_label = CString::new(label).unwrap();
+                debug.set_debug_utils_object_name(
+                    self.vk_logical_device().handle(),
+                    &DebugUtilsObjectNameInfoEXT {
+                        s_type: StructureType::DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+                        p_next: std::ptr::null(),
+                        object_type: T::TYPE,
+                        object_handle: object.as_raw(),
+                        p_object_name: c_label.as_ptr(),
+                    },
+                )?
+            },
+            _ => {}
+        };
+        Ok(())
     }
 
     pub fn write_buffer_data<T: Copy>(&self, buffer: &GpuBuffer, data: &[T]) -> VkResult<()> {
@@ -975,6 +1026,8 @@ impl Gpu {
                 .logical_device
                 .bind_image_memory(image, allocation.device_memory, 0)
         }?;
+        self.set_object_debug_name(create_info.label, image)?;
+
         GpuImage::create(
             self,
             image,

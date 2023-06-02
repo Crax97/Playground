@@ -5,6 +5,7 @@ use gpu::{BufferCreateInfo, Gpu, GpuBuffer, MemoryDomain};
 use resource_map::Resource;
 
 pub struct MeshCreateInfo<'a> {
+    pub label: Option<&'a str>,
     pub indices: &'a [u32],
     pub positions: &'a [Vector3<f32>],
     pub colors: &'a [Vector3<f32>],
@@ -24,8 +25,10 @@ pub struct Mesh {
 
 impl Mesh {
     pub fn new(gpu: &Gpu, create_info: &MeshCreateInfo) -> VkResult<Self> {
+        let label = create_info.label.map(|s| s.to_owned());
         let index_buffer = gpu.create_buffer(
             &BufferCreateInfo {
+                label: label.clone().map(|lab| lab + ": Index buffer").as_deref(),
                 size: std::mem::size_of::<u32>() * create_info.indices.len(),
                 usage: BufferUsageFlags::INDEX_BUFFER,
             },
@@ -34,6 +37,7 @@ impl Mesh {
         gpu.write_buffer_data(&index_buffer, create_info.indices)?;
         let position_component = gpu.create_buffer(
             &BufferCreateInfo {
+                label: label.clone().map(|lab| lab + ": Index buffer").as_deref(),
                 size: std::mem::size_of::<Vector3<f32>>() * create_info.positions.len(),
                 usage: BufferUsageFlags::VERTEX_BUFFER,
             },
@@ -42,6 +46,10 @@ impl Mesh {
         gpu.write_buffer_data(&position_component, create_info.positions)?;
         let color_component = gpu.create_buffer(
             &BufferCreateInfo {
+                label: label
+                    .clone()
+                    .map(|lab| lab + ": Position buffer")
+                    .as_deref(),
                 size: std::mem::size_of::<Vector3<f32>>() * create_info.positions.len(),
                 usage: BufferUsageFlags::VERTEX_BUFFER,
             },
@@ -50,6 +58,7 @@ impl Mesh {
         gpu.write_buffer_data(&color_component, create_info.colors)?;
         let normal_component = gpu.create_buffer(
             &BufferCreateInfo {
+                label: label.clone().map(|lab| lab + ": Color buffer").as_deref(),
                 size: std::mem::size_of::<Vector3<f32>>() * create_info.normals.len(),
                 usage: BufferUsageFlags::VERTEX_BUFFER,
             },
@@ -58,6 +67,7 @@ impl Mesh {
         gpu.write_buffer_data(&normal_component, create_info.normals)?;
         let tangent_component = gpu.create_buffer(
             &BufferCreateInfo {
+                label: label.clone().map(|lab| lab + ": Normal buffer").as_deref(),
                 size: std::mem::size_of::<Vector3<f32>>() * create_info.tangents.len(),
                 usage: BufferUsageFlags::VERTEX_BUFFER,
             },
@@ -66,6 +76,7 @@ impl Mesh {
         gpu.write_buffer_data(&tangent_component, create_info.tangents)?;
         let uv_component = gpu.create_buffer(
             &BufferCreateInfo {
+                label: label.clone().map(|lab| lab + ": Tangent buffer").as_deref(),
                 size: std::mem::size_of::<Vector2<f32>>() * create_info.uvs.len(),
                 usage: BufferUsageFlags::VERTEX_BUFFER,
             },

@@ -16,9 +16,10 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub fn new_empty(gpu: &Gpu, width: u32, height: u32) -> VkResult<Self> {
+    pub fn new_empty(gpu: &Gpu, width: u32, height: u32, label: Option<&str>) -> VkResult<Self> {
         let image = gpu.create_image(
             &ImageCreateInfo {
+                label,
                 width,
                 height,
                 format: vk::Format::R8G8B8A8_UNORM,
@@ -70,8 +71,14 @@ impl Texture {
             sampler,
         })
     }
-    pub fn new_with_data(gpu: &Gpu, width: u32, height: u32, data: &[u8]) -> VkResult<Self> {
-        let mut texture = Self::new_empty(gpu, width, height)?;
+    pub fn new_with_data(
+        gpu: &Gpu,
+        width: u32,
+        height: u32,
+        data: &[u8],
+        label: Option<&str>,
+    ) -> VkResult<Self> {
+        let mut texture = Self::new_empty(gpu, width, height, label)?;
         texture.copy_data_immediate(gpu, data)?;
         Ok(texture)
     }

@@ -51,6 +51,7 @@ fn main() -> anyhow::Result<()> {
         utils::read_file_to_vk_module(&engine::app_state().gpu, "./shaders/fragment.spirv")?;
 
     let mesh_data = MeshCreateInfo {
+        label: Some("Quad mesh"),
         indices: &[0, 1, 2, 2, 3, 0],
         positions: &[
             vector![-0.5, -0.5, 0.0],
@@ -113,6 +114,7 @@ fn main() -> anyhow::Result<()> {
     let data_size = size_of::<VertexData>() * vertex_data.len();
     let vertex_buffer = {
         let create_info = BufferCreateInfo {
+            label: Some("Example Vertex Buffer"),
             size: data_size,
             usage: BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
         };
@@ -128,6 +130,7 @@ fn main() -> anyhow::Result<()> {
         let create_info = BufferCreateInfo {
             size: index_size,
             usage: BufferUsageFlags::INDEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
+            label: Some("Example Index Buffer"),
         };
         let buffer = engine::app_state()
             .gpu
@@ -140,11 +143,13 @@ fn main() -> anyhow::Result<()> {
         cpu_image.width(),
         cpu_image.height(),
         &cpu_image,
+        Some("Quad texture david"),
     )?;
     let texture = resource_map.add(texture);
 
     let depth_image = engine::app_state().gpu.create_image(
         &ImageCreateInfo {
+            label: Some("Rendering depth texture"),
             width: engine::app_state().swapchain.extents().width,
             height: engine::app_state().swapchain.extents().height,
             format: vk::Format::D16_UNORM,
