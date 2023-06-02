@@ -150,9 +150,16 @@ impl RenderGraph {
     pub fn persist_resource(&mut self, id: &ResourceId) {
         self.persistent_resources.insert(*id);
     }
+
     pub fn compile(&mut self) -> GraphResult<CompiledRenderGraph> {
         let mut compiled = CompiledRenderGraph::default();
 
+        self.prune_passes(&mut compiled);
+
+        Ok(compiled)
+    }
+
+    fn prune_passes(&mut self, compiled: &mut CompiledRenderGraph) {
         let mut working_set: Vec<_> = self
             .persistent_resources
             .iter()
@@ -183,8 +190,6 @@ impl RenderGraph {
             }
         }
         compiled.passes.reverse();
-
-        Ok(compiled)
     }
 }
 
