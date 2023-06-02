@@ -52,8 +52,10 @@ pub struct RenderGraph {
     persistent_resources: HashSet<ResourceId>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum CompileError {}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CompileError {
+    ResourceAlreadyDefined(ResourceId),
+}
 
 pub type GraphResult<T> = Result<T, CompileError>;
 
@@ -111,13 +113,22 @@ impl RenderGraph {
         }
     }
 
-    pub fn allocate_image(&mut self, label: &str, description: &ImageDescription) -> ResourceId {
+    pub fn allocate_image(
+        &mut self,
+        label: &str,
+        description: &ImageDescription,
+    ) -> GraphResult<ResourceId> {
         let id = ResourceId::make(label);
+
+        if self.allocations.contains_key(&id) {
+            return Err(CompileError::ResourceAlreadyDefined(id));
+        }
+
         let allocation = ResourceInfo {
             ty: AllocationType::Image(description.clone()),
         };
         self.allocations.insert(id, allocation);
-        id
+        Ok(id)
     }
 
     pub fn begin_render_pass(&self, label: &str) -> RenderPass {
@@ -179,6 +190,8 @@ impl RenderGraph {
 
 #[cfg(test)]
 mod test {
+    use crate::CompileError;
+
     use super::{ImageDescription, RenderGraph, RenderGraphRunner};
 
     #[derive(Default)]
@@ -200,10 +213,18 @@ mod test {
             samples: 1,
         };
 
-        let color_component = render_graph.allocate_image("Color component", &image_desc);
-        let position_component = render_graph.allocate_image("Position component", &image_desc);
-        let tangent_component = render_graph.allocate_image("Tangent component", &image_desc);
-        let normal_component = render_graph.allocate_image("Normal component", &image_desc);
+        let color_component = render_graph
+            .allocate_image("Color component", &image_desc)
+            .unwrap();
+        let position_component = render_graph
+            .allocate_image("Position component", &image_desc)
+            .unwrap();
+        let tangent_component = render_graph
+            .allocate_image("Tangent component", &image_desc)
+            .unwrap();
+        let normal_component = render_graph
+            .allocate_image("Normal component", &image_desc)
+            .unwrap();
 
         let mut gbuffer = render_graph.begin_render_pass("gbuffer");
         gbuffer.write(color_component);
@@ -221,6 +242,25 @@ mod test {
     }
 
     #[test]
+    pub fn ensure_keys_are_unique() {
+        let mut render_graph = RenderGraph::new();
+        let image_desc = ImageDescription {
+            width: 1240,
+            height: 720,
+            format: gpu::ImageFormat::Rgba8,
+            samples: 1,
+        };
+        let color_component_1 = render_graph
+            .allocate_image("Color component", &image_desc)
+            .unwrap();
+        let color_component_2 = render_graph.allocate_image("Color component", &image_desc);
+
+        let is_defined = color_component_2
+            .is_err_and(|id| id == CompileError::ResourceAlreadyDefined(color_component_1));
+        assert!(is_defined)
+    }
+
+    #[test]
     pub fn survive_1() {
         let gpu = GpuDebugger::default();
         let mut render_graph = RenderGraph::new();
@@ -232,11 +272,21 @@ mod test {
             samples: 1,
         };
 
-        let color_component = render_graph.allocate_image("Color component", &image_desc);
-        let position_component = render_graph.allocate_image("Position component", &image_desc);
-        let tangent_component = render_graph.allocate_image("Tangent component", &image_desc);
-        let normal_component = render_graph.allocate_image("Normal component", &image_desc);
-        let output_image = render_graph.allocate_image("Output image", &image_desc);
+        let color_component = render_graph
+            .allocate_image("Color component", &image_desc)
+            .unwrap();
+        let position_component = render_graph
+            .allocate_image("Position component", &image_desc)
+            .unwrap();
+        let tangent_component = render_graph
+            .allocate_image("Tangent component", &image_desc)
+            .unwrap();
+        let normal_component = render_graph
+            .allocate_image("Normal component", &image_desc)
+            .unwrap();
+        let output_image = render_graph
+            .allocate_image("Output image", &image_desc)
+            .unwrap();
 
         let mut gbuffer = render_graph.begin_render_pass("gbuffer");
         gbuffer.write(color_component);
@@ -280,12 +330,24 @@ mod test {
             samples: 1,
         };
 
-        let color_component = render_graph.allocate_image("Color component", &image_desc);
-        let position_component = render_graph.allocate_image("Position component", &image_desc);
-        let tangent_component = render_graph.allocate_image("Tangent component", &image_desc);
-        let normal_component = render_graph.allocate_image("Normal component", &image_desc);
-        let output_image = render_graph.allocate_image("Output image", &image_desc);
-        let unused = render_graph.allocate_image("Unused resource", &image_desc);
+        let color_component = render_graph
+            .allocate_image("Color component", &image_desc)
+            .unwrap();
+        let position_component = render_graph
+            .allocate_image("Position component", &image_desc)
+            .unwrap();
+        let tangent_component = render_graph
+            .allocate_image("Tangent component", &image_desc)
+            .unwrap();
+        let normal_component = render_graph
+            .allocate_image("Normal component", &image_desc)
+            .unwrap();
+        let output_image = render_graph
+            .allocate_image("Output image", &image_desc)
+            .unwrap();
+        let unused = render_graph
+            .allocate_image("Unused resource", &image_desc)
+            .unwrap();
 
         let mut gbuffer = render_graph.begin_render_pass("gbuffer");
         gbuffer.write(color_component);
