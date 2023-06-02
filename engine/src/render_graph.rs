@@ -4,7 +4,7 @@
 */
 
 use std::{
-    collections::{hash_map::DefaultHasher, HashMap},
+    collections::{hash_map::DefaultHasher, HashMap, HashSet},
     hash::{Hash, Hasher},
 };
 
@@ -42,16 +42,14 @@ pub enum AllocationType {
 }
 
 #[derive(Hash)]
-pub struct AllocationInfo {
-    id: ResourceId,
+pub struct ResourceInfo {
     ty: AllocationType,
-    persistent: bool,
 }
 
-pub struct RenderGraph<'g> {
+pub struct RenderGraph {
     passes: Vec<RenderPass>,
-    allocations: Vec<AllocationInfo>,
-    callbacks: HashMap<u64, Box<dyn Fn(&Gpu, &mut CommandBuffer) + 'g>>,
+    allocations: HashMap<ResourceId, ResourceInfo>,
+    persistent_resources: HashSet<ResourceId>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -59,7 +57,7 @@ pub enum CompileError {}
 
 pub type GraphResult<T> = Result<T, CompileError>;
 
-#[derive(Default, Hash)]
+#[derive(Default, Hash, Clone)]
 pub struct RenderPass {
     label: String,
     writes: Vec<ResourceId>,
@@ -73,6 +71,12 @@ impl RenderPass {
     pub fn read(&mut self, handle: ResourceId) {
         self.reads.push(handle);
     }
+
+    fn id(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
 }
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -82,23 +86,37 @@ pub struct RenderPassHandle {
 
 impl RenderPassHandle {}
 
-impl<'g> RenderGraph<'g> {
+#[derive(Default)]
+pub struct CompiledRenderGraph<'g> {
+    passes: Vec<RenderPass>,
+    callbacks: HashMap<u64, Box<dyn Fn(&Gpu, &mut CommandBuffer) + 'g>>,
+}
+impl<'g> CompiledRenderGraph<'g> {
+    pub fn register_callback<F: Fn(&Gpu, &mut CommandBuffer) + 'g>(
+        &mut self,
+        handle: &RenderPassHandle,
+        callback: F,
+    ) {
+        self.callbacks.insert(handle.id, Box::new(callback));
+    }
+    pub fn exec<G: RenderGraphRunner>(&self, gpu: &G) {}
+}
+
+impl RenderGraph {
     pub fn new() -> Self {
         Self {
             passes: vec![],
-            callbacks: HashMap::default(),
-            allocations: vec![],
+            allocations: HashMap::default(),
+            persistent_resources: HashSet::default(),
         }
     }
 
     pub fn allocate_image(&mut self, label: &str, description: &ImageDescription) -> ResourceId {
         let id = ResourceId::make(label);
-        let allocation = AllocationInfo {
-            id: id.clone(),
+        let allocation = ResourceInfo {
             ty: AllocationType::Image(description.clone()),
-            persistent: false,
         };
-        self.allocations.push(allocation);
+        self.allocations.insert(id, allocation);
         id
     }
 
@@ -118,27 +136,36 @@ impl<'g> RenderGraph<'g> {
         RenderPassHandle { id }
     }
 
-    pub fn register_callback<F: Fn(&Gpu, &mut CommandBuffer) + 'g>(
-        &mut self,
-        handle: &RenderPassHandle,
-        callback: F,
-    ) {
-        self.callbacks.insert(handle.id, Box::new(callback));
-    }
-
     pub fn persist_resource(&mut self, id: &ResourceId) {
-        for allocation in &mut self.allocations {
-            if id == &allocation.id {
-                allocation.persistent = true;
+        self.persistent_resources.insert(*id);
+    }
+    pub fn compile(&mut self) -> GraphResult<CompiledRenderGraph> {
+        let mut compiled = CompiledRenderGraph::default();
+
+        let mut current_reads: Vec<_> = self
+            .persistent_resources
+            .iter()
+            .map(|r| r.clone())
+            .collect();
+        while !current_reads.is_empty() {
+            let mut remove = None;
+
+            for (index, pass) in self.passes.iter().enumerate().rev() {
+                for read in &current_reads {
+                    if pass.writes.contains(read) {
+                        compiled.passes.push(pass.clone());
+                        remove = Some(index);
+                        current_reads = pass.reads.clone();
+                        break;
+                    }
+                }
+            }
+            if let Some(index) = remove {
+                self.passes.remove(index);
             }
         }
-    }
 
-    pub fn compile(&mut self) -> GraphResult<()> {
-        todo!()
-    }
-    pub fn exec<G: RenderGraphRunner>(&self, gpu: &G) {
-        todo!()
+        Ok(compiled)
     }
 }
 
@@ -177,12 +204,12 @@ mod test {
         gbuffer.write(normal_component);
         let gbuffer = render_graph.commit_render_pass(gbuffer);
 
-        render_graph.compile().unwrap();
+        let mut render_graph = render_graph.compile().unwrap();
         render_graph.register_callback(&gbuffer, |gpu, render_pass| {
             // for each primitive draw in render_pass
         });
         render_graph.exec(&gpu);
-        assert_eq!(gpu.num_passes_survided, 0);
+        assert_eq!(render_graph.passes.len(), 0);
     }
 
     #[test]
@@ -207,17 +234,17 @@ mod test {
         gbuffer.write(position_component);
         gbuffer.write(tangent_component);
         gbuffer.write(normal_component);
-        let gbuffer = render_graph.commit_render_pass(gbuffer);
-        render_graph.register_callback(&gbuffer, |gpu, render_pass| {
-            // for each primitive draw in render_pass
-        });
 
+        let gbuffer = render_graph.commit_render_pass(gbuffer);
         // We need the color component: this will let the 'gbuffer' render pass live
         render_graph.persist_resource(&color_component);
 
-        render_graph.compile().unwrap();
+        let mut render_graph = render_graph.compile().unwrap();
+        render_graph.register_callback(&gbuffer, |gpu, render_pass| {
+            // for each primitive draw in render_pass
+        });
         render_graph.exec(&gpu);
-        assert_eq!(gpu.num_passes_survided, 1);
+        assert_eq!(render_graph.passes.len(), 1);
     }
 
     #[test]
@@ -237,6 +264,7 @@ mod test {
         let tangent_component = render_graph.allocate_image("Tangent component", &image_desc);
         let normal_component = render_graph.allocate_image("Normal component", &image_desc);
         let output_image = render_graph.allocate_image("Output image", &image_desc);
+        let unused = render_graph.allocate_image("Output image", &image_desc);
 
         let mut gbuffer = render_graph.begin_render_pass("gbuffer");
         gbuffer.write(color_component);
@@ -253,6 +281,18 @@ mod test {
         compose_gbuffer.write(output_image);
         let compose_gbuffer = render_graph.commit_render_pass(compose_gbuffer);
 
+        // adding an empty pass that outputs to an unused buffer
+        let mut unused_pass = render_graph.begin_render_pass("compose_gbuffer");
+        unused_pass.read(color_component);
+        unused_pass.read(position_component);
+        unused_pass.read(tangent_component);
+        unused_pass.read(normal_component);
+        unused_pass.write(unused);
+        let unused_pass = render_graph.commit_render_pass(unused_pass);
+
+        render_graph.persist_resource(&output_image);
+
+        let mut render_graph = render_graph.compile().unwrap();
         render_graph.register_callback(&gbuffer, |gpu, render_pass| {
             // for each primitive draw in render_pass
         });
@@ -262,10 +302,8 @@ mod test {
         });
 
         // We need the color component: this will let the 'gbuffer' render pass live
-        render_graph.persist_resource(&output_image);
-
-        render_graph.compile().unwrap();
         render_graph.exec(&gpu);
-        assert_eq!(gpu.num_passes_survided, 2);
+
+        assert_eq!(render_graph.passes.len(), 2);
     }
 }
