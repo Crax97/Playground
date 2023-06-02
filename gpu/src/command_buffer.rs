@@ -1,13 +1,14 @@
 use core::panic;
-use std::ops::Deref;
+use std::{ffi::CString, ops::Deref};
 
 use ash::{
+    extensions::ext::DebugUtils,
     prelude::VkResult,
     vk::{
         self, ClearValue, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
-        CommandBufferUsageFlags, DependencyFlags, IndexType, Offset2D, PipelineBindPoint,
-        PipelineStageFlags, Rect2D, RenderPassBeginInfo, ShaderStageFlags, StructureType,
-        SubmitInfo, SubpassContents, Viewport,
+        CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags, IndexType, Offset2D,
+        PipelineBindPoint, PipelineStageFlags, Rect2D, RenderPassBeginInfo, ShaderStageFlags,
+        StructureType, SubmitInfo, SubpassContents, Viewport,
     },
 };
 
@@ -273,6 +274,99 @@ impl<'g> CommandBuffer<'g> {
 
     pub fn inner(&self) -> vk::CommandBuffer {
         self.inner_command_buffer.clone()
+    }
+}
+
+// Debug utilities
+
+pub struct ScopedDebugLabelInner {
+    debug_utils: DebugUtils,
+    command_buffer: vk::CommandBuffer,
+}
+
+impl ScopedDebugLabelInner {
+    fn new(
+        label: &str,
+        color: [f32; 4],
+        debug_utils: DebugUtils,
+        command_buffer: vk::CommandBuffer,
+    ) -> Self {
+        unsafe {
+            let c_label = CString::new(label).unwrap();
+            debug_utils.cmd_begin_debug_utils_label(
+                command_buffer,
+                &DebugUtilsLabelEXT {
+                    s_type: StructureType::DEBUG_UTILS_LABEL_EXT,
+                    p_next: std::ptr::null(),
+                    p_label_name: c_label.as_ptr(),
+                    color,
+                },
+            );
+        }
+        Self {
+            debug_utils,
+            command_buffer,
+        }
+    }
+    fn end(&self) {
+        unsafe {
+            self.debug_utils
+                .cmd_end_debug_utils_label(self.command_buffer);
+        }
+    }
+}
+
+pub struct ScopedDebugLabel {
+    inner: Option<ScopedDebugLabelInner>,
+}
+
+impl ScopedDebugLabel {
+    pub fn end(mut self) {
+        if let Some(label) = self.inner.take() {
+            label.end();
+        }
+    }
+}
+
+impl Drop for ScopedDebugLabel {
+    fn drop(&mut self) {
+        if let Some(label) = self.inner.take() {
+            label.end();
+        }
+    }
+}
+
+impl<'g> CommandBuffer<'g> {
+    pub fn begin_debug_region(&self, label: &str, color: [f32; 4]) -> ScopedDebugLabel {
+        ScopedDebugLabel {
+            inner: if let Some(debug_utils) = &self.gpu.state.debug_utilities {
+                Some(ScopedDebugLabelInner::new(
+                    label,
+                    color,
+                    debug_utils.clone(),
+                    self.inner(),
+                ))
+            } else {
+                None
+            },
+        }
+    }
+
+    pub fn insert_debug_label(&self, label: &str, color: [f32; 4]) {
+        if let Some(debug_utils) = &self.gpu.state.debug_utilities {
+            unsafe {
+                let c_label = CString::new(label).unwrap();
+                debug_utils.cmd_insert_debug_utils_label(
+                    self.inner(),
+                    &DebugUtilsLabelEXT {
+                        s_type: StructureType::DEBUG_UTILS_LABEL_EXT,
+                        p_next: std::ptr::null(),
+                        p_label_name: c_label.as_ptr(),
+                        color,
+                    },
+                );
+            }
+        }
     }
 }
 

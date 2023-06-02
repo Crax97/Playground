@@ -421,6 +421,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         let mut pipeline_hashmap: HashMap<ResourceHandle<GpuPipeline>, Vec<ScenePrimitive>> =
             HashMap::new();
 
+
         for primitive in scene.primitives.iter() {
             let material = self.resource_map.get(&primitive.material);
             pipeline_hashmap
@@ -430,7 +431,10 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         }
         let mut command_buffer =
             gpu::CommandBuffer::new(&super::app_state() .gpu, gpu::QueueType::Graphics).unwrap();
-            super::app_state()
+            
+        let label = command_buffer.begin_debug_region("Forward Renderer - Main pass", [1.0, 0.0, 0.0, 1.0]);
+        command_buffer.insert_debug_label("Forward Renderer - Begin camera buffer update", [0.3, 0.0, 0.0, 1.0]);
+        super::app_state()
             .gpu
             .write_buffer_data(
                 &self.camera_buffer,
@@ -440,6 +444,8 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 }],
             )
             .unwrap();
+        command_buffer.insert_debug_label("Forward Renderer - End Camera buffer update", [0.3, 0.0, 0.0, 1.0]);
+
         for (pipeline, primitives) in pipeline_hashmap.iter() {
             {
                 let pipeline = self.resource_map.get(pipeline);
@@ -472,7 +478,8 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                         extent: self.extents,
                     },
                 });
-                for primitive in primitives.iter() {
+                for (idx, primitive) in primitives.iter().enumerate() {
+                    let label = render_pass.begin_debug_region(&format!("Rendering primitive {idx}"), [0.0, 1.0, 0.0, 1.0]);
                     let mesh = self.resource_map.get(&primitive.mesh);
                     let material = self.resource_map.get(&primitive.material);
 
@@ -498,10 +505,11 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                     );
                     render_pass.push_constant(&pipeline.0, &primitive.transform, 0);
                     render_pass.draw_indexed(6, 1, 0, 0, 0);
+                    label.end()
                 }
             }
         }
-
+        label.end();
         command_buffer
             .submit(&gpu::CommandBufferSubmitInfo {
                 wait_semaphores: &[&super::app_state().swapchain.image_available_semaphore],
