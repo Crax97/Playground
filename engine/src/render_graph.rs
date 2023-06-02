@@ -55,6 +55,7 @@ pub struct RenderGraph {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CompileError {
     ResourceAlreadyDefined(ResourceId, String),
+    RenderPassAlreadyDefined(String),
 }
 
 pub type GraphResult<T> = Result<T, CompileError>;
@@ -138,12 +139,15 @@ impl RenderGraph {
         Ok(id)
     }
 
-    pub fn begin_render_pass(&self, label: &str) -> RenderPass {
-        RenderPass {
+    pub fn begin_render_pass(&self, label: &str) -> GraphResult<RenderPass> {
+        if self.render_pass_is_defined_already(&label) {
+            return Err(CompileError::RenderPassAlreadyDefined(label.to_owned()));
+        }
+        Ok(RenderPass {
             label: label.to_owned(),
             writes: vec![],
             reads: vec![],
-        }
+        })
     }
 
     pub fn commit_render_pass(&mut self, pass: RenderPass) -> RenderPassHandle {
@@ -205,6 +209,10 @@ impl RenderGraph {
 
         compiled.passes.reverse();
     }
+
+    fn render_pass_is_defined_already(&self, label: &str) -> bool {
+        self.passes.iter().find(|p| p.label == label).is_some()
+    }
 }
 
 #[cfg(test)]
@@ -245,7 +253,7 @@ mod test {
             .allocate_image("Normal component", &image_desc)
             .unwrap();
 
-        let mut gbuffer = render_graph.begin_render_pass("gbuffer");
+        let mut gbuffer = render_graph.begin_render_pass("gbuffer").unwrap();
         gbuffer.write(color_component);
         gbuffer.write(position_component);
         gbuffer.write(tangent_component);
@@ -282,6 +290,14 @@ mod test {
         });
         assert!(is_defined)
     }
+    #[test]
+    pub fn ensure_passes_are_unique() {
+        let mut render_graph = RenderGraph::new();
+        let p1 = render_graph.begin_render_pass("pass").unwrap();
+        render_graph.commit_render_pass(p1);
+        let p2 = render_graph.begin_render_pass("pass");
+        assert!(p2.is_err_and(|e| e == CompileError::RenderPassAlreadyDefined("pass".to_owned())));
+    }
 
     #[test]
     pub fn survive_1() {
@@ -311,14 +327,14 @@ mod test {
             .allocate_image("Output image", &image_desc)
             .unwrap();
 
-        let mut gbuffer = render_graph.begin_render_pass("gbuffer");
+        let mut gbuffer = render_graph.begin_render_pass("gbuffer").unwrap();
         gbuffer.write(color_component);
         gbuffer.write(position_component);
         gbuffer.write(tangent_component);
         gbuffer.write(normal_component);
         let gbuffer = render_graph.commit_render_pass(gbuffer);
 
-        let mut compose_gbuffer = render_graph.begin_render_pass("compose_gbuffer");
+        let mut compose_gbuffer = render_graph.begin_render_pass("compose_gbuffer").unwrap();
         compose_gbuffer.read(color_component);
         compose_gbuffer.read(position_component);
         compose_gbuffer.read(tangent_component);
@@ -372,14 +388,14 @@ mod test {
             .allocate_image("Unused resource", &image_desc)
             .unwrap();
 
-        let mut gbuffer = render_graph.begin_render_pass("gbuffer");
+        let mut gbuffer = render_graph.begin_render_pass("gbuffer").unwrap();
         gbuffer.write(color_component);
         gbuffer.write(position_component);
         gbuffer.write(tangent_component);
         gbuffer.write(normal_component);
         let gbuffer = render_graph.commit_render_pass(gbuffer);
 
-        let mut compose_gbuffer = render_graph.begin_render_pass("compose_gbuffer");
+        let mut compose_gbuffer = render_graph.begin_render_pass("compose_gbuffer").unwrap();
         compose_gbuffer.read(color_component);
         compose_gbuffer.read(position_component);
         compose_gbuffer.read(tangent_component);
@@ -388,7 +404,7 @@ mod test {
         let compose_gbuffer = render_graph.commit_render_pass(compose_gbuffer);
 
         // adding an empty pass that outputs to an unused buffer
-        let mut unused_pass = render_graph.begin_render_pass("unused");
+        let mut unused_pass = render_graph.begin_render_pass("unused").unwrap();
         unused_pass.read(color_component);
         unused_pass.read(position_component);
         unused_pass.read(tangent_component);
@@ -439,17 +455,17 @@ mod test {
         let r4 = alloc("r4", &mut render_graph);
         let rb = alloc("rb", &mut render_graph);
 
-        let mut p1 = render_graph.begin_render_pass("p1");
+        let mut p1 = render_graph.begin_render_pass("p1").unwrap();
         p1.writes(&[r1, r2, r3, r4]);
         render_graph.commit_render_pass(p1);
 
-        let mut p2 = render_graph.begin_render_pass("p2");
+        let mut p2 = render_graph.begin_render_pass("p2").unwrap();
         let r5 = alloc("r5", &mut render_graph);
         p2.reads(&[r1, r3]);
         p2.writes(&[r5]);
         render_graph.commit_render_pass(p2);
 
-        let mut p3 = render_graph.begin_render_pass("p3");
+        let mut p3 = render_graph.begin_render_pass("p3").unwrap();
         let r6 = alloc("r6", &mut render_graph);
         let r7 = alloc("r7", &mut render_graph);
         let r8 = alloc("r8", &mut render_graph);
@@ -458,18 +474,18 @@ mod test {
         render_graph.commit_render_pass(p3);
 
         // pruned
-        let mut u1 = render_graph.begin_render_pass("u1");
+        let mut u1 = render_graph.begin_render_pass("u1").unwrap();
         let ru1 = alloc("ru1", &mut render_graph);
         let ru2 = alloc("ru2", &mut render_graph);
         u1.reads(&[r7, r8]);
         u1.writes(&[ru1, ru2]);
 
-        let mut p4 = render_graph.begin_render_pass("p4");
+        let mut p4 = render_graph.begin_render_pass("p4").unwrap();
         p4.reads(&[r7, r8]);
         p4.writes(&[r5, r6]);
         render_graph.commit_render_pass(p4);
 
-        let mut pb = render_graph.begin_render_pass("pb");
+        let mut pb = render_graph.begin_render_pass("pb").unwrap();
         pb.reads(&[r5, r6]);
         pb.writes(&[rb]);
         render_graph.commit_render_pass(pb);
