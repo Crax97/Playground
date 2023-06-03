@@ -56,11 +56,12 @@ pub struct RenderGraph {
 pub enum CompileError {
     ResourceAlreadyDefined(ResourceId, String),
     RenderPassAlreadyDefined(String),
+    CyclicGraph,
 }
 
 pub type GraphResult<T> = Result<T, CompileError>;
 
-#[derive(Default, Hash, Clone)]
+#[derive(Default, Debug, Hash, Clone)]
 pub struct RenderPass {
     label: String,
     writes: Vec<ResourceId>,
@@ -166,6 +167,7 @@ impl RenderGraph {
         let mut compiled = CompiledRenderGraph::default();
 
         self.prune_passes(&mut compiled);
+        self.ensure_graph_acyclic(&compiled)?;
 
         Ok(compiled)
     }
@@ -212,6 +214,19 @@ impl RenderGraph {
 
     fn render_pass_is_defined_already(&self, label: &str) -> bool {
         self.passes.iter().find(|p| p.label == label).is_some()
+    }
+
+    fn ensure_graph_acyclic(&self, compiled: &CompiledRenderGraph) -> GraphResult<()> {
+        let mut written_resources: HashSet<ResourceId> = Default::default();
+        for pass in &compiled.passes {
+            for res in &pass.writes {
+                if written_resources.contains(res) {
+                    return Err(CompileError::CyclicGraph);
+                }
+                written_resources.insert(*res);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -445,6 +460,62 @@ mod test {
     }
 
     #[test]
+    // A cycle happens when a render pass writes to a resource that
+    // has been written in an early pass. To avoid so, we should introduce something
+    // like resource aliasing
+    /// TODO: Study resource aliasing
+    pub fn detect_cycles() {
+        {
+            let mut render_graph = RenderGraph::new();
+
+            let r1 = alloc("r1", &mut render_graph);
+            let r2 = alloc("r2", &mut render_graph);
+            let r3 = alloc("r3", &mut render_graph);
+
+            let mut p1 = render_graph.begin_render_pass("p1").unwrap();
+            p1.writes(&[r1, r2]);
+            render_graph.commit_render_pass(p1);
+
+            let mut p2 = render_graph.begin_render_pass("p2").unwrap();
+            p2.reads(&[r1, r2]);
+            p2.writes(&[r3]);
+            render_graph.commit_render_pass(p2);
+
+            let mut p3 = render_graph.begin_render_pass("p3").unwrap();
+            p3.reads(&[r3]);
+            p3.writes(&[r1, r2]);
+            render_graph.commit_render_pass(p3);
+
+            render_graph.persist_resource(&r3);
+
+            let error = render_graph.compile();
+
+            assert!(error.is_err_and(|e| e == CompileError::CyclicGraph));
+        }
+        {
+            let mut render_graph = RenderGraph::new();
+
+            let r1 = alloc("r1", &mut render_graph);
+            let r2 = alloc("r2", &mut render_graph);
+
+            let mut p1 = render_graph.begin_render_pass("p1").unwrap();
+            p1.writes(&[r1, r2]);
+            render_graph.commit_render_pass(p1);
+
+            let mut p2 = render_graph.begin_render_pass("p2").unwrap();
+            p2.reads(&[r1, r2]);
+            p2.writes(&[r1]);
+            render_graph.commit_render_pass(p2);
+
+            render_graph.persist_resource(&r1);
+
+            let error = render_graph.compile();
+
+            assert!(error.is_err_and(|e| e == CompileError::CyclicGraph));
+        }
+    }
+
+    #[test]
     pub fn big_graph() {
         let gpu = GpuDebugger::default();
         let mut render_graph = RenderGraph::new();
@@ -481,30 +552,34 @@ mod test {
         u1.writes(&[ru1, ru2]);
 
         let mut p4 = render_graph.begin_render_pass("p4").unwrap();
+        let r9 = alloc("r9", &mut render_graph);
+        let r10 = alloc("r10", &mut render_graph);
         p4.reads(&[r7, r8]);
-        p4.writes(&[r5, r6]);
+        p4.writes(&[r9, r10]);
         render_graph.commit_render_pass(p4);
 
         let mut pb = render_graph.begin_render_pass("pb").unwrap();
-        pb.reads(&[r5, r6]);
+        pb.reads(&[r9, r10]);
         pb.writes(&[rb]);
         render_graph.commit_render_pass(pb);
 
         render_graph.persist_resource(&rb);
 
         let render_graph = render_graph.compile().unwrap();
-        assert_eq!(render_graph.passes.len(), 5);
+        for pass in &render_graph.passes {
+            println!("{:?}", pass);
+        }
+        assert_eq!(render_graph.passes.len(), 4);
         assert_eq!(render_graph.passes[0].label, "p1");
-        assert_eq!(render_graph.passes[1].label, "p2");
-        assert_eq!(render_graph.passes[2].label, "p3");
-        assert_eq!(render_graph.passes[3].label, "p4");
-        assert_eq!(render_graph.passes[4].label, "pb");
+        assert_eq!(render_graph.passes[1].label, "p3");
+        assert_eq!(render_graph.passes[2].label, "p4");
+        assert_eq!(render_graph.passes[3].label, "pb");
         assert!(render_graph
             .passes
             .iter()
             .find(|p| p.label == "u1")
             .is_none());
-        assert_eq!(render_graph.resources_used.len(), 9);
+        assert_eq!(render_graph.resources_used.len(), 7);
         assert!(render_graph
             .resources_used
             .iter()

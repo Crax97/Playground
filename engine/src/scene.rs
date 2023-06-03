@@ -28,7 +28,7 @@ use crate::{
     camera::Camera,
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
-    mesh::Mesh,
+    mesh::Mesh, RenderGraph,
 };
 
 use ash::vk::{
