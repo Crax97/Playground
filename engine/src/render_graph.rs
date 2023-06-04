@@ -9,10 +9,11 @@ use std::{
 };
 
 use gpu::{CommandBuffer, Gpu, ImageFormat};
+use resource_map::Resource;
 
-pub trait RenderGraphRunner {}
-
-impl RenderGraphRunner for Gpu {}
+pub trait RenderGraphRunner {
+    fn run_graph(&mut self, graph: &CompiledRenderGraph);
+}
 
 #[derive(Hash, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct ResourceId {
@@ -61,25 +62,39 @@ pub enum CompileError {
 
 pub type GraphResult<T> = Result<T, CompileError>;
 
-#[derive(Default, Debug, Hash, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct RenderPass {
     label: String,
-    writes: Vec<ResourceId>,
-    reads: Vec<ResourceId>,
+    writes: HashSet<ResourceId>,
+    reads: HashSet<ResourceId>,
+}
+
+impl Hash for RenderPass {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.label.hash(state);
+        for write in &self.writes {
+            write.hash(state);
+        }
+        for read in &self.reads {
+            read.hash(state);
+        }
+    }
 }
 
 impl RenderPass {
     pub fn write(&mut self, handle: ResourceId) {
-        self.writes.push(handle);
+        self.writes.insert(handle);
     }
     pub fn writes(&mut self, handles: &[ResourceId]) {
-        self.writes.append(&mut Vec::from(handles))
+        let handles: HashSet<ResourceId> = HashSet::from_iter(handles.iter().cloned());
+        self.writes.extend(&handles);
     }
     pub fn read(&mut self, handle: ResourceId) {
-        self.reads.push(handle);
+        self.reads.insert(handle);
     }
     pub fn reads(&mut self, handles: &[ResourceId]) {
-        self.reads.append(&mut Vec::from(handles))
+        let handles: HashSet<ResourceId> = HashSet::from_iter(handles.iter().cloned());
+        self.reads.extend(&handles)
     }
 
     fn id(&self) -> u64 {
@@ -96,11 +111,21 @@ pub struct RenderPassHandle {
 
 impl RenderPassHandle {}
 
+#[derive(Clone, Debug)]
+pub enum GraphOperation {
+    Allocate(HashSet<ResourceId>),
+    Destroy(HashSet<ResourceId>),
+    TransitionRead(HashSet<ResourceId>),
+    TransitionWrite(HashSet<ResourceId>),
+    ExecuteRenderPass(usize),
+}
+
 #[derive(Default)]
 pub struct CompiledRenderGraph<'g> {
     passes: Vec<RenderPass>,
     resources_used: HashMap<ResourceId, ResourceInfo>,
     callbacks: HashMap<u64, Box<dyn Fn(&Gpu, &mut CommandBuffer) + 'g>>,
+    graph_operations: Vec<GraphOperation>,
 }
 impl<'g> CompiledRenderGraph<'g> {
     pub fn register_callback<F: Fn(&Gpu, &mut CommandBuffer) + 'g>(
@@ -110,7 +135,6 @@ impl<'g> CompiledRenderGraph<'g> {
     ) {
         self.callbacks.insert(handle.id, Box::new(callback));
     }
-    pub fn exec<G: RenderGraphRunner>(&self, gpu: &G) {}
 }
 
 impl RenderGraph {
@@ -146,8 +170,8 @@ impl RenderGraph {
         }
         Ok(RenderPass {
             label: label.to_owned(),
-            writes: vec![],
-            reads: vec![],
+            writes: Default::default(),
+            reads: Default::default(),
         })
     }
 
@@ -168,12 +192,15 @@ impl RenderGraph {
 
         self.prune_passes(&mut compiled);
         self.ensure_graph_acyclic(&compiled)?;
+        let merge_candidates = self.find_merge_candidates(&mut compiled);
+
+        self.find_optimal_execution_order(&mut compiled, merge_candidates);
 
         Ok(compiled)
     }
 
     fn prune_passes(&mut self, compiled: &mut CompiledRenderGraph) {
-        let mut working_set: Vec<_> = self
+        let mut working_set: HashSet<_> = self
             .persistent_resources
             .iter()
             .map(|r| r.clone())
@@ -189,7 +216,7 @@ impl RenderGraph {
                         compiled.passes.push(pass.clone());
                         remove = Some(index);
                         working_set = pass.reads.clone();
-                        used_resources.append(&mut pass.reads.clone());
+                        used_resources.extend(&pass.reads.clone());
                         found = true;
                         break;
                     }
@@ -228,24 +255,108 @@ impl RenderGraph {
         }
         Ok(())
     }
+
+    fn find_merge_candidates(&self, compiled: &mut CompiledRenderGraph) -> Vec<Vec<usize>> {
+        let mut passes: Vec<_> = compiled.passes.iter().enumerate().collect();
+
+        let mut merge_candidates = vec![];
+
+        while let Some((pass_i, pass)) = passes.pop() {
+            let matching_passes: Vec<_> = passes
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, p))| p.reads.intersection(&pass.reads).next().is_some())
+                .map(|(i, _)| i)
+                .collect();
+
+            if matching_passes.len() > 0 {
+                let mut merge_candidate = vec![pass_i];
+                for passes_idx in matching_passes {
+                    let (pass_idx, _) = passes.remove(passes_idx);
+                    merge_candidate.push(pass_idx);
+                }
+
+                merge_candidates.push(merge_candidate);
+            }
+        }
+
+        merge_candidates
+    }
+
+    fn find_optimal_execution_order(
+        &self,
+        compiled: &mut CompiledRenderGraph,
+        _merge_candidates: Vec<Vec<usize>>,
+    ) {
+        // TODO: Upgrade to merge candidates
+        let mut allocated_resources: HashSet<ResourceId> = Default::default();
+        for (i, pass) in compiled.passes.iter().enumerate() {
+            let mut allocate_now: HashSet<ResourceId> = Default::default();
+            for writes in &pass.writes {
+                if !allocated_resources.contains(writes) {
+                    allocated_resources.insert(*writes);
+                    allocate_now.insert(*writes);
+                }
+            }
+
+            if allocate_now.len() > 0 {
+                compiled
+                    .graph_operations
+                    .push(GraphOperation::Allocate(allocate_now));
+            }
+            compiled
+                .graph_operations
+                .push(GraphOperation::TransitionRead(pass.reads.clone()));
+            compiled
+                .graph_operations
+                .push(GraphOperation::TransitionWrite(pass.writes.clone()));
+            compiled
+                .graph_operations
+                .push(GraphOperation::ExecuteRenderPass(i));
+        }
+        compiled
+            .graph_operations
+            .push(GraphOperation::Destroy(allocated_resources));
+    }
 }
 
+#[derive(Default)]
+pub struct RenderGraphPrinter {}
+
+impl RenderGraphRunner for RenderGraphPrinter {
+    fn run_graph(&mut self, graph: &CompiledRenderGraph) {
+        println!(
+            "Graph contains {} render passes, dumping pass info",
+            graph.passes.len()
+        );
+        for pass in &graph.passes {
+            println!(
+                "\tName: {}, reads {}, writes {}",
+                pass.label,
+                pass.reads
+                    .iter()
+                    .fold(String::new(), |s, p| s + &format!("{p:?},")),
+                pass.writes
+                    .iter()
+                    .fold(String::new(), |s, p| s + &format!("{p:?},")),
+            );
+        }
+        println!("Suggested execution order");
+
+        for op in &graph.graph_operations {
+            println!("\t{:?}", op);
+        }
+    }
+}
 #[cfg(test)]
 mod test {
     use crate::{CompileError, ResourceId};
 
-    use super::{ImageDescription, RenderGraph, RenderGraphRunner};
-
-    #[derive(Default)]
-    pub struct GpuDebugger {
-        num_passes_survided: u32,
-    }
-
-    impl RenderGraphRunner for GpuDebugger {}
+    use super::{ImageDescription, RenderGraph, RenderGraphPrinter, RenderGraphRunner};
 
     #[test]
     pub fn prune_empty() {
-        let gpu = GpuDebugger::default();
+        let gpu = RenderGraphPrinter::default();
         let mut render_graph = RenderGraph::new();
 
         let image_desc = ImageDescription {
@@ -279,7 +390,6 @@ mod test {
         render_graph.register_callback(&gbuffer, |gpu, render_pass| {
             // for each primitive draw in render_pass
         });
-        render_graph.exec(&gpu);
         assert_eq!(render_graph.passes.len(), 0);
     }
 
@@ -316,7 +426,7 @@ mod test {
 
     #[test]
     pub fn survive_1() {
-        let gpu = GpuDebugger::default();
+        let gpu = RenderGraphPrinter::default();
         let mut render_graph = RenderGraph::new();
 
         let image_desc = ImageDescription {
@@ -366,7 +476,6 @@ mod test {
         render_graph.register_callback(&gbuffer, |gpu, render_pass| {
             // for each primitive draw in render_pass
         });
-        render_graph.exec(&gpu);
         assert_eq!(render_graph.passes.len(), 2);
         assert_eq!(render_graph.passes[0].label, "gbuffer");
         assert_eq!(render_graph.passes[1].label, "compose_gbuffer");
@@ -374,7 +483,7 @@ mod test {
 
     #[test]
     pub fn survive_2() {
-        let gpu = GpuDebugger::default();
+        let gpu = RenderGraphPrinter::default();
         let mut render_graph = RenderGraph::new();
 
         let image_desc = ImageDescription {
@@ -441,7 +550,6 @@ mod test {
         });
 
         // We need the color component: this will let the 'gbuffer' render pass live
-        render_graph.exec(&gpu);
 
         assert_eq!(render_graph.passes.len(), 2);
         assert_eq!(render_graph.passes[0].label, "gbuffer");
@@ -517,7 +625,7 @@ mod test {
 
     #[test]
     pub fn big_graph() {
-        let gpu = GpuDebugger::default();
+        let mut gpu = RenderGraphPrinter::default();
         let mut render_graph = RenderGraph::new();
 
         let r1 = alloc("r1", &mut render_graph);
@@ -590,5 +698,7 @@ mod test {
             .iter()
             .find(|(id, _)| id == &&ru2)
             .is_none());
+
+        gpu.run_graph(&render_graph);
     }
 }
