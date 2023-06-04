@@ -42,8 +42,9 @@ pub enum AllocationType {
     Image(ImageDescription),
 }
 
-#[derive(Hash, Clone, Copy)]
+#[derive(Hash, Clone)]
 pub struct ResourceInfo {
+    label: String,
     ty: AllocationType,
 }
 
@@ -159,6 +160,7 @@ impl RenderGraph {
 
         let allocation = ResourceInfo {
             ty: AllocationType::Image(description.clone()),
+            label: label.to_owned(),
         };
         self.allocations.insert(id, allocation);
         Ok(id)
@@ -206,6 +208,7 @@ impl RenderGraph {
             .map(|r| r.clone())
             .collect();
         let mut used_resources = working_set.clone();
+        let mut write_resources: HashSet<ResourceId> = HashSet::default();
         while !working_set.is_empty() {
             let mut remove = None;
 
@@ -217,6 +220,7 @@ impl RenderGraph {
                         remove = Some(index);
                         working_set = pass.reads.clone();
                         used_resources.extend(&pass.reads.clone());
+                        write_resources.extend(&pass.writes.clone());
                         found = true;
                         break;
                     }
@@ -233,7 +237,12 @@ impl RenderGraph {
         for used_resource in used_resources {
             compiled
                 .resources_used
-                .insert(used_resource, self.allocations[&used_resource]);
+                .insert(used_resource, self.allocations[&used_resource].clone());
+        }
+        for used_resource in write_resources {
+            compiled
+                .resources_used
+                .insert(used_resource, self.allocations[&used_resource].clone());
         }
 
         compiled.passes.reverse();
@@ -331,14 +340,16 @@ impl RenderGraphRunner for RenderGraphPrinter {
         );
         for pass in &graph.passes {
             println!(
-                "\tName: {}, reads {}, writes {}",
+                "\tName: {}, reads '{}', writes '{}'",
                 pass.label,
-                pass.reads
-                    .iter()
-                    .fold(String::new(), |s, p| s + &format!("{p:?},")),
-                pass.writes
-                    .iter()
-                    .fold(String::new(), |s, p| s + &format!("{p:?},")),
+                pass.reads.iter().fold(String::new(), |s, r| s + &format!(
+                    "{},",
+                    graph.resources_used[r].label
+                )),
+                pass.writes.iter().fold(String::new(), |s, r| s + &format!(
+                    "{},",
+                    graph.resources_used[r].label
+                )),
             );
         }
         println!("Suggested execution order");
@@ -687,7 +698,7 @@ mod test {
             .iter()
             .find(|p| p.label == "u1")
             .is_none());
-        assert_eq!(render_graph.resources_used.len(), 7);
+        assert_eq!(render_graph.resources_used.len(), 10);
         assert!(render_graph
             .resources_used
             .iter()
