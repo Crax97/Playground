@@ -13,10 +13,10 @@ use ash::{
     prelude::VkResult,
     vk::{
         self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor,
-        BlendOp, ClearValue, ColorComponentFlags, ComponentMapping, DependencyFlags, Extent2D,
-        ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType,
-        Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D, SampleCountFlags,
-        SubpassDependency, SubpassDescriptionFlags,
+        BlendOp, ClearDepthStencilValue, ClearValue, ColorComponentFlags, ComponentMapping,
+        DependencyFlags, Extent2D, ImageAspectFlags, ImageLayout, ImageSubresourceRange,
+        ImageUsageFlags, ImageViewType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D,
+        SampleCountFlags, SubpassDependency, SubpassDescriptionFlags,
     },
 };
 use gpu::{
@@ -874,12 +874,34 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                         resource_allocator.get_renderpass_and_framebuffer(self.gpu, graph, *rp)?;
                     let info = graph.pass_infos.get(*rp).unwrap();
                     let cb = graph.callbacks.get(&info.id());
-                    let clear_color_values = &[ClearValue::default()];
+                    let clear_color_values: Vec<_> = info
+                        .writes
+                        .iter()
+                        .map(|rd| {
+                            let res_info = &graph.resources_used[rd];
+                            match res_info.ty {
+                                AllocationType::Image(desc)
+                                | AllocationType::ExternalImage(desc) => match desc.format {
+                                    ImageFormat::Rgba8 => ClearValue {
+                                        color: vk::ClearColorValue {
+                                            float32: [0.0, 0.0, 0.0, 0.0],
+                                        },
+                                    },
+                                    ImageFormat::Depth => ClearValue {
+                                        depth_stencil: ClearDepthStencilValue {
+                                            depth: 1.0,
+                                            stencil: 255,
+                                        },
+                                    },
+                                },
+                            }
+                        })
+                        .collect();
                     let render_pass_command =
                         command_buffer.begin_render_pass(&BeginRenderPassInfo {
                             framebuffer,
                             render_pass: pass,
-                            clear_color_values,
+                            clear_color_values: &clear_color_values,
                             render_area: Rect2D {
                                 offset: Offset2D::default(),
                                 extent: info.extents,
