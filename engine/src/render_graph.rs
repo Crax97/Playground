@@ -833,7 +833,13 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
     ) -> anyhow::Result<()> {
         let mut command_buffer = CommandBuffer::new(self.gpu, gpu::QueueType::Graphics)?;
 
-        let label = command_buffer.begin_debug_region("Rendering begin", [0.0, 0.3, 0.0, 1.0]);
+        let label = command_buffer.begin_debug_region(
+            &format!(
+                "Rendering frame {}",
+                crate::app_state().time().frames_since_start()
+            ),
+            [0.0, 0.3, 0.0, 1.0],
+        );
         for op in &graph.graph_operations {
             match op {
                 GraphOperation::TransitionRead(resources) => {

@@ -18,13 +18,14 @@ impl AppState {
     }
 
     pub fn begin_frame(&mut self) -> VkResult<()> {
-        self.time.update();
+        self.time.begin_frame();
         Ok(())
     }
 
     pub fn end_frame(&mut self) -> VkResult<()> {
         let _ = self.swapchain.present();
         self.gpu.reset_state()?;
+        self.time.end_frame();
         Ok(())
     }
 
