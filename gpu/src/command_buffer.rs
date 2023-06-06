@@ -225,11 +225,10 @@ impl<'g> CommandBuffer<'g> {
     }
 
     pub fn submit(mut self, submit_info: &CommandBufferSubmitInfo) -> VkResult<()> {
+        self.has_been_submitted = true;
         if !self.has_recorded_anything {
             return Ok(());
         }
-
-        self.has_been_submitted = true;
 
         let device = self.gpu.vk_logical_device();
         unsafe {

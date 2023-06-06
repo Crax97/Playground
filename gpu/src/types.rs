@@ -51,6 +51,12 @@ impl From<&vk::Format> for ImageFormat {
     }
 }
 
+impl From<vk::Format> for ImageFormat {
+    fn from(value: vk::Format) -> Self {
+        From::<&vk::Format>::from(&value)
+    }
+}
+
 macro_rules! impl_raii_wrapper_hash {
     ($name:ident) => {
         impl std::hash::Hash for $name {

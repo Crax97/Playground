@@ -434,7 +434,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         let extents = swapchain.extents();
         let next_image = swapchain.acquire_next_image()?;
         let mut render_graph = RenderGraph::new();
-        let depth_buffer = render_graph.allocate_image(
+        let depth_buffer = render_graph.use_image(
             "depth-buffer",
             &crate::ImageDescription {
                 width: extents.width,
@@ -443,7 +443,16 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 samples: 1,
             },
         )?;
-        let color_buffer = render_graph.inject_external_image("color-buffer", &next_image);
+        let color_buffer = render_graph.use_image(
+            "color-buffer",
+            &crate::ImageDescription {
+                width: extents.width,
+                height: extents.height,
+                format: swapchain.present_format().into(),
+                samples: 1,
+            },
+        )?;
+        render_graph.persist_resource(&color_buffer);
         let mut forward_pass = render_graph.begin_render_pass("ForwardPass")?;
         forward_pass.writes(&[color_buffer, depth_buffer]);
         let forward_pass = render_graph.commit_render_pass(forward_pass);
@@ -505,6 +514,8 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 }
             }
         });
+
+        render_graph.register_end_callback(|gpu, ctx| {});
         let mut runner = GpuRunner { gpu, swapchain };
         runner.run_graph(&render_graph)?;
         Ok(())

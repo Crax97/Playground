@@ -174,10 +174,10 @@ impl Swapchain {
 
     pub fn present(&self) -> VkResult<bool> {
         unsafe {
-            self.state
-                .logical_device
-                .wait_for_fences(&[self.in_flight_fence.inner], true, u64::MAX)
-                .unwrap();
+            // self.state
+            //     .logical_device
+            //     .wait_for_fences(&[self.in_flight_fence.inner], true, u64::MAX)
+            //     .unwrap();
             self.state
                 .logical_device
                 .reset_fences(&[self.in_flight_fence.inner])

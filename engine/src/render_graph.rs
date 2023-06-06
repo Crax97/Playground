@@ -25,8 +25,6 @@ use gpu::{
     PipelineBarrierInfo, RenderPass, RenderPassAttachment, RenderPassCommand,
     RenderPassDescription, SubpassDescription, Swapchain, ToVk, TransitionInfo,
 };
-use resource_map::Resource;
-
 pub trait RenderGraphRunner {
     fn run_graph(&mut self, graph: &CompiledRenderGraph) -> VkResult<()>;
 }
@@ -56,6 +54,7 @@ pub struct ImageDescription {
 #[derive(Hash, Copy, Clone)]
 pub enum AllocationType {
     Image(ImageDescription),
+    ExternalImage(ImageDescription),
 }
 
 #[derive(Hash, Clone)]
@@ -150,6 +149,9 @@ pub struct RenderPassContext<'p, 'g> {
     pub render_pass_command: RenderPassCommand<'p, 'g>,
     pub framebuffer: &'p GpuFramebuffer,
 }
+pub struct EndContext<'p, 'g> {
+    pub command_buffer: &'p mut CommandBuffer<'g>,
+}
 
 #[derive(Default)]
 pub struct CompiledRenderGraph<'g> {
@@ -157,6 +159,7 @@ pub struct CompiledRenderGraph<'g> {
     resources_used: HashMap<ResourceId, ResourceInfo>,
     callbacks: HashMap<u64, Box<dyn Fn(&Gpu, &mut RenderPassContext) + 'g>>,
     graph_operations: Vec<GraphOperation>,
+    end_callback: Option<Box<dyn Fn(&Gpu, &mut EndContext) + 'g>>,
 }
 
 impl<'g> CompiledRenderGraph<'g> {
@@ -166,6 +169,9 @@ impl<'g> CompiledRenderGraph<'g> {
         callback: F,
     ) {
         self.callbacks.insert(handle.id, Box::new(callback));
+    }
+    pub fn register_end_callback<F: Fn(&Gpu, &mut EndContext) + 'g>(&mut self, callback: F) {
+        self.end_callback = Some(Box::new(callback));
     }
 }
 
@@ -178,22 +184,26 @@ impl RenderGraph {
         }
     }
 
-    pub fn allocate_image(
+    pub fn use_image(
         &mut self,
         label: &str,
         description: &ImageDescription,
     ) -> GraphResult<ResourceId> {
-        let id = ResourceId::make(label);
-
-        if self.allocations.contains_key(&id) {
-            return Err(CompileError::ResourceAlreadyDefined(id, label.to_owned()));
-        }
+        let id = self.create_unique_id(label)?;
 
         let allocation = ResourceInfo {
             ty: AllocationType::Image(description.clone()),
             label: label.to_owned(),
         };
         self.allocations.insert(id, allocation);
+        Ok(id)
+    }
+
+    fn create_unique_id(&mut self, label: &str) -> GraphResult<ResourceId> {
+        let id = ResourceId::make(label);
+        if self.allocations.contains_key(&id) {
+            return Err(CompileError::ResourceAlreadyDefined(id, label.to_owned()));
+        }
         Ok(id)
     }
 
@@ -358,14 +368,6 @@ impl RenderGraph {
             .graph_operations
             .push(GraphOperation::Destroy(allocated_resources));
     }
-
-    pub(crate) fn inject_external_image(
-        &self,
-        label: &str,
-        next_image: &GpuImageView,
-    ) -> ResourceId {
-        todo!()
-    }
 }
 
 pub struct GpuRunner<'a> {
@@ -401,30 +403,41 @@ impl<'a> GpuRunner<'a> {
             let writes: Vec<_> = pass_info
                 .writes
                 .iter()
-                .map(|id| {
+                .filter_map(|id| {
                     let resource_desc = graph.resources_used.get(id).unwrap();
-                    match resource_desc.ty {
-                        AllocationType::Image(image_desc) => RenderPassAttachment {
-                            format: image_desc.format.to_vk(),
-                            samples: SampleCountFlags::TYPE_1,
-                            load_op: AttachmentLoadOp::DONT_CARE,
-                            store_op: AttachmentStoreOp::STORE,
-                            stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                            stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                            initial_layout: ImageLayout::UNDEFINED,
-                            final_layout: ImageLayout::READ_ONLY_OPTIMAL,
-                            blend_state: BlendState {
-                                blend_enable: true,
-                                src_color_blend_factor: BlendFactor::ONE,
-                                dst_color_blend_factor: BlendFactor::ZERO,
-                                color_blend_op: BlendOp::ADD,
-                                src_alpha_blend_factor: BlendFactor::ONE,
-                                dst_alpha_blend_factor: BlendFactor::ZERO,
-                                alpha_blend_op: BlendOp::ADD,
-                                color_write_mask: ColorComponentFlags::RGBA,
-                            },
-                        },
+                    match &resource_desc.ty {
+                        AllocationType::Image(image_desc)
+                        | AllocationType::ExternalImage(image_desc) => {
+                            if image_desc.format == ImageFormat::Rgba8 {
+                                Some(image_desc)
+                            } else {
+                                None
+                            }
+                        }
                     }
+                })
+                .map(|image_desc| RenderPassAttachment {
+                    format: image_desc.format.to_vk(),
+                    samples: SampleCountFlags::TYPE_1,
+                    load_op: AttachmentLoadOp::DONT_CARE,
+                    store_op: AttachmentStoreOp::STORE,
+                    stencil_load_op: AttachmentLoadOp::DONT_CARE,
+                    stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                    initial_layout: ImageLayout::UNDEFINED,
+                    final_layout: match image_desc.format {
+                        ImageFormat::Rgba8 => ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                        ImageFormat::Depth => ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+                    },
+                    blend_state: BlendState {
+                        blend_enable: true,
+                        src_color_blend_factor: BlendFactor::ONE,
+                        dst_color_blend_factor: BlendFactor::ZERO,
+                        color_blend_op: BlendOp::ADD,
+                        src_alpha_blend_factor: BlendFactor::ONE,
+                        dst_alpha_blend_factor: BlendFactor::ZERO,
+                        alpha_blend_op: BlendOp::ADD,
+                        color_write_mask: ColorComponentFlags::RGBA,
+                    },
                 })
                 .collect();
 
@@ -442,7 +455,7 @@ impl<'a> GpuRunner<'a> {
                 .map(|id| graph.resources_used.get(id).unwrap())
                 .enumerate()
                 .filter_map(|(idx, info)| match info.ty {
-                    AllocationType::Image(info) => {
+                    AllocationType::Image(info) | AllocationType::ExternalImage(info) => {
                         if info.format == ImageFormat::Depth {
                             Some(idx)
                         } else {
@@ -464,7 +477,7 @@ impl<'a> GpuRunner<'a> {
                     input_attachments: &[],
                     color_attachments: &color_attachments,
                     resolve_attachments: &[],
-                    depth_stencil_attachment: &depth_attachments,
+                    depth_stencil_attachment: &[],
                     preserve_attachments: &[],
                 }],
                 dependencies: &[SubpassDependency {
@@ -525,6 +538,10 @@ impl<'a> GpuRunner<'a> {
                 let info = graph.resources_used.get(write).unwrap();
                 let format = match info.ty {
                     AllocationType::Image(img) => img.format.to_vk(),
+                    AllocationType::ExternalImage(_) => {
+                        // External Images bust be injectex externally
+                        continue;
+                    }
                 };
 
                 let image = resources.get(write).unwrap();
@@ -550,12 +567,12 @@ impl<'a> GpuRunner<'a> {
 
 struct ResourceState {
     resource: GpuImage,
-    current_layout: TransitionInfo,
 }
 
 impl<'a> RenderGraphRunner for GpuRunner<'a> {
     fn run_graph(&mut self, graph: &CompiledRenderGraph) -> VkResult<()> {
         let mut allocated_resources: HashMap<ResourceId, ResourceState> = HashMap::default();
+        let mut resource_states: HashMap<ResourceId, TransitionInfo> = HashMap::default();
 
         let passes = self.create_render_passes(graph)?;
         let views = self.create_image_views(&allocated_resources, graph)?;
@@ -568,15 +585,13 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                 GraphOperation::Allocate(resources) => {
                     for id in resources {
                         let image = self.allocate_resource(id, graph)?;
-                        allocated_resources.insert(
+                        allocated_resources.insert(*id, ResourceState { resource: image });
+                        resource_states.insert(
                             *id,
-                            ResourceState {
-                                resource: image,
-                                current_layout: TransitionInfo {
-                                    layout: ImageLayout::UNDEFINED,
-                                    access_mask: AccessFlags::empty(),
-                                    stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
-                                },
+                            TransitionInfo {
+                                layout: ImageLayout::UNDEFINED,
+                                access_mask: AccessFlags::empty(),
+                                stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
                             },
                         );
                     }
@@ -587,43 +602,65 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                     }
                 }
                 GraphOperation::TransitionRead(resources) => {
-                    for resource in resources {
-                        let mut resource = allocated_resources.get_mut(resource).unwrap();
-                        let old_layout = resource.current_layout;
-                        let new_layout = TransitionInfo {
-                            layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                            access_mask: AccessFlags::SHADER_READ
-                                | AccessFlags::COLOR_ATTACHMENT_READ,
-                            stage_mask: PipelineStageFlags::ALL_GRAPHICS,
-                        };
-                        self.gpu.transition_image_layout_in_command_buffer(
-                            &resource.resource,
-                            &mut command_buffer,
-                            old_layout,
-                            new_layout,
-                            ImageAspectFlags::COLOR,
-                        );
-                        resource.current_layout = new_layout;
+                    for id in resources {
+                        let resource = allocated_resources.get_mut(id).unwrap();
+                        let resource_info = &graph.resources_used[id];
+                        match resource_info.ty {
+                            AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
+                                let access_flag = match desc.format {
+                                    ImageFormat::Rgba8 => AccessFlags::COLOR_ATTACHMENT_READ,
+                                    ImageFormat::Depth => {
+                                        AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
+                                    }
+                                };
+
+                                let old_layout = resource_states[id];
+                                let new_layout = TransitionInfo {
+                                    layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                                    access_mask: AccessFlags::SHADER_READ | access_flag,
+                                    stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                                };
+                                self.gpu.transition_image_layout_in_command_buffer(
+                                    &resource.resource,
+                                    &mut command_buffer,
+                                    old_layout,
+                                    new_layout,
+                                    ImageAspectFlags::COLOR,
+                                );
+                                resource_states.insert(*id, new_layout);
+                            }
+                        }
                     }
                 }
                 GraphOperation::TransitionWrite(resources) => {
-                    for resource in resources {
-                        let mut resource = allocated_resources.get_mut(resource).unwrap();
-                        let old_layout = resource.current_layout;
-                        let new_layout = TransitionInfo {
-                            layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                            access_mask: AccessFlags::SHADER_WRITE
-                                | AccessFlags::COLOR_ATTACHMENT_WRITE,
-                            stage_mask: PipelineStageFlags::ALL_GRAPHICS,
-                        };
-                        self.gpu.transition_image_layout_in_command_buffer(
-                            &resource.resource,
-                            &mut command_buffer,
-                            old_layout,
-                            new_layout,
-                            ImageAspectFlags::COLOR,
-                        );
-                        resource.current_layout = new_layout;
+                    for id in resources {
+                        let resource = allocated_resources.get_mut(id).unwrap();
+                        let resource_info = &graph.resources_used[id];
+                        match resource_info.ty {
+                            AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
+                                let access_flag = match desc.format {
+                                    ImageFormat::Rgba8 => AccessFlags::COLOR_ATTACHMENT_WRITE,
+                                    ImageFormat::Depth => {
+                                        AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
+                                    }
+                                };
+
+                                let old_layout = resource_states[id];
+                                let new_layout = TransitionInfo {
+                                    layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                                    access_mask: AccessFlags::SHADER_WRITE | access_flag,
+                                    stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                                };
+                                self.gpu.transition_image_layout_in_command_buffer(
+                                    &resource.resource,
+                                    &mut command_buffer,
+                                    old_layout,
+                                    new_layout,
+                                    ImageAspectFlags::COLOR,
+                                );
+                                resource_states.insert(*id, new_layout);
+                            }
+                        }
                     }
                 }
                 GraphOperation::ExecuteRenderPass(rp) => {
@@ -653,11 +690,19 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                 }
             }
         }
+        if let Some(end_cb) = &graph.end_callback {
+            end_cb(
+                self.gpu,
+                &mut EndContext {
+                    command_buffer: &mut command_buffer,
+                },
+            );
+        }
         command_buffer.submit(&gpu::CommandBufferSubmitInfo {
             wait_semaphores: &[&self.swapchain.image_available_semaphore],
-            wait_stages: &[],
+            wait_stages: &[PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
             signal_semaphores: &[&self.swapchain.render_finished_semaphore],
-            fence: None,
+            fence: Some(&self.swapchain.in_flight_fence),
         })
     }
 }
@@ -712,16 +757,16 @@ mod test {
         };
 
         let color_component = render_graph
-            .allocate_image("Color component", &image_desc)
+            .use_image("Color component", &image_desc)
             .unwrap();
         let position_component = render_graph
-            .allocate_image("Position component", &image_desc)
+            .use_image("Position component", &image_desc)
             .unwrap();
         let tangent_component = render_graph
-            .allocate_image("Tangent component", &image_desc)
+            .use_image("Tangent component", &image_desc)
             .unwrap();
         let normal_component = render_graph
-            .allocate_image("Normal component", &image_desc)
+            .use_image("Normal component", &image_desc)
             .unwrap();
 
         let mut gbuffer = render_graph.begin_render_pass("gbuffer").unwrap();
@@ -748,9 +793,9 @@ mod test {
             samples: 1,
         };
         let color_component_1 = render_graph
-            .allocate_image("Color component", &image_desc)
+            .use_image("Color component", &image_desc)
             .unwrap();
-        let color_component_2 = render_graph.allocate_image("Color component", &image_desc);
+        let color_component_2 = render_graph.use_image("Color component", &image_desc);
 
         let is_defined = color_component_2.is_err_and(|id| {
             id == CompileError::ResourceAlreadyDefined(
@@ -782,20 +827,18 @@ mod test {
         };
 
         let color_component = render_graph
-            .allocate_image("Color component", &image_desc)
+            .use_image("Color component", &image_desc)
             .unwrap();
         let position_component = render_graph
-            .allocate_image("Position component", &image_desc)
+            .use_image("Position component", &image_desc)
             .unwrap();
         let tangent_component = render_graph
-            .allocate_image("Tangent component", &image_desc)
+            .use_image("Tangent component", &image_desc)
             .unwrap();
         let normal_component = render_graph
-            .allocate_image("Normal component", &image_desc)
+            .use_image("Normal component", &image_desc)
             .unwrap();
-        let output_image = render_graph
-            .allocate_image("Output image", &image_desc)
-            .unwrap();
+        let output_image = render_graph.use_image("Output image", &image_desc).unwrap();
 
         let mut gbuffer = render_graph.begin_render_pass("gbuffer").unwrap();
         gbuffer.write(color_component);
@@ -839,22 +882,20 @@ mod test {
         };
 
         let color_component = render_graph
-            .allocate_image("Color component", &image_desc)
+            .use_image("Color component", &image_desc)
             .unwrap();
         let position_component = render_graph
-            .allocate_image("Position component", &image_desc)
+            .use_image("Position component", &image_desc)
             .unwrap();
         let tangent_component = render_graph
-            .allocate_image("Tangent component", &image_desc)
+            .use_image("Tangent component", &image_desc)
             .unwrap();
         let normal_component = render_graph
-            .allocate_image("Normal component", &image_desc)
+            .use_image("Normal component", &image_desc)
             .unwrap();
-        let output_image = render_graph
-            .allocate_image("Output image", &image_desc)
-            .unwrap();
+        let output_image = render_graph.use_image("Output image", &image_desc).unwrap();
         let unused = render_graph
-            .allocate_image("Unused resource", &image_desc)
+            .use_image("Unused resource", &image_desc)
             .unwrap();
 
         let mut gbuffer = render_graph.begin_render_pass("gbuffer").unwrap();
@@ -909,7 +950,7 @@ mod test {
             samples: 1,
         };
 
-        rg.allocate_image(name, &description).unwrap()
+        rg.use_image(name, &description).unwrap()
     }
 
     #[test]
