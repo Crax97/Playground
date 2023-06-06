@@ -8,11 +8,26 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use gpu::{CommandBuffer, Gpu, ImageFormat};
+use ash::{
+    prelude::VkResult,
+    vk::{
+        self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor,
+        BlendOp, ClearValue, ColorComponentFlags, ComponentMapping, DependencyFlags,
+        ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType,
+        Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D, SampleCountFlags,
+        SubpassDependency, SubpassDescriptionFlags,
+    },
+};
+use gpu::{
+    BeginRenderPassInfo, BlendState, CommandBuffer, FramebufferCreateInfo, Gpu, GpuFramebuffer,
+    GpuImage, GpuImageView, ImageCreateInfo, ImageFormat, ImageViewCreateInfo, MemoryDomain,
+    PipelineBarrierInfo, RenderPass, RenderPassAttachment, RenderPassDescription,
+    SubpassDescription, Swapchain, ToVk, TransitionInfo,
+};
 use resource_map::Resource;
 
 pub trait RenderGraphRunner {
-    fn run_graph(&mut self, graph: &CompiledRenderGraph);
+    fn run_graph(&mut self, graph: &CompiledRenderGraph) -> VkResult<()>;
 }
 
 #[derive(Hash, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -49,7 +64,7 @@ pub struct ResourceInfo {
 }
 
 pub struct RenderGraph {
-    passes: Vec<RenderPass>,
+    passes: Vec<RenderPassInfo>,
     allocations: HashMap<ResourceId, ResourceInfo>,
     persistent_resources: HashSet<ResourceId>,
 }
@@ -64,13 +79,13 @@ pub enum CompileError {
 pub type GraphResult<T> = Result<T, CompileError>;
 
 #[derive(Default, Debug, Clone)]
-pub struct RenderPass {
+pub struct RenderPassInfo {
     label: String,
     writes: HashSet<ResourceId>,
     reads: HashSet<ResourceId>,
 }
 
-impl Hash for RenderPass {
+impl Hash for RenderPassInfo {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.label.hash(state);
         for write in &self.writes {
@@ -82,7 +97,7 @@ impl Hash for RenderPass {
     }
 }
 
-impl RenderPass {
+impl RenderPassInfo {
     pub fn write(&mut self, handle: ResourceId) {
         self.writes.insert(handle);
     }
@@ -123,7 +138,7 @@ pub enum GraphOperation {
 
 #[derive(Default)]
 pub struct CompiledRenderGraph<'g> {
-    passes: Vec<RenderPass>,
+    pass_infos: Vec<RenderPassInfo>,
     resources_used: HashMap<ResourceId, ResourceInfo>,
     callbacks: HashMap<u64, Box<dyn Fn(&Gpu, &mut CommandBuffer) + 'g>>,
     graph_operations: Vec<GraphOperation>,
@@ -166,18 +181,18 @@ impl RenderGraph {
         Ok(id)
     }
 
-    pub fn begin_render_pass(&self, label: &str) -> GraphResult<RenderPass> {
+    pub fn begin_render_pass(&self, label: &str) -> GraphResult<RenderPassInfo> {
         if self.render_pass_is_defined_already(&label) {
             return Err(CompileError::RenderPassAlreadyDefined(label.to_owned()));
         }
-        Ok(RenderPass {
+        Ok(RenderPassInfo {
             label: label.to_owned(),
             writes: Default::default(),
             reads: Default::default(),
         })
     }
 
-    pub fn commit_render_pass(&mut self, pass: RenderPass) -> RenderPassHandle {
+    pub fn commit_render_pass(&mut self, pass: RenderPassInfo) -> RenderPassHandle {
         let mut hasher = DefaultHasher::new();
         pass.hash(&mut hasher);
         let id = hasher.finish();
@@ -216,7 +231,7 @@ impl RenderGraph {
                 let mut found = false;
                 for target in &used_resources {
                     if pass.writes.contains(target) {
-                        compiled.passes.push(pass.clone());
+                        compiled.pass_infos.push(pass.clone());
                         remove = Some(index);
                         working_set = pass.reads.clone();
                         used_resources.extend(&pass.reads.clone());
@@ -245,7 +260,7 @@ impl RenderGraph {
                 .insert(used_resource, self.allocations[&used_resource].clone());
         }
 
-        compiled.passes.reverse();
+        compiled.pass_infos.reverse();
     }
 
     fn render_pass_is_defined_already(&self, label: &str) -> bool {
@@ -254,7 +269,7 @@ impl RenderGraph {
 
     fn ensure_graph_acyclic(&self, compiled: &CompiledRenderGraph) -> GraphResult<()> {
         let mut written_resources: HashSet<ResourceId> = Default::default();
-        for pass in &compiled.passes {
+        for pass in &compiled.pass_infos {
             for res in &pass.writes {
                 if written_resources.contains(res) {
                     return Err(CompileError::CyclicGraph);
@@ -266,7 +281,7 @@ impl RenderGraph {
     }
 
     fn find_merge_candidates(&self, compiled: &mut CompiledRenderGraph) -> Vec<Vec<usize>> {
-        let mut passes: Vec<_> = compiled.passes.iter().enumerate().collect();
+        let mut passes: Vec<_> = compiled.pass_infos.iter().enumerate().collect();
 
         let mut merge_candidates = vec![];
 
@@ -299,7 +314,7 @@ impl RenderGraph {
     ) {
         // TODO: Upgrade to merge candidates
         let mut allocated_resources: HashSet<ResourceId> = Default::default();
-        for (i, pass) in compiled.passes.iter().enumerate() {
+        for (i, pass) in compiled.pass_infos.iter().enumerate() {
             let mut allocate_now: HashSet<ResourceId> = Default::default();
             for writes in &pass.writes {
                 if !allocated_resources.contains(writes) {
@@ -329,16 +344,298 @@ impl RenderGraph {
     }
 }
 
+pub struct GpuRunner<'a> {
+    gpu: &'a Gpu,
+    swapchain: &'a Swapchain,
+}
+impl<'a> GpuRunner<'a> {
+    fn allocate_resource(
+        &self,
+        id: &ResourceId,
+        graph: &CompiledRenderGraph,
+    ) -> VkResult<GpuImage> {
+        let info = graph.resources_used.get(&id).unwrap();
+        if let AllocationType::Image(info) = &info.ty {
+            return self.gpu.create_image(
+                &ImageCreateInfo {
+                    label: Some("GpuImage"),
+                    width: info.width,
+                    height: info.height,
+                    format: info.format.to_vk(),
+                    usage: ImageUsageFlags::COLOR_ATTACHMENT | ImageUsageFlags::SAMPLED,
+                },
+                MemoryDomain::DeviceLocal,
+            );
+        }
+
+        unreachable!()
+    }
+
+    fn create_render_passes(&self, graph: &CompiledRenderGraph) -> VkResult<Vec<RenderPass>> {
+        let mut passes = vec![];
+        for pass_info in &graph.pass_infos {
+            let writes: Vec<_> = pass_info
+                .writes
+                .iter()
+                .map(|id| {
+                    let resource_desc = graph.resources_used.get(id).unwrap();
+                    match resource_desc.ty {
+                        AllocationType::Image(image_desc) => RenderPassAttachment {
+                            format: image_desc.format.to_vk(),
+                            samples: SampleCountFlags::TYPE_1,
+                            load_op: AttachmentLoadOp::DONT_CARE,
+                            store_op: AttachmentStoreOp::STORE,
+                            stencil_load_op: AttachmentLoadOp::DONT_CARE,
+                            stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                            initial_layout: ImageLayout::UNDEFINED,
+                            final_layout: ImageLayout::READ_ONLY_OPTIMAL,
+                            blend_state: BlendState {
+                                blend_enable: true,
+                                src_color_blend_factor: BlendFactor::ONE,
+                                dst_color_blend_factor: BlendFactor::ZERO,
+                                color_blend_op: BlendOp::ADD,
+                                src_alpha_blend_factor: BlendFactor::ONE,
+                                dst_alpha_blend_factor: BlendFactor::ZERO,
+                                alpha_blend_op: BlendOp::ADD,
+                                color_write_mask: ColorComponentFlags::RGBA,
+                            },
+                        },
+                    }
+                })
+                .collect();
+
+            let color_attachments: Vec<_> = writes
+                .iter()
+                .enumerate()
+                .map(|(i, _)| AttachmentReference {
+                    attachment: i as _,
+                    layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                })
+                .collect();
+            let depth_attachments: Vec<_> = pass_info
+                .writes
+                .iter()
+                .map(|id| graph.resources_used.get(id).unwrap())
+                .enumerate()
+                .filter_map(|(idx, info)| match info.ty {
+                    AllocationType::Image(info) => {
+                        if info.format == ImageFormat::Depth {
+                            Some(idx)
+                        } else {
+                            None
+                        }
+                    }
+                })
+                .map(|i| AttachmentReference {
+                    attachment: i as _,
+                    layout: ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+                })
+                .collect();
+
+            let description = RenderPassDescription {
+                attachments: &writes,
+                subpasses: &[SubpassDescription {
+                    pipeline_bind_point: PipelineBindPoint::GRAPHICS,
+                    flags: SubpassDescriptionFlags::empty(),
+                    input_attachments: &[],
+                    color_attachments: &color_attachments,
+                    resolve_attachments: &[],
+                    depth_stencil_attachment: &depth_attachments,
+                    preserve_attachments: &[],
+                }],
+                dependencies: &[SubpassDependency {
+                    src_subpass: vk::SUBPASS_EXTERNAL,
+                    dst_subpass: 0,
+                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    src_access_mask: AccessFlags::empty(),
+                    dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                    dependency_flags: DependencyFlags::empty(),
+                }],
+            };
+            let pass = RenderPass::new(self.gpu, &description)?;
+            passes.push(pass);
+        }
+        Ok(passes)
+    }
+
+    fn create_framebuffers(
+        &self,
+        graph: &CompiledRenderGraph,
+        passes: &Vec<RenderPass>,
+        views: &HashMap<ResourceId, GpuImageView>,
+    ) -> VkResult<Vec<GpuFramebuffer>> {
+        let mut framebuffers: Vec<GpuFramebuffer> = vec![];
+        for (pass_idx, _) in graph.pass_infos.iter().enumerate() {
+            let info = graph.pass_infos.get(pass_idx).unwrap();
+            let views: Vec<_> = info
+                .writes
+                .iter()
+                .map(|ri| views.get(ri).unwrap())
+                .collect();
+            let framebuffer = self.gpu.create_framebuffer(&FramebufferCreateInfo {
+                render_pass: passes.get(pass_idx).unwrap(),
+                attachments: &views,
+                width: self.swapchain.extents().width,
+                height: self.swapchain.extents().height,
+            })?;
+
+            framebuffers.push(framebuffer);
+        }
+        Ok(framebuffers)
+    }
+
+    fn create_image_views(
+        &self,
+        resources: &HashMap<ResourceId, ResourceState>,
+        graph: &CompiledRenderGraph,
+    ) -> VkResult<HashMap<ResourceId, GpuImageView>> {
+        let mut hm = HashMap::default();
+
+        for info in &graph.pass_infos {
+            for write in &info.writes {
+                if hm.contains_key(write) {
+                    continue;
+                }
+
+                let info = graph.resources_used.get(write).unwrap();
+                let format = match info.ty {
+                    AllocationType::Image(img) => img.format.to_vk(),
+                };
+
+                let image = resources.get(write).unwrap();
+                let view = self.gpu.create_image_view(&ImageViewCreateInfo {
+                    image: &image.resource,
+                    view_type: ImageViewType::TYPE_2D,
+                    format,
+                    components: ComponentMapping::default(),
+                    subresource_range: ImageSubresourceRange {
+                        aspect_mask: ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    },
+                })?;
+                hm.insert(*write, view);
+            }
+        }
+        Ok(hm)
+    }
+}
+
+struct ResourceState {
+    resource: GpuImage,
+    current_layout: TransitionInfo,
+}
+
+impl<'a> RenderGraphRunner for GpuRunner<'a> {
+    fn run_graph(&mut self, graph: &CompiledRenderGraph) -> VkResult<()> {
+        let mut allocated_resources: HashMap<ResourceId, ResourceState> = HashMap::default();
+
+        let passes = self.create_render_passes(graph)?;
+        let views = self.create_image_views(&allocated_resources, graph)?;
+        let framebuffers = self.create_framebuffers(graph, &passes, &views)?;
+
+        let mut command_buffer = CommandBuffer::new(self.gpu, gpu::QueueType::Graphics)?;
+
+        for op in &graph.graph_operations {
+            match op {
+                GraphOperation::Allocate(resources) => {
+                    for id in resources {
+                        let image = self.allocate_resource(id, graph)?;
+                        allocated_resources.insert(
+                            *id,
+                            ResourceState {
+                                resource: image,
+                                current_layout: TransitionInfo {
+                                    layout: ImageLayout::UNDEFINED,
+                                    access_mask: AccessFlags::empty(),
+                                    stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
+                                },
+                            },
+                        );
+                    }
+                }
+                GraphOperation::Destroy(resources) => {
+                    for resource in resources {
+                        allocated_resources.remove(resource);
+                    }
+                }
+                GraphOperation::TransitionRead(resources) => {
+                    for resource in resources {
+                        let mut resource = allocated_resources.get_mut(resource).unwrap();
+                        let old_layout = resource.current_layout;
+                        let new_layout = TransitionInfo {
+                            layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                            access_mask: AccessFlags::SHADER_READ
+                                | AccessFlags::COLOR_ATTACHMENT_READ,
+                            stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                        };
+                        self.gpu.transition_image_layout_in_command_buffer(
+                            &resource.resource,
+                            &mut command_buffer,
+                            old_layout,
+                            new_layout,
+                            ImageAspectFlags::COLOR,
+                        );
+                        resource.current_layout = new_layout;
+                    }
+                }
+                GraphOperation::TransitionWrite(resources) => {
+                    for resource in resources {
+                        let mut resource = allocated_resources.get_mut(resource).unwrap();
+                        let old_layout = resource.current_layout;
+                        let new_layout = TransitionInfo {
+                            layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                            access_mask: AccessFlags::SHADER_WRITE
+                                | AccessFlags::COLOR_ATTACHMENT_WRITE,
+                            stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                        };
+                        self.gpu.transition_image_layout_in_command_buffer(
+                            &resource.resource,
+                            &mut command_buffer,
+                            old_layout,
+                            new_layout,
+                            ImageAspectFlags::COLOR,
+                        );
+                        resource.current_layout = new_layout;
+                    }
+                }
+                GraphOperation::ExecuteRenderPass(rp) => {
+                    let pass = passes.get(*rp).unwrap();
+                    let info = graph.pass_infos.get(*rp).unwrap();
+                    let cb = graph.callbacks.get(&info.id());
+                    command_buffer.begin_render_pass(&BeginRenderPassInfo {
+                        framebuffer: framebuffers.get(*rp).unwrap(),
+                        render_pass: pass,
+                        clear_color_values: &[ClearValue::default()],
+                        render_area: Rect2D {
+                            offset: Offset2D::default(),
+                            extent: self.swapchain.extents(),
+                        },
+                    });
+
+                    if let Some(cb) = cb {
+                        cb(self.gpu, &mut command_buffer);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 pub struct RenderGraphPrinter {}
 
 impl RenderGraphRunner for RenderGraphPrinter {
-    fn run_graph(&mut self, graph: &CompiledRenderGraph) {
+    fn run_graph(&mut self, graph: &CompiledRenderGraph) -> VkResult<()> {
         println!(
             "Graph contains {} render passes, dumping pass info",
-            graph.passes.len()
+            graph.pass_infos.len()
         );
-        for pass in &graph.passes {
+        for pass in &graph.pass_infos {
             println!(
                 "\tName: {}, reads '{}', writes '{}'",
                 pass.label,
@@ -357,6 +654,7 @@ impl RenderGraphRunner for RenderGraphPrinter {
         for op in &graph.graph_operations {
             println!("\t{:?}", op);
         }
+        Ok(())
     }
 }
 #[cfg(test)]
@@ -401,7 +699,7 @@ mod test {
         render_graph.register_callback(&gbuffer, |gpu, render_pass| {
             // for each primitive draw in render_pass
         });
-        assert_eq!(render_graph.passes.len(), 0);
+        assert_eq!(render_graph.pass_infos.len(), 0);
     }
 
     #[test]
@@ -487,9 +785,9 @@ mod test {
         render_graph.register_callback(&gbuffer, |gpu, render_pass| {
             // for each primitive draw in render_pass
         });
-        assert_eq!(render_graph.passes.len(), 2);
-        assert_eq!(render_graph.passes[0].label, "gbuffer");
-        assert_eq!(render_graph.passes[1].label, "compose_gbuffer");
+        assert_eq!(render_graph.pass_infos.len(), 2);
+        assert_eq!(render_graph.pass_infos[0].label, "gbuffer");
+        assert_eq!(render_graph.pass_infos[1].label, "compose_gbuffer");
     }
 
     #[test]
@@ -562,9 +860,9 @@ mod test {
 
         // We need the color component: this will let the 'gbuffer' render pass live
 
-        assert_eq!(render_graph.passes.len(), 2);
-        assert_eq!(render_graph.passes[0].label, "gbuffer");
-        assert_eq!(render_graph.passes[1].label, "compose_gbuffer");
+        assert_eq!(render_graph.pass_infos.len(), 2);
+        assert_eq!(render_graph.pass_infos[0].label, "gbuffer");
+        assert_eq!(render_graph.pass_infos[1].label, "compose_gbuffer");
     }
 
     fn alloc(name: &str, rg: &mut RenderGraph) -> ResourceId {
@@ -685,16 +983,16 @@ mod test {
         render_graph.persist_resource(&rb);
 
         let render_graph = render_graph.compile().unwrap();
-        for pass in &render_graph.passes {
+        for pass in &render_graph.pass_infos {
             println!("{:?}", pass);
         }
-        assert_eq!(render_graph.passes.len(), 4);
-        assert_eq!(render_graph.passes[0].label, "p1");
-        assert_eq!(render_graph.passes[1].label, "p3");
-        assert_eq!(render_graph.passes[2].label, "p4");
-        assert_eq!(render_graph.passes[3].label, "pb");
+        assert_eq!(render_graph.pass_infos.len(), 4);
+        assert_eq!(render_graph.pass_infos[0].label, "p1");
+        assert_eq!(render_graph.pass_infos[1].label, "p3");
+        assert_eq!(render_graph.pass_infos[2].label, "p4");
+        assert_eq!(render_graph.pass_infos[3].label, "pb");
         assert!(render_graph
-            .passes
+            .pass_infos
             .iter()
             .find(|p| p.label == "u1")
             .is_none());

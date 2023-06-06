@@ -808,12 +808,15 @@ pub struct BufferCreateInfo<'a> {
     pub size: usize,
     pub usage: BufferUsageFlags,
 }
+
+#[derive(Clone, Copy)]
 pub struct TransitionInfo {
     pub layout: ImageLayout,
     pub access_mask: AccessFlags,
     pub stage_mask: PipelineStageFlags,
 }
 
+#[derive(Clone, Copy)]
 pub struct FramebufferCreateInfo<'a> {
     pub render_pass: &'a RenderPass,
     pub attachments: &'a [&'a GpuImageView],
@@ -1174,6 +1177,25 @@ impl Gpu {
     ) -> VkResult<()> {
         let mut command_buffer = super::CommandBuffer::new(self, crate::QueueType::Graphics)?;
 
+        self.transition_image_layout_in_command_buffer(
+            image,
+            &mut command_buffer,
+            old_layout,
+            new_layout,
+            aspect_mask,
+        );
+        command_buffer.submit(&crate::CommandBufferSubmitInfo::default())?;
+        self.wait_queue_idle(QueueType::Graphics)
+    }
+
+    pub fn transition_image_layout_in_command_buffer(
+        &self,
+        image: &GpuImage,
+        command_buffer: &mut crate::CommandBuffer,
+        old_layout: TransitionInfo,
+        new_layout: TransitionInfo,
+        aspect_mask: ImageAspectFlags,
+    ) {
         let memory_barrier = ImageMemoryBarrier {
             src_access_mask: old_layout.access_mask,
             dst_access_mask: new_layout.access_mask,
@@ -1197,8 +1219,6 @@ impl Gpu {
             image_memory_barriers: &[memory_barrier],
             ..Default::default()
         });
-        command_buffer.submit(&crate::CommandBufferSubmitInfo::default())?;
-        self.wait_queue_idle(QueueType::Graphics)
     }
 
     pub fn copy_buffer_to_image(
