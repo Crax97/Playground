@@ -5,7 +5,7 @@ use ash::{
     prelude::VkResult,
     vk::{
         self, ComponentMapping, ComponentSwizzle, CompositeAlphaFlagsKHR, Extent2D,
-        FenceCreateFlags, FenceCreateInfo, Format, Image, ImageAspectFlags, ImageSubresourceRange,
+        FenceCreateFlags, FenceCreateInfo, Format, ImageAspectFlags, ImageSubresourceRange,
         ImageUsageFlags, ImageViewCreateFlags, ImageViewCreateInfo, ImageViewType, PresentInfoKHR,
         PresentModeKHR, SemaphoreCreateFlags, SemaphoreCreateInfo, SharingMode, StructureType,
         SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR, SwapchainCreateFlagsKHR,

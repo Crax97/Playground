@@ -3,11 +3,11 @@ mod utils;
 use std::{io::BufReader, mem::size_of, rc::Rc};
 
 use ash::vk::{
-    self, AccessFlags, BufferUsageFlags, ComponentMapping, Format, ImageAspectFlags, ImageLayout,
-    ImageSubresourceRange, ImageUsageFlags, ImageViewType, PipelineStageFlags, PresentModeKHR,
+    self, AccessFlags, BufferUsageFlags, ImageAspectFlags, ImageLayout, ImageUsageFlags,
+    PipelineStageFlags, PresentModeKHR,
 };
 
-use gpu::{BufferCreateInfo, FramebufferCreateInfo, ImageCreateInfo, MemoryDomain, TransitionInfo};
+use gpu::{BufferCreateInfo, ImageCreateInfo, MemoryDomain, TransitionInfo};
 
 use engine::{
     Camera, ForwardRenderingPipeline, MaterialDescription, MaterialDomain, Mesh, MeshCreateInfo,

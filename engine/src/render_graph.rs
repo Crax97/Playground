@@ -9,21 +9,18 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use ash::{
-    prelude::VkResult,
-    vk::{
-        self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor,
-        BlendOp, ClearDepthStencilValue, ClearValue, ColorComponentFlags, ComponentMapping,
-        DependencyFlags, Extent2D, ImageAspectFlags, ImageLayout, ImageSubresourceRange,
-        ImageUsageFlags, ImageViewType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D,
-        SampleCountFlags, SubpassDependency, SubpassDescriptionFlags,
-    },
+use ash::vk::{
+    self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor,
+    BlendOp, ClearDepthStencilValue, ClearValue, ColorComponentFlags, ComponentMapping,
+    DependencyFlags, Extent2D, ImageAspectFlags, ImageLayout, ImageSubresourceRange,
+    ImageUsageFlags, ImageViewType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D,
+    SampleCountFlags, SubpassDependency, SubpassDescriptionFlags,
 };
 use gpu::{
     BeginRenderPassInfo, BlendState, CommandBuffer, FramebufferCreateInfo, Gpu, GpuFramebuffer,
     GpuImage, GpuImageView, ImageCreateInfo, ImageFormat, ImageMemoryBarrier, ImageViewCreateInfo,
-    MemoryBarrier, MemoryDomain, PipelineBarrierInfo, RenderPass, RenderPassAttachment,
-    RenderPassCommand, RenderPassDescription, SubpassDescription, Swapchain, ToVk, TransitionInfo,
+    MemoryDomain, PipelineBarrierInfo, RenderPass, RenderPassAttachment, RenderPassCommand,
+    RenderPassDescription, SubpassDescription, ToVk, TransitionInfo,
 };
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]

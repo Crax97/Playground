@@ -3,16 +3,15 @@ use std::{collections::HashMap, mem::size_of, rc::Rc};
 use ash::{
     prelude::VkResult,
     vk::{
-        self, BufferUsageFlags, ClearColorValue, ClearDepthStencilValue, ClearValue, CompareOp,
-        Extent2D, IndexType, Offset2D, PipelineBindPoint, PipelineStageFlags, PushConstantRange,
-        Rect2D, ShaderStageFlags, StencilOpState,
+        self, BufferUsageFlags, CompareOp, IndexType, PipelineBindPoint, PipelineStageFlags,
+        PushConstantRange, ShaderStageFlags, StencilOpState,
     },
 };
 use gpu::{
-    BeginRenderPassInfo, BindingElement, BufferCreateInfo, BufferRange, DepthStencilState,
-    DescriptorInfo, DescriptorSetInfo, FragmentStageInfo, GlobalBinding, Gpu, GpuBuffer,
-    GpuDescriptorSet, GpuFramebuffer, MemoryDomain, Pipeline, PipelineDescription, Swapchain,
-    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
+    BindingElement, BufferCreateInfo, BufferRange, DepthStencilState, DescriptorInfo,
+    DescriptorSetInfo, FragmentStageInfo, GlobalBinding, Gpu, GpuBuffer, GpuDescriptorSet,
+    MemoryDomain, Pipeline, PipelineDescription, Swapchain, VertexAttributeDescription,
+    VertexBindingDescription, VertexStageInfo,
 };
 use nalgebra::{Matrix4, Vector2, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -30,7 +29,7 @@ use crate::{
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     mesh::Mesh,
     DefaultResourceAllocator, GpuRunner, ImageDescription, RenderGraph, RenderGraphRunner,
-    ResourceAllocator, ResourceInfo,
+    ResourceAllocator,
 };
 
 use ash::vk::{
@@ -89,7 +88,6 @@ pub trait RenderingPipeline {
 
 pub struct ForwardRenderingPipeline {
     resource_map: Rc<ResourceMap>,
-    extents: Extent2D,
 
     camera_buffer: GpuBuffer,
     camera_buffer_descriptor_set: GpuDescriptorSet,
@@ -126,7 +124,6 @@ impl ForwardRenderingPipeline {
         Ok(Self {
             camera_buffer,
             resource_map,
-            extents: swapchain.extents(),
             camera_buffer_descriptor_set,
             material_context,
         })
