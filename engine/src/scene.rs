@@ -28,7 +28,8 @@ use crate::{
     camera::Camera,
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
-    mesh::Mesh, RenderGraph,
+    mesh::Mesh,
+    GpuRunner, RenderGraph, RenderGraphRunner,
 };
 
 use ash::vk::{
@@ -78,8 +79,9 @@ pub trait RenderingPipeline {
         &mut self,
         pov: &Camera,
         scene: &Scene,
-        framebuffer: &GpuFramebuffer,
-    );
+        swapchain: &mut Swapchain,
+        gpu: &Gpu,
+    ) -> anyhow::Result<()>;
 
     fn get_context(&self) -> &dyn MaterialContext;
 }
@@ -416,24 +418,9 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         &mut self,
         pov: &Camera,
         scene: &Scene,
-        framebuffer: &GpuFramebuffer,
-    ) {
-        let mut pipeline_hashmap: HashMap<ResourceHandle<GpuPipeline>, Vec<ScenePrimitive>> =
-            HashMap::new();
-
-
-        for primitive in scene.primitives.iter() {
-            let material = self.resource_map.get(&primitive.material);
-            pipeline_hashmap
-                .entry(material.pipeline.clone())
-                .or_default()
-                .push(primitive.clone());
-        }
-        let mut command_buffer =
-            gpu::CommandBuffer::new(&super::app_state() .gpu, gpu::QueueType::Graphics).unwrap();
-            
-        let label = command_buffer.begin_debug_region("Forward Renderer - Main pass", [1.0, 0.0, 0.0, 1.0]);
-        command_buffer.insert_debug_label("Forward Renderer - Begin camera buffer update", [0.3, 0.0, 0.0, 1.0]);
+        swapchain: &mut Swapchain,
+        gpu: &Gpu,
+    ) -> anyhow::Result<()> {
         super::app_state()
             .gpu
             .write_buffer_data(
@@ -444,80 +431,83 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 }],
             )
             .unwrap();
-        command_buffer.insert_debug_label("Forward Renderer - End Camera buffer update", [0.3, 0.0, 0.0, 1.0]);
+        let extents = swapchain.extents();
+        let next_image = swapchain.acquire_next_image()?;
+        let mut render_graph = RenderGraph::new();
+        let depth_buffer = render_graph.allocate_image(
+            "depth-buffer",
+            &crate::ImageDescription {
+                width: extents.width,
+                height: extents.height,
+                format: gpu::ImageFormat::Depth,
+                samples: 1,
+            },
+        )?;
+        let color_buffer = render_graph.inject_external_image("color-buffer", &next_image);
+        let mut forward_pass = render_graph.begin_render_pass("ForwardPass")?;
+        forward_pass.writes(&[color_buffer, depth_buffer]);
+        let forward_pass = render_graph.commit_render_pass(forward_pass);
 
-        for (pipeline, primitives) in pipeline_hashmap.iter() {
-            {
-                let pipeline = self.resource_map.get(pipeline);
-                command_buffer.bind_descriptor_sets(
-                    PipelineBindPoint::GRAPHICS,
-                    &pipeline.0,
-                    0,
-                    &[&self.camera_buffer_descriptor_set],
-                );
-                let mut render_pass = command_buffer.begin_render_pass(&BeginRenderPassInfo {
-                    framebuffer,
-                    render_pass: self
-                        .material_context
-                        .get_material_render_pass(MaterialDomain::Surface),
-                    clear_color_values: &[
-                        ClearValue {
-                            color: ClearColorValue {
-                                float32: [0.0, 0.0, 0.0, 1.0],
-                            },
-                        },
-                        ClearValue {
-                            depth_stencil: ClearDepthStencilValue {
-                                depth: 1.0,
-                                stencil: 0,
-                            },
-                        },
-                    ],
-                    render_area: Rect2D {
-                        offset: Offset2D { x: 0, y: 0 },
-                        extent: self.extents,
-                    },
-                });
-                for (idx, primitive) in primitives.iter().enumerate() {
-                    let label = render_pass.begin_debug_region(&format!("Rendering primitive {idx}"), [0.0, 1.0, 0.0, 1.0]);
-                    let mesh = self.resource_map.get(&primitive.mesh);
-                    let material = self.resource_map.get(&primitive.material);
+        let mut pipeline_hashmap: HashMap<ResourceHandle<GpuPipeline>, Vec<ScenePrimitive>> =
+            HashMap::new();
 
-                    render_pass.bind_pipeline(&pipeline.0);
-                    render_pass.bind_descriptor_sets(
+        for primitive in scene.primitives.iter() {
+            let material = self.resource_map.get(&primitive.material);
+            pipeline_hashmap
+                .entry(material.pipeline.clone())
+                .or_default()
+                .push(primitive.clone());
+        }
+
+        let mut render_graph = render_graph.compile()?;
+        render_graph.register_callback(&forward_pass, |gpu, ctx| {
+            for (pipeline, primitives) in pipeline_hashmap.iter() {
+                {
+                    let pipeline = self.resource_map.get(pipeline);
+                    ctx.render_pass_command.bind_descriptor_sets(
                         PipelineBindPoint::GRAPHICS,
                         &pipeline.0,
-                        1,
-                        &[&material.resources_descriptor_set],
-                    );
-
-                    render_pass.bind_index_buffer(&mesh.index_buffer, 0, IndexType::UINT32);
-                    render_pass.bind_vertex_buffer(
                         0,
-                        &[
-                            &mesh.position_component,
-                            &mesh.color_component,
-                            &mesh.normal_component,
-                            &mesh.tangent_component,
-                            &mesh.uv_component,
-                        ],
-                        &[0, 0, 0, 0, 0],
+                        &[&self.camera_buffer_descriptor_set],
                     );
-                    render_pass.push_constant(&pipeline.0, &primitive.transform, 0);
-                    render_pass.draw_indexed(6, 1, 0, 0, 0);
-                    label.end()
+                    for (idx, primitive) in primitives.iter().enumerate() {
+                        let mesh = self.resource_map.get(&primitive.mesh);
+                        let material = self.resource_map.get(&primitive.material);
+
+                        ctx.render_pass_command.bind_pipeline(&pipeline.0);
+                        ctx.render_pass_command.bind_descriptor_sets(
+                            PipelineBindPoint::GRAPHICS,
+                            &pipeline.0,
+                            1,
+                            &[&material.resources_descriptor_set],
+                        );
+
+                        ctx.render_pass_command.bind_index_buffer(
+                            &mesh.index_buffer,
+                            0,
+                            IndexType::UINT32,
+                        );
+                        ctx.render_pass_command.bind_vertex_buffer(
+                            0,
+                            &[
+                                &mesh.position_component,
+                                &mesh.color_component,
+                                &mesh.normal_component,
+                                &mesh.tangent_component,
+                                &mesh.uv_component,
+                            ],
+                            &[0, 0, 0, 0, 0],
+                        );
+                        ctx.render_pass_command
+                            .push_constant(&pipeline.0, &primitive.transform, 0);
+                        ctx.render_pass_command.draw_indexed(6, 1, 0, 0, 0);
+                    }
                 }
             }
-        }
-        label.end();
-        command_buffer
-            .submit(&gpu::CommandBufferSubmitInfo {
-                wait_semaphores: &[&super::app_state().swapchain.image_available_semaphore],
-                wait_stages: &[PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
-                signal_semaphores: &[&super::app_state().swapchain.render_finished_semaphore],
-                fence: Some(&super::app_state().swapchain.in_flight_fence),
-            })
-            .unwrap();
+        });
+        let mut runner = GpuRunner { gpu, swapchain };
+        runner.run_graph(&render_graph)?;
+        Ok(())
     }
 
     fn get_context(&self) -> &dyn MaterialContext {

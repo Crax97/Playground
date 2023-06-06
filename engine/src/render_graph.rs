@@ -5,6 +5,7 @@
 
 use std::{
     collections::{hash_map::DefaultHasher, HashMap, HashSet},
+    error::Error,
     hash::{Hash, Hasher},
 };
 
@@ -21,8 +22,8 @@ use ash::{
 use gpu::{
     BeginRenderPassInfo, BlendState, CommandBuffer, FramebufferCreateInfo, Gpu, GpuFramebuffer,
     GpuImage, GpuImageView, ImageCreateInfo, ImageFormat, ImageViewCreateInfo, MemoryDomain,
-    PipelineBarrierInfo, RenderPass, RenderPassAttachment, RenderPassDescription,
-    SubpassDescription, Swapchain, ToVk, TransitionInfo,
+    PipelineBarrierInfo, RenderPass, RenderPassAttachment, RenderPassCommand,
+    RenderPassDescription, SubpassDescription, Swapchain, ToVk, TransitionInfo,
 };
 use resource_map::Resource;
 
@@ -75,6 +76,14 @@ pub enum CompileError {
     RenderPassAlreadyDefined(String),
     CyclicGraph,
 }
+
+impl std::fmt::Display for CompileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("Render Graph compilation error: {:?}", &self))
+    }
+}
+
+impl Error for CompileError {}
 
 pub type GraphResult<T> = Result<T, CompileError>;
 
@@ -136,15 +145,22 @@ pub enum GraphOperation {
     ExecuteRenderPass(usize),
 }
 
+pub struct RenderPassContext<'p, 'g> {
+    pub render_pass: &'p RenderPass,
+    pub render_pass_command: RenderPassCommand<'p, 'g>,
+    pub framebuffer: &'p GpuFramebuffer,
+}
+
 #[derive(Default)]
 pub struct CompiledRenderGraph<'g> {
     pass_infos: Vec<RenderPassInfo>,
     resources_used: HashMap<ResourceId, ResourceInfo>,
-    callbacks: HashMap<u64, Box<dyn Fn(&Gpu, &mut CommandBuffer) + 'g>>,
+    callbacks: HashMap<u64, Box<dyn Fn(&Gpu, &mut RenderPassContext) + 'g>>,
     graph_operations: Vec<GraphOperation>,
 }
+
 impl<'g> CompiledRenderGraph<'g> {
-    pub fn register_callback<F: Fn(&Gpu, &mut CommandBuffer) + 'g>(
+    pub fn register_callback<F: Fn(&Gpu, &mut RenderPassContext) + 'g>(
         &mut self,
         handle: &RenderPassHandle,
         callback: F,
@@ -342,11 +358,19 @@ impl RenderGraph {
             .graph_operations
             .push(GraphOperation::Destroy(allocated_resources));
     }
+
+    pub(crate) fn inject_external_image(
+        &self,
+        label: &str,
+        next_image: &GpuImageView,
+    ) -> ResourceId {
+        todo!()
+    }
 }
 
 pub struct GpuRunner<'a> {
-    gpu: &'a Gpu,
-    swapchain: &'a Swapchain,
+    pub gpu: &'a Gpu,
+    pub swapchain: &'a Swapchain,
 }
 impl<'a> GpuRunner<'a> {
     fn allocate_resource(
@@ -606,23 +630,35 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                     let pass = passes.get(*rp).unwrap();
                     let info = graph.pass_infos.get(*rp).unwrap();
                     let cb = graph.callbacks.get(&info.id());
-                    command_buffer.begin_render_pass(&BeginRenderPassInfo {
+                    let clear_color_values = &[ClearValue::default()];
+                    let render_pass_command =
+                        command_buffer.begin_render_pass(&BeginRenderPassInfo {
+                            framebuffer: framebuffers.get(*rp).unwrap(),
+                            render_pass: pass,
+                            clear_color_values,
+                            render_area: Rect2D {
+                                offset: Offset2D::default(),
+                                extent: self.swapchain.extents(),
+                            },
+                        });
+                    let mut context = RenderPassContext {
+                        render_pass: &pass,
                         framebuffer: framebuffers.get(*rp).unwrap(),
-                        render_pass: pass,
-                        clear_color_values: &[ClearValue::default()],
-                        render_area: Rect2D {
-                            offset: Offset2D::default(),
-                            extent: self.swapchain.extents(),
-                        },
-                    });
+                        render_pass_command,
+                    };
 
                     if let Some(cb) = cb {
-                        cb(self.gpu, &mut command_buffer);
+                        cb(self.gpu, &mut context);
                     }
                 }
             }
         }
-        Ok(())
+        command_buffer.submit(&gpu::CommandBufferSubmitInfo {
+            wait_semaphores: &[&self.swapchain.image_available_semaphore],
+            wait_stages: &[],
+            signal_semaphores: &[&self.swapchain.render_finished_semaphore],
+            fence: None,
+        })
     }
 }
 

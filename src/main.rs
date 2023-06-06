@@ -157,24 +157,6 @@ fn main() -> anyhow::Result<()> {
         },
         MemoryDomain::DeviceLocal,
     )?;
-
-    let depth_image_view =
-        engine::app_state()
-            .gpu
-            .create_image_view(&gpu::ImageViewCreateInfo {
-                image: &depth_image,
-                view_type: ImageViewType::TYPE_2D,
-                format: Format::D16_UNORM,
-                components: ComponentMapping::default(),
-                subresource_range: ImageSubresourceRange {
-                    aspect_mask: ImageAspectFlags::DEPTH,
-                    base_mip_level: 0,
-                    level_count: 1,
-                    base_array_layer: 0,
-                    layer_count: 1,
-                },
-            })?;
-
     engine::app_state()
         .gpu
         .write_buffer_data(&vertex_buffer, vertex_data)?;
@@ -329,26 +311,17 @@ fn main() -> anyhow::Result<()> {
                 let direction = vector![new_forward[0], new_forward[1], new_forward[2]];
                 camera.forward = -direction;
 
-                engine::app_state_mut().begin_frame().unwrap();
-
-                let sw_extents = engine::app_state().swapchain.extents();
-                let next_image = engine::app_state_mut()
-                    .swapchain
-                    .acquire_next_image()
+                let app_state_mut = engine::app_state_mut();
+                app_state_mut.begin_frame().unwrap();
+                scene_renderer
+                    .render(
+                        &camera,
+                        &scene,
+                        &mut app_state_mut.swapchain,
+                        &app_state_mut.gpu,
+                    )
                     .unwrap();
-                let framebuffer = engine::app_state()
-                    .gpu
-                    .create_framebuffer(&FramebufferCreateInfo {
-                        render_pass: scene_renderer
-                            .get_context()
-                            .get_material_render_pass(MaterialDomain::Surface),
-                        attachments: &[&next_image, &depth_image_view],
-                        width: sw_extents.width,
-                        height: sw_extents.height,
-                    })
-                    .unwrap();
-                scene_renderer.render(&camera, &scene, &framebuffer);
-                engine::app_state_mut().end_frame().unwrap();
+                app_state_mut.end_frame().unwrap();
             }
             winit::event::Event::RedrawEventsCleared => {}
             winit::event::Event::LoopDestroyed => {
