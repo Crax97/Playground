@@ -444,6 +444,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 height: extents.height,
                 format: gpu::ImageFormat::Depth,
                 samples: 1,
+                present: false,
             },
         )?;
         let color_buffer = render_graph.use_image(
@@ -453,6 +454,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 height: extents.height,
                 format: swapchain_format.into(),
                 samples: 1,
+                present: true,
             },
         )?;
         render_graph.persist_resource(&color_buffer);
@@ -529,12 +531,15 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 height: extents.height,
                 format: swapchain_format.into(),
                 samples: 1,
+                present: true,
             },
         );
 
         render_graph.register_end_callback(|gpu, ctx| {});
         let mut runner = GpuRunner { gpu };
         runner.run_graph(&render_graph, &mut default_allocator)?;
+        gpu.wait_device_idle()?;
+
         Ok(())
     }
 

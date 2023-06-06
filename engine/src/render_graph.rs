@@ -160,26 +160,26 @@ impl<'a> DefaultResourceAllocator<'a> {
                 let resource_desc = graph.resources_used.get(id).unwrap();
                 match &resource_desc.ty {
                     AllocationType::Image(image_desc)
-                    | AllocationType::ExternalImage(image_desc) => {
-                        if image_desc.format == ImageFormat::Rgba8 {
-                            Some(image_desc)
-                        } else {
-                            None
-                        }
-                    }
+                    | AllocationType::ExternalImage(image_desc) => Some(image_desc),
                 }
             })
             .map(|image_desc| RenderPassAttachment {
                 format: image_desc.format.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::DONT_CARE,
+                load_op: AttachmentLoadOp::CLEAR,
                 store_op: AttachmentStoreOp::STORE,
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
                 final_layout: match image_desc.format {
-                    ImageFormat::Rgba8 => ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                    ImageFormat::Depth => ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+                    ImageFormat::Rgba8 => {
+                        if image_desc.present {
+                            ImageLayout::PRESENT_SRC_KHR
+                        } else {
+                            ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                        }
+                    }
+                    ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                 },
                 blend_state: BlendState {
                     blend_enable: true,
@@ -197,6 +197,7 @@ impl<'a> DefaultResourceAllocator<'a> {
         let color_attachments: Vec<_> = writes
             .iter()
             .enumerate()
+            .filter(|(_, attach)| attach.format != ImageFormat::Depth.to_vk())
             .map(|(i, _)| AttachmentReference {
                 attachment: i as _,
                 layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
@@ -218,7 +219,7 @@ impl<'a> DefaultResourceAllocator<'a> {
             })
             .map(|i| AttachmentReference {
                 attachment: i as _,
-                layout: ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+                layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             })
             .collect();
 
@@ -230,7 +231,7 @@ impl<'a> DefaultResourceAllocator<'a> {
                 input_attachments: &[],
                 color_attachments: &color_attachments,
                 resolve_attachments: &[],
-                depth_stencil_attachment: &[],
+                depth_stencil_attachment: &depth_attachments,
                 preserve_attachments: &[],
             }],
             dependencies: &[SubpassDependency {
@@ -403,7 +404,7 @@ impl<'a> ResourceAllocator<'a> for DefaultResourceAllocator<'a> {
 
                 let old_layout = self.resource_states[id];
                 let new_layout = TransitionInfo {
-                    layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                    layout: ImageLayout::READ_ONLY_OPTIMAL,
                     access_mask: AccessFlags::SHADER_READ | access_flag,
                     stage_mask: PipelineStageFlags::ALL_GRAPHICS,
                 };
@@ -459,7 +460,16 @@ impl<'a> ResourceAllocator<'a> for DefaultResourceAllocator<'a> {
 
                 let old_layout = self.resource_states[id];
                 let new_layout = TransitionInfo {
-                    layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                    layout: match desc.format {
+                        ImageFormat::Rgba8 => {
+                            if desc.present {
+                                ImageLayout::PRESENT_SRC_KHR
+                            } else {
+                                ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                            }
+                        }
+                        ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    },
                     access_mask: AccessFlags::SHADER_READ | access_flag,
                     stage_mask: PipelineStageFlags::ALL_GRAPHICS,
                 };
@@ -527,6 +537,7 @@ pub struct ImageDescription {
     pub height: u32,
     pub format: ImageFormat,
     pub samples: u32,
+    pub present: bool,
 }
 
 #[derive(Hash, Copy, Clone)]
@@ -827,75 +838,6 @@ impl RenderGraph {
 pub struct GpuRunner<'a> {
     pub gpu: &'a Gpu,
 }
-impl<'a> GpuRunner<'a> {
-    fn allocate_resource(
-        &self,
-        id: &ResourceId,
-        graph: &CompiledRenderGraph,
-    ) -> VkResult<GpuImage> {
-        let info = graph.resources_used.get(&id).unwrap();
-        if let AllocationType::Image(info) = &info.ty {
-            return self.gpu.create_image(
-                &ImageCreateInfo {
-                    label: Some("GpuImage"),
-                    width: info.width,
-                    height: info.height,
-                    format: info.format.to_vk(),
-                    usage: ImageUsageFlags::COLOR_ATTACHMENT | ImageUsageFlags::SAMPLED,
-                },
-                MemoryDomain::DeviceLocal,
-            );
-        }
-
-        unreachable!()
-    }
-
-    fn create_image_views(
-        &self,
-        resources: &HashMap<ResourceId, ResourceState>,
-        graph: &CompiledRenderGraph,
-    ) -> VkResult<HashMap<ResourceId, GpuImageView>> {
-        let mut hm = HashMap::default();
-
-        for info in &graph.pass_infos {
-            for write in &info.writes {
-                if hm.contains_key(write) {
-                    continue;
-                }
-
-                let info = graph.resources_used.get(write).unwrap();
-                let format = match info.ty {
-                    AllocationType::Image(img) => img.format.to_vk(),
-                    AllocationType::ExternalImage(_) => {
-                        // External Images bust be injectex externally
-                        continue;
-                    }
-                };
-
-                let image = resources.get(write).unwrap();
-                let view = self.gpu.create_image_view(&ImageViewCreateInfo {
-                    image: &image.resource,
-                    view_type: ImageViewType::TYPE_2D,
-                    format,
-                    components: ComponentMapping::default(),
-                    subresource_range: ImageSubresourceRange {
-                        aspect_mask: ImageAspectFlags::COLOR,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1,
-                    },
-                })?;
-                hm.insert(*write, view);
-            }
-        }
-        Ok(hm)
-    }
-}
-
-struct ResourceState {
-    resource: GpuImage,
-}
 
 impl<'a> RenderGraphRunner for GpuRunner<'a> {
     fn run_graph(
@@ -969,6 +911,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
             signal_semaphores: &[&crate::app_state().swapchain.render_finished_semaphore],
             fence: Some(&crate::app_state().swapchain.in_flight_fence),
         })?;
+
         Ok(())
     }
 }
@@ -1026,6 +969,7 @@ mod test {
             height: 720,
             format: gpu::ImageFormat::Rgba8,
             samples: 1,
+            present: false,
         };
 
         let color_component = render_graph
@@ -1065,6 +1009,7 @@ mod test {
             height: 720,
             format: gpu::ImageFormat::Rgba8,
             samples: 1,
+            present: false,
         };
         let color_component_1 = render_graph
             .use_image("Color component", &image_desc)
@@ -1100,6 +1045,7 @@ mod test {
             height: 720,
             format: gpu::ImageFormat::Rgba8,
             samples: 1,
+            present: false,
         };
 
         let color_component = render_graph
@@ -1159,6 +1105,7 @@ mod test {
             height: 720,
             format: gpu::ImageFormat::Rgba8,
             samples: 1,
+            present: false,
         };
 
         let color_component = render_graph
@@ -1234,6 +1181,7 @@ mod test {
             height: 720,
             format: gpu::ImageFormat::Rgba8,
             samples: 1,
+            present: false,
         };
 
         rg.use_image(name, &description).unwrap()
