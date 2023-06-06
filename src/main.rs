@@ -2,12 +2,9 @@ mod utils;
 
 use std::{io::BufReader, mem::size_of, rc::Rc};
 
-use ash::vk::{
-    self, AccessFlags, BufferUsageFlags, ImageAspectFlags, ImageLayout, ImageUsageFlags,
-    PipelineStageFlags, PresentModeKHR,
-};
+use ash::vk::{BufferUsageFlags, PresentModeKHR};
 
-use gpu::{BufferCreateInfo, ImageCreateInfo, MemoryDomain, TransitionInfo};
+use gpu::{BufferCreateInfo, MemoryDomain};
 
 use engine::{
     Camera, ForwardRenderingPipeline, MaterialDescription, MaterialDomain, Mesh, MeshCreateInfo,
@@ -147,37 +144,12 @@ fn main() -> anyhow::Result<()> {
     )?;
     let texture = resource_map.add(texture);
 
-    let depth_image = engine::app_state().gpu.create_image(
-        &ImageCreateInfo {
-            label: Some("Rendering depth texture"),
-            width: engine::app_state().swapchain.extents().width,
-            height: engine::app_state().swapchain.extents().height,
-            format: vk::Format::D16_UNORM,
-            usage: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-        },
-        MemoryDomain::DeviceLocal,
-    )?;
     engine::app_state()
         .gpu
         .write_buffer_data(&vertex_buffer, vertex_data)?;
     engine::app_state()
         .gpu
         .write_buffer_data(&index_buffer, indices)?;
-
-    engine::app_state().gpu.transition_image_layout(
-        &depth_image,
-        TransitionInfo {
-            layout: ImageLayout::UNDEFINED,
-            access_mask: AccessFlags::empty(),
-            stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-        },
-        TransitionInfo {
-            layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-            stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
-        },
-        ImageAspectFlags::DEPTH,
-    )?;
 
     let mut scene_renderer = ForwardRenderingPipeline::new(
         &engine::app_state().gpu,
