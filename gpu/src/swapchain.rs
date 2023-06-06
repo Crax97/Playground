@@ -16,7 +16,7 @@ use log::{info, trace, warn};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use winit::window::Window;
 
-use crate::GpuImageView;
+use crate::{GpuImage, GpuImageView};
 
 use super::{GPUFence, GPUSemaphore, Gpu, GpuState};
 
@@ -54,7 +54,7 @@ pub struct Swapchain {
     pub(super) supported_presentation_formats: Vec<SurfaceFormatKHR>,
     pub(super) surface_capabilities: SurfaceCapabilitiesKHR,
     pub(super) current_swapchain: SwapchainKHR,
-    pub(super) current_swapchain_images: Vec<Image>,
+    pub(super) current_swapchain_images: Vec<GpuImage>,
     pub(super) current_swapchain_image_views: Vec<MaybeUninit<GpuImageView>>,
     pub next_image_fence: GPUFence,
     pub in_flight_fence: GPUFence,
@@ -140,7 +140,7 @@ impl Swapchain {
         Ok(me)
     }
 
-    pub fn acquire_next_image(&mut self) -> VkResult<&GpuImageView> {
+    pub fn acquire_next_image(&mut self) -> VkResult<(&GpuImage, &GpuImageView)> {
         let next_image_fence = self.next_image_fence.inner;
         loop {
             let (next_image, suboptimal) = unsafe {
@@ -165,7 +165,13 @@ impl Swapchain {
                     .get(next_image as usize)
                     .unwrap();
                 self.current_swapchain_index = next_image;
-                return Ok(unsafe { image_view.assume_init_ref().clone() });
+                let image_idx = self.current_swapchain_index as usize;
+                return Ok(unsafe {
+                    (
+                        &self.current_swapchain_images[image_idx],
+                        image_view.assume_init_ref().clone(),
+                    )
+                });
             } else {
                 self.recreate_swapchain()?;
             }
@@ -356,7 +362,10 @@ impl Swapchain {
                 .get_swapchain_images(self.current_swapchain)
         }?;
 
-        self.current_swapchain_images = images;
+        self.current_swapchain_images = images
+            .iter()
+            .map(|i| GpuImage::wrap(self.state.logical_device.clone(), i.clone(), self.extents()))
+            .collect();
         Ok(())
     }
 
@@ -371,7 +380,7 @@ impl Swapchain {
                 s_type: StructureType::IMAGE_VIEW_CREATE_INFO,
                 p_next: std::ptr::null(),
                 flags: ImageViewCreateFlags::empty(),
-                image: *image,
+                image: image.inner,
                 view_type: ImageViewType::TYPE_2D,
                 format: self.present_format.format,
                 components: ComponentMapping {

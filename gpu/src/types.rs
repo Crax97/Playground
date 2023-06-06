@@ -213,8 +213,8 @@ impl_raii_wrapper_to_vk!(GpuBuffer, vk::Buffer);
 pub struct GpuImage {
     device: ash::Device,
     pub(super) inner: vk::Image,
-    pub(super) allocation: MemoryAllocation,
-    pub(super) allocator: Arc<RefCell<dyn GpuAllocator>>,
+    pub(super) allocation: Option<MemoryAllocation>,
+    pub(super) allocator: Option<Arc<RefCell<dyn GpuAllocator>>>,
     pub(super) extents: Extent2D,
 }
 impl GpuImage {
@@ -228,21 +228,36 @@ impl GpuImage {
         Ok(Self {
             device: gpu.state.logical_device.clone(),
             inner: image,
-            allocation,
-            allocator,
+            allocation: Some(allocation),
+            allocator: Some(allocator),
             extents,
         })
+    }
+
+    pub(super) fn wrap(device: ash::Device, inner: vk::Image, extents: Extent2D) -> Self {
+        Self {
+            device,
+            inner,
+            allocation: None,
+            allocator: None,
+            extents,
+        }
     }
 }
 impl Drop for GpuImage {
     fn drop(&mut self) {
-        self.allocator
-            .borrow_mut()
-            .deallocate(&self.device, &self.allocation);
-        unsafe {
-            self.device
-                .destroy_image(self.inner, self::get_allocation_callbacks());
-        }
+        match (&self.allocator, &self.allocation) {
+            (Some(allocator), Some(allocation)) => {
+                allocator.borrow_mut().deallocate(&self.device, &allocation);
+                unsafe {
+                    self.device
+                        .destroy_image(self.inner, self::get_allocation_callbacks());
+                }
+            }
+            _ => {
+                // this is a wrapped image
+            }
+        };
     }
 }
 impl Deref for GpuImage {

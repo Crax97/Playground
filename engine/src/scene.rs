@@ -29,7 +29,8 @@ use crate::{
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     mesh::Mesh,
-    GpuRunner, RenderGraph, RenderGraphRunner,
+    DefaultResourceAllocator, GpuRunner, ImageDescription, RenderGraph, RenderGraphRunner,
+    ResourceAllocator, ResourceInfo,
 };
 
 use ash::vk::{
@@ -432,7 +433,9 @@ impl RenderingPipeline for ForwardRenderingPipeline {
             )
             .unwrap();
         let extents = swapchain.extents();
-        let next_image = swapchain.acquire_next_image()?;
+        let swapchain_format = swapchain.present_format();
+
+        let (image, view) = swapchain.acquire_next_image()?;
         let mut render_graph = RenderGraph::new();
         let depth_buffer = render_graph.use_image(
             "depth-buffer",
@@ -448,12 +451,12 @@ impl RenderingPipeline for ForwardRenderingPipeline {
             &crate::ImageDescription {
                 width: extents.width,
                 height: extents.height,
-                format: swapchain.present_format().into(),
+                format: swapchain_format.into(),
                 samples: 1,
             },
         )?;
         render_graph.persist_resource(&color_buffer);
-        let mut forward_pass = render_graph.begin_render_pass("ForwardPass")?;
+        let mut forward_pass = render_graph.begin_render_pass("ForwardPass", extents)?;
         forward_pass.writes(&[color_buffer, depth_buffer]);
         let forward_pass = render_graph.commit_render_pass(forward_pass);
 
@@ -515,9 +518,23 @@ impl RenderingPipeline for ForwardRenderingPipeline {
             }
         });
 
+        let mut default_allocator = DefaultResourceAllocator::default();
+
+        default_allocator.inject_external_image(
+            &color_buffer,
+            image,
+            view,
+            ImageDescription {
+                width: extents.width,
+                height: extents.height,
+                format: swapchain_format.into(),
+                samples: 1,
+            },
+        );
+
         render_graph.register_end_callback(|gpu, ctx| {});
-        let mut runner = GpuRunner { gpu, swapchain };
-        runner.run_graph(&render_graph)?;
+        let mut runner = GpuRunner { gpu };
+        runner.run_graph(&render_graph, &mut default_allocator)?;
         Ok(())
     }
 
