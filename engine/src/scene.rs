@@ -482,6 +482,10 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                         &[&self.camera_buffer_descriptor_set],
                     );
                     for (idx, primitive) in primitives.iter().enumerate() {
+                        let primitive_label = ctx.render_pass_command.begin_debug_region(
+                            &format!("Rendering primitive {}", idx),
+                            [0.0, 0.3, 0.4, 1.0],
+                        );
                         let mesh = self.resource_map.get(&primitive.mesh);
                         let material = self.resource_map.get(&primitive.material);
 
@@ -512,6 +516,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                         ctx.render_pass_command
                             .push_constant(&pipeline.0, &primitive.transform, 0);
                         ctx.render_pass_command.draw_indexed(6, 1, 0, 0, 0);
+                        primitive_label.end();
                     }
                 }
             }
@@ -519,18 +524,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
 
         let mut default_allocator = DefaultResourceAllocator::default();
 
-        default_allocator.inject_external_image(
-            &color_buffer,
-            image,
-            view,
-            ImageDescription {
-                width: extents.width,
-                height: extents.height,
-                format: swapchain_format.into(),
-                samples: 1,
-                present: true,
-            },
-        );
+        default_allocator.inject_external_image(&color_buffer, image, view);
 
         render_graph.register_end_callback(|gpu, ctx| {});
         let mut runner = GpuRunner { gpu };

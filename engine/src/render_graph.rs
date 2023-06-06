@@ -41,7 +41,6 @@ pub trait ResourceAllocator<'a> {
         id: &ResourceId,
         image: &'a GpuImage,
         view: &'a GpuImageView,
-        desc: ImageDescription,
     );
     fn inject_external_renderpass(&mut self, id: &usize, render_pass: &'a RenderPass);
 
@@ -72,7 +71,6 @@ pub trait ResourceAllocator<'a> {
 pub struct DefaultResourceAllocator<'a> {
     images: HashMap<ResourceId, GpuImage>,
     image_views: HashMap<ResourceId, GpuImageView>,
-    resource_info: HashMap<ResourceId, ResourceInfo>,
     resource_states: HashMap<ResourceId, TransitionInfo>,
     render_passes: HashMap<usize, RenderPass>,
     framebuffers: HashMap<usize, GpuFramebuffer>,
@@ -87,11 +85,12 @@ impl<'a> DefaultResourceAllocator<'a> {
         gpu: &Gpu,
         img: &ImageDescription,
         id: &ResourceId,
+        info: &ResourceInfo,
     ) -> Result<&GpuImageView, anyhow::Error> {
         let image = {
             gpu.create_image(
                 &ImageCreateInfo {
-                    label: Some("img hehe"),
+                    label: Some(&info.label),
                     width: img.width,
                     height: img.height,
                     format: img.format.to_vk(),
@@ -124,13 +123,7 @@ impl<'a> DefaultResourceAllocator<'a> {
 
         self.images.insert(*id, image);
         self.image_views.insert(*id, view);
-        self.resource_info.insert(
-            *id,
-            ResourceInfo {
-                label: "todo".to_owned(),
-                ty: AllocationType::Image(img.clone()),
-            },
-        );
+
         self.resource_states.insert(
             *id,
             TransitionInfo {
@@ -297,22 +290,21 @@ impl<'a> DefaultResourceAllocator<'a> {
         }
     }
 
-    fn get_resource_info(
-        &mut self,
-        gpu: &Gpu,
-        graph: &CompiledRenderGraph,
-        id: &ResourceId,
-    ) -> &ResourceInfo {
-        if !self.resource_info.contains_key(id) {
-            // image is internal: create it
-            match &graph.resources_used[id].ty {
-                AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
-                    self.create_image(gpu, desc, id)
+    fn ensure_resource_exists(&mut self, gpu: &Gpu, graph: &CompiledRenderGraph, id: &ResourceId) {
+        if !self.resource_states.contains_key(id) {
+            let info = &graph.resources_used[id];
+            match &info.ty {
+                AllocationType::Image(dsc) => {
+                    self.create_image(gpu, dsc, id, info).unwrap();
+                }
+                AllocationType::ExternalImage(_) => {
+                    panic!(
+                        "External resource does not exist, ensure you have injected it: {}",
+                        info.label
+                    );
                 }
             }
-            .unwrap();
         }
-        self.resource_info.get(id).unwrap()
     }
 }
 
@@ -326,9 +318,12 @@ impl<'a> ResourceAllocator<'a> for DefaultResourceAllocator<'a> {
         if !self.image_views.contains_key(id) && !self.external_image_views.contains_key(id) {
             let resource_info = &graph.resources_used[id];
             match &resource_info.ty {
-                AllocationType::Image(img) => self.create_image(gpu, img, id),
+                AllocationType::Image(img) => self.create_image(gpu, img, id, resource_info),
                 AllocationType::ExternalImage(_) => {
-                    panic!("External image requeste but it wasn't injected.")
+                    panic!(
+                        "External image requeste but it wasn't injected: {}",
+                        resource_info.label
+                    )
                 }
             }?;
         }
@@ -341,16 +336,8 @@ impl<'a> ResourceAllocator<'a> for DefaultResourceAllocator<'a> {
         id: &ResourceId,
         image: &'a GpuImage,
         view: &'a GpuImageView,
-        desc: ImageDescription,
     ) {
         self.external_images.insert(*id, image);
-        self.resource_info.insert(
-            *id,
-            ResourceInfo {
-                label: "external".to_owned(),
-                ty: AllocationType::ExternalImage(desc),
-            },
-        );
         self.resource_states.insert(
             *id,
             TransitionInfo {
@@ -391,7 +378,8 @@ impl<'a> ResourceAllocator<'a> for DefaultResourceAllocator<'a> {
         command_buffer: &mut CommandBuffer,
         id: &ResourceId,
     ) {
-        let resource_info = self.get_resource_info(gpu, graph, id);
+        self.ensure_resource_exists(gpu, graph, id);
+        let resource_info = graph.resources_used.get(id).unwrap();
         match resource_info.ty {
             AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
                 let access_flag = match desc.format {
@@ -447,7 +435,8 @@ impl<'a> ResourceAllocator<'a> for DefaultResourceAllocator<'a> {
         command_buffer: &mut CommandBuffer,
         id: &ResourceId,
     ) {
-        let resource_info = self.get_resource_info(gpu, graph, id);
+        self.ensure_resource_exists(gpu, graph, id);
+        let resource_info = graph.resources_used.get(id).unwrap();
         match resource_info.ty {
             AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
                 let access_flag = match desc.format {
@@ -844,9 +833,14 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
     ) -> anyhow::Result<()> {
         let mut command_buffer = CommandBuffer::new(self.gpu, gpu::QueueType::Graphics)?;
 
+        let label = command_buffer.begin_debug_region("Rendering begin", [0.0, 0.3, 0.0, 1.0]);
         for op in &graph.graph_operations {
             match op {
                 GraphOperation::TransitionRead(resources) => {
+                    command_buffer.insert_debug_label(
+                        "Transitioning resources to read",
+                        [0.0, 0.3, 0.3, 1.0],
+                    );
                     for id in resources {
                         resource_allocator.transition_image_read(
                             self.gpu,
@@ -857,6 +851,11 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                     }
                 }
                 GraphOperation::TransitionWrite(resources) => {
+                    command_buffer.insert_debug_label(
+                        "Transitioning resources to write",
+                        [0.0, 0.3, 0.3, 1.0],
+                    );
+
                     for id in resources {
                         resource_allocator.transition_image_write(
                             self.gpu,
@@ -870,6 +869,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                     let (pass, framebuffer) =
                         resource_allocator.get_renderpass_and_framebuffer(self.gpu, graph, *rp)?;
                     let info = graph.pass_infos.get(*rp).unwrap();
+
                     let cb = graph.callbacks.get(&info.id());
                     let clear_color_values: Vec<_> = info
                         .writes
@@ -894,6 +894,10 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                             }
                         })
                         .collect();
+                    let render_pass_label = command_buffer.begin_debug_region(
+                        &format!("Begin Render Pass: {}", info.label),
+                        [0.3, 0.0, 0.0, 1.0],
+                    );
                     let render_pass_command =
                         command_buffer.begin_render_pass(&BeginRenderPassInfo {
                             framebuffer,
@@ -913,6 +917,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                     if let Some(cb) = cb {
                         cb(self.gpu, &mut context);
                     }
+                    render_pass_label.end();
                 }
             }
         }
@@ -924,6 +929,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                 },
             );
         }
+        label.end();
         command_buffer.submit(&gpu::CommandBufferSubmitInfo {
             wait_semaphores: &[&crate::app_state().swapchain.image_available_semaphore],
             wait_stages: &[PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
