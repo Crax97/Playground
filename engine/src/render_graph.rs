@@ -22,6 +22,7 @@ use gpu::{
     MemoryDomain, PipelineBarrierInfo, RenderPass, RenderPassAttachment, RenderPassCommand,
     RenderPassDescription, SubpassDescription, ToVk, TransitionInfo,
 };
+use resource_map::Resource;
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RenderPassHandle {
@@ -30,6 +31,12 @@ pub struct RenderPassHandle {
 
 impl RenderPassHandle {}
 pub trait ResourceAllocator<'a> {
+    fn get_image(
+        &mut self,
+        gpu: &Gpu,
+        graph: &CompiledRenderGraph,
+        id: &ResourceId,
+    ) -> anyhow::Result<&GpuImage>;
     fn get_image_view(
         &mut self,
         gpu: &Gpu,
@@ -50,28 +57,12 @@ pub trait ResourceAllocator<'a> {
         graph: &CompiledRenderGraph,
         id: usize,
     ) -> anyhow::Result<(&RenderPass, &GpuFramebuffer)>;
-
-    fn transition_image_read(
-        &mut self,
-        gpu: &Gpu,
-        graph: &CompiledRenderGraph,
-        command_buffer: &mut CommandBuffer,
-        id: &ResourceId,
-    );
-    fn transition_image_write(
-        &mut self,
-        gpu: &Gpu,
-        graph: &CompiledRenderGraph,
-        command_buffer: &mut CommandBuffer,
-        id: &ResourceId,
-    );
 }
 
 #[derive(Default)]
 pub struct DefaultResourceAllocator<'a> {
     images: HashMap<ResourceId, GpuImage>,
     image_views: HashMap<ResourceId, GpuImageView>,
-    resource_states: HashMap<ResourceId, TransitionInfo>,
     render_passes: HashMap<usize, RenderPass>,
     framebuffers: HashMap<usize, GpuFramebuffer>,
 
@@ -123,15 +114,6 @@ impl<'a> DefaultResourceAllocator<'a> {
 
         self.images.insert(*id, image);
         self.image_views.insert(*id, view);
-
-        self.resource_states.insert(
-            *id,
-            TransitionInfo {
-                layout: ImageLayout::UNDEFINED,
-                access_mask: AccessFlags::empty(),
-                stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-            },
-        );
 
         Ok(self.image_views.get(id).unwrap())
     }
@@ -289,23 +271,6 @@ impl<'a> DefaultResourceAllocator<'a> {
             panic!("Failed to find render pass");
         }
     }
-
-    fn ensure_resource_exists(&mut self, gpu: &Gpu, graph: &CompiledRenderGraph, id: &ResourceId) {
-        if !self.resource_states.contains_key(id) {
-            let info = &graph.resources_used[id];
-            match &info.ty {
-                AllocationType::Image(dsc) => {
-                    self.create_image(gpu, dsc, id, info).unwrap();
-                }
-                AllocationType::ExternalImage(_) => {
-                    panic!(
-                        "External resource does not exist, ensure you have injected it: {}",
-                        info.label
-                    );
-                }
-            }
-        }
-    }
 }
 
 impl<'a> ResourceAllocator<'a> for DefaultResourceAllocator<'a> {
@@ -338,14 +303,7 @@ impl<'a> ResourceAllocator<'a> for DefaultResourceAllocator<'a> {
         view: &'a GpuImageView,
     ) {
         self.external_images.insert(*id, image);
-        self.resource_states.insert(
-            *id,
-            TransitionInfo {
-                layout: ImageLayout::UNDEFINED,
-                access_mask: AccessFlags::empty(),
-                stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-            },
-        );
+
         self.external_image_views.insert(*id, view);
     }
 
@@ -371,127 +329,26 @@ impl<'a> ResourceAllocator<'a> for DefaultResourceAllocator<'a> {
         self.external_render_passes.insert(*id, render_pass);
     }
 
-    fn transition_image_read(
+    fn get_image(
         &mut self,
         gpu: &Gpu,
         graph: &CompiledRenderGraph,
-        command_buffer: &mut CommandBuffer,
         id: &ResourceId,
-    ) {
-        self.ensure_resource_exists(gpu, graph, id);
-        let resource_info = graph.resources_used.get(id).unwrap();
-        match resource_info.ty {
-            AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
-                let access_flag = match desc.format {
-                    ImageFormat::Rgba8 => AccessFlags::COLOR_ATTACHMENT_READ,
-                    ImageFormat::Depth => AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ,
-                };
-
-                let old_layout = self.resource_states[id];
-                let new_layout = TransitionInfo {
-                    layout: ImageLayout::READ_ONLY_OPTIMAL,
-                    access_mask: AccessFlags::SHADER_READ | access_flag,
-                    stage_mask: PipelineStageFlags::ALL_GRAPHICS,
-                };
-
-                let aspect_mask = match desc.format {
-                    ImageFormat::Rgba8 => ImageAspectFlags::COLOR,
-                    ImageFormat::Depth => ImageAspectFlags::DEPTH,
-                };
-
-                let image = self.get_image_checked(*id);
-                let memory_barrier = ImageMemoryBarrier {
-                    src_access_mask: old_layout.access_mask,
-                    dst_access_mask: new_layout.access_mask,
-                    old_layout: old_layout.layout,
-                    new_layout: new_layout.layout,
-                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                    image,
-                    subresource_range: ImageSubresourceRange {
-                        aspect_mask,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1,
-                    },
-                };
-                command_buffer.pipeline_barrier(&PipelineBarrierInfo {
-                    src_stage_mask: old_layout.stage_mask,
-                    dst_stage_mask: new_layout.stage_mask,
-                    dependency_flags: DependencyFlags::empty(),
-                    image_memory_barriers: &[memory_barrier],
-                    ..Default::default()
-                });
-                self.resource_states.insert(*id, new_layout);
-            }
+    ) -> anyhow::Result<&GpuImage> {
+        if !self.images.contains_key(id) && !self.external_images.contains_key(id) {
+            let resource_info = &graph.resources_used[id];
+            match &resource_info.ty {
+                AllocationType::Image(img) => self.create_image(gpu, img, id, resource_info),
+                AllocationType::ExternalImage(_) => {
+                    panic!(
+                        "External image requested but it wasn't injected: {}",
+                        resource_info.label
+                    )
+                }
+            }?;
         }
-    }
 
-    fn transition_image_write(
-        &mut self,
-        gpu: &Gpu,
-        graph: &CompiledRenderGraph,
-        command_buffer: &mut CommandBuffer,
-        id: &ResourceId,
-    ) {
-        self.ensure_resource_exists(gpu, graph, id);
-        let resource_info = graph.resources_used.get(id).unwrap();
-        match resource_info.ty {
-            AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
-                let access_flag = match desc.format {
-                    ImageFormat::Rgba8 => AccessFlags::COLOR_ATTACHMENT_WRITE,
-                    ImageFormat::Depth => AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                };
-
-                let old_layout = self.resource_states[id];
-                let new_layout = TransitionInfo {
-                    layout: match desc.format {
-                        ImageFormat::Rgba8 => {
-                            if desc.present {
-                                ImageLayout::PRESENT_SRC_KHR
-                            } else {
-                                ImageLayout::COLOR_ATTACHMENT_OPTIMAL
-                            }
-                        }
-                        ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                    },
-                    access_mask: AccessFlags::SHADER_READ | access_flag,
-                    stage_mask: PipelineStageFlags::ALL_GRAPHICS,
-                };
-
-                let aspect_mask = match desc.format {
-                    ImageFormat::Rgba8 => ImageAspectFlags::COLOR,
-                    ImageFormat::Depth => ImageAspectFlags::DEPTH,
-                };
-
-                let image = &self.get_image_checked(*id);
-                let memory_barrier = ImageMemoryBarrier {
-                    src_access_mask: old_layout.access_mask,
-                    dst_access_mask: new_layout.access_mask,
-                    old_layout: old_layout.layout,
-                    new_layout: new_layout.layout,
-                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                    image,
-                    subresource_range: ImageSubresourceRange {
-                        aspect_mask,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1,
-                    },
-                };
-                command_buffer.pipeline_barrier(&PipelineBarrierInfo {
-                    src_stage_mask: old_layout.stage_mask,
-                    dst_stage_mask: new_layout.stage_mask,
-                    dependency_flags: DependencyFlags::empty(),
-                    image_memory_barriers: &[memory_barrier],
-                    ..Default::default()
-                });
-                self.resource_states.insert(*id, new_layout);
-            }
-        }
+        Ok(self.get_image_checked(*id))
     }
 }
 
@@ -823,6 +680,147 @@ impl RenderGraph {
 
 pub struct GpuRunner<'a> {
     pub gpu: &'a Gpu,
+
+    resource_states: HashMap<ResourceId, TransitionInfo>,
+}
+impl<'a> GpuRunner<'a> {
+    pub fn new(gpu: &'a Gpu) -> Self {
+        Self {
+            gpu,
+            resource_states: Default::default(),
+        }
+    }
+
+    fn transition_image_read(
+        &mut self,
+        gpu: &Gpu,
+        allocator: &mut dyn ResourceAllocator,
+        graph: &CompiledRenderGraph,
+        command_buffer: &mut CommandBuffer,
+        id: &ResourceId,
+    ) {
+        let resource_info = graph.resources_used.get(id).unwrap();
+        match resource_info.ty {
+            AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
+                let access_flag = match desc.format {
+                    ImageFormat::Rgba8 => AccessFlags::COLOR_ATTACHMENT_READ,
+                    ImageFormat::Depth => AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ,
+                };
+
+                let old_layout = self.resource_states.entry(*id).or_insert(TransitionInfo {
+                    layout: ImageLayout::UNDEFINED,
+                    access_mask: AccessFlags::empty(),
+                    stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+                });
+                let new_layout = TransitionInfo {
+                    layout: ImageLayout::READ_ONLY_OPTIMAL,
+                    access_mask: AccessFlags::SHADER_READ | access_flag,
+                    stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                };
+
+                let aspect_mask = match desc.format {
+                    ImageFormat::Rgba8 => ImageAspectFlags::COLOR,
+                    ImageFormat::Depth => ImageAspectFlags::DEPTH,
+                };
+
+                let image = allocator.get_image(gpu, graph, &id).unwrap();
+                let memory_barrier = ImageMemoryBarrier {
+                    src_access_mask: old_layout.access_mask,
+                    dst_access_mask: new_layout.access_mask,
+                    old_layout: old_layout.layout,
+                    new_layout: new_layout.layout,
+                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                    image,
+                    subresource_range: ImageSubresourceRange {
+                        aspect_mask,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    },
+                };
+                command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                    src_stage_mask: old_layout.stage_mask,
+                    dst_stage_mask: new_layout.stage_mask,
+                    dependency_flags: DependencyFlags::empty(),
+                    image_memory_barriers: &[memory_barrier],
+                    ..Default::default()
+                });
+                self.resource_states.insert(*id, new_layout);
+            }
+        }
+    }
+
+    fn transition_image_write(
+        &mut self,
+        gpu: &Gpu,
+        allocator: &mut dyn ResourceAllocator,
+        graph: &CompiledRenderGraph,
+        command_buffer: &mut CommandBuffer,
+        id: &ResourceId,
+    ) {
+        let resource_info = graph.resources_used.get(id).unwrap();
+        match resource_info.ty {
+            AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
+                let access_flag = match desc.format {
+                    ImageFormat::Rgba8 => AccessFlags::COLOR_ATTACHMENT_WRITE,
+                    ImageFormat::Depth => AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                };
+
+                let old_layout = self.resource_states.entry(*id).or_insert(TransitionInfo {
+                    layout: ImageLayout::UNDEFINED,
+                    access_mask: AccessFlags::empty(),
+                    stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+                });
+                let new_layout = TransitionInfo {
+                    layout: match desc.format {
+                        ImageFormat::Rgba8 => {
+                            if desc.present {
+                                ImageLayout::PRESENT_SRC_KHR
+                            } else {
+                                ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                            }
+                        }
+                        ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    },
+                    access_mask: AccessFlags::SHADER_READ | access_flag,
+                    stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                };
+
+                let aspect_mask = match desc.format {
+                    ImageFormat::Rgba8 => ImageAspectFlags::COLOR,
+                    ImageFormat::Depth => ImageAspectFlags::DEPTH,
+                };
+
+                let image = allocator.get_image(gpu, graph, &id).unwrap();
+                let memory_barrier = ImageMemoryBarrier {
+                    src_access_mask: old_layout.access_mask,
+                    dst_access_mask: new_layout.access_mask,
+                    old_layout: old_layout.layout,
+                    new_layout: new_layout.layout,
+                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                    image,
+                    subresource_range: ImageSubresourceRange {
+                        aspect_mask,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    },
+                };
+                command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                    src_stage_mask: old_layout.stage_mask,
+                    dst_stage_mask: new_layout.stage_mask,
+                    dependency_flags: DependencyFlags::empty(),
+                    image_memory_barriers: &[memory_barrier],
+                    ..Default::default()
+                });
+                self.resource_states.insert(*id, new_layout);
+            }
+        }
+    }
 }
 
 impl<'a> RenderGraphRunner for GpuRunner<'a> {
@@ -848,8 +846,9 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                         [0.0, 0.3, 0.3, 1.0],
                     );
                     for id in resources {
-                        resource_allocator.transition_image_read(
+                        self.transition_image_read(
                             self.gpu,
+                            resource_allocator,
                             graph,
                             &mut command_buffer,
                             id,
@@ -863,8 +862,9 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                     );
 
                     for id in resources {
-                        resource_allocator.transition_image_write(
+                        self.transition_image_write(
                             self.gpu,
+                            resource_allocator,
                             graph,
                             &mut command_buffer,
                             id,

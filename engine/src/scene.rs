@@ -525,9 +525,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         let mut default_allocator = DefaultResourceAllocator::default();
 
         default_allocator.inject_external_image(&color_buffer, image, view);
-
-        render_graph.register_end_callback(|gpu, ctx| {});
-        let mut runner = GpuRunner { gpu };
+        let mut runner = GpuRunner::new(gpu);
         runner.run_graph(&render_graph, &mut default_allocator)?;
         gpu.wait_device_idle()?;
 
