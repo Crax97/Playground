@@ -30,7 +30,7 @@ pub struct RenderPassHandle {
 }
 
 impl RenderPassHandle {}
-pub trait ResourceAllocator<'a> {
+pub trait ResourceAllocator {
     fn get_image(
         &mut self,
         gpu: &Gpu,
@@ -43,34 +43,46 @@ pub trait ResourceAllocator<'a> {
         graph: &CompiledRenderGraph,
         id: &ResourceId,
     ) -> anyhow::Result<&GpuImageView>;
-    fn inject_external_image(
-        &mut self,
-        id: &ResourceId,
-        image: &'a GpuImage,
-        view: &'a GpuImageView,
-    );
-    fn inject_external_renderpass(&mut self, id: &usize, render_pass: &'a RenderPass);
 
-    fn get_renderpass_and_framebuffer(
+    fn ensure_image_view_exists(
         &mut self,
         gpu: &Gpu,
         graph: &CompiledRenderGraph,
-        id: usize,
-    ) -> anyhow::Result<(&RenderPass, &GpuFramebuffer)>;
+        id: &ResourceId,
+    ) -> anyhow::Result<()>;
+
+    fn get_image_view_unchecked(&self, id: &ResourceId) -> &GpuImageView;
 }
 
 #[derive(Default)]
-pub struct DefaultResourceAllocator<'a> {
-    images: HashMap<ResourceId, GpuImage>,
-    image_views: HashMap<ResourceId, GpuImageView>,
-    render_passes: HashMap<usize, RenderPass>,
-    framebuffers: HashMap<usize, GpuFramebuffer>,
-
+pub struct ExternalResources<'a> {
     external_images: HashMap<ResourceId, &'a GpuImage>,
     external_image_views: HashMap<ResourceId, &'a GpuImageView>,
     external_render_passes: HashMap<usize, &'a RenderPass>,
 }
-impl<'a> DefaultResourceAllocator<'a> {
+
+impl<'a> ExternalResources<'a> {
+    pub fn inject_external_image(
+        &mut self,
+        id: &ResourceId,
+        image: &'a GpuImage,
+        view: &'a GpuImageView,
+    ) {
+        self.external_images.insert(*id, image);
+        self.external_image_views.insert(*id, view);
+    }
+
+    pub fn inject_external_renderpass(&mut self, id: &usize, render_pass: &'a RenderPass) {
+        self.external_render_passes.insert(*id, render_pass);
+    }
+}
+
+#[derive(Default)]
+pub struct DefaultResourceAllocator {
+    images: HashMap<ResourceId, GpuImage>,
+    image_views: HashMap<ResourceId, GpuImageView>,
+}
+impl DefaultResourceAllocator {
     fn create_image(
         &mut self,
         gpu: &Gpu,
@@ -118,169 +130,30 @@ impl<'a> DefaultResourceAllocator<'a> {
         Ok(self.image_views.get(id).unwrap())
     }
 
-    fn create_render_pass(
-        &mut self,
-        gpu: &Gpu,
-        graph: &CompiledRenderGraph,
-        pass_info: &RenderPassInfo,
-        id: usize,
-    ) -> Result<&RenderPass, anyhow::Error> {
-        let writes: Vec<_> = pass_info
-            .writes
-            .iter()
-            .filter_map(|id| {
-                let resource_desc = graph.resources_used.get(id).unwrap();
-                match &resource_desc.ty {
-                    AllocationType::Image(image_desc)
-                    | AllocationType::ExternalImage(image_desc) => Some(image_desc),
-                }
-            })
-            .map(|image_desc| RenderPassAttachment {
-                format: image_desc.format.to_vk(),
-                samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::CLEAR,
-                store_op: AttachmentStoreOp::STORE,
-                stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: ImageLayout::UNDEFINED,
-                final_layout: match image_desc.format {
-                    ImageFormat::Rgba8 => {
-                        if image_desc.present {
-                            ImageLayout::PRESENT_SRC_KHR
-                        } else {
-                            ImageLayout::COLOR_ATTACHMENT_OPTIMAL
-                        }
-                    }
-                    ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                },
-                blend_state: BlendState {
-                    blend_enable: true,
-                    src_color_blend_factor: BlendFactor::ONE,
-                    dst_color_blend_factor: BlendFactor::ZERO,
-                    color_blend_op: BlendOp::ADD,
-                    src_alpha_blend_factor: BlendFactor::ONE,
-                    dst_alpha_blend_factor: BlendFactor::ZERO,
-                    alpha_blend_op: BlendOp::ADD,
-                    color_write_mask: ColorComponentFlags::RGBA,
-                },
-            })
-            .collect();
-
-        let color_attachments: Vec<_> = writes
-            .iter()
-            .enumerate()
-            .filter(|(_, attach)| attach.format != ImageFormat::Depth.to_vk())
-            .map(|(i, _)| AttachmentReference {
-                attachment: i as _,
-                layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            })
-            .collect();
-        let depth_attachments: Vec<_> = pass_info
-            .writes
-            .iter()
-            .map(|id| graph.resources_used.get(id).unwrap())
-            .enumerate()
-            .filter_map(|(idx, info)| match info.ty {
-                AllocationType::Image(info) | AllocationType::ExternalImage(info) => {
-                    if info.format == ImageFormat::Depth {
-                        Some(idx)
-                    } else {
-                        None
-                    }
-                }
-            })
-            .map(|i| AttachmentReference {
-                attachment: i as _,
-                layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            })
-            .collect();
-
-        let description = RenderPassDescription {
-            attachments: &writes,
-            subpasses: &[SubpassDescription {
-                pipeline_bind_point: PipelineBindPoint::GRAPHICS,
-                flags: SubpassDescriptionFlags::empty(),
-                input_attachments: &[],
-                color_attachments: &color_attachments,
-                resolve_attachments: &[],
-                depth_stencil_attachment: &depth_attachments,
-                preserve_attachments: &[],
-            }],
-            dependencies: &[SubpassDependency {
-                src_subpass: vk::SUBPASS_EXTERNAL,
-                dst_subpass: 0,
-                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                src_access_mask: AccessFlags::empty(),
-                dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                dependency_flags: DependencyFlags::empty(),
-            }],
-        };
-        let pass = RenderPass::new(gpu, &description)?;
-        self.render_passes.insert(id, pass);
-        Ok(self.render_passes.get(&id).unwrap())
-    }
-
-    fn create_framebuffer(
-        &mut self,
-        gpu: &Gpu,
-        pass_info: &RenderPassInfo,
-        id: usize,
-    ) -> anyhow::Result<&GpuFramebuffer> {
-        let render_pass = self.get_renderpass(id);
-        let views: Vec<_> = pass_info
-            .writes
-            .iter()
-            .map(|ri| self.get_image_view_checked(*ri))
-            .collect();
-        let framebuffer = gpu.create_framebuffer(&FramebufferCreateInfo {
-            render_pass,
-            attachments: &views,
-            width: pass_info.extents.width,
-            height: pass_info.extents.height,
-        })?;
-        self.framebuffers.insert(id, framebuffer);
-        Ok(self.framebuffers.get(&id).unwrap())
-    }
-
-    fn get_renderpass(&self, id: usize) -> &RenderPass {
-        if self.external_render_passes.contains_key(&id) {
-            return self.external_render_passes.get(&id).unwrap();
-        } else if self.render_passes.contains_key(&id) {
-            return self.render_passes.get(&id).unwrap();
-        } else {
-            panic!("Failed to find render pass");
-        }
-    }
-
     fn get_image_view_checked(&self, id: ResourceId) -> &GpuImageView {
-        if self.external_image_views.contains_key(&id) {
-            return self.external_image_views.get(&id).unwrap();
-        } else if self.image_views.contains_key(&id) {
+        if self.image_views.contains_key(&id) {
             return self.image_views.get(&id).unwrap();
         } else {
-            panic!("Failed to find render pass");
+            panic!("Failed to find image view");
         }
     }
     fn get_image_checked(&self, id: ResourceId) -> &GpuImage {
-        if self.external_images.contains_key(&id) {
-            return self.external_images.get(&id).unwrap();
-        } else if self.images.contains_key(&id) {
+        if self.images.contains_key(&id) {
             return self.images.get(&id).unwrap();
         } else {
-            panic!("Failed to find render pass");
+            panic!("Failed to find image view");
         }
     }
 }
 
-impl<'a> ResourceAllocator<'a> for DefaultResourceAllocator<'a> {
+impl ResourceAllocator for DefaultResourceAllocator {
     fn get_image_view(
         &mut self,
         gpu: &Gpu,
         graph: &CompiledRenderGraph,
         id: &ResourceId,
     ) -> anyhow::Result<&GpuImageView> {
-        if !self.image_views.contains_key(id) && !self.external_image_views.contains_key(id) {
+        if !self.image_views.contains_key(id) {
             let resource_info = &graph.resources_used[id];
             match &resource_info.ty {
                 AllocationType::Image(img) => self.create_image(gpu, img, id, resource_info),
@@ -296,46 +169,13 @@ impl<'a> ResourceAllocator<'a> for DefaultResourceAllocator<'a> {
         Ok(self.get_image_view_checked(*id))
     }
 
-    fn inject_external_image(
-        &mut self,
-        id: &ResourceId,
-        image: &'a GpuImage,
-        view: &'a GpuImageView,
-    ) {
-        self.external_images.insert(*id, image);
-
-        self.external_image_views.insert(*id, view);
-    }
-
-    fn get_renderpass_and_framebuffer(
-        &mut self,
-        gpu: &Gpu,
-        graph: &CompiledRenderGraph,
-        id: usize,
-    ) -> anyhow::Result<(&RenderPass, &GpuFramebuffer)> {
-        if !self.render_passes.contains_key(&id) && !self.external_render_passes.contains_key(&id) {
-            let pass_info = &graph.pass_infos[id];
-            self.create_render_pass(gpu, graph, pass_info, id)?;
-        };
-        if !self.framebuffers.contains_key(&id) {
-            let pass_info = &graph.pass_infos[id];
-            self.create_framebuffer(gpu, pass_info, id)?;
-        };
-
-        Ok((self.get_renderpass(id), self.framebuffers.get(&id).unwrap()))
-    }
-
-    fn inject_external_renderpass(&mut self, id: &usize, render_pass: &'a RenderPass) {
-        self.external_render_passes.insert(*id, render_pass);
-    }
-
     fn get_image(
         &mut self,
         gpu: &Gpu,
         graph: &CompiledRenderGraph,
         id: &ResourceId,
     ) -> anyhow::Result<&GpuImage> {
-        if !self.images.contains_key(id) && !self.external_images.contains_key(id) {
+        if !self.images.contains_key(id) {
             let resource_info = &graph.resources_used[id];
             match &resource_info.ty {
                 AllocationType::Image(img) => self.create_image(gpu, img, id, resource_info),
@@ -350,6 +190,28 @@ impl<'a> ResourceAllocator<'a> for DefaultResourceAllocator<'a> {
 
         Ok(self.get_image_checked(*id))
     }
+
+    fn ensure_image_view_exists(
+        &mut self,
+        gpu: &Gpu,
+        graph: &CompiledRenderGraph,
+        id: &ResourceId,
+    ) -> anyhow::Result<()> {
+        if !self.image_views.contains_key(id) {
+            let resource_info = &graph.resources_used[id];
+            match &resource_info.ty {
+                AllocationType::Image(img) => {
+                    self.create_image(gpu, img, id, resource_info)?;
+                }
+                AllocationType::ExternalImage(_) => {}
+            };
+        }
+        Ok(())
+    }
+
+    fn get_image_view_unchecked(&self, id: &ResourceId) -> &GpuImageView {
+        self.image_views.get(id).unwrap()
+    }
 }
 
 pub trait RenderGraphRunner {
@@ -357,6 +219,7 @@ pub trait RenderGraphRunner {
         &mut self,
         graph: &CompiledRenderGraph,
         resource_allocator: &mut dyn ResourceAllocator,
+        external_resources: &ExternalResources,
     ) -> anyhow::Result<()>;
 }
 
@@ -682,22 +545,58 @@ pub struct GpuRunner<'a> {
     pub gpu: &'a Gpu,
 
     resource_states: HashMap<ResourceId, TransitionInfo>,
+    render_passes: HashMap<usize, RenderPass>,
+    framebuffers: HashMap<usize, GpuFramebuffer>,
 }
 impl<'a> GpuRunner<'a> {
     pub fn new(gpu: &'a Gpu) -> Self {
         Self {
             gpu,
             resource_states: Default::default(),
+            render_passes: Default::default(),
+            framebuffers: Default::default(),
+        }
+    }
+
+    pub fn get_image_view<'r, 'e>(
+        gpu: &Gpu,
+        graph: &CompiledRenderGraph,
+        id: &ResourceId,
+        allocator: &'r mut dyn ResourceAllocator,
+        external_resources: &ExternalResources<'e>,
+    ) -> &'e GpuImageView
+    where
+        'r: 'e,
+    {
+        if external_resources.external_image_views.contains_key(id) {
+            return external_resources.external_image_views.get(id).unwrap();
+        } else {
+            return allocator.get_image_view(gpu, graph, id).unwrap();
+        }
+    }
+    pub fn get_image<'r, 'e>(
+        gpu: &Gpu,
+        graph: &CompiledRenderGraph,
+        id: &ResourceId,
+        allocator: &'r mut dyn ResourceAllocator,
+        external_resources: &ExternalResources<'e>,
+    ) -> &'e GpuImage
+    where
+        'r: 'e,
+    {
+        if external_resources.external_images.contains_key(id) {
+            return external_resources.external_images.get(id).unwrap();
+        } else {
+            return allocator.get_image(gpu, graph, id).unwrap();
         }
     }
 
     fn transition_image_read(
         &mut self,
-        gpu: &Gpu,
-        allocator: &mut dyn ResourceAllocator,
         graph: &CompiledRenderGraph,
         command_buffer: &mut CommandBuffer,
         id: &ResourceId,
+        image: &GpuImage,
     ) {
         let resource_info = graph.resources_used.get(id).unwrap();
         match resource_info.ty {
@@ -723,7 +622,6 @@ impl<'a> GpuRunner<'a> {
                     ImageFormat::Depth => ImageAspectFlags::DEPTH,
                 };
 
-                let image = allocator.get_image(gpu, graph, &id).unwrap();
                 let memory_barrier = ImageMemoryBarrier {
                     src_access_mask: old_layout.access_mask,
                     dst_access_mask: new_layout.access_mask,
@@ -754,11 +652,10 @@ impl<'a> GpuRunner<'a> {
 
     fn transition_image_write(
         &mut self,
-        gpu: &Gpu,
-        allocator: &mut dyn ResourceAllocator,
         graph: &CompiledRenderGraph,
         command_buffer: &mut CommandBuffer,
         id: &ResourceId,
+        image: &GpuImage,
     ) {
         let resource_info = graph.resources_used.get(id).unwrap();
         match resource_info.ty {
@@ -793,7 +690,6 @@ impl<'a> GpuRunner<'a> {
                     ImageFormat::Depth => ImageAspectFlags::DEPTH,
                 };
 
-                let image = allocator.get_image(gpu, graph, &id).unwrap();
                 let memory_barrier = ImageMemoryBarrier {
                     src_access_mask: old_layout.access_mask,
                     dst_access_mask: new_layout.access_mask,
@@ -821,6 +717,174 @@ impl<'a> GpuRunner<'a> {
             }
         }
     }
+
+    fn create_render_pass(
+        &mut self,
+        graph: &CompiledRenderGraph,
+        pass_info: &RenderPassInfo,
+        id: usize,
+    ) -> Result<&RenderPass, anyhow::Error> {
+        let writes: Vec<_> = pass_info
+            .writes
+            .iter()
+            .filter_map(|id| {
+                let resource_desc = graph.resources_used.get(id).unwrap();
+                match &resource_desc.ty {
+                    AllocationType::Image(image_desc)
+                    | AllocationType::ExternalImage(image_desc) => Some(image_desc),
+                }
+            })
+            .map(|image_desc| RenderPassAttachment {
+                format: image_desc.format.to_vk(),
+                samples: SampleCountFlags::TYPE_1,
+                load_op: AttachmentLoadOp::CLEAR,
+                store_op: AttachmentStoreOp::STORE,
+                stencil_load_op: AttachmentLoadOp::DONT_CARE,
+                stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                initial_layout: ImageLayout::UNDEFINED,
+                final_layout: match image_desc.format {
+                    ImageFormat::Rgba8 => {
+                        if image_desc.present {
+                            ImageLayout::PRESENT_SRC_KHR
+                        } else {
+                            ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                        }
+                    }
+                    ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                },
+                blend_state: BlendState {
+                    blend_enable: true,
+                    src_color_blend_factor: BlendFactor::ONE,
+                    dst_color_blend_factor: BlendFactor::ZERO,
+                    color_blend_op: BlendOp::ADD,
+                    src_alpha_blend_factor: BlendFactor::ONE,
+                    dst_alpha_blend_factor: BlendFactor::ZERO,
+                    alpha_blend_op: BlendOp::ADD,
+                    color_write_mask: ColorComponentFlags::RGBA,
+                },
+            })
+            .collect();
+
+        let color_attachments: Vec<_> = writes
+            .iter()
+            .enumerate()
+            .filter(|(_, attach)| attach.format != ImageFormat::Depth.to_vk())
+            .map(|(i, _)| AttachmentReference {
+                attachment: i as _,
+                layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            })
+            .collect();
+        let depth_attachments: Vec<_> = pass_info
+            .writes
+            .iter()
+            .map(|id| graph.resources_used.get(id).unwrap())
+            .enumerate()
+            .filter_map(|(idx, info)| match info.ty {
+                AllocationType::Image(info) | AllocationType::ExternalImage(info) => {
+                    if info.format == ImageFormat::Depth {
+                        Some(idx)
+                    } else {
+                        None
+                    }
+                }
+            })
+            .map(|i| AttachmentReference {
+                attachment: i as _,
+                layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            })
+            .collect();
+
+        let description = RenderPassDescription {
+            attachments: &writes,
+            subpasses: &[SubpassDescription {
+                pipeline_bind_point: PipelineBindPoint::GRAPHICS,
+                flags: SubpassDescriptionFlags::empty(),
+                input_attachments: &[],
+                color_attachments: &color_attachments,
+                resolve_attachments: &[],
+                depth_stencil_attachment: &depth_attachments,
+                preserve_attachments: &[],
+            }],
+            dependencies: &[SubpassDependency {
+                src_subpass: vk::SUBPASS_EXTERNAL,
+                dst_subpass: 0,
+                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                src_access_mask: AccessFlags::empty(),
+                dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                dependency_flags: DependencyFlags::empty(),
+            }],
+        };
+        let pass = RenderPass::new(self.gpu, &description)?;
+        self.render_passes.insert(id, pass);
+        Ok(self.render_passes.get(&id).unwrap())
+    }
+
+    fn get_renderpass(&self, id: usize) -> &RenderPass {
+        if self.render_passes.contains_key(&id) {
+            return self.render_passes.get(&id).unwrap();
+        } else {
+            panic!("Failed to find render pass");
+        }
+    }
+
+    fn create_framebuffer(
+        &mut self,
+        graph: &CompiledRenderGraph,
+        allocator: &mut dyn ResourceAllocator,
+        external_resources: &ExternalResources,
+
+        id: usize,
+    ) -> anyhow::Result<&GpuFramebuffer> {
+        let mut views = vec![];
+        let pass_info = &graph.pass_infos[id];
+        for write in &pass_info.writes {
+            if !external_resources.external_image_views.contains_key(write) {
+                allocator.ensure_image_view_exists(self.gpu, graph, write)?;
+            }
+        }
+        for write in &pass_info.writes {
+            let view = if external_resources.external_image_views.contains_key(write) {
+                external_resources.external_image_views.get(write).unwrap()
+            } else {
+                allocator.get_image_view_unchecked(write)
+            };
+
+            views.push(view)
+        }
+        let render_pass = self.get_renderpass(id);
+        let framebuffer = self.gpu.create_framebuffer(&FramebufferCreateInfo {
+            render_pass,
+            attachments: &views,
+            width: pass_info.extents.width,
+            height: pass_info.extents.height,
+        })?;
+        self.framebuffers.insert(id, framebuffer);
+        Ok(self.framebuffers.get(&id).unwrap())
+    }
+    fn get_renderpass_and_framebuffer(
+        &self,
+        id: usize,
+    ) -> anyhow::Result<(&RenderPass, &GpuFramebuffer)> {
+        Ok((self.get_renderpass(id), self.framebuffers.get(&id).unwrap()))
+    }
+
+    fn ensure_render_pass_and_framebuffer_exist(
+        &mut self,
+        rp: &usize,
+        graph: &CompiledRenderGraph,
+        resource_allocator: &mut dyn ResourceAllocator,
+        external_resources: &ExternalResources,
+    ) -> Result<(), anyhow::Error> {
+        if !self.render_passes.contains_key(rp) {
+            let pass_info = &graph.pass_infos[*rp];
+            self.create_render_pass(graph, pass_info, *rp)?;
+        };
+        if !self.framebuffers.contains_key(rp) {
+            self.create_framebuffer(graph, resource_allocator, external_resources, *rp)?;
+        };
+        Ok(())
+    }
 }
 
 impl<'a> RenderGraphRunner for GpuRunner<'a> {
@@ -828,6 +892,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
         &mut self,
         graph: &CompiledRenderGraph,
         resource_allocator: &mut dyn ResourceAllocator,
+        external_resources: &ExternalResources,
     ) -> anyhow::Result<()> {
         let mut command_buffer = CommandBuffer::new(self.gpu, gpu::QueueType::Graphics)?;
 
@@ -846,13 +911,14 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                         [0.0, 0.3, 0.3, 1.0],
                     );
                     for id in resources {
-                        self.transition_image_read(
+                        let image = Self::get_image(
                             self.gpu,
-                            resource_allocator,
                             graph,
-                            &mut command_buffer,
                             id,
+                            resource_allocator,
+                            external_resources,
                         );
+                        self.transition_image_read(graph, &mut command_buffer, id, image);
                     }
                 }
                 GraphOperation::TransitionWrite(resources) => {
@@ -862,18 +928,25 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                     );
 
                     for id in resources {
-                        self.transition_image_write(
+                        let image = Self::get_image(
                             self.gpu,
-                            resource_allocator,
                             graph,
-                            &mut command_buffer,
                             id,
+                            resource_allocator,
+                            external_resources,
                         );
+                        self.transition_image_write(graph, &mut command_buffer, id, image);
                     }
                 }
                 GraphOperation::ExecuteRenderPass(rp) => {
-                    let (pass, framebuffer) =
-                        resource_allocator.get_renderpass_and_framebuffer(self.gpu, graph, *rp)?;
+                    self.ensure_render_pass_and_framebuffer_exist(
+                        rp,
+                        graph,
+                        resource_allocator,
+                        external_resources,
+                    )?;
+
+                    let (pass, framebuffer) = self.get_renderpass_and_framebuffer(*rp)?;
                     let info = graph.pass_infos.get(*rp).unwrap();
 
                     let cb = graph.callbacks.get(&info.id());
@@ -955,6 +1028,7 @@ impl RenderGraphRunner for RenderGraphPrinter {
         &mut self,
         graph: &CompiledRenderGraph,
         _allocator: &mut dyn ResourceAllocator,
+        external_resources: &ExternalResources,
     ) -> anyhow::Result<()> {
         println!(
             "Graph contains {} render passes, dumping pass info",

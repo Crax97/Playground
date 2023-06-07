@@ -28,8 +28,8 @@ use crate::{
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     mesh::Mesh,
-    DefaultResourceAllocator, GpuRunner, ImageDescription, RenderGraph, RenderGraphRunner,
-    ResourceAllocator,
+    DefaultResourceAllocator, ExternalResources, GpuRunner, ImageDescription, RenderGraph,
+    RenderGraphRunner, ResourceAllocator,
 };
 
 use ash::vk::{
@@ -524,9 +524,11 @@ impl RenderingPipeline for ForwardRenderingPipeline {
 
         let mut default_allocator = DefaultResourceAllocator::default();
 
-        default_allocator.inject_external_image(&color_buffer, image, view);
+        let mut external_resources = ExternalResources::default();
+
+        external_resources.inject_external_image(&color_buffer, image, view);
         let mut runner = GpuRunner::new(gpu);
-        runner.run_graph(&render_graph, &mut default_allocator)?;
+        runner.run_graph(&render_graph, &mut default_allocator, &external_resources)?;
         gpu.wait_device_idle()?;
 
         Ok(())
