@@ -303,8 +303,8 @@ pub type GraphResult<T> = Result<T, CompileError>;
 #[derive(Default, Debug, Clone)]
 pub struct RenderPassInfo {
     label: String,
-    writes: HashSet<ResourceId>,
-    reads: HashSet<ResourceId>,
+    writes: Vec<ResourceId>,
+    reads: Vec<ResourceId>,
     extents: Extent2D,
     is_external: bool,
 }
@@ -323,18 +323,18 @@ impl Hash for RenderPassInfo {
 
 impl RenderPassInfo {
     pub fn write(&mut self, handle: ResourceId) {
-        self.writes.insert(handle);
+        assert!(!self.writes.contains(&handle));
+        self.writes.push(handle);
     }
     pub fn writes(&mut self, handles: &[ResourceId]) {
-        let handles: HashSet<ResourceId> = HashSet::from_iter(handles.iter().cloned());
-        self.writes.extend(&handles);
+        self.writes.append(&mut handles.to_owned());
     }
     pub fn read(&mut self, handle: ResourceId) {
-        self.reads.insert(handle);
+        assert!(!self.reads.contains(&handle));
+        self.reads.push(handle);
     }
     pub fn reads(&mut self, handles: &[ResourceId]) {
-        let handles: HashSet<ResourceId> = HashSet::from_iter(handles.iter().cloned());
-        self.reads.extend(&handles)
+        self.reads.append(&mut handles.to_owned());
     }
 
     pub fn mark_external(&mut self) {
@@ -344,8 +344,8 @@ impl RenderPassInfo {
 
 #[derive(Clone, Debug)]
 pub enum GraphOperation {
-    TransitionRead(HashSet<ResourceId>),
-    TransitionWrite(HashSet<ResourceId>),
+    TransitionRead(Vec<ResourceId>),
+    TransitionWrite(Vec<ResourceId>),
     ExecuteRenderPass(usize),
 }
 
@@ -362,9 +362,7 @@ pub struct EndContext<'p, 'g> {
 pub struct CompiledRenderGraph {
     pass_infos: Vec<RenderPassInfo>,
     resources_used: HashMap<ResourceId, ResourceInfo>,
-    //
     graph_operations: Vec<GraphOperation>,
-    //
 }
 
 #[derive(Default)]
@@ -479,7 +477,7 @@ impl RenderGraph {
     }
 
     fn prune_passes(&mut self, compiled: &mut CompiledRenderGraph) {
-        let mut working_set: HashSet<_> = self
+        let mut working_set: Vec<_> = self
             .persistent_resources
             .iter()
             .map(|r| r.clone())
@@ -551,7 +549,7 @@ impl RenderGraph {
             let matching_passes: Vec<_> = passes
                 .iter()
                 .enumerate()
-                .filter(|(_, (_, p))| p.reads.intersection(&pass.reads).next().is_some())
+                .filter(|(_, (_, p))| p.reads.iter().any(|read| pass.reads.contains(read)))
                 .map(|(i, _)| i)
                 .collect();
 
