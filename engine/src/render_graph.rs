@@ -223,6 +223,7 @@ pub trait RenderGraphRunner {
     fn run_graph(
         &mut self,
         graph: &CompiledRenderGraph,
+        callbacks: &Callbacks,
         resource_allocator: &mut dyn ResourceAllocator,
         external_resources: &ExternalResources,
     ) -> anyhow::Result<()>;
@@ -267,6 +268,8 @@ pub struct RenderGraph {
     passes: Vec<RenderPassInfo>,
     allocations: HashMap<ResourceId, ResourceInfo>,
     persistent_resources: HashSet<ResourceId>,
+    dirty: bool,
+    cached_graph: CompiledRenderGraph,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -350,16 +353,22 @@ pub struct EndContext<'p, 'g> {
     pub command_buffer: &'p mut CommandBuffer<'g>,
 }
 
-#[derive(Default)]
-pub struct CompiledRenderGraph<'g> {
+#[derive(Default, Clone)]
+pub struct CompiledRenderGraph {
     pass_infos: Vec<RenderPassInfo>,
     resources_used: HashMap<ResourceId, ResourceInfo>,
-    callbacks: HashMap<usize, Box<dyn Fn(&Gpu, &mut RenderPassContext) + 'g>>,
+    //
     graph_operations: Vec<GraphOperation>,
+    //
+}
+
+#[derive(Default)]
+pub struct Callbacks<'g> {
+    callbacks: HashMap<usize, Box<dyn Fn(&Gpu, &mut RenderPassContext) + 'g>>,
     end_callback: Option<Box<dyn Fn(&Gpu, &mut EndContext) + 'g>>,
 }
 
-impl<'g> CompiledRenderGraph<'g> {
+impl<'g> Callbacks<'g> {
     pub fn register_callback<F: Fn(&Gpu, &mut RenderPassContext) + 'g>(
         &mut self,
         handle: &RenderPassHandle,
@@ -378,6 +387,8 @@ impl RenderGraph {
             passes: vec![],
             allocations: HashMap::default(),
             persistent_resources: HashSet::default(),
+            dirty: false,
+            cached_graph: CompiledRenderGraph::default(),
         }
     }
 
@@ -420,6 +431,8 @@ impl RenderGraph {
     pub fn commit_render_pass(&mut self, pass: RenderPassInfo) -> RenderPassHandle {
         let id = self.passes.len() as _;
         self.passes.push(pass);
+
+        self.dirty = true;
         RenderPassHandle { id }
     }
 
@@ -428,6 +441,9 @@ impl RenderGraph {
     }
 
     pub fn compile(&mut self) -> GraphResult<CompiledRenderGraph> {
+        if !self.dirty {
+            return Ok(self.cached_graph.clone());
+        }
         let mut compiled = CompiledRenderGraph::default();
 
         self.prune_passes(&mut compiled);
@@ -435,6 +451,9 @@ impl RenderGraph {
         let merge_candidates = self.find_merge_candidates(&mut compiled);
 
         self.find_optimal_execution_order(&mut compiled, merge_candidates);
+
+        self.dirty = false;
+        self.cached_graph = compiled.clone();
 
         Ok(compiled)
     }
@@ -910,6 +929,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
     fn run_graph(
         &mut self,
         graph: &CompiledRenderGraph,
+        callbacks: &Callbacks,
         resource_allocator: &mut dyn ResourceAllocator,
         external_resources: &ExternalResources,
     ) -> anyhow::Result<()> {
@@ -968,7 +988,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                     let (pass, framebuffer) = self.get_renderpass_and_framebuffer(*rp)?;
                     let info = &graph.pass_infos[*rp];
 
-                    let cb = graph.callbacks.get(rp);
+                    let cb = callbacks.callbacks.get(rp);
                     let clear_color_values: Vec<_> = info
                         .writes
                         .iter()
@@ -1019,7 +1039,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                 }
             }
         }
-        if let Some(end_cb) = &graph.end_callback {
+        if let Some(end_cb) = &callbacks.end_callback {
             end_cb(
                 self.gpu,
                 &mut EndContext {
@@ -1046,6 +1066,7 @@ impl RenderGraphRunner for RenderGraphPrinter {
     fn run_graph(
         &mut self,
         graph: &CompiledRenderGraph,
+        callbacks: &Callbacks,
         _allocator: &mut dyn ResourceAllocator,
         _external_resources: &ExternalResources,
     ) -> anyhow::Result<()> {

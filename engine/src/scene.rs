@@ -28,8 +28,8 @@ use crate::{
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     mesh::Mesh,
-    DefaultResourceAllocator, ExternalResources, GpuRunner, ImageDescription, RenderGraph,
-    RenderGraphRunner, ResourceAllocator,
+    Callbacks, CompiledRenderGraph, DefaultResourceAllocator, ExternalResources, GpuRunner,
+    RenderGraph, RenderGraphRunner, RenderPassHandle, ResourceId,
 };
 
 use ash::vk::{
@@ -92,9 +92,18 @@ pub struct ForwardRenderingPipeline {
     camera_buffer: GpuBuffer,
     camera_buffer_descriptor_set: GpuDescriptorSet,
     material_context: ForwardRendererMaterialContext,
+    resource_allocator: DefaultResourceAllocator,
+    render_graph: RenderGraph,
+
+    forward_pass: RenderPassHandle,
+    color_buffer: ResourceId,
 }
 impl ForwardRenderingPipeline {
-    pub fn new(gpu: &Gpu, resource_map: Rc<ResourceMap>, swapchain: &Swapchain) -> VkResult<Self> {
+    pub fn new(
+        gpu: &Gpu,
+        resource_map: Rc<ResourceMap>,
+        swapchain: &Swapchain,
+    ) -> anyhow::Result<Self> {
         let camera_buffer = {
             let create_info = BufferCreateInfo {
                 label: Some("Forward Renderer - Camera buffer"),
@@ -121,11 +130,46 @@ impl ForwardRenderingPipeline {
         })?;
 
         let material_context = ForwardRendererMaterialContext::new(gpu, swapchain)?;
+        let extents = swapchain.extents();
+        let format = swapchain.present_format();
+
+        let mut render_graph = RenderGraph::new();
+        let depth_buffer = render_graph.use_image(
+            "depth-buffer",
+            &crate::ImageDescription {
+                width: extents.width,
+                height: extents.height,
+                format: gpu::ImageFormat::Depth,
+                samples: 1,
+                present: false,
+            },
+        )?;
+        let color_buffer = render_graph.use_image(
+            "color-buffer",
+            &crate::ImageDescription {
+                width: extents.width,
+                height: extents.height,
+                format: format.into(),
+                samples: 1,
+                present: true,
+            },
+        )?;
+        render_graph.persist_resource(&color_buffer);
+        let mut forward_pass = render_graph.begin_render_pass("ForwardPass", extents)?;
+        forward_pass.writes(&[color_buffer, depth_buffer]);
+        forward_pass.mark_external();
+        let forward_pass = render_graph.commit_render_pass(forward_pass);
+
         Ok(Self {
             camera_buffer,
             resource_map,
             camera_buffer_descriptor_set,
             material_context,
+            resource_allocator: Default::default(),
+            render_graph,
+
+            color_buffer,
+            forward_pass,
         })
     }
 }
@@ -429,36 +473,8 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 }],
             )
             .unwrap();
-        let extents = swapchain.extents();
-        let swapchain_format = swapchain.present_format();
 
         let (image, view) = swapchain.acquire_next_image()?;
-        let mut render_graph = RenderGraph::new();
-        let depth_buffer = render_graph.use_image(
-            "depth-buffer",
-            &crate::ImageDescription {
-                width: extents.width,
-                height: extents.height,
-                format: gpu::ImageFormat::Depth,
-                samples: 1,
-                present: false,
-            },
-        )?;
-        let color_buffer = render_graph.use_image(
-            "color-buffer",
-            &crate::ImageDescription {
-                width: extents.width,
-                height: extents.height,
-                format: swapchain_format.into(),
-                samples: 1,
-                present: true,
-            },
-        )?;
-        render_graph.persist_resource(&color_buffer);
-        let mut forward_pass = render_graph.begin_render_pass("ForwardPass", extents)?;
-        forward_pass.writes(&[color_buffer, depth_buffer]);
-        forward_pass.mark_external();
-        let forward_pass = render_graph.commit_render_pass(forward_pass);
 
         let mut pipeline_hashmap: HashMap<ResourceHandle<GpuPipeline>, Vec<ScenePrimitive>> =
             HashMap::new();
@@ -471,8 +487,9 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 .push(primitive.clone());
         }
 
-        let mut render_graph = render_graph.compile()?;
-        render_graph.register_callback(&forward_pass, |_: &Gpu, ctx| {
+        let render_graph = self.render_graph.compile()?;
+        let mut callbacks = Callbacks::default();
+        callbacks.register_callback(&self.forward_pass, |_: &Gpu, ctx| {
             for (pipeline, primitives) in pipeline_hashmap.iter() {
                 {
                     let pipeline = self.resource_map.get(pipeline);
@@ -523,18 +540,21 @@ impl RenderingPipeline for ForwardRenderingPipeline {
             }
         });
 
-        let mut default_allocator = DefaultResourceAllocator::default();
-
         let mut external_resources = ExternalResources::default();
 
         external_resources.inject_external_renderpass(
-            forward_pass,
-            self.get_context()
+            self.forward_pass,
+            self.material_context
                 .get_material_render_pass(MaterialDomain::Surface),
         );
-        external_resources.inject_external_image(&color_buffer, image, view);
+        external_resources.inject_external_image(&self.color_buffer, image, view);
         let mut runner = GpuRunner::new(gpu);
-        runner.run_graph(&render_graph, &mut default_allocator, &external_resources)?;
+        runner.run_graph(
+            &render_graph,
+            &callbacks,
+            &mut self.resource_allocator,
+            &external_resources,
+        )?;
         gpu.wait_device_idle()?;
 
         Ok(())
