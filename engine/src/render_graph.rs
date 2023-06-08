@@ -127,21 +127,21 @@ impl DefaultResourceAllocator {
         self.images.insert(*id, image);
         self.image_views.insert(*id, view);
 
-        Ok(self.image_views.get(id).unwrap())
+        Ok(&self.image_views[id])
     }
 
     fn get_image_view_checked(&self, id: ResourceId) -> &GpuImageView {
         if self.image_views.contains_key(&id) {
-            return self.image_views.get(&id).unwrap();
+            return &self.image_views[&id];
         } else {
-            panic!("Failed to find image view");
+            panic!("get_image_view_checked: failed to find image view");
         }
     }
     fn get_image_checked(&self, id: ResourceId) -> &GpuImage {
         if self.images.contains_key(&id) {
-            return self.images.get(&id).unwrap();
+            return &self.images[&id];
         } else {
-            panic!("Failed to find image view");
+            panic!("get_image: failed to find image view");
         }
     }
 }
@@ -210,7 +210,9 @@ impl ResourceAllocator for DefaultResourceAllocator {
     }
 
     fn get_image_view_unchecked(&self, id: &ResourceId) -> &GpuImageView {
-        self.image_views.get(id).unwrap()
+        self.image_views
+            .get(id)
+            .expect("get_image_view_unchecked(): image view not found")
     }
 }
 
@@ -564,14 +566,14 @@ impl<'a> GpuRunner<'a> {
         id: &ResourceId,
         allocator: &'r mut dyn ResourceAllocator,
         external_resources: &ExternalResources<'e>,
-    ) -> &'e GpuImageView
+    ) -> anyhow::Result<&'e GpuImageView>
     where
         'r: 'e,
     {
         if external_resources.external_image_views.contains_key(id) {
-            return external_resources.external_image_views.get(id).unwrap();
+            Ok(external_resources.external_image_views[id])
         } else {
-            return allocator.get_image_view(gpu, graph, id).unwrap();
+            allocator.get_image_view(gpu, graph, id)
         }
     }
     pub fn get_image<'r, 'e>(
@@ -580,14 +582,14 @@ impl<'a> GpuRunner<'a> {
         id: &ResourceId,
         allocator: &'r mut dyn ResourceAllocator,
         external_resources: &ExternalResources<'e>,
-    ) -> &'e GpuImage
+    ) -> anyhow::Result<&'e GpuImage>
     where
         'r: 'e,
     {
         if external_resources.external_images.contains_key(id) {
-            return external_resources.external_images.get(id).unwrap();
+            Ok(external_resources.external_images[id])
         } else {
-            return allocator.get_image(gpu, graph, id).unwrap();
+            allocator.get_image(gpu, graph, id)
         }
     }
 
@@ -598,7 +600,7 @@ impl<'a> GpuRunner<'a> {
         id: &ResourceId,
         image: &GpuImage,
     ) {
-        let resource_info = graph.resources_used.get(id).unwrap();
+        let resource_info = &graph.resources_used[id];
         match resource_info.ty {
             AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
                 let access_flag = match desc.format {
@@ -657,7 +659,7 @@ impl<'a> GpuRunner<'a> {
         id: &ResourceId,
         image: &GpuImage,
     ) {
-        let resource_info = graph.resources_used.get(id).unwrap();
+        let resource_info = &graph.resources_used[id];
         match resource_info.ty {
             AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
                 let access_flag = match desc.format {
@@ -728,7 +730,7 @@ impl<'a> GpuRunner<'a> {
             .writes
             .iter()
             .filter_map(|id| {
-                let resource_desc = graph.resources_used.get(id).unwrap();
+                let resource_desc = &graph.resources_used[&id];
                 match &resource_desc.ty {
                     AllocationType::Image(image_desc)
                     | AllocationType::ExternalImage(image_desc) => Some(image_desc),
@@ -777,7 +779,7 @@ impl<'a> GpuRunner<'a> {
         let depth_attachments: Vec<_> = pass_info
             .writes
             .iter()
-            .map(|id| graph.resources_used.get(id).unwrap())
+            .map(|id| &graph.resources_used[id])
             .enumerate()
             .filter_map(|(idx, info)| match info.ty {
                 AllocationType::Image(info) | AllocationType::ExternalImage(info) => {
@@ -817,14 +819,14 @@ impl<'a> GpuRunner<'a> {
         };
         let pass = RenderPass::new(self.gpu, &description)?;
         self.render_passes.insert(id, pass);
-        Ok(self.render_passes.get(&id).unwrap())
+        Ok(&self.render_passes[&id])
     }
 
     fn get_renderpass(&self, id: usize) -> &RenderPass {
         if self.render_passes.contains_key(&id) {
-            return self.render_passes.get(&id).unwrap();
+            return &self.render_passes[&id];
         } else {
-            panic!("Failed to find render pass");
+            panic!("GpuRunner::get_renderpass(): failed to find render pass");
         }
     }
 
@@ -845,7 +847,7 @@ impl<'a> GpuRunner<'a> {
         }
         for write in &pass_info.writes {
             let view = if external_resources.external_image_views.contains_key(write) {
-                external_resources.external_image_views.get(write).unwrap()
+                external_resources.external_image_views[write]
             } else {
                 allocator.get_image_view_unchecked(write)
             };
@@ -860,13 +862,13 @@ impl<'a> GpuRunner<'a> {
             height: pass_info.extents.height,
         })?;
         self.framebuffers.insert(id, framebuffer);
-        Ok(self.framebuffers.get(&id).unwrap())
+        Ok(&self.framebuffers[&id])
     }
     fn get_renderpass_and_framebuffer(
         &self,
         id: usize,
     ) -> anyhow::Result<(&RenderPass, &GpuFramebuffer)> {
-        Ok((self.get_renderpass(id), self.framebuffers.get(&id).unwrap()))
+        Ok((self.get_renderpass(id), &self.framebuffers[&id]))
     }
 
     fn ensure_render_pass_and_framebuffer_exist(
@@ -917,7 +919,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                             id,
                             resource_allocator,
                             external_resources,
-                        );
+                        )?;
                         self.transition_image_read(graph, &mut command_buffer, id, image);
                     }
                 }
@@ -934,7 +936,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                             id,
                             resource_allocator,
                             external_resources,
-                        );
+                        )?;
                         self.transition_image_write(graph, &mut command_buffer, id, image);
                     }
                 }
@@ -947,7 +949,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                     )?;
 
                     let (pass, framebuffer) = self.get_renderpass_and_framebuffer(*rp)?;
-                    let info = graph.pass_infos.get(*rp).unwrap();
+                    let info = &graph.pass_infos[*rp];
 
                     let cb = graph.callbacks.get(&info.id());
                     let clear_color_values: Vec<_> = info
