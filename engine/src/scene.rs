@@ -28,8 +28,8 @@ use crate::{
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     mesh::Mesh,
-    Callbacks, CompiledRenderGraph, DefaultResourceAllocator, ExternalResources, GpuRunner,
-    RenderGraph, RenderGraphRunner, RenderPassHandle, ResourceId,
+    Callbacks, DefaultResourceAllocator, ExternalResources, GpuRunner, RenderGraph,
+    RenderPassHandle, ResourceId,
 };
 
 use ash::vk::{
@@ -487,7 +487,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 .push(primitive.clone());
         }
 
-        let render_graph = self.render_graph.compile()?;
+        self.render_graph.compile()?;
         let mut callbacks = Callbacks::default();
         callbacks.register_callback(&self.forward_pass, |_: &Gpu, ctx| {
             for (pipeline, primitives) in pipeline_hashmap.iter() {
@@ -549,8 +549,8 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         );
         external_resources.inject_external_image(&self.color_buffer, image, view);
         let mut runner = GpuRunner::new(gpu);
-        runner.run_graph(
-            &render_graph,
+        self.render_graph.run(
+            &mut runner,
             &callbacks,
             &mut self.resource_allocator,
             &external_resources,

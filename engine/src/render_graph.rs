@@ -329,12 +329,6 @@ impl RenderPassInfo {
     pub fn mark_external(&mut self) {
         self.is_external = true;
     }
-
-    fn id(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        self.hash(&mut hasher);
-        hasher.finish()
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -440,9 +434,9 @@ impl RenderGraph {
         self.persistent_resources.insert(*id);
     }
 
-    pub fn compile(&mut self) -> GraphResult<CompiledRenderGraph> {
+    pub fn compile(&mut self) -> GraphResult<()> {
         if !self.dirty {
-            return Ok(self.cached_graph.clone());
+            return Ok(());
         }
         let mut compiled = CompiledRenderGraph::default();
 
@@ -455,7 +449,22 @@ impl RenderGraph {
         self.dirty = false;
         self.cached_graph = compiled.clone();
 
-        Ok(compiled)
+        Ok(())
+    }
+
+    pub fn run(
+        &self,
+        runner: &mut dyn RenderGraphRunner,
+        callbacks: &Callbacks,
+        resource_allocator: &mut dyn ResourceAllocator,
+        external_resources: &ExternalResources,
+    ) -> anyhow::Result<()> {
+        runner.run_graph(
+            &self.cached_graph,
+            callbacks,
+            resource_allocator,
+            external_resources,
+        )
     }
 
     fn prune_passes(&mut self, compiled: &mut CompiledRenderGraph) {
@@ -1066,7 +1075,7 @@ impl RenderGraphRunner for RenderGraphPrinter {
     fn run_graph(
         &mut self,
         graph: &CompiledRenderGraph,
-        callbacks: &Callbacks,
+        _callbacks: &Callbacks,
         _allocator: &mut dyn ResourceAllocator,
         _external_resources: &ExternalResources,
     ) -> anyhow::Result<()> {
