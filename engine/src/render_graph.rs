@@ -22,6 +22,7 @@ use gpu::{
     MemoryDomain, PipelineBarrierInfo, RenderPass, RenderPassAttachment, RenderPassCommand,
     RenderPassDescription, SubpassDescription, ToVk, TransitionInfo,
 };
+use log::trace;
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RenderPassHandle {
@@ -129,6 +130,14 @@ impl DefaultResourceAllocator {
 
         self.images.insert(*id, image);
         self.image_views.insert(*id, view);
+
+        trace!(
+            "Created new image resource {} {}x{} {:?}",
+            info.label,
+            img.width,
+            img.height,
+            img.format
+        );
 
         Ok(&self.image_views[id])
     }
@@ -854,6 +863,8 @@ impl<'a> GpuRunner<'a> {
         };
         let pass = RenderPass::new(self.gpu, &description)?;
         self.render_passes.insert(id, pass);
+
+        trace!("Created new render pass {}", pass_info.label);
         Ok(&self.render_passes[&id])
     }
 
@@ -896,6 +907,8 @@ impl<'a> GpuRunner<'a> {
             width: pass_info.extents.width,
             height: pass_info.extents.height,
         })?;
+
+        trace!("Created new framebuffer for {}", pass_info.label);
         self.framebuffers.insert(id, framebuffer);
         Ok(&self.framebuffers[&id])
     }

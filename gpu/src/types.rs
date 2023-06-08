@@ -25,7 +25,7 @@ pub trait ToVk {
     fn to_vk(&self) -> Self::Inner;
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ImageFormat {
     Rgba8,
     Depth,
