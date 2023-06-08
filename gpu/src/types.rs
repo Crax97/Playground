@@ -256,6 +256,10 @@ impl GpuImage {
     pub fn format(&self) -> ImageFormat {
         self.format
     }
+
+    pub fn extents(&self) -> Extent2D {
+        self.extents
+    }
 }
 impl Drop for GpuImage {
     fn drop(&mut self) {
@@ -284,6 +288,7 @@ impl_raii_wrapper_to_vk!(GpuImage, vk::Image);
 
 define_raii_wrapper!((struct GpuImageView{
     format: ImageFormat,
+    extents: Extent2D,
 }, vk::ImageView, ash::Device::destroy_image_view) {
     (create_info: &vk::ImageViewCreateInfo,) => {
         |device: &ash::Device| {
@@ -301,6 +306,10 @@ impl GpuImageView {
 
     pub fn format(&self) -> ImageFormat {
         self.format
+    }
+
+    pub fn extents(&self) -> Extent2D {
+        self.extents
     }
 }
 

@@ -408,6 +408,7 @@ impl Swapchain {
                 self.state.logical_device.clone(),
                 &view_info,
                 view_info.format.into(),
+                self.present_extent,
             )?);
         }
 

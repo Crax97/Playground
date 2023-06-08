@@ -1046,7 +1046,7 @@ impl Gpu {
 
     pub fn create_image_view(&self, create_info: &ImageViewCreateInfo) -> VkResult<GpuImageView> {
         let image = create_info.image.inner;
-        let create_info = vk::ImageViewCreateInfo {
+        let vk_create_info = vk::ImageViewCreateInfo {
             s_type: StructureType::IMAGE_VIEW_CREATE_INFO,
             p_next: std::ptr::null(),
             flags: ImageViewCreateFlags::empty(),
@@ -1058,8 +1058,9 @@ impl Gpu {
         };
         GpuImageView::create(
             self.vk_logical_device(),
-            &create_info,
+            &vk_create_info,
             create_info.format.into(),
+            create_info.image.extents,
         )
     }
     pub fn create_sampler(&self, create_info: &SamplerCreateInfo) -> VkResult<GpuSampler> {

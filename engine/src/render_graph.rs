@@ -83,9 +83,14 @@ impl<'a> ExternalResources<'a> {
     }
 }
 
+struct GpuImageInfo {
+    image: GpuImage,
+    desc: ImageDescription,
+}
+
 #[derive(Default)]
 pub struct DefaultResourceAllocator {
-    images: HashMap<ResourceId, GpuImage>,
+    images: HashMap<ResourceId, GpuImageInfo>,
     image_views: HashMap<ResourceId, GpuImageView>,
 }
 impl DefaultResourceAllocator {
@@ -130,7 +135,13 @@ impl DefaultResourceAllocator {
             },
         })?;
 
-        self.images.insert(*id, image);
+        self.images.insert(
+            *id,
+            GpuImageInfo {
+                image,
+                desc: img.clone(),
+            },
+        );
         self.image_views.insert(*id, view);
 
         trace!(
@@ -153,10 +164,68 @@ impl DefaultResourceAllocator {
     }
     fn get_image_checked(&self, id: ResourceId) -> &GpuImage {
         if self.images.contains_key(&id) {
-            return &self.images[&id];
+            return &self.images[&id].image;
         } else {
             panic!("get_image: failed to find image view");
         }
+    }
+
+    fn ensure_image_description_hasnt_changed(
+        &mut self,
+        resource_info: &ResourceInfo,
+        id: &ResourceId,
+        gpu: &Gpu,
+    ) -> Result<(), anyhow::Error> {
+        let desc = match &resource_info.ty {
+            AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
+        };
+        let cached_desc = self.images[id].desc;
+        Ok(
+            if desc.format != cached_desc.format
+                || desc.height != cached_desc.height
+                || desc.width != cached_desc.width
+            {
+                self.create_image(gpu, &desc, id, resource_info)?;
+            },
+        )
+    }
+
+    fn ensure_image_exists(
+        &mut self,
+        id: &ResourceId,
+        resource_info: &ResourceInfo,
+        gpu: &Gpu,
+    ) -> Result<(), anyhow::Error> {
+        Ok(if !self.images.contains_key(id) {
+            match &resource_info.ty {
+                AllocationType::Image(img) => self.create_image(gpu, img, id, resource_info),
+                AllocationType::ExternalImage(_) => {
+                    panic!(
+                        "External image requested but it wasn't injected: {}",
+                        resource_info.label
+                    )
+                }
+            }?;
+        })
+    }
+
+    fn ensure_image_view_exists(
+        &mut self,
+        id: &ResourceId,
+        resource_info: &ResourceInfo,
+        gpu: &Gpu,
+    ) -> Result<(), anyhow::Error> {
+        Ok(if !self.image_views.contains_key(id) {
+            match &resource_info.ty {
+                AllocationType::Image(img) => self.create_image(gpu, img, id, resource_info),
+                AllocationType::ExternalImage(_) => {
+                    panic!(
+                        "External image requeste but it wasn't injected: {}",
+                        resource_info.label
+                    )
+                }
+            }?;
+        })
     }
 }
 
@@ -167,18 +236,8 @@ impl ResourceAllocator for DefaultResourceAllocator {
         graph: &CompiledRenderGraph,
         id: &ResourceId,
     ) -> anyhow::Result<&GpuImageView> {
-        if !self.image_views.contains_key(id) {
-            let resource_info = &graph.resources_used[id];
-            match &resource_info.ty {
-                AllocationType::Image(img) => self.create_image(gpu, img, id, resource_info),
-                AllocationType::ExternalImage(_) => {
-                    panic!(
-                        "External image requeste but it wasn't injected: {}",
-                        resource_info.label
-                    )
-                }
-            }?;
-        }
+        let resource_info = &graph.resources_used[id];
+        self.ensure_image_view_exists(id, resource_info, gpu)?;
 
         Ok(self.get_image_view_checked(*id))
     }
@@ -189,33 +248,27 @@ impl ResourceAllocator for DefaultResourceAllocator {
         graph: &CompiledRenderGraph,
         id: &ResourceId,
     ) -> anyhow::Result<&GpuImage> {
-        if !self.images.contains_key(id) {
-            let resource_info = &graph.resources_used[id];
-            match &resource_info.ty {
-                AllocationType::Image(img) => self.create_image(gpu, img, id, resource_info),
-                AllocationType::ExternalImage(_) => {
-                    panic!(
-                        "External image requested but it wasn't injected: {}",
-                        resource_info.label
-                    )
-                }
-            }?;
-        }
+        let resource_info = &graph.resources_used[id];
+        self.ensure_image_exists(id, resource_info, gpu)?;
+        self.ensure_image_description_hasnt_changed(resource_info, id, gpu)?;
 
         Ok(self.get_image_checked(*id))
     }
 
     fn ensure_image_view_exists(
         &mut self,
-        gpu: &Gpu,
+        _gpu: &Gpu,
         graph: &CompiledRenderGraph,
         id: &ResourceId,
     ) -> anyhow::Result<()> {
         if !self.image_views.contains_key(id) {
             let resource_info = &graph.resources_used[id];
             match &resource_info.ty {
-                AllocationType::Image(img) => {
-                    self.create_image(gpu, img, id, resource_info)?;
+                AllocationType::Image(_) => {
+                    panic!(
+                        "No matching image_view has been created for graph-owned image {}! Most likely this is a bug",
+                        resource_info.label
+                    )
                 }
                 AllocationType::ExternalImage(_) => {}
             };
