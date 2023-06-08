@@ -457,6 +457,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         render_graph.persist_resource(&color_buffer);
         let mut forward_pass = render_graph.begin_render_pass("ForwardPass", extents)?;
         forward_pass.writes(&[color_buffer, depth_buffer]);
+        forward_pass.mark_external();
         let forward_pass = render_graph.commit_render_pass(forward_pass);
 
         let mut pipeline_hashmap: HashMap<ResourceHandle<GpuPipeline>, Vec<ScenePrimitive>> =
@@ -471,7 +472,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         }
 
         let mut render_graph = render_graph.compile()?;
-        render_graph.register_callback(&forward_pass, |gpu, ctx| {
+        render_graph.register_callback(&forward_pass, |_: &Gpu, ctx| {
             for (pipeline, primitives) in pipeline_hashmap.iter() {
                 {
                     let pipeline = self.resource_map.get(pipeline);
@@ -526,6 +527,11 @@ impl RenderingPipeline for ForwardRenderingPipeline {
 
         let mut external_resources = ExternalResources::default();
 
+        external_resources.inject_external_renderpass(
+            forward_pass,
+            self.get_context()
+                .get_material_render_pass(MaterialDomain::Surface),
+        );
         external_resources.inject_external_image(&color_buffer, image, view);
         let mut runner = GpuRunner::new(gpu);
         runner.run_graph(&render_graph, &mut default_allocator, &external_resources)?;

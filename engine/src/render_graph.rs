@@ -22,11 +22,10 @@ use gpu::{
     MemoryDomain, PipelineBarrierInfo, RenderPass, RenderPassAttachment, RenderPassCommand,
     RenderPassDescription, SubpassDescription, ToVk, TransitionInfo,
 };
-use resource_map::Resource;
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RenderPassHandle {
-    id: u64,
+    id: usize,
 }
 
 impl RenderPassHandle {}
@@ -72,8 +71,12 @@ impl<'a> ExternalResources<'a> {
         self.external_image_views.insert(*id, view);
     }
 
-    pub fn inject_external_renderpass(&mut self, id: &usize, render_pass: &'a RenderPass) {
-        self.external_render_passes.insert(*id, render_pass);
+    pub fn inject_external_renderpass(
+        &mut self,
+        handle: RenderPassHandle,
+        render_pass: &'a RenderPass,
+    ) {
+        self.external_render_passes.insert(handle.id, render_pass);
     }
 }
 
@@ -289,6 +292,7 @@ pub struct RenderPassInfo {
     writes: HashSet<ResourceId>,
     reads: HashSet<ResourceId>,
     extents: Extent2D,
+    is_external: bool,
 }
 
 impl Hash for RenderPassInfo {
@@ -319,6 +323,10 @@ impl RenderPassInfo {
         self.reads.extend(&handles)
     }
 
+    pub fn mark_external(&mut self) {
+        self.is_external = true;
+    }
+
     fn id(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
         self.hash(&mut hasher);
@@ -346,7 +354,7 @@ pub struct EndContext<'p, 'g> {
 pub struct CompiledRenderGraph<'g> {
     pass_infos: Vec<RenderPassInfo>,
     resources_used: HashMap<ResourceId, ResourceInfo>,
-    callbacks: HashMap<u64, Box<dyn Fn(&Gpu, &mut RenderPassContext) + 'g>>,
+    callbacks: HashMap<usize, Box<dyn Fn(&Gpu, &mut RenderPassContext) + 'g>>,
     graph_operations: Vec<GraphOperation>,
     end_callback: Option<Box<dyn Fn(&Gpu, &mut EndContext) + 'g>>,
 }
@@ -405,13 +413,12 @@ impl RenderGraph {
             writes: Default::default(),
             reads: Default::default(),
             extents,
+            is_external: false,
         })
     }
 
     pub fn commit_render_pass(&mut self, pass: RenderPassInfo) -> RenderPassHandle {
-        let mut hasher = DefaultHasher::new();
-        pass.hash(&mut hasher);
-        let id = hasher.finish();
+        let id = self.passes.len() as _;
         self.passes.push(pass);
         RenderPassHandle { id }
     }
@@ -878,10 +885,20 @@ impl<'a> GpuRunner<'a> {
         resource_allocator: &mut dyn ResourceAllocator,
         external_resources: &ExternalResources,
     ) -> Result<(), anyhow::Error> {
-        if !self.render_passes.contains_key(rp) {
+        {
             let pass_info = &graph.pass_infos[*rp];
-            self.create_render_pass(graph, pass_info, *rp)?;
-        };
+            if pass_info.is_external && !external_resources.external_render_passes.contains_key(rp)
+            {
+                panic!(
+                    "RenderPass {} is external, but it hasn't been injected",
+                    pass_info.label
+                );
+            }
+
+            if !self.render_passes.contains_key(rp) {
+                self.create_render_pass(graph, pass_info, *rp)?;
+            };
+        }
         if !self.framebuffers.contains_key(rp) {
             self.create_framebuffer(graph, resource_allocator, external_resources, *rp)?;
         };
@@ -951,7 +968,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                     let (pass, framebuffer) = self.get_renderpass_and_framebuffer(*rp)?;
                     let info = &graph.pass_infos[*rp];
 
-                    let cb = graph.callbacks.get(&info.id());
+                    let cb = graph.callbacks.get(rp);
                     let clear_color_values: Vec<_> = info
                         .writes
                         .iter()
@@ -1030,7 +1047,7 @@ impl RenderGraphRunner for RenderGraphPrinter {
         &mut self,
         graph: &CompiledRenderGraph,
         _allocator: &mut dyn ResourceAllocator,
-        external_resources: &ExternalResources,
+        _external_resources: &ExternalResources,
     ) -> anyhow::Result<()> {
         println!(
             "Graph contains {} render passes, dumping pass info",
