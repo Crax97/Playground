@@ -1040,6 +1040,7 @@ impl Gpu {
                 width: create_info.width,
                 height: create_info.height,
             },
+            create_info.format.into(),
         )
     }
 
@@ -1055,7 +1056,11 @@ impl Gpu {
             components: create_info.components,
             subresource_range: create_info.subresource_range,
         };
-        GpuImageView::create(self.vk_logical_device(), &create_info)
+        GpuImageView::create(
+            self.vk_logical_device(),
+            &create_info,
+            create_info.format.into(),
+        )
     }
     pub fn create_sampler(&self, create_info: &SamplerCreateInfo) -> VkResult<GpuSampler> {
         GpuSampler::create(self.vk_logical_device(), create_info)

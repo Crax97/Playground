@@ -364,7 +364,14 @@ impl Swapchain {
 
         self.current_swapchain_images = images
             .iter()
-            .map(|i| GpuImage::wrap(self.state.logical_device.clone(), i.clone(), self.extents()))
+            .map(|i| {
+                GpuImage::wrap(
+                    self.state.logical_device.clone(),
+                    i.clone(),
+                    self.extents(),
+                    self.present_format().into(),
+                )
+            })
             .collect();
         Ok(())
     }
@@ -400,6 +407,7 @@ impl Swapchain {
             self.current_swapchain_image_views[i] = MaybeUninit::new(GpuImageView::create(
                 self.state.logical_device.clone(),
                 &view_info,
+                view_info.format.into(),
             )?);
         }
 

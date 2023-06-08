@@ -4,7 +4,7 @@ use super::{allocator::GpuAllocator, gpu::Gpu};
 use ash::{
     prelude::*,
     vk::{
-        self, AllocationCallbacks, Buffer, Extent2D, FenceCreateInfo, MappedMemoryRange,
+        self, AllocationCallbacks, Buffer, Extent2D, FenceCreateInfo, Format, MappedMemoryRange,
         MemoryMapFlags, SamplerCreateInfo, SemaphoreCreateInfo, ShaderModuleCreateInfo,
         StructureType,
     },
@@ -216,6 +216,7 @@ pub struct GpuImage {
     pub(super) allocation: Option<MemoryAllocation>,
     pub(super) allocator: Option<Arc<RefCell<dyn GpuAllocator>>>,
     pub(super) extents: Extent2D,
+    pub(super) format: ImageFormat,
 }
 impl GpuImage {
     pub(super) fn create(
@@ -224,6 +225,7 @@ impl GpuImage {
         allocation: MemoryAllocation,
         allocator: Arc<RefCell<dyn GpuAllocator>>,
         extents: Extent2D,
+        format: ImageFormat,
     ) -> VkResult<Self> {
         Ok(Self {
             device: gpu.state.logical_device.clone(),
@@ -231,17 +233,28 @@ impl GpuImage {
             allocation: Some(allocation),
             allocator: Some(allocator),
             extents,
+            format,
         })
     }
 
-    pub(super) fn wrap(device: ash::Device, inner: vk::Image, extents: Extent2D) -> Self {
+    pub(super) fn wrap(
+        device: ash::Device,
+        inner: vk::Image,
+        extents: Extent2D,
+        format: ImageFormat,
+    ) -> Self {
         Self {
             device,
             inner,
             allocation: None,
             allocator: None,
             extents,
+            format,
         }
+    }
+
+    pub fn format(&self) -> ImageFormat {
+        self.format
     }
 }
 impl Drop for GpuImage {
@@ -269,7 +282,9 @@ impl Deref for GpuImage {
 impl_raii_wrapper_hash!(GpuImage);
 impl_raii_wrapper_to_vk!(GpuImage, vk::Image);
 
-define_raii_wrapper!((struct GpuImageView{}, vk::ImageView, ash::Device::destroy_image_view) {
+define_raii_wrapper!((struct GpuImageView{
+    format: ImageFormat,
+}, vk::ImageView, ash::Device::destroy_image_view) {
     (create_info: &vk::ImageViewCreateInfo,) => {
         |device: &ash::Device| {
             unsafe {
@@ -282,6 +297,10 @@ define_raii_wrapper!((struct GpuImageView{}, vk::ImageView, ash::Device::destroy
 impl GpuImageView {
     pub fn inner_image_view(&self) -> vk::ImageView {
         self.inner
+    }
+
+    pub fn format(&self) -> ImageFormat {
+        self.format
     }
 }
 
