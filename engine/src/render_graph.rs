@@ -134,11 +134,11 @@ impl DefaultResourceAllocator {
         self.image_views.insert(*id, view);
 
         trace!(
-            "Created new image resource {} {}x{} {:?}",
+            "Created new {:?} image resource {} {}x{}",
+            img.format,
             info.label,
             img.width,
             img.height,
-            img.format
         );
 
         Ok(&self.image_views[id])
@@ -279,7 +279,9 @@ pub struct RenderGraph {
     passes: Vec<RenderPassInfo>,
     allocations: HashMap<ResourceId, ResourceInfo>,
     persistent_resources: HashSet<ResourceId>,
-    dirty: bool,
+
+    hasher: DefaultHasher,
+    cached_graph_hash: u64,
     cached_graph: CompiledRenderGraph,
 }
 
@@ -312,6 +314,8 @@ pub struct RenderPassInfo {
 impl Hash for RenderPassInfo {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.label.hash(state);
+        self.extents.hash(state);
+        self.is_external.hash(state);
         for write in &self.writes {
             write.hash(state);
         }
@@ -390,7 +394,9 @@ impl RenderGraph {
             passes: vec![],
             allocations: HashMap::default(),
             persistent_resources: HashSet::default(),
-            dirty: false,
+
+            hasher: DefaultHasher::default(),
+            cached_graph_hash: 0,
             cached_graph: CompiledRenderGraph::default(),
         }
     }
@@ -433,9 +439,9 @@ impl RenderGraph {
 
     pub fn commit_render_pass(&mut self, pass: RenderPassInfo) -> RenderPassHandle {
         let id = self.passes.len() as _;
+        pass.hash(&mut self.hasher);
         self.passes.push(pass);
 
-        self.dirty = true;
         RenderPassHandle { id }
     }
 
@@ -444,7 +450,7 @@ impl RenderGraph {
     }
 
     pub fn compile(&mut self) -> GraphResult<()> {
-        if !self.dirty {
+        if self.hasher.finish() == self.cached_graph_hash {
             return Ok(());
         }
         let mut compiled = CompiledRenderGraph::default();
@@ -455,9 +461,10 @@ impl RenderGraph {
 
         self.find_optimal_execution_order(&mut compiled, merge_candidates);
 
-        self.dirty = false;
+        self.cached_graph_hash = self.hasher.finish();
         self.cached_graph = compiled.clone();
 
+        self.prepare_for_next_frame();
         Ok(())
     }
 
@@ -584,6 +591,12 @@ impl RenderGraph {
                 .graph_operations
                 .push(GraphOperation::ExecuteRenderPass(i));
         }
+    }
+
+    fn prepare_for_next_frame(&mut self) {
+        self.passes.clear();
+        self.persistent_resources.clear();
+        self.allocations.clear();
     }
 }
 
@@ -899,6 +912,7 @@ impl GpuRunner {
 
             views.push(view)
         }
+
         let render_pass = self.get_renderpass(render_pass_id);
         let framebuffer = crate::app_state()
             .gpu

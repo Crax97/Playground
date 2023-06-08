@@ -4,7 +4,7 @@ use super::{allocator::GpuAllocator, gpu::Gpu};
 use ash::{
     prelude::*,
     vk::{
-        self, AllocationCallbacks, Buffer, Extent2D, FenceCreateInfo, Format, MappedMemoryRange,
+        self, AllocationCallbacks, Buffer, Extent2D, FenceCreateInfo, MappedMemoryRange,
         MemoryMapFlags, SamplerCreateInfo, SemaphoreCreateInfo, ShaderModuleCreateInfo,
         StructureType,
     },
