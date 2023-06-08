@@ -24,6 +24,8 @@ use gpu::{
 };
 use log::trace;
 
+use crate::app_state;
+
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RenderPassHandle {
     id: usize,
@@ -587,17 +589,14 @@ impl RenderGraph {
     }
 }
 
-pub struct GpuRunner<'a> {
-    pub gpu: &'a Gpu,
-
+pub struct GpuRunner {
     resource_states: HashMap<ResourceId, TransitionInfo>,
     render_passes: HashMap<usize, RenderPass>,
     framebuffers: HashMap<usize, GpuFramebuffer>,
 }
-impl<'a> GpuRunner<'a> {
-    pub fn new(gpu: &'a Gpu) -> Self {
+impl GpuRunner {
+    pub fn new() -> Self {
         Self {
-            gpu,
             resource_states: Default::default(),
             render_passes: Default::default(),
             framebuffers: Default::default(),
@@ -861,7 +860,7 @@ impl<'a> GpuRunner<'a> {
                 dependency_flags: DependencyFlags::empty(),
             }],
         };
-        let pass = RenderPass::new(self.gpu, &description)?;
+        let pass = RenderPass::new(&crate::app_state().gpu, &description)?;
         self.render_passes.insert(id, pass);
 
         trace!("Created new render pass {}", pass_info.label);
@@ -869,26 +868,28 @@ impl<'a> GpuRunner<'a> {
     }
 
     fn get_renderpass(&self, id: usize) -> &RenderPass {
-        if self.render_passes.contains_key(&id) {
-            return &self.render_passes[&id];
-        } else {
-            panic!("GpuRunner::get_renderpass(): failed to find render pass");
-        }
+        self.render_passes
+            .get(&id)
+            .expect(&format!("Failed to find renderpass with id {}", id))
     }
-
+    fn get_framebuffer(&self, hash: usize) -> &GpuFramebuffer {
+        self.framebuffers
+            .get(&hash)
+            .expect(&format!("Failed to find framebuffer with hash {}", hash))
+    }
     fn create_framebuffer(
         &mut self,
         graph: &CompiledRenderGraph,
         allocator: &mut dyn ResourceAllocator,
         external_resources: &ExternalResources,
-
-        id: usize,
+        render_pass_id: usize,
+        framebuffer_hash: usize,
     ) -> anyhow::Result<&GpuFramebuffer> {
         let mut views = vec![];
-        let pass_info = &graph.pass_infos[id];
+        let pass_info = &graph.pass_infos[render_pass_id];
         for write in &pass_info.writes {
             if !external_resources.external_image_views.contains_key(write) {
-                allocator.ensure_image_view_exists(self.gpu, graph, write)?;
+                allocator.ensure_image_view_exists(&crate::app_state().gpu, graph, write)?;
             }
         }
         for write in &pass_info.writes {
@@ -900,30 +901,29 @@ impl<'a> GpuRunner<'a> {
 
             views.push(view)
         }
-        let render_pass = self.get_renderpass(id);
-        let framebuffer = self.gpu.create_framebuffer(&FramebufferCreateInfo {
-            render_pass,
-            attachments: &views,
-            width: pass_info.extents.width,
-            height: pass_info.extents.height,
-        })?;
+        let render_pass = self.get_renderpass(render_pass_id);
+        let framebuffer = crate::app_state()
+            .gpu
+            .create_framebuffer(&FramebufferCreateInfo {
+                render_pass,
+                attachments: &views,
+                width: pass_info.extents.width,
+                height: pass_info.extents.height,
+            })?;
 
-        trace!("Created new framebuffer for {}", pass_info.label);
-        self.framebuffers.insert(id, framebuffer);
-        Ok(&self.framebuffers[&id])
-    }
-    fn get_renderpass_and_framebuffer(
-        &self,
-        id: usize,
-    ) -> anyhow::Result<(&RenderPass, &GpuFramebuffer)> {
-        Ok((self.get_renderpass(id), &self.framebuffers[&id]))
+        trace!(
+            "Created new framebuffer for {} hash {}",
+            pass_info.label,
+            framebuffer_hash
+        );
+        self.framebuffers.insert(framebuffer_hash, framebuffer);
+        Ok(&self.framebuffers[&framebuffer_hash])
     }
 
-    fn ensure_render_pass_and_framebuffer_exist(
+    fn ensure_render_pass_exists(
         &mut self,
         rp: &usize,
         graph: &CompiledRenderGraph,
-        resource_allocator: &mut dyn ResourceAllocator,
         external_resources: &ExternalResources,
     ) -> Result<(), anyhow::Error> {
         {
@@ -940,14 +940,39 @@ impl<'a> GpuRunner<'a> {
                 self.create_render_pass(graph, pass_info, *rp)?;
             };
         }
-        if !self.framebuffers.contains_key(rp) {
-            self.create_framebuffer(graph, resource_allocator, external_resources, *rp)?;
-        };
         Ok(())
+    }
+
+    fn ensure_framebuffer_exists(
+        &mut self,
+        render_pass: &usize,
+        graph: &CompiledRenderGraph,
+        allocator: &mut dyn ResourceAllocator,
+        external_resources: &ExternalResources,
+    ) -> anyhow::Result<usize> {
+        let mut hasher = DefaultHasher::new();
+        let pass_info = &graph.pass_infos[*render_pass];
+        for id in &pass_info.writes {
+            let view =
+                Self::get_image_view(&app_state().gpu, graph, id, allocator, external_resources)?;
+            view.hash(&mut hasher);
+        }
+        let framebuffer_hash = hasher.finish() as usize;
+
+        if !self.framebuffers.contains_key(&framebuffer_hash) {
+            self.create_framebuffer(
+                graph,
+                allocator,
+                external_resources,
+                *render_pass,
+                framebuffer_hash,
+            )?;
+        };
+        Ok(framebuffer_hash)
     }
 }
 
-impl<'a> RenderGraphRunner for GpuRunner<'a> {
+impl RenderGraphRunner for GpuRunner {
     fn run_graph(
         &mut self,
         graph: &CompiledRenderGraph,
@@ -955,7 +980,10 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
         resource_allocator: &mut dyn ResourceAllocator,
         external_resources: &ExternalResources,
     ) -> anyhow::Result<()> {
-        let mut command_buffer = CommandBuffer::new(self.gpu, gpu::QueueType::Graphics)?;
+        self.resource_states.clear();
+
+        let mut command_buffer =
+            CommandBuffer::new(&crate::app_state().gpu, gpu::QueueType::Graphics)?;
 
         let label = command_buffer.begin_debug_region(
             &format!(
@@ -973,7 +1001,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                     );
                     for id in resources {
                         let image = Self::get_image(
-                            self.gpu,
+                            &crate::app_state().gpu,
                             graph,
                             id,
                             resource_allocator,
@@ -990,7 +1018,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
 
                     for id in resources {
                         let image = Self::get_image(
-                            self.gpu,
+                            &crate::app_state().gpu,
                             graph,
                             id,
                             resource_allocator,
@@ -1000,14 +1028,16 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                     }
                 }
                 GraphOperation::ExecuteRenderPass(rp) => {
-                    self.ensure_render_pass_and_framebuffer_exist(
+                    self.ensure_render_pass_exists(rp, graph, external_resources)?;
+                    let framebuffer_hash = self.ensure_framebuffer_exists(
                         rp,
                         graph,
                         resource_allocator,
                         external_resources,
                     )?;
 
-                    let (pass, framebuffer) = self.get_renderpass_and_framebuffer(*rp)?;
+                    let pass = self.get_renderpass(*rp);
+                    let framebuffer = self.get_framebuffer(framebuffer_hash);
                     let info = &graph.pass_infos[*rp];
 
                     let cb = callbacks.callbacks.get(rp);
@@ -1055,7 +1085,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
                     };
 
                     if let Some(cb) = cb {
-                        cb(self.gpu, &mut context);
+                        cb(&crate::app_state().gpu, &mut context);
                     }
                     render_pass_label.end();
                 }
@@ -1063,7 +1093,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
         }
         if let Some(end_cb) = &callbacks.end_callback {
             end_cb(
-                self.gpu,
+                &crate::app_state().gpu,
                 &mut EndContext {
                     command_buffer: &mut command_buffer,
                 },
@@ -1077,6 +1107,7 @@ impl<'a> RenderGraphRunner for GpuRunner<'a> {
             fence: Some(&crate::app_state().swapchain.in_flight_fence),
         })?;
 
+        crate::app_state().gpu.wait_device_idle()?;
         Ok(())
     }
 }

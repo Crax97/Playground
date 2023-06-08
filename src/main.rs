@@ -286,12 +286,7 @@ fn main() -> anyhow::Result<()> {
                 let app_state_mut = engine::app_state_mut();
                 app_state_mut.begin_frame().unwrap();
                 scene_renderer
-                    .render(
-                        &camera,
-                        &scene,
-                        &mut app_state_mut.swapchain,
-                        &app_state_mut.gpu,
-                    )
+                    .render(&camera, &scene, &mut app_state_mut.swapchain)
                     .unwrap();
                 app_state_mut.end_frame().unwrap();
             }

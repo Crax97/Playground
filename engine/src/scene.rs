@@ -80,7 +80,6 @@ pub trait RenderingPipeline {
         pov: &Camera,
         scene: &Scene,
         swapchain: &mut Swapchain,
-        gpu: &Gpu,
     ) -> anyhow::Result<()>;
 
     fn get_context(&self) -> &dyn MaterialContext;
@@ -97,6 +96,7 @@ pub struct ForwardRenderingPipeline {
 
     forward_pass: RenderPassHandle,
     color_buffer: ResourceId,
+    runner: GpuRunner,
 }
 impl ForwardRenderingPipeline {
     pub fn new(
@@ -170,6 +170,7 @@ impl ForwardRenderingPipeline {
 
             color_buffer,
             forward_pass,
+            runner: GpuRunner::new(),
         })
     }
 }
@@ -461,7 +462,6 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         pov: &Camera,
         scene: &Scene,
         swapchain: &mut Swapchain,
-        gpu: &Gpu,
     ) -> anyhow::Result<()> {
         super::app_state()
             .gpu
@@ -548,14 +548,12 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 .get_material_render_pass(MaterialDomain::Surface),
         );
         external_resources.inject_external_image(&self.color_buffer, image, view);
-        let mut runner = GpuRunner::new(gpu);
         self.render_graph.run(
-            &mut runner,
+            &mut self.runner,
             &callbacks,
             &mut self.resource_allocator,
             &external_resources,
         )?;
-        gpu.wait_device_idle()?;
 
         Ok(())
     }
