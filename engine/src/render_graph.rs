@@ -181,7 +181,7 @@ impl<
 }
 
 #[derive(Default)]
-pub struct ExternalResources<'a> {
+struct ExternalResources<'a> {
     external_images: HashMap<ResourceId, &'a GpuImage>,
     external_image_views: HashMap<ResourceId, &'a GpuImageView>,
     external_render_passes: HashMap<usize, &'a RenderPass>,
@@ -200,7 +200,7 @@ impl<'a> ExternalResources<'a> {
 
     pub fn inject_external_renderpass(
         &mut self,
-        handle: RenderPassHandle,
+        handle: &RenderPassHandle,
         render_pass: &'a RenderPass,
     ) {
         self.external_render_passes.insert(handle.id, render_pass);
@@ -297,13 +297,59 @@ impl DefaultResourceAllocator {
         self.images.remove_unused_resources(current_iteration);
     }
 }
-pub struct GraphRunContext<'a> {
-    pub gpu: &'a Gpu,
-    pub current_iteration: u64,
-    pub swapchain: &'a mut Swapchain,
+pub struct GraphRunContext<'a, 'e> {
+    gpu: &'a Gpu,
+    current_iteration: u64,
+    swapchain: &'a mut Swapchain,
+
+    callbacks: Callbacks<'e>,
+    external_resources: ExternalResources<'e>,
 }
 
-pub trait RenderGraphRunner {
+impl<'a, 'e> GraphRunContext<'a, 'e> {
+    pub fn new(gpu: &'a Gpu, swapchain: &'a mut Swapchain, current_iteration: u64) -> Self {
+        Self {
+            gpu,
+            current_iteration,
+            swapchain,
+            callbacks: Callbacks::default(),
+            external_resources: ExternalResources::default(),
+        }
+    }
+
+    pub(crate) fn register_callback<F: Fn(&Gpu, &mut RenderPassContext) + 'e>(
+        &mut self,
+        handle: &RenderPassHandle,
+        callback: F,
+    ) {
+        self.callbacks.register_callback(handle, callback)
+    }
+
+    pub fn register_end_callback<F: Fn(&Gpu, &mut EndContext) + 'e>(&mut self, callback: F) {
+        self.callbacks.register_end_callback(callback)
+    }
+
+    pub(crate) fn inject_external_renderpass(
+        &mut self,
+        handle: &RenderPassHandle,
+        pass: &'e RenderPass,
+    ) {
+        self.external_resources
+            .inject_external_renderpass(handle, pass);
+    }
+
+    pub(crate) fn inject_external_image(
+        &mut self,
+        handle: &ResourceId,
+        image: &'e GpuImage,
+        view: &'e GpuImageView,
+    ) {
+        self.external_resources
+            .inject_external_image(handle, image, view);
+    }
+}
+
+trait RenderGraphRunner {
     fn run_graph(
         &mut self,
         context: &GraphRunContext,
@@ -447,7 +493,7 @@ pub struct CompiledRenderGraph {
 }
 
 #[derive(Default)]
-pub struct Callbacks<'g> {
+struct Callbacks<'g> {
     callbacks: HashMap<usize, Box<dyn Fn(&Gpu, &mut RenderPassContext) + 'g>>,
     end_callback: Option<Box<dyn Fn(&Gpu, &mut EndContext) + 'g>>,
 }
@@ -553,20 +599,15 @@ impl RenderGraph {
         Ok(())
     }
 
-    pub fn run(
-        &self,
-        ctx: GraphRunContext,
-        callbacks: &Callbacks,
-        external_resources: &ExternalResources,
-    ) -> anyhow::Result<()> {
+    pub fn run(&self, ctx: GraphRunContext) -> anyhow::Result<()> {
         let mut runner = GpuRunner::new();
 
         runner.run_graph(
             &ctx,
             &self.cached_graph,
-            callbacks,
+            &ctx.callbacks,
             &mut self.resource_allocator.borrow_mut(),
-            external_resources,
+            &ctx.external_resources,
         )
     }
 
@@ -683,7 +724,7 @@ impl RenderGraph {
     }
 }
 
-pub struct GpuRunner {
+struct GpuRunner {
     resource_states: HashMap<ResourceId, TransitionInfo>,
     render_passes: HashMap<usize, RenderPass>,
 }
@@ -695,26 +736,6 @@ impl GpuRunner {
         }
     }
 
-    pub fn get_image_view<'r, 'e>(
-        ctx: &GraphRunContext,
-        graph: &CompiledRenderGraph,
-        id: &ResourceId,
-        allocator: &'r mut DefaultResourceAllocator,
-        external_resources: &ExternalResources<'e>,
-    ) -> anyhow::Result<&'e GpuImageView>
-    where
-        'r: 'e,
-    {
-        if external_resources.external_image_views.contains_key(id) {
-            Ok(external_resources.external_image_views[id])
-        } else {
-            let desc = match &graph.resources_used[id].ty {
-                AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
-            };
-            let image = allocator.images.get(ctx, &desc, id, &())?;
-            allocator.image_views.get(ctx, &desc, id, image)
-        }
-    }
     pub fn get_image<'r, 'e>(
         ctx: &GraphRunContext,
         graph: &CompiledRenderGraph,

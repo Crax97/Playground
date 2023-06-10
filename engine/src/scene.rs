@@ -28,7 +28,7 @@ use crate::{
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     mesh::Mesh,
-    Callbacks, ExternalResources, GraphRunContext, RenderGraph,
+    GraphRunContext, RenderGraph,
 };
 
 use ash::vk::{
@@ -482,8 +482,14 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         let forward_pass = self.render_graph.commit_render_pass(forward_pass);
 
         self.render_graph.compile()?;
-        let mut callbacks = Callbacks::default();
-        callbacks.register_callback(&forward_pass, |_: &Gpu, ctx| {
+
+        let mut context = GraphRunContext::new(
+            &crate::app_state().gpu,
+            &mut crate::app_state_mut().swapchain,
+            crate::app_state().time().frames_since_start(),
+        );
+
+        context.register_callback(&forward_pass, |_: &Gpu, ctx| {
             for (pipeline, primitives) in pipeline_hashmap.iter() {
                 {
                     let pipeline = self.resource_map.get(pipeline);
@@ -534,23 +540,13 @@ impl RenderingPipeline for ForwardRenderingPipeline {
             }
         });
 
-        let mut external_resources = ExternalResources::default();
-
-        external_resources.inject_external_renderpass(
-            forward_pass,
+        context.inject_external_renderpass(
+            &forward_pass,
             self.material_context
                 .get_material_render_pass(MaterialDomain::Surface),
         );
-        external_resources.inject_external_image(&color_buffer, image, view);
-        self.render_graph.run(
-            GraphRunContext {
-                gpu: &crate::app_state().gpu,
-                current_iteration: crate::app_state().time().frames_since_start(),
-                swapchain: &mut crate::app_state_mut().swapchain,
-            },
-            &callbacks,
-            &external_resources,
-        )?;
+        context.inject_external_image(&color_buffer, image, view);
+        self.render_graph.run(context)?;
 
         Ok(())
     }
