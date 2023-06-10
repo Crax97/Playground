@@ -964,14 +964,24 @@ impl GpuRunner {
                 dependency_flags: DependencyFlags::empty(),
             }],
         };
-        let pass = RenderPass::new(&crate::app_state().gpu, &description)?;
+        let pass = RenderPass::new(&ctx.gpu, &description)?;
         self.render_passes.insert(id, pass);
 
         trace!("Created new render pass {}", pass_info.label);
         Ok(&self.render_passes[&id])
     }
 
-    fn get_renderpass(&self, id: usize) -> &RenderPass {
+    fn get_renderpass<'e, 'a>(
+        &'a self,
+        id: usize,
+        external_resources: &ExternalResources<'e>,
+    ) -> &'e RenderPass
+    where
+        'a: 'e,
+    {
+        if external_resources.external_render_passes.contains_key(&id) {
+            return &external_resources.external_render_passes[&id];
+        }
         self.render_passes
             .get(&id)
             .expect(&format!("Failed to find renderpass with id {}", id))
@@ -979,22 +989,22 @@ impl GpuRunner {
 
     fn ensure_render_pass_exists(
         &mut self,
+        ctx: &GraphRunContext,
         rp: &usize,
         graph: &CompiledRenderGraph,
         external_resources: &ExternalResources,
     ) -> Result<(), anyhow::Error> {
         {
             let pass_info = &graph.pass_infos[*rp];
-            if pass_info.is_external && !external_resources.external_render_passes.contains_key(rp)
-            {
-                panic!(
-                    "RenderPass {} is external, but it hasn't been injected",
-                    pass_info.label
-                );
-            }
-
-            if !self.render_passes.contains_key(rp) {
-                self.create_render_pass(graph, pass_info, *rp)?;
+            if pass_info.is_external {
+                if !external_resources.external_render_passes.contains_key(rp) {
+                    panic!(
+                        "RenderPass {} is external, but it hasn't been injected",
+                        pass_info.label
+                    );
+                }
+            } else if !self.render_passes.contains_key(rp) {
+                self.create_render_pass(ctx, graph, pass_info, *rp)?;
             };
         }
         Ok(())
@@ -1055,10 +1065,11 @@ impl RenderGraphRunner for GpuRunner {
                     }
                 }
                 GraphOperation::ExecuteRenderPass(rp) => {
-                    self.ensure_render_pass_exists(rp, graph, external_resources)?;
+                    self.ensure_render_pass_exists(ctx, rp, graph, external_resources)?;
                     let info = &graph.pass_infos[*rp];
 
                     ensure_graph_allocated_image_views_exist(
+                        ctx,
                         info,
                         external_resources,
                         graph,
@@ -1072,9 +1083,9 @@ impl RenderGraphRunner for GpuRunner {
 
                     let framebuffer_hash = compute_framebuffer_hash(&views);
 
-                    let pass = self.get_renderpass(*rp);
+                    let pass = self.get_renderpass(*rp, external_resources);
                     let framebuffer = resource_allocator.framebuffers.get(
-                        &app_state().gpu,
+                        ctx,
                         &info.clone(),
                         &framebuffer_hash,
                         &RenderGraphFramebufferCreateInfo {
