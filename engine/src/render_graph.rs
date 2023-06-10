@@ -1228,7 +1228,7 @@ mod test {
 
     use crate::{CompileError, ResourceId};
 
-    use super::{ImageDescription, RenderGraph, RenderGraphPrinter, RenderGraphRunner};
+    use super::{ImageDescription, RenderGraph};
 
     fn alloc(name: &str, rg: &mut RenderGraph) -> ResourceId {
         let description = ImageDescription {
@@ -1244,17 +1244,7 @@ mod test {
     }
     #[test]
     pub fn prune_empty() {
-        let gpu = RenderGraphPrinter::default();
         let mut render_graph = RenderGraph::new();
-
-        let image_desc = ImageDescription {
-            label: "".to_owned(),
-            width: 1240,
-            height: 720,
-            format: gpu::ImageFormat::Rgba8,
-            samples: 1,
-            present: false,
-        };
 
         let color_component = alloc("color", &mut render_graph);
         let position_component = alloc("position", &mut render_graph);
@@ -1268,34 +1258,32 @@ mod test {
         gbuffer.write(position_component);
         gbuffer.write(tangent_component);
         gbuffer.write(normal_component);
-        let gbuffer = render_graph.commit_render_pass(gbuffer);
+        let _ = render_graph.commit_render_pass(gbuffer);
 
-        let mut render_graph = render_graph.compile().unwrap();
-        render_graph.register_callback(&gbuffer, |gpu, render_pass| {
-            // for each primitive draw in render_pass
-        });
-        assert_eq!(render_graph.pass_infos.len(), 0);
+        render_graph.compile().unwrap();
+
+        assert_eq!(render_graph.cached_graph.pass_infos.len(), 0);
     }
 
     #[test]
     pub fn ensure_keys_are_unique() {
         let mut render_graph = RenderGraph::new();
-        let image_desc = ImageDescription {
-            label: "".to_owned(),
-            width: 1240,
-            height: 720,
-            format: gpu::ImageFormat::Rgba8,
-            samples: 1,
-            present: false,
-        };
 
         let color_component_1 = alloc("color1", &mut render_graph);
-        let color_component_2 = alloc("color2", &mut render_graph);
+        let color_component_2 = {
+            let description = ImageDescription {
+                label: "color1".to_owned(),
+                width: 1240,
+                height: 720,
+                format: gpu::ImageFormat::Rgba8,
+                samples: 1,
+                present: false,
+            };
+
+            render_graph.use_image(&description)
+        };
         let is_defined = color_component_2.is_err_and(|id| {
-            id == CompileError::ResourceAlreadyDefined(
-                color_component_1,
-                "Color component".to_owned(),
-            )
+            id == CompileError::ResourceAlreadyDefined(color_component_1, "color1".to_owned())
         });
         assert!(is_defined)
     }
@@ -1312,20 +1300,9 @@ mod test {
 
     #[test]
     pub fn survive_1() {
-        let gpu = RenderGraphPrinter::default();
         let mut render_graph = RenderGraph::new();
 
-        let image_desc = ImageDescription {
-            label: "".to_owned(),
-            width: 1240,
-            height: 720,
-            format: gpu::ImageFormat::Rgba8,
-            samples: 1,
-            present: false,
-        };
-
-        let color_component_1 = alloc("color1", &mut render_graph);
-        let color_component_2 = alloc("color2", &mut render_graph);
+        let color_component = alloc("color1", &mut render_graph);
         let position_component = alloc("position", &mut render_graph);
         let tangent_component = alloc("tangent", &mut render_graph);
         let normal_component = alloc("normal", &mut render_graph);
@@ -1338,7 +1315,7 @@ mod test {
         gbuffer.write(position_component);
         gbuffer.write(tangent_component);
         gbuffer.write(normal_component);
-        let gbuffer = render_graph.commit_render_pass(gbuffer);
+        let _ = render_graph.commit_render_pass(gbuffer);
 
         let mut compose_gbuffer = render_graph
             .begin_render_pass("compose_gbuffer", Extent2D::default())
@@ -1348,43 +1325,33 @@ mod test {
         compose_gbuffer.read(tangent_component);
         compose_gbuffer.read(normal_component);
         compose_gbuffer.write(output_image);
-        let compose_gbuffer = render_graph.commit_render_pass(compose_gbuffer);
+        let _ = render_graph.commit_render_pass(compose_gbuffer);
 
         // We need the color component: this will let the 'gbuffer' render pass live
         render_graph.persist_resource(&output_image);
 
         assert_eq!(render_graph.passes[0].label, "gbuffer");
         assert_eq!(render_graph.passes[1].label, "compose_gbuffer");
-        let mut render_graph = render_graph.compile().unwrap();
-        render_graph.register_callback(&gbuffer, |gpu, render_pass| {
-            // for each primitive draw in render_pass
-        });
-        assert_eq!(render_graph.pass_infos.len(), 2);
-        assert_eq!(render_graph.pass_infos[0].label, "gbuffer");
-        assert_eq!(render_graph.pass_infos[1].label, "compose_gbuffer");
+        render_graph.compile().unwrap();
+
+        assert_eq!(render_graph.cached_graph.pass_infos.len(), 2);
+        assert_eq!(render_graph.cached_graph.pass_infos[0].label, "gbuffer");
+        assert_eq!(
+            render_graph.cached_graph.pass_infos[1].label,
+            "compose_gbuffer"
+        );
     }
 
     #[test]
     pub fn survive_2() {
-        let gpu = RenderGraphPrinter::default();
         let mut render_graph = RenderGraph::new();
 
-        let image_desc = ImageDescription {
-            label: "".to_owned(),
-            width: 1240,
-            height: 720,
-            format: gpu::ImageFormat::Rgba8,
-            samples: 1,
-            present: false,
-        };
-
-        let color_component_1 = alloc("color1", &mut render_graph);
-        let color_component_2 = alloc("color2", &mut render_graph);
+        let color_component = alloc("color1", &mut render_graph);
         let position_component = alloc("position", &mut render_graph);
         let tangent_component = alloc("tangent", &mut render_graph);
         let normal_component = alloc("normal", &mut render_graph);
         let output_image = alloc("output", &mut render_graph);
-        let output_image = alloc("unused", &mut render_graph);
+        let unused = alloc("unused", &mut render_graph);
 
         let mut gbuffer = render_graph
             .begin_render_pass("gbuffer", Extent2D::default())
@@ -1393,7 +1360,7 @@ mod test {
         gbuffer.write(position_component);
         gbuffer.write(tangent_component);
         gbuffer.write(normal_component);
-        let gbuffer = render_graph.commit_render_pass(gbuffer);
+        let _ = render_graph.commit_render_pass(gbuffer);
 
         let mut compose_gbuffer = render_graph
             .begin_render_pass("compose_gbuffer", Extent2D::default())
@@ -1403,7 +1370,7 @@ mod test {
         compose_gbuffer.read(tangent_component);
         compose_gbuffer.read(normal_component);
         compose_gbuffer.write(output_image);
-        let compose_gbuffer = render_graph.commit_render_pass(compose_gbuffer);
+        let _ = render_graph.commit_render_pass(compose_gbuffer);
 
         // adding an empty pass that outputs to an unused buffer
         let mut unused_pass = render_graph
@@ -1414,26 +1381,22 @@ mod test {
         unused_pass.read(tangent_component);
         unused_pass.read(normal_component);
         unused_pass.write(unused);
-        let unused_pass = render_graph.commit_render_pass(unused_pass);
+        let _ = render_graph.commit_render_pass(unused_pass);
 
         render_graph.persist_resource(&output_image);
 
         assert_eq!(render_graph.passes[0].label, "gbuffer");
         assert_eq!(render_graph.passes[1].label, "compose_gbuffer");
-        let mut render_graph = render_graph.compile().unwrap();
-        render_graph.register_callback(&gbuffer, |gpu, render_pass| {
-            // for each primitive draw in render_pass
-        });
-
-        render_graph.register_callback(&compose_gbuffer, |gpu, render_pass| {
-            // bind pipeline shit for compose gbuffer
-        });
+        render_graph.compile().unwrap();
 
         // We need the color component: this will let the 'gbuffer' render pass live
 
-        assert_eq!(render_graph.pass_infos.len(), 2);
-        assert_eq!(render_graph.pass_infos[0].label, "gbuffer");
-        assert_eq!(render_graph.pass_infos[1].label, "compose_gbuffer");
+        assert_eq!(render_graph.cached_graph.pass_infos.len(), 2);
+        assert_eq!(render_graph.cached_graph.pass_infos[0].label, "gbuffer");
+        assert_eq!(
+            render_graph.cached_graph.pass_infos[1].label,
+            "compose_gbuffer"
+        );
     }
 
     #[test]
@@ -1504,7 +1467,6 @@ mod test {
 
     #[test]
     pub fn big_graph() {
-        let mut gpu = RenderGraphPrinter::default();
         let mut render_graph = RenderGraph::new();
 
         let r1 = alloc("r1", &mut render_graph);
@@ -1564,27 +1526,30 @@ mod test {
 
         render_graph.persist_resource(&rb);
 
-        let render_graph = render_graph.compile().unwrap();
-        for pass in &render_graph.pass_infos {
+        render_graph.compile().unwrap();
+        for pass in &render_graph.cached_graph.pass_infos {
             println!("{:?}", pass);
         }
-        assert_eq!(render_graph.pass_infos.len(), 4);
-        assert_eq!(render_graph.pass_infos[0].label, "p1");
-        assert_eq!(render_graph.pass_infos[1].label, "p3");
-        assert_eq!(render_graph.pass_infos[2].label, "p4");
-        assert_eq!(render_graph.pass_infos[3].label, "pb");
+        assert_eq!(render_graph.cached_graph.pass_infos.len(), 4);
+        assert_eq!(render_graph.cached_graph.pass_infos[0].label, "p1");
+        assert_eq!(render_graph.cached_graph.pass_infos[1].label, "p3");
+        assert_eq!(render_graph.cached_graph.pass_infos[2].label, "p4");
+        assert_eq!(render_graph.cached_graph.pass_infos[3].label, "pb");
         assert!(render_graph
+            .cached_graph
             .pass_infos
             .iter()
             .find(|p| p.label == "u1")
             .is_none());
-        assert_eq!(render_graph.resources_used.len(), 10);
+        assert_eq!(render_graph.cached_graph.resources_used.len(), 10);
         assert!(render_graph
+            .cached_graph
             .resources_used
             .iter()
             .find(|(id, _)| id == &&ru1)
             .is_none());
         assert!(render_graph
+            .cached_graph
             .resources_used
             .iter()
             .find(|(id, _)| id == &&ru2)
