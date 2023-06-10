@@ -22,11 +22,9 @@ use gpu::{
     BeginRenderPassInfo, BlendState, CommandBuffer, FramebufferCreateInfo, Gpu, GpuFramebuffer,
     GpuImage, GpuImageView, ImageCreateInfo, ImageFormat, ImageMemoryBarrier, ImageViewCreateInfo,
     MemoryDomain, PipelineBarrierInfo, RenderPass, RenderPassAttachment, RenderPassCommand,
-    RenderPassDescription, SubpassDescription, ToVk, TransitionInfo,
+    RenderPassDescription, SubpassDescription, Swapchain, ToVk, TransitionInfo,
 };
 use log::trace;
-
-use crate::app_state;
 
 pub struct LifetimeAllocation<R, D: Label> {
     inner: R,
@@ -93,13 +91,19 @@ impl<
         ID: Hash + Eq + PartialEq + Ord + PartialOrd + Clone + Debug,
     > ResourceAllocator<R, D, ID>
 {
-    fn get<A>(&mut self, gpu: &Gpu, desc: &D, id: &ID, additional: &A) -> anyhow::Result<&R>
+    fn get<A>(
+        &mut self,
+        ctx: &GraphRunContext,
+        desc: &D,
+        id: &ID,
+        additional: &A,
+    ) -> anyhow::Result<&R>
     where
         R: CreateFrom<D, A>,
     {
-        self.ensure_resource_exists(gpu, desc, id, additional)?;
-        self.ensure_resource_hasnt_changed(gpu, desc, id, additional)?;
-        self.update_resource_access_time(id);
+        self.ensure_resource_exists(ctx.gpu, desc, id, additional)?;
+        self.ensure_resource_hasnt_changed(ctx.gpu, desc, id, additional)?;
+        self.update_resource_access_time(id, ctx.current_iteration);
         Ok(self.get_unchecked(id))
     }
     fn get_unchecked(&self, id: &ID) -> &R {
@@ -154,17 +158,16 @@ impl<
         }
         Ok(())
     }
-    fn update_resource_access_time(&mut self, id: &ID) {
+    fn update_resource_access_time(&mut self, id: &ID, current_iteration: u64) {
         self.resources
             .get_mut(id)
             .expect("Failed to fetch resource")
-            .last_frame_used = app_state().time().frames_since_start()
+            .last_frame_used = current_iteration;
     }
 
-    fn remove_unused_resources(&mut self) {
-        let now = app_state().time().frames_since_start();
+    fn remove_unused_resources(&mut self, current_iteration: u64) {
         self.resources.retain(|_, res| {
-            let can_live = now - res.last_frame_used < self.lifetime;
+            let can_live = current_iteration - res.last_frame_used < self.lifetime;
             if !can_live {
                 trace!(
                     "Deallocating resource {:?} after {} frames",
@@ -300,16 +303,22 @@ impl DefaultResourceAllocator {
 }
 
 impl DefaultResourceAllocator {
-    fn update(&mut self) {
-        self.framebuffers.remove_unused_resources();
-        self.image_views.remove_unused_resources();
-        self.images.remove_unused_resources();
+    fn update(&mut self, current_iteration: u64) {
+        self.framebuffers.remove_unused_resources(current_iteration);
+        self.image_views.remove_unused_resources(current_iteration);
+        self.images.remove_unused_resources(current_iteration);
     }
+}
+pub struct GraphRunContext<'a> {
+    pub gpu: &'a Gpu,
+    pub current_iteration: u64,
+    pub swapchain: &'a mut Swapchain,
 }
 
 pub trait RenderGraphRunner {
     fn run_graph(
         &mut self,
+        context: &GraphRunContext,
         graph: &CompiledRenderGraph,
         callbacks: &Callbacks,
         resource_allocator: &mut DefaultResourceAllocator,
@@ -546,13 +555,14 @@ impl RenderGraph {
 
     pub fn run(
         &self,
-        gpu: &Gpu,
+        ctx: GraphRunContext,
         callbacks: &Callbacks,
         external_resources: &ExternalResources,
     ) -> anyhow::Result<()> {
         let mut runner = GpuRunner::new();
 
         runner.run_graph(
+            &ctx,
             &self.cached_graph,
             callbacks,
             &mut self.resource_allocator.borrow_mut(),
@@ -690,7 +700,7 @@ impl GpuRunner {
     }
 
     pub fn get_image_view<'r, 'e>(
-        gpu: &Gpu,
+        ctx: &GraphRunContext,
         graph: &CompiledRenderGraph,
         id: &ResourceId,
         allocator: &'r mut DefaultResourceAllocator,
@@ -705,12 +715,12 @@ impl GpuRunner {
             let desc = match &graph.resources_used[id].ty {
                 AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
             };
-            let image = allocator.images.get(gpu, &desc, id, &())?;
-            allocator.image_views.get(gpu, &desc, id, image)
+            let image = allocator.images.get(ctx, &desc, id, &())?;
+            allocator.image_views.get(ctx, &desc, id, image)
         }
     }
     pub fn get_image<'r, 'e>(
-        gpu: &Gpu,
+        ctx: &GraphRunContext,
         graph: &CompiledRenderGraph,
         id: &ResourceId,
         allocator: &'r mut DefaultResourceAllocator,
@@ -725,7 +735,7 @@ impl GpuRunner {
             let desc = match &graph.resources_used[id].ty {
                 AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
             };
-            allocator.images.get(gpu, &desc, id, &())
+            allocator.images.get(ctx, &desc, id, &())
         }
     }
 
@@ -858,6 +868,7 @@ impl GpuRunner {
 
     fn create_render_pass(
         &mut self,
+        ctx: &GraphRunContext,
         graph: &CompiledRenderGraph,
         pass_info: &RenderPassInfo,
         id: usize,
@@ -993,22 +1004,19 @@ impl GpuRunner {
 impl RenderGraphRunner for GpuRunner {
     fn run_graph(
         &mut self,
+        ctx: &GraphRunContext,
         graph: &CompiledRenderGraph,
         callbacks: &Callbacks,
         resource_allocator: &mut DefaultResourceAllocator,
         external_resources: &ExternalResources,
     ) -> anyhow::Result<()> {
         self.resource_states.clear();
-        resource_allocator.update();
+        resource_allocator.update(ctx.current_iteration);
 
-        let mut command_buffer =
-            CommandBuffer::new(&crate::app_state().gpu, gpu::QueueType::Graphics)?;
+        let mut command_buffer = CommandBuffer::new(&ctx.gpu, gpu::QueueType::Graphics)?;
 
         let label = command_buffer.begin_debug_region(
-            &format!(
-                "Rendering frame {}",
-                crate::app_state().time().frames_since_start()
-            ),
+            &format!("Rendering frame {}", ctx.current_iteration),
             [0.0, 0.3, 0.0, 1.0],
         );
         for op in &graph.graph_operations {
@@ -1020,7 +1028,7 @@ impl RenderGraphRunner for GpuRunner {
                     );
                     for id in resources {
                         let image = Self::get_image(
-                            &crate::app_state().gpu,
+                            ctx,
                             graph,
                             id,
                             resource_allocator,
@@ -1037,7 +1045,7 @@ impl RenderGraphRunner for GpuRunner {
 
                     for id in resources {
                         let image = Self::get_image(
-                            &crate::app_state().gpu,
+                            ctx,
                             graph,
                             id,
                             resource_allocator,
@@ -1121,7 +1129,7 @@ impl RenderGraphRunner for GpuRunner {
                     };
 
                     if let Some(cb) = cb {
-                        cb(&crate::app_state().gpu, &mut context);
+                        cb(&ctx.gpu, &mut context);
                     }
                     render_pass_label.end();
                 }
@@ -1129,7 +1137,7 @@ impl RenderGraphRunner for GpuRunner {
         }
         if let Some(end_cb) = &callbacks.end_callback {
             end_cb(
-                &crate::app_state().gpu,
+                &ctx.gpu,
                 &mut EndContext {
                     command_buffer: &mut command_buffer,
                 },
@@ -1137,10 +1145,10 @@ impl RenderGraphRunner for GpuRunner {
         }
         label.end();
         command_buffer.submit(&gpu::CommandBufferSubmitInfo {
-            wait_semaphores: &[&crate::app_state().swapchain.image_available_semaphore],
+            wait_semaphores: &[&ctx.swapchain.image_available_semaphore],
             wait_stages: &[PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
-            signal_semaphores: &[&crate::app_state().swapchain.render_finished_semaphore],
-            fence: Some(&crate::app_state().swapchain.in_flight_fence),
+            signal_semaphores: &[&ctx.swapchain.render_finished_semaphore],
+            fence: Some(&ctx.swapchain.in_flight_fence),
         })?;
 
         crate::app_state().gpu.wait_device_idle()?;
@@ -1159,6 +1167,7 @@ fn compute_framebuffer_hash(views: &Vec<&GpuImageView>) -> u64 {
 }
 
 fn ensure_graph_allocated_image_views_exist(
+    ctx: &GraphRunContext,
     info: &RenderPassInfo,
     external_resources: &ExternalResources,
     graph: &CompiledRenderGraph,
@@ -1169,12 +1178,10 @@ fn ensure_graph_allocated_image_views_exist(
             let desc = match &graph.resources_used[writes].ty {
                 AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
             };
-            let image = resource_allocator
-                .images
-                .get(&app_state().gpu, &desc, writes, &())?;
+            let image = resource_allocator.images.get(ctx, &desc, writes, &())?;
             resource_allocator
                 .image_views
-                .get(&app_state().gpu, &desc, writes, image)?;
+                .get(ctx, &desc, writes, image)?;
         };
     })
 }
@@ -1199,43 +1206,6 @@ where
     views
 }
 
-#[derive(Default)]
-pub struct RenderGraphPrinter {}
-
-impl RenderGraphRunner for RenderGraphPrinter {
-    fn run_graph(
-        &mut self,
-        graph: &CompiledRenderGraph,
-        _callbacks: &Callbacks,
-        _allocator: &mut DefaultResourceAllocator,
-        _external_resources: &ExternalResources,
-    ) -> anyhow::Result<()> {
-        println!(
-            "Graph contains {} render passes, dumping pass info",
-            graph.pass_infos.len()
-        );
-        for pass in &graph.pass_infos {
-            println!(
-                "\tName: {}, reads '{}', writes '{}'",
-                pass.label,
-                pass.reads.iter().fold(String::new(), |s, r| s + &format!(
-                    "{},",
-                    graph.resources_used[r].label
-                )),
-                pass.writes.iter().fold(String::new(), |s, r| s + &format!(
-                    "{},",
-                    graph.resources_used[r].label
-                )),
-            );
-        }
-        println!("Suggested execution order");
-
-        for op in &graph.graph_operations {
-            println!("\t{:?}", op);
-        }
-        Ok(())
-    }
-}
 #[cfg(test)]
 mod test {
     use ash::vk::Extent2D;

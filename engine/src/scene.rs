@@ -24,12 +24,11 @@ struct PerFrameData {
 }
 
 use crate::{
-    app_state,
     camera::Camera,
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     mesh::Mesh,
-    Callbacks, ExternalResources, RenderGraph,
+    Callbacks, ExternalResources, GraphRunContext, RenderGraph,
 };
 
 use ash::vk::{
@@ -539,8 +538,15 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 .get_material_render_pass(MaterialDomain::Surface),
         );
         external_resources.inject_external_image(&color_buffer, image, view);
-        self.render_graph
-            .run(&app_state().gpu, &callbacks, &external_resources)?;
+        self.render_graph.run(
+            GraphRunContext {
+                gpu: &crate::app_state().gpu,
+                current_iteration: crate::app_state().time().frames_since_start(),
+                swapchain: &mut crate::app_state_mut().swapchain,
+            },
+            &callbacks,
+            &external_resources,
+        )?;
 
         Ok(())
     }
