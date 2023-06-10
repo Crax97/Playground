@@ -6,6 +6,7 @@
 use std::{
     collections::{hash_map::DefaultHasher, HashMap, HashSet},
     error::Error,
+    fmt::Debug,
     hash::{Hash, Hasher},
 };
 
@@ -26,12 +27,12 @@ use log::trace;
 
 use crate::app_state;
 
-pub struct LifetimeAllocation<R, D> {
+pub struct LifetimeAllocation<R, D: Label> {
     inner: R,
     desc: D,
     last_frame_used: u64,
 }
-impl<R, D> LifetimeAllocation<R, D> {
+impl<R, D: Label> LifetimeAllocation<R, D> {
     fn new<A>(inner: R, desc: D) -> LifetimeAllocation<R, D>
     where
         R: CreateFrom<D, A>,
@@ -51,6 +52,10 @@ where
     fn create(gpu: &Gpu, desc: &D, additional: &A) -> anyhow::Result<Self>;
 }
 
+pub trait Label {
+    fn label(&self) -> &str;
+}
+
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RenderPassHandle {
     id: usize,
@@ -60,14 +65,17 @@ impl RenderPassHandle {}
 
 pub struct ResourceAllocator<
     R: Sized,
-    D: Eq + PartialEq + Clone,
+    D: Eq + PartialEq + Clone + Label,
     ID: Hash + Eq + PartialEq + Ord + PartialOrd,
 > {
     resources: HashMap<ID, LifetimeAllocation<R, D>>,
 }
 
-impl<R: Sized, D: Eq + PartialEq + Clone, ID: Hash + Eq + PartialEq + Ord + PartialOrd + Clone>
-    Default for ResourceAllocator<R, D, ID>
+impl<
+        R: Sized,
+        D: Eq + PartialEq + Clone + Label,
+        ID: Hash + Eq + PartialEq + Ord + PartialOrd + Clone,
+    > Default for ResourceAllocator<R, D, ID>
 {
     fn default() -> Self {
         Self {
@@ -76,8 +84,11 @@ impl<R: Sized, D: Eq + PartialEq + Clone, ID: Hash + Eq + PartialEq + Ord + Part
     }
 }
 
-impl<R: Sized, D: Eq + PartialEq + Clone, ID: Hash + Eq + PartialEq + Ord + PartialOrd + Clone>
-    ResourceAllocator<R, D, ID>
+impl<
+        R: Sized,
+        D: Eq + PartialEq + Clone + Label,
+        ID: Hash + Eq + PartialEq + Ord + PartialOrd + Clone + Debug,
+    > ResourceAllocator<R, D, ID>
 {
     fn get<A>(&mut self, gpu: &Gpu, desc: &D, id: &ID, additional: &A) -> anyhow::Result<&R>
     where
@@ -145,6 +156,22 @@ impl<R: Sized, D: Eq + PartialEq + Clone, ID: Hash + Eq + PartialEq + Ord + Part
             .get_mut(id)
             .expect("Failed to fetch resource")
             .last_frame_used = app_state().time().frames_since_start()
+    }
+
+    fn remove_unused_resources(&mut self) {
+        const FRAMES_LIFETIME: u64 = 10;
+        let now = app_state().time().frames_since_start();
+        self.resources.retain(|_, res| {
+            let can_live = now - res.last_frame_used < FRAMES_LIFETIME;
+            if !can_live {
+                trace!(
+                    "Deallocating resource {:?} after {} frames",
+                    res.desc.label(),
+                    FRAMES_LIFETIME
+                )
+            }
+            can_live
+        })
     }
 }
 
@@ -218,10 +245,55 @@ impl CreateFrom<ImageDescription, GpuImage> for GpuImageView {
             .expect("Failed to create image resource"))
     }
 }
+
+struct RenderGraphFramebufferCreateInfo<'a> {
+    render_pass: &'a RenderPass,
+    render_targets: &'a [&'a GpuImageView],
+    extents: Extent2D,
+}
+
+impl<'a> CreateFrom<RenderPassInfo, RenderGraphFramebufferCreateInfo<'a>> for GpuFramebuffer {
+    fn create(
+        gpu: &Gpu,
+        _: &RenderPassInfo,
+        additional: &RenderGraphFramebufferCreateInfo,
+    ) -> anyhow::Result<Self> {
+        Ok(gpu
+            .create_framebuffer(&FramebufferCreateInfo {
+                render_pass: additional.render_pass,
+                attachments: additional.render_targets,
+                width: additional.extents.width,
+                height: additional.extents.height,
+            })
+            .expect("Failed to create framebuffer"))
+    }
+}
+
+impl Label for ImageDescription {
+    fn label(&self) -> &str {
+        &self.label
+    }
+}
+
+impl Label for RenderPassInfo {
+    fn label(&self) -> &str {
+        &self.label
+    }
+}
+
 #[derive(Default)]
 pub struct DefaultResourceAllocator {
     images: ResourceAllocator<GpuImage, ImageDescription, ResourceId>,
     image_views: ResourceAllocator<GpuImageView, ImageDescription, ResourceId>,
+    framebuffers: ResourceAllocator<GpuFramebuffer, RenderPassInfo, u64>,
+}
+
+impl DefaultResourceAllocator {
+    fn update(&mut self) {
+        self.framebuffers.remove_unused_resources();
+        self.image_views.remove_unused_resources();
+        self.images.remove_unused_resources();
+    }
 }
 
 pub trait RenderGraphRunner {
@@ -248,8 +320,9 @@ impl ResourceId {
     }
 }
 
-#[derive(Hash, Copy, Clone, PartialEq, Eq)]
+#[derive(Hash, Clone, PartialEq, Eq)]
 pub struct ImageDescription {
+    pub label: String,
     pub width: u32,
     pub height: u32,
     pub format: ImageFormat,
@@ -257,7 +330,7 @@ pub struct ImageDescription {
     pub present: bool,
 }
 
-#[derive(Hash, Copy, Clone)]
+#[derive(Hash, Clone)]
 pub enum AllocationType {
     Image(ImageDescription),
     ExternalImage(ImageDescription),
@@ -296,7 +369,7 @@ impl Error for CompileError {}
 
 pub type GraphResult<T> = Result<T, CompileError>;
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, Eq, PartialEq)]
 pub struct RenderPassInfo {
     label: String,
     writes: Vec<ResourceId>,
@@ -395,16 +468,12 @@ impl RenderGraph {
         }
     }
 
-    pub fn use_image(
-        &mut self,
-        label: &str,
-        description: &ImageDescription,
-    ) -> GraphResult<ResourceId> {
-        let id = self.create_unique_id(label)?;
+    pub fn use_image(&mut self, description: &ImageDescription) -> GraphResult<ResourceId> {
+        let id = self.create_unique_id(&description.label)?;
 
         let allocation = ResourceInfo {
             ty: AllocationType::Image(description.clone()),
-            label: label.to_owned(),
+            label: description.label.clone(),
         };
         self.allocations.insert(id, allocation);
         Ok(id)
@@ -597,14 +666,12 @@ impl RenderGraph {
 pub struct GpuRunner {
     resource_states: HashMap<ResourceId, TransitionInfo>,
     render_passes: HashMap<usize, RenderPass>,
-    framebuffers: HashMap<usize, GpuFramebuffer>,
 }
 impl GpuRunner {
     pub fn new() -> Self {
         Self {
             resource_states: Default::default(),
             render_passes: Default::default(),
-            framebuffers: Default::default(),
         }
     }
 
@@ -621,7 +688,7 @@ impl GpuRunner {
         if external_resources.external_image_views.contains_key(id) {
             Ok(external_resources.external_image_views[id])
         } else {
-            let desc = match graph.resources_used[id].ty {
+            let desc = match &graph.resources_used[id].ty {
                 AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
             };
             let image = allocator.images.get(gpu, &desc, id, &())?;
@@ -641,7 +708,7 @@ impl GpuRunner {
         if external_resources.external_images.contains_key(id) {
             Ok(external_resources.external_images[id])
         } else {
-            let desc = match graph.resources_used[id].ty {
+            let desc = match &graph.resources_used[id].ty {
                 AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
             };
             allocator.images.get(gpu, &desc, id, &())
@@ -656,7 +723,7 @@ impl GpuRunner {
         image: &GpuImage,
     ) {
         let resource_info = &graph.resources_used[id];
-        match resource_info.ty {
+        match &resource_info.ty {
             AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
                 let access_flag = match desc.format {
                     ImageFormat::Rgba8 => AccessFlags::COLOR_ATTACHMENT_READ,
@@ -715,7 +782,7 @@ impl GpuRunner {
         image: &GpuImage,
     ) {
         let resource_info = &graph.resources_used[id];
-        match resource_info.ty {
+        match &resource_info.ty {
             AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
                 let access_flag = match desc.format {
                     ImageFormat::Rgba8 => AccessFlags::COLOR_ATTACHMENT_WRITE,
@@ -836,7 +903,7 @@ impl GpuRunner {
             .iter()
             .map(|id| &graph.resources_used[id])
             .enumerate()
-            .filter_map(|(idx, info)| match info.ty {
+            .filter_map(|(idx, info)| match &info.ty {
                 AllocationType::Image(info) | AllocationType::ExternalImage(info) => {
                     if info.format == ImageFormat::Depth {
                         Some(idx)
@@ -884,58 +951,6 @@ impl GpuRunner {
             .get(&id)
             .expect(&format!("Failed to find renderpass with id {}", id))
     }
-    fn get_framebuffer(&self, hash: usize) -> &GpuFramebuffer {
-        self.framebuffers
-            .get(&hash)
-            .expect(&format!("Failed to find framebuffer with hash {}", hash))
-    }
-    fn create_framebuffer(
-        &mut self,
-        graph: &CompiledRenderGraph,
-        allocator: &mut DefaultResourceAllocator,
-        external_resources: &ExternalResources,
-        render_pass_id: usize,
-        framebuffer_hash: usize,
-    ) -> anyhow::Result<&GpuFramebuffer> {
-        let mut views = vec![];
-        let pass_info = &graph.pass_infos[render_pass_id];
-        for write in &pass_info.writes {
-            let desc = match graph.resources_used[write].ty {
-                AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
-            };
-            let image = allocator.images.get(&app_state().gpu, &desc, write, &())?;
-            allocator
-                .image_views
-                .get(&app_state().gpu, &desc, write, image)?;
-        }
-        for write in &pass_info.writes {
-            let view = if external_resources.external_image_views.contains_key(write) {
-                external_resources.external_image_views[write]
-            } else {
-                allocator.image_views.get_unchecked(write)
-            };
-
-            views.push(view)
-        }
-
-        let render_pass = self.get_renderpass(render_pass_id);
-        let framebuffer = crate::app_state()
-            .gpu
-            .create_framebuffer(&FramebufferCreateInfo {
-                render_pass,
-                attachments: &views,
-                width: pass_info.extents.width,
-                height: pass_info.extents.height,
-            })?;
-
-        trace!(
-            "Created new framebuffer for {} hash {}",
-            pass_info.label,
-            framebuffer_hash
-        );
-        self.framebuffers.insert(framebuffer_hash, framebuffer);
-        Ok(&self.framebuffers[&framebuffer_hash])
-    }
 
     fn ensure_render_pass_exists(
         &mut self,
@@ -959,34 +974,6 @@ impl GpuRunner {
         }
         Ok(())
     }
-
-    fn ensure_framebuffer_exists(
-        &mut self,
-        render_pass: &usize,
-        graph: &CompiledRenderGraph,
-        allocator: &mut DefaultResourceAllocator,
-        external_resources: &ExternalResources,
-    ) -> anyhow::Result<usize> {
-        let mut hasher = DefaultHasher::new();
-        let pass_info = &graph.pass_infos[*render_pass];
-        for id in &pass_info.writes {
-            let view =
-                Self::get_image_view(&app_state().gpu, graph, id, allocator, external_resources)?;
-            view.hash(&mut hasher);
-        }
-        let framebuffer_hash = hasher.finish() as usize;
-
-        if !self.framebuffers.contains_key(&framebuffer_hash) {
-            self.create_framebuffer(
-                graph,
-                allocator,
-                external_resources,
-                *render_pass,
-                framebuffer_hash,
-            )?;
-        };
-        Ok(framebuffer_hash)
-    }
 }
 
 impl RenderGraphRunner for GpuRunner {
@@ -998,6 +985,7 @@ impl RenderGraphRunner for GpuRunner {
         external_resources: &ExternalResources,
     ) -> anyhow::Result<()> {
         self.resource_states.clear();
+        resource_allocator.update();
 
         let mut command_buffer =
             CommandBuffer::new(&crate::app_state().gpu, gpu::QueueType::Graphics)?;
@@ -1046,16 +1034,33 @@ impl RenderGraphRunner for GpuRunner {
                 }
                 GraphOperation::ExecuteRenderPass(rp) => {
                     self.ensure_render_pass_exists(rp, graph, external_resources)?;
-                    let framebuffer_hash = self.ensure_framebuffer_exists(
-                        rp,
+                    let info = &graph.pass_infos[*rp];
+
+                    ensure_graph_allocated_image_views_exist(
+                        info,
+                        external_resources,
                         graph,
                         resource_allocator,
-                        external_resources,
                     )?;
+                    let views = resolve_image_views_unchecked(
+                        info,
+                        external_resources,
+                        &mut resource_allocator.image_views,
+                    );
+
+                    let framebuffer_hash = compute_framebuffer_hash(&views);
 
                     let pass = self.get_renderpass(*rp);
-                    let framebuffer = self.get_framebuffer(framebuffer_hash);
-                    let info = &graph.pass_infos[*rp];
+                    let framebuffer = resource_allocator.framebuffers.get(
+                        &app_state().gpu,
+                        &info.clone(),
+                        &framebuffer_hash,
+                        &RenderGraphFramebufferCreateInfo {
+                            render_pass: pass,
+                            render_targets: &views,
+                            extents: info.extents,
+                        },
+                    )?;
 
                     let cb = callbacks.callbacks.get(rp);
                     let clear_color_values: Vec<_> = info
@@ -1063,7 +1068,7 @@ impl RenderGraphRunner for GpuRunner {
                         .iter()
                         .map(|rd| {
                             let res_info = &graph.resources_used[rd];
-                            match res_info.ty {
+                            match &res_info.ty {
                                 AllocationType::Image(desc)
                                 | AllocationType::ExternalImage(desc) => match desc.format {
                                     ImageFormat::Rgba8 => ClearValue {
@@ -1129,6 +1134,57 @@ impl RenderGraphRunner for GpuRunner {
     }
 }
 
+fn compute_framebuffer_hash(views: &Vec<&GpuImageView>) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    for view in views {
+        view.hash(&mut hasher);
+    }
+
+    let framebuffer_hash = hasher.finish();
+    framebuffer_hash
+}
+
+fn ensure_graph_allocated_image_views_exist(
+    info: &RenderPassInfo,
+    external_resources: &ExternalResources,
+    graph: &CompiledRenderGraph,
+    resource_allocator: &mut DefaultResourceAllocator,
+) -> Result<(), anyhow::Error> {
+    Ok(for writes in &info.writes {
+        let _ = if !external_resources.external_image_views.contains_key(writes) {
+            let desc = match &graph.resources_used[writes].ty {
+                AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
+            };
+            let image = resource_allocator
+                .images
+                .get(&app_state().gpu, &desc, writes, &())?;
+            resource_allocator
+                .image_views
+                .get(&app_state().gpu, &desc, writes, image)?;
+        };
+    })
+}
+
+fn resolve_image_views_unchecked<'e, 'a>(
+    info: &RenderPassInfo,
+    external_resources: &ExternalResources<'e>,
+    image_views_allocator: &'a mut ResourceAllocator<GpuImageView, ImageDescription, ResourceId>,
+) -> Vec<&'e GpuImageView>
+where
+    'a: 'e,
+{
+    let mut views = vec![];
+    for writes in &info.writes {
+        let view = if external_resources.external_image_views.contains_key(writes) {
+            &external_resources.external_image_views[writes]
+        } else {
+            image_views_allocator.get_unchecked(writes)
+        };
+        views.push(view);
+    }
+    views
+}
+
 #[derive(Default)]
 pub struct RenderGraphPrinter {}
 
@@ -1174,12 +1230,9 @@ mod test {
 
     use super::{ImageDescription, RenderGraph, RenderGraphPrinter, RenderGraphRunner};
 
-    #[test]
-    pub fn prune_empty() {
-        let gpu = RenderGraphPrinter::default();
-        let mut render_graph = RenderGraph::new();
-
-        let image_desc = ImageDescription {
+    fn alloc(name: &str, rg: &mut RenderGraph) -> ResourceId {
+        let description = ImageDescription {
+            label: name.to_owned(),
             width: 1240,
             height: 720,
             format: gpu::ImageFormat::Rgba8,
@@ -1187,18 +1240,26 @@ mod test {
             present: false,
         };
 
-        let color_component = render_graph
-            .use_image("Color component", &image_desc)
-            .unwrap();
-        let position_component = render_graph
-            .use_image("Position component", &image_desc)
-            .unwrap();
-        let tangent_component = render_graph
-            .use_image("Tangent component", &image_desc)
-            .unwrap();
-        let normal_component = render_graph
-            .use_image("Normal component", &image_desc)
-            .unwrap();
+        rg.use_image(&description).unwrap()
+    }
+    #[test]
+    pub fn prune_empty() {
+        let gpu = RenderGraphPrinter::default();
+        let mut render_graph = RenderGraph::new();
+
+        let image_desc = ImageDescription {
+            label: "".to_owned(),
+            width: 1240,
+            height: 720,
+            format: gpu::ImageFormat::Rgba8,
+            samples: 1,
+            present: false,
+        };
+
+        let color_component = alloc("color", &mut render_graph);
+        let position_component = alloc("position", &mut render_graph);
+        let tangent_component = alloc("tangent", &mut render_graph);
+        let normal_component = alloc("normal", &mut render_graph);
 
         let mut gbuffer = render_graph
             .begin_render_pass("gbuffer", Extent2D::default())
@@ -1220,17 +1281,16 @@ mod test {
     pub fn ensure_keys_are_unique() {
         let mut render_graph = RenderGraph::new();
         let image_desc = ImageDescription {
+            label: "".to_owned(),
             width: 1240,
             height: 720,
             format: gpu::ImageFormat::Rgba8,
             samples: 1,
             present: false,
         };
-        let color_component_1 = render_graph
-            .use_image("Color component", &image_desc)
-            .unwrap();
-        let color_component_2 = render_graph.use_image("Color component", &image_desc);
 
+        let color_component_1 = alloc("color1", &mut render_graph);
+        let color_component_2 = alloc("color2", &mut render_graph);
         let is_defined = color_component_2.is_err_and(|id| {
             id == CompileError::ResourceAlreadyDefined(
                 color_component_1,
@@ -1256,6 +1316,7 @@ mod test {
         let mut render_graph = RenderGraph::new();
 
         let image_desc = ImageDescription {
+            label: "".to_owned(),
             width: 1240,
             height: 720,
             format: gpu::ImageFormat::Rgba8,
@@ -1263,19 +1324,12 @@ mod test {
             present: false,
         };
 
-        let color_component = render_graph
-            .use_image("Color component", &image_desc)
-            .unwrap();
-        let position_component = render_graph
-            .use_image("Position component", &image_desc)
-            .unwrap();
-        let tangent_component = render_graph
-            .use_image("Tangent component", &image_desc)
-            .unwrap();
-        let normal_component = render_graph
-            .use_image("Normal component", &image_desc)
-            .unwrap();
-        let output_image = render_graph.use_image("Output image", &image_desc).unwrap();
+        let color_component_1 = alloc("color1", &mut render_graph);
+        let color_component_2 = alloc("color2", &mut render_graph);
+        let position_component = alloc("position", &mut render_graph);
+        let tangent_component = alloc("tangent", &mut render_graph);
+        let normal_component = alloc("normal", &mut render_graph);
+        let output_image = alloc("output", &mut render_graph);
 
         let mut gbuffer = render_graph
             .begin_render_pass("gbuffer", Extent2D::default())
@@ -1316,6 +1370,7 @@ mod test {
         let mut render_graph = RenderGraph::new();
 
         let image_desc = ImageDescription {
+            label: "".to_owned(),
             width: 1240,
             height: 720,
             format: gpu::ImageFormat::Rgba8,
@@ -1323,22 +1378,13 @@ mod test {
             present: false,
         };
 
-        let color_component = render_graph
-            .use_image("Color component", &image_desc)
-            .unwrap();
-        let position_component = render_graph
-            .use_image("Position component", &image_desc)
-            .unwrap();
-        let tangent_component = render_graph
-            .use_image("Tangent component", &image_desc)
-            .unwrap();
-        let normal_component = render_graph
-            .use_image("Normal component", &image_desc)
-            .unwrap();
-        let output_image = render_graph.use_image("Output image", &image_desc).unwrap();
-        let unused = render_graph
-            .use_image("Unused resource", &image_desc)
-            .unwrap();
+        let color_component_1 = alloc("color1", &mut render_graph);
+        let color_component_2 = alloc("color2", &mut render_graph);
+        let position_component = alloc("position", &mut render_graph);
+        let tangent_component = alloc("tangent", &mut render_graph);
+        let normal_component = alloc("normal", &mut render_graph);
+        let output_image = alloc("output", &mut render_graph);
+        let output_image = alloc("unused", &mut render_graph);
 
         let mut gbuffer = render_graph
             .begin_render_pass("gbuffer", Extent2D::default())
@@ -1388,18 +1434,6 @@ mod test {
         assert_eq!(render_graph.pass_infos.len(), 2);
         assert_eq!(render_graph.pass_infos[0].label, "gbuffer");
         assert_eq!(render_graph.pass_infos[1].label, "compose_gbuffer");
-    }
-
-    fn alloc(name: &str, rg: &mut RenderGraph) -> ResourceId {
-        let description = ImageDescription {
-            width: 1240,
-            height: 720,
-            format: gpu::ImageFormat::Rgba8,
-            samples: 1,
-            present: false,
-        };
-
-        rg.use_image(name, &description).unwrap()
     }
 
     #[test]
