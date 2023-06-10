@@ -10,7 +10,7 @@ fn recompile_all_shaders() {
 
     let compiler = shaderc::Compiler::new().expect("Failed to create compiler");
 
-    let out_dir = ".";
+    let out_dir = "..";
 
     let out_dir = std::path::Path::new(&out_dir);
     let input_shader_path = std::path::Path::new("src/shaders");
