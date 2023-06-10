@@ -26,12 +26,12 @@ use gpu::{
 };
 use log::trace;
 
-pub struct LifetimeAllocation<R, D: Label> {
+pub struct LifetimeAllocation<R, D> {
     inner: R,
     desc: D,
     last_frame_used: u64,
 }
-impl<R, D: Label> LifetimeAllocation<R, D> {
+impl<R, D> LifetimeAllocation<R, D> {
     fn new<A>(inner: R, desc: D) -> LifetimeAllocation<R, D>
     where
         R: CreateFrom<D, A>,
@@ -51,31 +51,31 @@ where
     fn create(gpu: &Gpu, desc: &D, additional: &A) -> anyhow::Result<Self>;
 }
 
-pub trait Label {
-    fn label(&self) -> &str;
-}
-
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RenderPassHandle {
+    label: &'static str,
     id: usize,
 }
 
 impl RenderPassHandle {}
 
+#[derive(Hash, PartialOrd, Ord, PartialEq, Eq, Clone, Copy, Debug)]
+struct FramebufferHandle {
+    render_pass_label: &'static str,
+    hash: u64,
+}
+
 pub struct ResourceAllocator<
     R: Sized,
-    D: Eq + PartialEq + Clone + Label,
+    D: Eq + PartialEq + Clone,
     ID: Hash + Eq + PartialEq + Ord + PartialOrd,
 > {
     resources: HashMap<ID, LifetimeAllocation<R, D>>,
     lifetime: u64,
 }
 
-impl<
-        R: Sized,
-        D: Eq + PartialEq + Clone + Label,
-        ID: Hash + Eq + PartialEq + Ord + PartialOrd + Clone,
-    > ResourceAllocator<R, D, ID>
+impl<R: Sized, D: Eq + PartialEq + Clone, ID: Hash + Eq + PartialEq + Ord + PartialOrd + Clone>
+    ResourceAllocator<R, D, ID>
 {
     fn new(lifetime: u64) -> Self {
         Self {
@@ -87,7 +87,7 @@ impl<
 
 impl<
         R: Sized,
-        D: Eq + PartialEq + Clone + Label,
+        D: Eq + PartialEq + Clone,
         ID: Hash + Eq + PartialEq + Ord + PartialOrd + Clone + Debug,
     > ResourceAllocator<R, D, ID>
 {
@@ -166,12 +166,12 @@ impl<
     }
 
     fn remove_unused_resources(&mut self, current_iteration: u64) {
-        self.resources.retain(|_, res| {
+        self.resources.retain(|id, res| {
             let can_live = current_iteration - res.last_frame_used < self.lifetime;
             if !can_live {
                 trace!(
                     "Deallocating resource {:?} after {} frames",
-                    res.desc.label(),
+                    id,
                     self.lifetime
                 )
             }
@@ -274,22 +274,10 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraphFramebufferCreateInfo<'a>> for Gp
     }
 }
 
-impl Label for ImageDescription {
-    fn label(&self) -> &str {
-        &self.label
-    }
-}
-
-impl Label for RenderPassInfo {
-    fn label(&self) -> &str {
-        &self.label
-    }
-}
-
 pub struct DefaultResourceAllocator {
     images: ResourceAllocator<GpuImage, ImageDescription, ResourceId>,
     image_views: ResourceAllocator<GpuImageView, ImageDescription, ResourceId>,
-    framebuffers: ResourceAllocator<GpuFramebuffer, RenderPassInfo, u64>,
+    framebuffers: ResourceAllocator<GpuFramebuffer, RenderPassInfo, FramebufferHandle>,
 }
 
 impl DefaultResourceAllocator {
@@ -328,21 +316,22 @@ pub trait RenderGraphRunner {
 
 #[derive(Hash, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct ResourceId {
+    label: &'static str,
     raw: u64,
 }
 impl ResourceId {
-    fn make(label: &str) -> ResourceId {
+    fn make(label: &'static str) -> ResourceId {
         let mut hasher = DefaultHasher::new();
         label.hash(&mut hasher);
         Self {
+            label,
             raw: hasher.finish(),
         }
     }
 }
 
-#[derive(Hash, Clone, PartialEq, Eq)]
+#[derive(Hash, Copy, Clone, PartialEq, Eq)]
 pub struct ImageDescription {
-    pub label: String,
     pub width: u32,
     pub height: u32,
     pub format: ImageFormat,
@@ -350,15 +339,15 @@ pub struct ImageDescription {
     pub present: bool,
 }
 
-#[derive(Hash, Clone)]
+#[derive(Hash, Copy, Clone)]
 pub enum AllocationType {
     Image(ImageDescription),
     ExternalImage(ImageDescription),
 }
 
-#[derive(Hash, Clone)]
+#[derive(Hash, Copy, Clone)]
 pub struct ResourceInfo {
-    label: String,
+    label: &'static str,
     ty: AllocationType,
 }
 
@@ -392,7 +381,7 @@ pub type GraphResult<T> = Result<T, CompileError>;
 
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
 pub struct RenderPassInfo {
-    label: String,
+    label: &'static str,
     writes: Vec<ResourceId>,
     reads: Vec<ResourceId>,
     extents: Extent2D,
@@ -490,18 +479,22 @@ impl RenderGraph {
         }
     }
 
-    pub fn use_image(&mut self, description: &ImageDescription) -> GraphResult<ResourceId> {
-        let id = self.create_unique_id(&description.label)?;
+    pub fn use_image(
+        &mut self,
+        label: &'static str,
+        description: &ImageDescription,
+    ) -> GraphResult<ResourceId> {
+        let id = self.create_unique_id(label)?;
 
         let allocation = ResourceInfo {
             ty: AllocationType::Image(description.clone()),
-            label: description.label.clone(),
+            label,
         };
         self.allocations.insert(id, allocation);
         Ok(id)
     }
 
-    fn create_unique_id(&mut self, label: &str) -> GraphResult<ResourceId> {
+    fn create_unique_id(&mut self, label: &'static str) -> GraphResult<ResourceId> {
         let id = ResourceId::make(label);
         if self.allocations.contains_key(&id) {
             return Err(CompileError::ResourceAlreadyDefined(id, label.to_owned()));
@@ -509,12 +502,16 @@ impl RenderGraph {
         Ok(id)
     }
 
-    pub fn begin_render_pass(&self, label: &str, extents: Extent2D) -> GraphResult<RenderPassInfo> {
+    pub fn begin_render_pass(
+        &self,
+        label: &'static str,
+        extents: Extent2D,
+    ) -> GraphResult<RenderPassInfo> {
         if self.render_pass_is_defined_already(&label) {
             return Err(CompileError::RenderPassAlreadyDefined(label.to_owned()));
         }
         Ok(RenderPassInfo {
-            label: label.to_owned(),
+            label,
             writes: Default::default(),
             reads: Default::default(),
             extents,
@@ -525,9 +522,12 @@ impl RenderGraph {
     pub fn commit_render_pass(&mut self, pass: RenderPassInfo) -> RenderPassHandle {
         let id = self.passes.len() as _;
         pass.hash(&mut self.hasher);
+        let handle = RenderPassHandle {
+            id,
+            label: &pass.label,
+        };
         self.passes.push(pass);
-
-        RenderPassHandle { id }
+        handle
     }
 
     pub fn persist_resource(&mut self, id: &ResourceId) {
@@ -571,11 +571,7 @@ impl RenderGraph {
     }
 
     fn prune_passes(&mut self, compiled: &mut CompiledRenderGraph) {
-        let mut working_set: Vec<_> = self
-            .persistent_resources
-            .iter()
-            .map(|r| r.clone())
-            .collect();
+        let mut working_set: Vec<_> = self.persistent_resources.iter().map(|r| *r).collect();
         let mut used_resources = working_set.clone();
         let mut write_resources: HashSet<ResourceId> = HashSet::default();
         while !working_set.is_empty() {
@@ -1081,7 +1077,7 @@ impl RenderGraphRunner for GpuRunner {
                         &mut resource_allocator.image_views,
                     );
 
-                    let framebuffer_hash = compute_framebuffer_hash(&views);
+                    let framebuffer_hash = compute_framebuffer_hash(info, &views);
 
                     let pass = self.get_renderpass(*rp, external_resources);
                     let framebuffer = resource_allocator.framebuffers.get(
@@ -1167,14 +1163,20 @@ impl RenderGraphRunner for GpuRunner {
     }
 }
 
-fn compute_framebuffer_hash(views: &Vec<&GpuImageView>) -> u64 {
+fn compute_framebuffer_hash(
+    info: &RenderPassInfo,
+    views: &Vec<&GpuImageView>,
+) -> FramebufferHandle {
     let mut hasher = DefaultHasher::new();
     for view in views {
         view.hash(&mut hasher);
     }
 
     let framebuffer_hash = hasher.finish();
-    framebuffer_hash
+    FramebufferHandle {
+        render_pass_label: info.label,
+        hash: framebuffer_hash,
+    }
 }
 
 fn ensure_graph_allocated_image_views_exist(
@@ -1225,9 +1227,8 @@ mod test {
 
     use super::{ImageDescription, RenderGraph};
 
-    fn alloc(name: &str, rg: &mut RenderGraph) -> ResourceId {
+    fn alloc(name: &'static str, rg: &mut RenderGraph) -> ResourceId {
         let description = ImageDescription {
-            label: name.to_owned(),
             width: 1240,
             height: 720,
             format: gpu::ImageFormat::Rgba8,
@@ -1235,7 +1236,7 @@ mod test {
             present: false,
         };
 
-        rg.use_image(&description).unwrap()
+        rg.use_image(name, &description).unwrap()
     }
     #[test]
     pub fn prune_empty() {
@@ -1267,7 +1268,6 @@ mod test {
         let color_component_1 = alloc("color1", &mut render_graph);
         let color_component_2 = {
             let description = ImageDescription {
-                label: "color1".to_owned(),
                 width: 1240,
                 height: 720,
                 format: gpu::ImageFormat::Rgba8,
@@ -1275,7 +1275,7 @@ mod test {
                 present: false,
             };
 
-            render_graph.use_image(&description)
+            render_graph.use_image("color1", &description)
         };
         let is_defined = color_component_2.is_err_and(|id| {
             id == CompileError::ResourceAlreadyDefined(color_component_1, "color1".to_owned())

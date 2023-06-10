@@ -452,22 +452,26 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 .push(primitive.clone());
         }
 
-        let depth_buffer = self.render_graph.use_image(&crate::ImageDescription {
-            label: "depth-buffer".to_owned(),
-            width: swapchain_extents.width,
-            height: swapchain_extents.height,
-            format: gpu::ImageFormat::Depth,
-            samples: 1,
-            present: false,
-        })?;
-        let color_buffer = self.render_graph.use_image(&crate::ImageDescription {
-            label: "color-buffer".to_owned(),
-            width: swapchain_extents.width,
-            height: swapchain_extents.height,
-            format: swapchain_format.into(),
-            samples: 1,
-            present: true,
-        })?;
+        let depth_buffer = self.render_graph.use_image(
+            "depth-buffer",
+            &crate::ImageDescription {
+                width: swapchain_extents.width,
+                height: swapchain_extents.height,
+                format: gpu::ImageFormat::Depth,
+                samples: 1,
+                present: false,
+            },
+        )?;
+        let color_buffer = self.render_graph.use_image(
+            "color-buffer",
+            &crate::ImageDescription {
+                width: swapchain_extents.width,
+                height: swapchain_extents.height,
+                format: swapchain_format.into(),
+                samples: 1,
+                present: true,
+            },
+        )?;
         self.render_graph.persist_resource(&color_buffer);
 
         let mut forward_pass = self
