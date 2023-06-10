@@ -134,7 +134,7 @@ impl ForwardRenderingPipeline {
             resource_map,
             camera_buffer_descriptor_set,
             material_context,
-            resource_allocator: Default::default(),
+            resource_allocator: DefaultResourceAllocator::new(),
             render_graph,
 
             runner: GpuRunner::new(),

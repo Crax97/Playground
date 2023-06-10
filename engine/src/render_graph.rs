@@ -69,17 +69,19 @@ pub struct ResourceAllocator<
     ID: Hash + Eq + PartialEq + Ord + PartialOrd,
 > {
     resources: HashMap<ID, LifetimeAllocation<R, D>>,
+    lifetime: u64,
 }
 
 impl<
         R: Sized,
         D: Eq + PartialEq + Clone + Label,
         ID: Hash + Eq + PartialEq + Ord + PartialOrd + Clone,
-    > Default for ResourceAllocator<R, D, ID>
+    > ResourceAllocator<R, D, ID>
 {
-    fn default() -> Self {
+    fn new(lifetime: u64) -> Self {
         Self {
             resources: HashMap::new(),
+            lifetime,
         }
     }
 }
@@ -159,15 +161,14 @@ impl<
     }
 
     fn remove_unused_resources(&mut self) {
-        const FRAMES_LIFETIME: u64 = 10;
         let now = app_state().time().frames_since_start();
         self.resources.retain(|_, res| {
-            let can_live = now - res.last_frame_used < FRAMES_LIFETIME;
+            let can_live = now - res.last_frame_used < self.lifetime;
             if !can_live {
                 trace!(
                     "Deallocating resource {:?} after {} frames",
                     res.desc.label(),
-                    FRAMES_LIFETIME
+                    self.lifetime
                 )
             }
             can_live
@@ -281,11 +282,20 @@ impl Label for RenderPassInfo {
     }
 }
 
-#[derive(Default)]
 pub struct DefaultResourceAllocator {
     images: ResourceAllocator<GpuImage, ImageDescription, ResourceId>,
     image_views: ResourceAllocator<GpuImageView, ImageDescription, ResourceId>,
     framebuffers: ResourceAllocator<GpuFramebuffer, RenderPassInfo, u64>,
+}
+
+impl DefaultResourceAllocator {
+    pub fn new() -> Self {
+        Self {
+            images: ResourceAllocator::new(2),
+            image_views: ResourceAllocator::new(2),
+            framebuffers: ResourceAllocator::new(5),
+        }
+    }
 }
 
 impl DefaultResourceAllocator {
