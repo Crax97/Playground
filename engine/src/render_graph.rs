@@ -26,34 +26,126 @@ use log::trace;
 
 use crate::app_state;
 
+pub struct LifetimeAllocation<R, D> {
+    inner: R,
+    desc: D,
+    last_frame_used: u64,
+}
+impl<R, D> LifetimeAllocation<R, D> {
+    fn new<A>(inner: R, desc: D) -> LifetimeAllocation<R, D>
+    where
+        R: CreateFrom<D, A>,
+    {
+        Self {
+            inner,
+            desc,
+            last_frame_used: 0,
+        }
+    }
+}
+
+pub trait CreateFrom<D, A>
+where
+    Self: Sized,
+{
+    fn create(gpu: &Gpu, desc: &D, additional: &A) -> anyhow::Result<Self>;
+}
+
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RenderPassHandle {
     id: usize,
 }
 
 impl RenderPassHandle {}
-pub trait ResourceAllocator {
-    fn get_image(
-        &mut self,
-        gpu: &Gpu,
-        graph: &CompiledRenderGraph,
-        id: &ResourceId,
-    ) -> anyhow::Result<&GpuImage>;
-    fn get_image_view(
-        &mut self,
-        gpu: &Gpu,
-        graph: &CompiledRenderGraph,
-        id: &ResourceId,
-    ) -> anyhow::Result<&GpuImageView>;
 
-    fn ensure_image_view_exists(
+pub struct ResourceAllocator<
+    R: Sized,
+    D: Eq + PartialEq + Clone,
+    ID: Hash + Eq + PartialEq + Ord + PartialOrd,
+> {
+    resources: HashMap<ID, LifetimeAllocation<R, D>>,
+}
+
+impl<R: Sized, D: Eq + PartialEq + Clone, ID: Hash + Eq + PartialEq + Ord + PartialOrd + Clone>
+    Default for ResourceAllocator<R, D, ID>
+{
+    fn default() -> Self {
+        Self {
+            resources: HashMap::new(),
+        }
+    }
+}
+
+impl<R: Sized, D: Eq + PartialEq + Clone, ID: Hash + Eq + PartialEq + Ord + PartialOrd + Clone>
+    ResourceAllocator<R, D, ID>
+{
+    fn get<A>(&mut self, gpu: &Gpu, desc: &D, id: &ID, additional: &A) -> anyhow::Result<&R>
+    where
+        R: CreateFrom<D, A>,
+    {
+        self.ensure_resource_exists(gpu, desc, id, additional)?;
+        self.ensure_resource_hasnt_changed(gpu, desc, id, additional)?;
+        self.update_resource_access_time(id);
+        Ok(self.get_unchecked(id))
+    }
+    fn get_unchecked(&self, id: &ID) -> &R {
+        &self.resources[id].inner
+    }
+
+    fn ensure_resource_exists<A>(
         &mut self,
         gpu: &Gpu,
-        graph: &CompiledRenderGraph,
-        id: &ResourceId,
-    ) -> anyhow::Result<()>;
+        desc: &D,
+        id: &ID,
+        additional: &A,
+    ) -> anyhow::Result<()>
+    where
+        R: CreateFrom<D, A>,
+    {
+        if !self.resources.contains_key(id) {
+            self.create_resource(gpu, desc, id, additional)?
+        }
 
-    fn get_image_view_unchecked(&self, id: &ResourceId) -> &GpuImageView;
+        Ok(())
+    }
+
+    fn create_resource<A>(
+        &mut self,
+        gpu: &Gpu,
+        desc: &D,
+        id: &ID,
+        additional: &A,
+    ) -> anyhow::Result<()>
+    where
+        R: CreateFrom<D, A>,
+    {
+        let resource = R::create(gpu, desc, additional)?;
+        self.resources
+            .insert(id.clone(), LifetimeAllocation::new(resource, desc.clone()));
+        Ok(())
+    }
+    fn ensure_resource_hasnt_changed<A>(
+        &mut self,
+        gpu: &Gpu,
+        desc: &D,
+        id: &ID,
+        additional: &A,
+    ) -> anyhow::Result<()>
+    where
+        R: CreateFrom<D, A>,
+    {
+        let old_desc = &self.resources[id].desc;
+        if old_desc != desc {
+            self.create_resource(gpu, desc, id, additional)?;
+        }
+        Ok(())
+    }
+    fn update_resource_access_time(&mut self, id: &ID) {
+        self.resources
+            .get_mut(id)
+            .expect("Failed to fetch resource")
+            .last_frame_used = app_state().time().frames_since_start()
+    }
 }
 
 #[derive(Default)]
@@ -83,204 +175,53 @@ impl<'a> ExternalResources<'a> {
     }
 }
 
-struct GpuImageInfo {
-    image: GpuImage,
-    desc: ImageDescription,
-}
-
-#[derive(Default)]
-pub struct DefaultResourceAllocator {
-    images: HashMap<ResourceId, GpuImageInfo>,
-    image_views: HashMap<ResourceId, GpuImageView>,
-}
-impl DefaultResourceAllocator {
-    fn create_image(
-        &mut self,
-        gpu: &Gpu,
-        img: &ImageDescription,
-        id: &ResourceId,
-        info: &ResourceInfo,
-    ) -> Result<&GpuImageView, anyhow::Error> {
-        let image = {
-            gpu.create_image(
+impl CreateFrom<ImageDescription, ()> for GpuImage {
+    fn create(gpu: &Gpu, desc: &ImageDescription, _: &()) -> anyhow::Result<Self> {
+        Ok(gpu
+            .create_image(
                 &ImageCreateInfo {
-                    label: Some(&info.label),
-                    width: img.width,
-                    height: img.height,
-                    format: img.format.to_vk(),
-                    usage: ImageUsageFlags::INPUT_ATTACHMENT
-                        | match img.format {
-                            ImageFormat::Rgba8 => ImageUsageFlags::COLOR_ATTACHMENT,
-                            ImageFormat::Depth => ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                        },
+                    label: None,
+                    width: desc.width,
+                    height: desc.height,
+                    format: desc.format.to_vk(),
+                    usage: match desc.format {
+                        ImageFormat::Rgba8 => ImageUsageFlags::COLOR_ATTACHMENT,
+                        ImageFormat::Depth => ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                    } | ImageUsageFlags::INPUT_ATTACHMENT
+                        | ImageUsageFlags::SAMPLED,
                 },
                 MemoryDomain::DeviceLocal,
-            )?
-        };
-
-        let view = gpu.create_image_view(&ImageViewCreateInfo {
-            image: &image,
-            view_type: ImageViewType::TYPE_2D,
-            format: img.format.to_vk(),
-            components: ComponentMapping::default(),
-            subresource_range: ImageSubresourceRange {
-                aspect_mask: match img.format {
-                    ImageFormat::Rgba8 => ImageAspectFlags::COLOR,
-                    ImageFormat::Depth => ImageAspectFlags::DEPTH,
-                },
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 1,
-            },
-        })?;
-
-        self.images.insert(
-            *id,
-            GpuImageInfo {
-                image,
-                desc: img.clone(),
-            },
-        );
-        self.image_views.insert(*id, view);
-
-        trace!(
-            "Created new {:?} image resource {} {}x{}",
-            img.format,
-            info.label,
-            img.width,
-            img.height,
-        );
-
-        Ok(&self.image_views[id])
-    }
-
-    fn get_image_view_checked(&self, id: ResourceId) -> &GpuImageView {
-        if self.image_views.contains_key(&id) {
-            return &self.image_views[&id];
-        } else {
-            panic!("get_image_view_checked: failed to find image view");
-        }
-    }
-    fn get_image_checked(&self, id: ResourceId) -> &GpuImage {
-        if self.images.contains_key(&id) {
-            return &self.images[&id].image;
-        } else {
-            panic!("get_image: failed to find image view");
-        }
-    }
-
-    fn ensure_image_description_hasnt_changed(
-        &mut self,
-        resource_info: &ResourceInfo,
-        id: &ResourceId,
-        gpu: &Gpu,
-    ) -> Result<(), anyhow::Error> {
-        let desc = match &resource_info.ty {
-            AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
-        };
-        let cached_desc = self.images[id].desc;
-        Ok(
-            if desc.format != cached_desc.format
-                || desc.height != cached_desc.height
-                || desc.width != cached_desc.width
-            {
-                self.create_image(gpu, &desc, id, resource_info)?;
-            },
-        )
-    }
-
-    fn ensure_image_exists(
-        &mut self,
-        id: &ResourceId,
-        resource_info: &ResourceInfo,
-        gpu: &Gpu,
-    ) -> Result<(), anyhow::Error> {
-        Ok(if !self.images.contains_key(id) {
-            match &resource_info.ty {
-                AllocationType::Image(img) => self.create_image(gpu, img, id, resource_info),
-                AllocationType::ExternalImage(_) => {
-                    panic!(
-                        "External image requested but it wasn't injected: {}",
-                        resource_info.label
-                    )
-                }
-            }?;
-        })
-    }
-
-    fn ensure_image_view_exists(
-        &mut self,
-        id: &ResourceId,
-        resource_info: &ResourceInfo,
-        gpu: &Gpu,
-    ) -> Result<(), anyhow::Error> {
-        Ok(if !self.image_views.contains_key(id) {
-            match &resource_info.ty {
-                AllocationType::Image(img) => self.create_image(gpu, img, id, resource_info),
-                AllocationType::ExternalImage(_) => {
-                    panic!(
-                        "External image requeste but it wasn't injected: {}",
-                        resource_info.label
-                    )
-                }
-            }?;
-        })
+            )
+            .expect("Failed to create image resource"))
     }
 }
 
-impl ResourceAllocator for DefaultResourceAllocator {
-    fn get_image_view(
-        &mut self,
-        gpu: &Gpu,
-        graph: &CompiledRenderGraph,
-        id: &ResourceId,
-    ) -> anyhow::Result<&GpuImageView> {
-        let resource_info = &graph.resources_used[id];
-        self.ensure_image_view_exists(id, resource_info, gpu)?;
-
-        Ok(self.get_image_view_checked(*id))
+impl CreateFrom<ImageDescription, GpuImage> for GpuImageView {
+    fn create(gpu: &Gpu, desc: &ImageDescription, additional: &GpuImage) -> anyhow::Result<Self> {
+        Ok(gpu
+            .create_image_view(&ImageViewCreateInfo {
+                image: additional,
+                view_type: ImageViewType::TYPE_2D,
+                format: desc.format.to_vk(),
+                components: ComponentMapping::default(),
+                subresource_range: ImageSubresourceRange {
+                    aspect_mask: match desc.format {
+                        ImageFormat::Rgba8 => ImageAspectFlags::COLOR,
+                        ImageFormat::Depth => ImageAspectFlags::DEPTH,
+                    },
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+            })
+            .expect("Failed to create image resource"))
     }
-
-    fn get_image(
-        &mut self,
-        gpu: &Gpu,
-        graph: &CompiledRenderGraph,
-        id: &ResourceId,
-    ) -> anyhow::Result<&GpuImage> {
-        let resource_info = &graph.resources_used[id];
-        self.ensure_image_exists(id, resource_info, gpu)?;
-        self.ensure_image_description_hasnt_changed(resource_info, id, gpu)?;
-
-        Ok(self.get_image_checked(*id))
-    }
-
-    fn ensure_image_view_exists(
-        &mut self,
-        _gpu: &Gpu,
-        graph: &CompiledRenderGraph,
-        id: &ResourceId,
-    ) -> anyhow::Result<()> {
-        if !self.image_views.contains_key(id) {
-            let resource_info = &graph.resources_used[id];
-            match &resource_info.ty {
-                AllocationType::Image(_) => {
-                    panic!(
-                        "No matching image_view has been created for graph-owned image {}! Most likely this is a bug",
-                        resource_info.label
-                    )
-                }
-                AllocationType::ExternalImage(_) => {}
-            };
-        }
-        Ok(())
-    }
-
-    fn get_image_view_unchecked(&self, id: &ResourceId) -> &GpuImageView {
-        self.image_views
-            .get(id)
-            .expect("get_image_view_unchecked(): image view not found")
-    }
+}
+#[derive(Default)]
+pub struct DefaultResourceAllocator {
+    images: ResourceAllocator<GpuImage, ImageDescription, ResourceId>,
+    image_views: ResourceAllocator<GpuImageView, ImageDescription, ResourceId>,
 }
 
 pub trait RenderGraphRunner {
@@ -288,7 +229,7 @@ pub trait RenderGraphRunner {
         &mut self,
         graph: &CompiledRenderGraph,
         callbacks: &Callbacks,
-        resource_allocator: &mut dyn ResourceAllocator,
+        resource_allocator: &mut DefaultResourceAllocator,
         external_resources: &ExternalResources,
     ) -> anyhow::Result<()>;
 }
@@ -307,7 +248,7 @@ impl ResourceId {
     }
 }
 
-#[derive(Hash, Copy, Clone)]
+#[derive(Hash, Copy, Clone, PartialEq, Eq)]
 pub struct ImageDescription {
     pub width: u32,
     pub height: u32,
@@ -525,7 +466,7 @@ impl RenderGraph {
         &self,
         runner: &mut dyn RenderGraphRunner,
         callbacks: &Callbacks,
-        resource_allocator: &mut dyn ResourceAllocator,
+        resource_allocator: &mut DefaultResourceAllocator,
         external_resources: &ExternalResources,
     ) -> anyhow::Result<()> {
         runner.run_graph(
@@ -671,7 +612,7 @@ impl GpuRunner {
         gpu: &Gpu,
         graph: &CompiledRenderGraph,
         id: &ResourceId,
-        allocator: &'r mut dyn ResourceAllocator,
+        allocator: &'r mut DefaultResourceAllocator,
         external_resources: &ExternalResources<'e>,
     ) -> anyhow::Result<&'e GpuImageView>
     where
@@ -680,14 +621,18 @@ impl GpuRunner {
         if external_resources.external_image_views.contains_key(id) {
             Ok(external_resources.external_image_views[id])
         } else {
-            allocator.get_image_view(gpu, graph, id)
+            let desc = match graph.resources_used[id].ty {
+                AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
+            };
+            let image = allocator.images.get(gpu, &desc, id, &())?;
+            allocator.image_views.get(gpu, &desc, id, image)
         }
     }
     pub fn get_image<'r, 'e>(
         gpu: &Gpu,
         graph: &CompiledRenderGraph,
         id: &ResourceId,
-        allocator: &'r mut dyn ResourceAllocator,
+        allocator: &'r mut DefaultResourceAllocator,
         external_resources: &ExternalResources<'e>,
     ) -> anyhow::Result<&'e GpuImage>
     where
@@ -696,7 +641,10 @@ impl GpuRunner {
         if external_resources.external_images.contains_key(id) {
             Ok(external_resources.external_images[id])
         } else {
-            allocator.get_image(gpu, graph, id)
+            let desc = match graph.resources_used[id].ty {
+                AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
+            };
+            allocator.images.get(gpu, &desc, id, &())
         }
     }
 
@@ -944,7 +892,7 @@ impl GpuRunner {
     fn create_framebuffer(
         &mut self,
         graph: &CompiledRenderGraph,
-        allocator: &mut dyn ResourceAllocator,
+        allocator: &mut DefaultResourceAllocator,
         external_resources: &ExternalResources,
         render_pass_id: usize,
         framebuffer_hash: usize,
@@ -952,15 +900,19 @@ impl GpuRunner {
         let mut views = vec![];
         let pass_info = &graph.pass_infos[render_pass_id];
         for write in &pass_info.writes {
-            if !external_resources.external_image_views.contains_key(write) {
-                allocator.ensure_image_view_exists(&crate::app_state().gpu, graph, write)?;
-            }
+            let desc = match graph.resources_used[write].ty {
+                AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
+            };
+            let image = allocator.images.get(&app_state().gpu, &desc, write, &())?;
+            allocator
+                .image_views
+                .get(&app_state().gpu, &desc, write, image)?;
         }
         for write in &pass_info.writes {
             let view = if external_resources.external_image_views.contains_key(write) {
                 external_resources.external_image_views[write]
             } else {
-                allocator.get_image_view_unchecked(write)
+                allocator.image_views.get_unchecked(write)
             };
 
             views.push(view)
@@ -1012,7 +964,7 @@ impl GpuRunner {
         &mut self,
         render_pass: &usize,
         graph: &CompiledRenderGraph,
-        allocator: &mut dyn ResourceAllocator,
+        allocator: &mut DefaultResourceAllocator,
         external_resources: &ExternalResources,
     ) -> anyhow::Result<usize> {
         let mut hasher = DefaultHasher::new();
@@ -1042,7 +994,7 @@ impl RenderGraphRunner for GpuRunner {
         &mut self,
         graph: &CompiledRenderGraph,
         callbacks: &Callbacks,
-        resource_allocator: &mut dyn ResourceAllocator,
+        resource_allocator: &mut DefaultResourceAllocator,
         external_resources: &ExternalResources,
     ) -> anyhow::Result<()> {
         self.resource_states.clear();
@@ -1185,7 +1137,7 @@ impl RenderGraphRunner for RenderGraphPrinter {
         &mut self,
         graph: &CompiledRenderGraph,
         _callbacks: &Callbacks,
-        _allocator: &mut dyn ResourceAllocator,
+        _allocator: &mut DefaultResourceAllocator,
         _external_resources: &ExternalResources,
     ) -> anyhow::Result<()> {
         println!(
