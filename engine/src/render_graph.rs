@@ -4,6 +4,7 @@
 */
 
 use std::{
+    cell::RefCell,
     collections::{hash_map::DefaultHasher, HashMap, HashSet},
     error::Error,
     fmt::Debug,
@@ -356,6 +357,7 @@ pub struct RenderGraph {
     passes: Vec<RenderPassInfo>,
     allocations: HashMap<ResourceId, ResourceInfo>,
     persistent_resources: HashSet<ResourceId>,
+    resource_allocator: RefCell<DefaultResourceAllocator>,
 
     hasher: DefaultHasher,
     cached_graph_hash: u64,
@@ -471,6 +473,7 @@ impl RenderGraph {
             passes: vec![],
             allocations: HashMap::default(),
             persistent_resources: HashSet::default(),
+            resource_allocator: RefCell::new(DefaultResourceAllocator::new()),
 
             hasher: DefaultHasher::default(),
             cached_graph_hash: 0,
@@ -543,15 +546,16 @@ impl RenderGraph {
 
     pub fn run(
         &self,
-        runner: &mut dyn RenderGraphRunner,
+        gpu: &Gpu,
         callbacks: &Callbacks,
-        resource_allocator: &mut DefaultResourceAllocator,
         external_resources: &ExternalResources,
     ) -> anyhow::Result<()> {
+        let mut runner = GpuRunner::new();
+
         runner.run_graph(
             &self.cached_graph,
             callbacks,
-            resource_allocator,
+            &mut self.resource_allocator.borrow_mut(),
             external_resources,
         )
     }

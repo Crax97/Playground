@@ -24,11 +24,12 @@ struct PerFrameData {
 }
 
 use crate::{
+    app_state,
     camera::Camera,
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     mesh::Mesh,
-    Callbacks, DefaultResourceAllocator, ExternalResources, GpuRunner, RenderGraph,
+    Callbacks, ExternalResources, RenderGraph,
 };
 
 use ash::vk::{
@@ -90,9 +91,7 @@ pub struct ForwardRenderingPipeline {
     camera_buffer: GpuBuffer,
     camera_buffer_descriptor_set: GpuDescriptorSet,
     material_context: ForwardRendererMaterialContext,
-    resource_allocator: DefaultResourceAllocator,
     render_graph: RenderGraph,
-    runner: GpuRunner,
 }
 impl ForwardRenderingPipeline {
     pub fn new(
@@ -134,10 +133,7 @@ impl ForwardRenderingPipeline {
             resource_map,
             camera_buffer_descriptor_set,
             material_context,
-            resource_allocator: DefaultResourceAllocator::new(),
             render_graph,
-
-            runner: GpuRunner::new(),
         })
     }
 }
@@ -543,12 +539,8 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 .get_material_render_pass(MaterialDomain::Surface),
         );
         external_resources.inject_external_image(&color_buffer, image, view);
-        self.render_graph.run(
-            &mut self.runner,
-            &callbacks,
-            &mut self.resource_allocator,
-            &external_resources,
-        )?;
+        self.render_graph
+            .run(&app_state().gpu, &callbacks, &external_resources)?;
 
         Ok(())
     }
