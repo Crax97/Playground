@@ -13,14 +13,17 @@ use std::{
 
 use ash::vk::{
     self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor,
-    BlendOp, ClearDepthStencilValue, ClearValue, ColorComponentFlags, ComponentMapping,
-    DependencyFlags, Extent2D, ImageAspectFlags, ImageLayout, ImageSubresourceRange,
-    ImageUsageFlags, ImageViewType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D,
-    SampleCountFlags, SubpassDependency, SubpassDescriptionFlags,
+    BlendOp, BorderColor, ClearDepthStencilValue, ClearValue, ColorComponentFlags, CompareOp,
+    ComponentMapping, DependencyFlags, Extent2D, Filter, ImageAspectFlags, ImageLayout,
+    ImageSubresourceRange, ImageUsageFlags, ImageViewType, Offset2D, PipelineBindPoint,
+    PipelineStageFlags, Rect2D, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags,
+    SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency,
+    SubpassDescriptionFlags,
 };
 use gpu::{
-    BeginRenderPassInfo, BlendState, CommandBuffer, FramebufferCreateInfo, Gpu, GpuFramebuffer,
-    GpuImage, GpuImageView, ImageCreateInfo, ImageFormat, ImageMemoryBarrier, ImageViewCreateInfo,
+    BeginRenderPassInfo, BlendState, CommandBuffer, DescriptorInfo, DescriptorSetInfo,
+    FramebufferCreateInfo, Gpu, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView,
+    GpuSampler, ImageCreateInfo, ImageFormat, ImageMemoryBarrier, ImageViewCreateInfo,
     MemoryDomain, PipelineBarrierInfo, RenderPass, RenderPassAttachment, RenderPassCommand,
     RenderPassDescription, SubpassDescription, Swapchain, ToVk, TransitionInfo,
 };
@@ -138,6 +141,7 @@ impl<
         R: CreateFrom<D, A>,
     {
         let resource = R::create(gpu, desc, additional)?;
+        trace!("Created new resource: {:?}", id);
         self.resources
             .insert(id.clone(), LifetimeAllocation::new(resource, desc.clone()));
         Ok(())
@@ -230,6 +234,36 @@ impl CreateFrom<ImageDescription, ()> for GpuImage {
     }
 }
 
+impl CreateFrom<ImageDescription, ()> for GpuSampler {
+    fn create(gpu: &Gpu, desc: &ImageDescription, _: &()) -> anyhow::Result<Self> {
+        Ok(gpu
+            .create_sampler(&SamplerCreateInfo {
+                s_type: StructureType::SAMPLER_CREATE_INFO,
+                p_next: std::ptr::null(),
+                flags: SamplerCreateFlags::empty(),
+                mag_filter: Filter::LINEAR,
+                min_filter: Filter::LINEAR,
+                mipmap_mode: SamplerMipmapMode::LINEAR,
+                address_mode_u: SamplerAddressMode::REPEAT,
+                address_mode_v: SamplerAddressMode::REPEAT,
+                address_mode_w: SamplerAddressMode::REPEAT,
+                mip_lod_bias: 0.0,
+                anisotropy_enable: vk::TRUE,
+                max_anisotropy: gpu
+                    .physical_device_properties()
+                    .limits
+                    .max_sampler_anisotropy,
+                compare_enable: vk::FALSE,
+                compare_op: CompareOp::ALWAYS,
+                min_lod: 0.0,
+                max_lod: 0.0,
+                border_color: BorderColor::default(),
+                unnormalized_coordinates: vk::FALSE,
+            })
+            .expect("Failed to create image resource"))
+    }
+}
+
 impl CreateFrom<ImageDescription, GpuImage> for GpuImageView {
     fn create(gpu: &Gpu, desc: &ImageDescription, additional: &GpuImage) -> anyhow::Result<Self> {
         Ok(gpu
@@ -259,6 +293,10 @@ struct RenderGraphFramebufferCreateInfo<'a> {
     extents: Extent2D,
 }
 
+struct DescriptorSetCreateInfo<'a> {
+    inputs: &'a [DescriptorInfo<'a>],
+}
+
 impl<'a> CreateFrom<RenderPassInfo, RenderGraphFramebufferCreateInfo<'a>> for GpuFramebuffer {
     fn create(
         gpu: &Gpu,
@@ -276,10 +314,25 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraphFramebufferCreateInfo<'a>> for Gp
     }
 }
 
+impl<'a> CreateFrom<RenderPassInfo, DescriptorSetCreateInfo<'a>> for GpuDescriptorSet {
+    fn create(
+        gpu: &Gpu,
+        info: &RenderPassInfo,
+        additional: &DescriptorSetCreateInfo,
+    ) -> anyhow::Result<Self> {
+        Ok(gpu
+            .create_descriptor_set(&DescriptorSetInfo {
+                descriptors: additional.inputs,
+            })
+            .expect("Failed to create framebuffer"))
+    }
+}
 pub struct DefaultResourceAllocator {
     images: ResourceAllocator<GpuImage, ImageDescription, ResourceId>,
     image_views: ResourceAllocator<GpuImageView, ImageDescription, ResourceId>,
+    samplers: ResourceAllocator<GpuSampler, ImageDescription, ResourceId>,
     framebuffers: ResourceAllocator<GpuFramebuffer, RenderPassInfo, FramebufferHandle>,
+    descriptors: ResourceAllocator<GpuDescriptorSet, RenderPassInfo, u64>,
 }
 
 impl DefaultResourceAllocator {
@@ -287,6 +340,8 @@ impl DefaultResourceAllocator {
         Self {
             images: ResourceAllocator::new(2),
             image_views: ResourceAllocator::new(2),
+            samplers: ResourceAllocator::new(2),
+            descriptors: ResourceAllocator::new(2),
             framebuffers: ResourceAllocator::new(5),
         }
     }
@@ -496,6 +551,7 @@ pub struct RenderPassContext<'p, 'g> {
     pub render_pass: &'p RenderPass,
     pub render_pass_command: RenderPassCommand<'p, 'g>,
     pub framebuffer: &'p GpuFramebuffer,
+    pub read_descriptor_set: Option<&'p GpuDescriptorSet>,
 }
 pub struct EndContext<'p, 'g> {
     pub command_buffer: &'p mut CommandBuffer<'g>,
@@ -1115,10 +1171,27 @@ impl RenderGraphRunner for GpuRunner {
                         graph,
                         resource_allocator,
                     )?;
+                    ensure_graph_allocated_samplers_exists(
+                        ctx,
+                        info,
+                        external_resources,
+                        graph,
+                        resource_allocator,
+                    )?;
                     let views = resolve_image_views_unchecked(
                         info,
                         external_resources,
-                        &mut resource_allocator.image_views,
+                        &resource_allocator.image_views,
+                    );
+
+                    let read_descriptor_set = resolve_input_descriptor_set(
+                        ctx,
+                        info,
+                        graph,
+                        external_resources,
+                        &resource_allocator.image_views,
+                        &resource_allocator.samplers,
+                        &mut resource_allocator.descriptors,
                     );
 
                     let framebuffer_hash = compute_framebuffer_hash(info, &views);
@@ -1177,6 +1250,7 @@ impl RenderGraphRunner for GpuRunner {
                         render_pass: &pass,
                         framebuffer,
                         render_pass_command,
+                        read_descriptor_set,
                     };
 
                     if let Some(cb) = cb {
@@ -1211,16 +1285,20 @@ fn compute_framebuffer_hash(
     info: &RenderPassInfo,
     views: &Vec<&GpuImageView>,
 ) -> FramebufferHandle {
+    let framebuffer_hash = hash_image_views(views);
+    FramebufferHandle {
+        render_pass_label: info.label,
+        hash: framebuffer_hash,
+    }
+}
+
+fn hash_image_views(views: &Vec<&GpuImageView>) -> u64 {
     let mut hasher = DefaultHasher::new();
     for view in views {
         view.hash(&mut hasher);
     }
 
-    let framebuffer_hash = hasher.finish();
-    FramebufferHandle {
-        render_pass_label: info.label,
-        hash: framebuffer_hash,
-    }
+    hasher.finish()
 }
 
 fn ensure_graph_allocated_image_views_exist(
@@ -1230,7 +1308,7 @@ fn ensure_graph_allocated_image_views_exist(
     graph: &CompiledRenderGraph,
     resource_allocator: &mut DefaultResourceAllocator,
 ) -> Result<(), anyhow::Error> {
-    Ok(for writes in &info.writes {
+    for writes in &info.writes {
         let _ = if !external_resources.external_image_views.contains_key(writes) {
             let desc = match &graph.resources_used[writes].ty {
                 AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
@@ -1240,13 +1318,43 @@ fn ensure_graph_allocated_image_views_exist(
                 .image_views
                 .get(ctx, &desc, writes, image)?;
         };
-    })
+    }
+    for writes in &info.reads {
+        let _ = if !external_resources.external_image_views.contains_key(writes) {
+            let desc = match &graph.resources_used[writes].ty {
+                AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
+            };
+            let image = resource_allocator.images.get(ctx, &desc, writes, &())?;
+            resource_allocator
+                .image_views
+                .get(ctx, &desc, writes, image)?;
+        };
+    }
+    Ok(())
+}
+
+fn ensure_graph_allocated_samplers_exists(
+    ctx: &GraphRunContext,
+    info: &RenderPassInfo,
+    external_resources: &ExternalResources,
+    graph: &CompiledRenderGraph,
+    resource_allocator: &mut DefaultResourceAllocator,
+) -> Result<(), anyhow::Error> {
+    for writes in &info.reads {
+        let _ = if !external_resources.external_image_views.contains_key(writes) {
+            let desc = match &graph.resources_used[writes].ty {
+                AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
+            };
+            resource_allocator.samplers.get(ctx, &desc, writes, &())?;
+        };
+    }
+    Ok(())
 }
 
 fn resolve_image_views_unchecked<'e, 'a>(
     info: &RenderPassInfo,
     external_resources: &ExternalResources<'e>,
-    image_views_allocator: &'a mut ResourceAllocator<GpuImageView, ImageDescription, ResourceId>,
+    image_views_allocator: &'a ResourceAllocator<GpuImageView, ImageDescription, ResourceId>,
 ) -> Vec<&'e GpuImageView>
 where
     'a: 'e,
@@ -1261,6 +1369,52 @@ where
         views.push(view);
     }
     views
+}
+
+fn resolve_input_descriptor_set<'e, 'a, 'd>(
+    ctx: &GraphRunContext,
+    info: &RenderPassInfo,
+    graph: &CompiledRenderGraph,
+    external_resources: &ExternalResources<'e>,
+    image_view_allocator: &'a ResourceAllocator<GpuImageView, ImageDescription, ResourceId>,
+    sampler_allocator: &'a ResourceAllocator<GpuSampler, ImageDescription, ResourceId>,
+    descriptor_view_allocator: &'a mut ResourceAllocator<GpuDescriptorSet, RenderPassInfo, u64>,
+) -> Option<&'a GpuDescriptorSet> {
+    let mut hasher = DefaultHasher::new();
+    if info.reads.is_empty() {
+        return None;
+    }
+    let mut descriptors = vec![];
+    for (idx, read) in info.reads.iter().enumerate() {
+        let view = if external_resources.external_image_views.contains_key(read) {
+            external_resources.external_image_views[read]
+        } else {
+            image_view_allocator.get_unchecked(read)
+        };
+        view.hash(&mut hasher);
+        descriptors.push(DescriptorInfo {
+            binding: idx as _,
+            element_type: gpu::DescriptorType::CombinedImageSampler(gpu::SamplerState {
+                sampler: sampler_allocator.get_unchecked(read),
+                image_view: view,
+                image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            }),
+            binding_stage: gpu::ShaderStage::Fragment,
+        })
+    }
+
+    let hash = hasher.finish();
+    let res = descriptor_view_allocator
+        .get(
+            ctx,
+            info,
+            &hash,
+            &DescriptorSetCreateInfo {
+                inputs: &descriptors,
+            },
+        )
+        .unwrap();
+    Some(res)
 }
 
 #[cfg(test)]
