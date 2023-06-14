@@ -47,7 +47,7 @@ pub struct ScenePrimitive {
 }
 
 pub struct Scene {
-    primitives: Vec<ScenePrimitive>,
+    pub primitives: Vec<ScenePrimitive>,
 }
 
 impl Scene {
