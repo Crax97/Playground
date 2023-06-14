@@ -777,7 +777,7 @@ impl GpuRunner {
                     stage_mask: PipelineStageFlags::TOP_OF_PIPE,
                 });
                 let new_layout = TransitionInfo {
-                    layout: ImageLayout::READ_ONLY_OPTIMAL,
+                    layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                     access_mask: AccessFlags::SHADER_READ | access_flag,
                     stage_mask: PipelineStageFlags::ALL_GRAPHICS,
                 };
