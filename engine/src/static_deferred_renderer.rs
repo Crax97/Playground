@@ -32,15 +32,15 @@ use std::{collections::HashMap, mem::size_of, rc::Rc};
 use ash::{
     prelude::VkResult,
     vk::{
-        self, BufferUsageFlags, CompareOp, IndexType, PipelineBindPoint, PipelineStageFlags,
+        self, BufferUsageFlags, CompareOp, PipelineBindPoint, PipelineStageFlags,
         PushConstantRange, ShaderStageFlags, StencilOpState,
     },
 };
 use gpu::{
     BindingElement, BufferCreateInfo, BufferRange, DepthStencilState, DescriptorInfo,
     DescriptorSetInfo, FragmentStageInfo, GlobalBinding, Gpu, GpuBuffer, GpuDescriptorSet,
-    MemoryDomain, Pipeline, PipelineDescription, Swapchain, VertexAttributeDescription,
-    VertexBindingDescription, VertexStageInfo,
+    ImageFormat, MemoryDomain, Pipeline, PipelineDescription, Swapchain, ToVk,
+    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
 use nalgebra::{Matrix4, Vector2, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -189,7 +189,7 @@ impl DeferredRenderingMaterialContext {
         let attachments = &[
             // Position
             RenderPassAttachment {
-                format: Format::R8G8B8A8_UNORM,
+                format: ImageFormat::RgbaFloat.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
                 load_op: AttachmentLoadOp::CLEAR,
                 store_op: AttachmentStoreOp::STORE,
@@ -210,7 +210,7 @@ impl DeferredRenderingMaterialContext {
             },
             // Normals
             RenderPassAttachment {
-                format: Format::R8G8B8A8_UNORM,
+                format: ImageFormat::RgbaFloat.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
                 load_op: AttachmentLoadOp::CLEAR,
                 store_op: AttachmentStoreOp::STORE,
@@ -378,7 +378,7 @@ impl DeferredRenderingMaterialContext {
         let color_attachments = &[
             // Position
             RenderPassAttachment {
-                format: Format::R8G8B8A8_UNORM,
+                format: ImageFormat::RgbaFloat.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
                 load_op: AttachmentLoadOp::CLEAR,
                 store_op: AttachmentStoreOp::STORE,
@@ -399,7 +399,7 @@ impl DeferredRenderingMaterialContext {
             },
             // Normals
             RenderPassAttachment {
-                format: Format::R8G8B8A8_UNORM,
+                format: ImageFormat::RgbaFloat.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
                 load_op: AttachmentLoadOp::CLEAR,
                 store_op: AttachmentStoreOp::STORE,
@@ -649,7 +649,14 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let framebuffer_rgba_desc = crate::ImageDescription {
             width: swapchain_extents.width,
             height: swapchain_extents.height,
-            format: swapchain_format.into(),
+            format: ImageFormat::Rgba8,
+            samples: 1,
+            present: true,
+        };
+        let framebuffer_vector_desc = crate::ImageDescription {
+            width: swapchain_extents.width,
+            height: swapchain_extents.height,
+            format: ImageFormat::RgbaFloat,
             samples: 1,
             present: true,
         };
@@ -674,10 +681,10 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let position_buffer = self
             .render_graph
-            .use_image("position-buffer", &framebuffer_rgba_desc)?;
+            .use_image("position-buffer", &framebuffer_vector_desc)?;
         let normal_buffer = self
             .render_graph
-            .use_image("normal_buffer", &framebuffer_rgba_desc)?;
+            .use_image("normal_buffer", &framebuffer_vector_desc)?;
         let diffuse_buffer = self
             .render_graph
             .use_image("diffuse_buffer", &framebuffer_rgba_desc)?;

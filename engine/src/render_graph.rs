@@ -217,7 +217,9 @@ impl CreateFrom<ImageDescription, ()> for GpuImage {
                     height: desc.height,
                     format: desc.format.to_vk(),
                     usage: match desc.format {
-                        ImageFormat::Rgba8 => ImageUsageFlags::COLOR_ATTACHMENT,
+                        ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                            ImageUsageFlags::COLOR_ATTACHMENT
+                        }
                         ImageFormat::Depth => ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
                     } | ImageUsageFlags::INPUT_ATTACHMENT
                         | ImageUsageFlags::SAMPLED,
@@ -238,7 +240,7 @@ impl CreateFrom<ImageDescription, GpuImage> for GpuImageView {
                 components: ComponentMapping::default(),
                 subresource_range: ImageSubresourceRange {
                     aspect_mask: match desc.format {
-                        ImageFormat::Rgba8 => ImageAspectFlags::COLOR,
+                        ImageFormat::Rgba8 | ImageFormat::RgbaFloat => ImageAspectFlags::COLOR,
                         ImageFormat::Depth => ImageAspectFlags::DEPTH,
                     },
                     base_mip_level: 0,
@@ -784,7 +786,9 @@ impl GpuRunner {
         match &resource_info.ty {
             AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
                 let access_flag = match desc.format {
-                    ImageFormat::Rgba8 => AccessFlags::COLOR_ATTACHMENT_READ,
+                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                        AccessFlags::COLOR_ATTACHMENT_READ
+                    }
                     ImageFormat::Depth => AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ,
                 };
 
@@ -800,7 +804,7 @@ impl GpuRunner {
                 };
 
                 let aspect_mask = match desc.format {
-                    ImageFormat::Rgba8 => ImageAspectFlags::COLOR,
+                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => ImageAspectFlags::COLOR,
                     ImageFormat::Depth => ImageAspectFlags::DEPTH,
                 };
 
@@ -843,7 +847,9 @@ impl GpuRunner {
         match &resource_info.ty {
             AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
                 let access_flag = match desc.format {
-                    ImageFormat::Rgba8 => AccessFlags::COLOR_ATTACHMENT_WRITE,
+                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                        AccessFlags::COLOR_ATTACHMENT_WRITE
+                    }
                     ImageFormat::Depth => AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
                 };
 
@@ -854,7 +860,7 @@ impl GpuRunner {
                 });
                 let new_layout = TransitionInfo {
                     layout: match desc.format {
-                        ImageFormat::Rgba8 => {
+                        ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
                             if desc.present {
                                 ImageLayout::PRESENT_SRC_KHR
                             } else {
@@ -868,7 +874,7 @@ impl GpuRunner {
                 };
 
                 let aspect_mask = match desc.format {
-                    ImageFormat::Rgba8 => ImageAspectFlags::COLOR,
+                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => ImageAspectFlags::COLOR,
                     ImageFormat::Depth => ImageAspectFlags::DEPTH,
                 };
 
@@ -926,7 +932,7 @@ impl GpuRunner {
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
                 final_layout: match image_desc.format {
-                    ImageFormat::Rgba8 => {
+                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
                         if image_desc.present {
                             ImageLayout::PRESENT_SRC_KHR
                         } else {
@@ -1138,7 +1144,7 @@ impl RenderGraphRunner for GpuRunner {
                             match &res_info.ty {
                                 AllocationType::Image(desc)
                                 | AllocationType::ExternalImage(desc) => match desc.format {
-                                    ImageFormat::Rgba8 => ClearValue {
+                                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => ClearValue {
                                         color: vk::ClearColorValue {
                                             float32: [0.0, 0.0, 0.0, 0.0],
                                         },

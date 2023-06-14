@@ -28,6 +28,7 @@ pub trait ToVk {
 #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ImageFormat {
     Rgba8,
+    RgbaFloat,
     Depth,
 }
 
@@ -36,6 +37,7 @@ impl ToVk for ImageFormat {
     fn to_vk(&self) -> Self::Inner {
         match self {
             ImageFormat::Rgba8 => vk::Format::R8G8B8A8_UNORM,
+            ImageFormat::RgbaFloat => vk::Format::R32G32B32A32_SFLOAT,
             ImageFormat::Depth => vk::Format::D16_UNORM,
         }
     }
@@ -46,6 +48,7 @@ impl From<&vk::Format> for ImageFormat {
         match *value {
             vk::Format::R8G8B8A8_UNORM => ImageFormat::Rgba8,
             vk::Format::D16_UNORM => ImageFormat::Depth,
+            vk::Format::R32G32B32A32_SFLOAT => ImageFormat::RgbaFloat,
             _ => panic!("ImageFormat::from(vk::Format): cannot convert {:?} to ImageFormat, most likely a bug: report it", value)
         }
     }
