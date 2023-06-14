@@ -424,8 +424,7 @@ impl std::fmt::Display for CompileError {
 impl Error for CompileError {}
 
 pub type GraphResult<T> = Result<T, CompileError>;
-
-#[derive(Default, Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RenderPassInfo {
     label: &'static str,
     writes: Vec<ResourceId>,
@@ -448,24 +447,39 @@ impl Hash for RenderPassInfo {
     }
 }
 
-impl RenderPassInfo {
-    pub fn write(&mut self, handle: ResourceId) {
-        assert!(!self.writes.contains(&handle));
-        self.writes.push(handle);
+pub struct RenderPassBuilder<'g> {
+    pass: RenderPassInfo,
+
+    graph: &'g mut RenderGraph,
+}
+
+impl<'g> RenderPassBuilder<'g> {
+    pub fn write(mut self, handle: ResourceId) -> Self {
+        assert!(!self.pass.writes.contains(&handle));
+        self.pass.writes.push(handle);
+        self
     }
-    pub fn writes(&mut self, handles: &[ResourceId]) {
-        self.writes.append(&mut handles.to_owned());
+    pub fn writes(mut self, handles: &[ResourceId]) -> Self {
+        self.pass.writes.append(&mut handles.to_owned());
+        self
     }
-    pub fn read(&mut self, handle: ResourceId) {
-        assert!(!self.reads.contains(&handle));
-        self.reads.push(handle);
+    pub fn read(mut self, handle: ResourceId) -> Self {
+        assert!(!self.pass.reads.contains(&handle));
+        self.pass.reads.push(handle);
+        self
     }
-    pub fn reads(&mut self, handles: &[ResourceId]) {
-        self.reads.append(&mut handles.to_owned());
+    pub fn reads(mut self, handles: &[ResourceId]) -> Self {
+        self.pass.reads.append(&mut handles.to_owned());
+        self
     }
 
-    pub fn mark_external(&mut self) {
-        self.is_external = true;
+    pub fn mark_external(mut self) -> Self {
+        self.pass.is_external = true;
+        self
+    }
+
+    pub fn commit(self) -> RenderPassHandle {
+        self.graph.commit_render_pass(self.pass)
     }
 }
 
@@ -549,19 +563,22 @@ impl RenderGraph {
     }
 
     pub fn begin_render_pass(
-        &self,
+        &mut self,
         label: &'static str,
         extents: Extent2D,
-    ) -> GraphResult<RenderPassInfo> {
+    ) -> GraphResult<RenderPassBuilder> {
         if self.render_pass_is_defined_already(&label) {
             return Err(CompileError::RenderPassAlreadyDefined(label.to_owned()));
         }
-        Ok(RenderPassInfo {
-            label,
-            writes: Default::default(),
-            reads: Default::default(),
-            extents,
-            is_external: false,
+        Ok(RenderPassBuilder {
+            pass: RenderPassInfo {
+                label,
+                writes: Default::default(),
+                reads: Default::default(),
+                extents,
+                is_external: false,
+            },
+            graph: self,
         })
     }
 
@@ -1268,14 +1285,14 @@ mod test {
         let tangent_component = alloc("tangent", &mut render_graph);
         let normal_component = alloc("normal", &mut render_graph);
 
-        let mut gbuffer = render_graph
+        let _ = render_graph
             .begin_render_pass("gbuffer", Extent2D::default())
-            .unwrap();
-        gbuffer.write(color_component);
-        gbuffer.write(position_component);
-        gbuffer.write(tangent_component);
-        gbuffer.write(normal_component);
-        let _ = render_graph.commit_render_pass(gbuffer);
+            .unwrap()
+            .write(color_component)
+            .write(position_component)
+            .write(tangent_component)
+            .write(normal_component)
+            .commit();
 
         render_graph.compile().unwrap();
 
@@ -1309,7 +1326,7 @@ mod test {
         let p1 = render_graph
             .begin_render_pass("pass", Extent2D::default())
             .unwrap();
-        render_graph.commit_render_pass(p1);
+        let _ = p1.commit();
         let p2 = render_graph.begin_render_pass("pass", Extent2D::default());
         assert!(p2.is_err_and(|e| e == CompileError::RenderPassAlreadyDefined("pass".to_owned())));
     }
@@ -1324,24 +1341,24 @@ mod test {
         let normal_component = alloc("normal", &mut render_graph);
         let output_image = alloc("output", &mut render_graph);
 
-        let mut gbuffer = render_graph
+        let _ = render_graph
             .begin_render_pass("gbuffer", Extent2D::default())
-            .unwrap();
-        gbuffer.write(color_component);
-        gbuffer.write(position_component);
-        gbuffer.write(tangent_component);
-        gbuffer.write(normal_component);
-        let _ = render_graph.commit_render_pass(gbuffer);
+            .unwrap()
+            .write(color_component)
+            .write(position_component)
+            .write(tangent_component)
+            .write(normal_component)
+            .commit();
 
-        let mut compose_gbuffer = render_graph
+        let _ = render_graph
             .begin_render_pass("compose_gbuffer", Extent2D::default())
-            .unwrap();
-        compose_gbuffer.read(color_component);
-        compose_gbuffer.read(position_component);
-        compose_gbuffer.read(tangent_component);
-        compose_gbuffer.read(normal_component);
-        compose_gbuffer.write(output_image);
-        let _ = render_graph.commit_render_pass(compose_gbuffer);
+            .unwrap()
+            .read(color_component)
+            .read(position_component)
+            .read(tangent_component)
+            .read(normal_component)
+            .write(output_image)
+            .commit();
 
         // We need the color component: this will let the 'gbuffer' render pass live
         render_graph.persist_resource(&output_image);
@@ -1369,35 +1386,34 @@ mod test {
         let output_image = alloc("output", &mut render_graph);
         let unused = alloc("unused", &mut render_graph);
 
-        let mut gbuffer = render_graph
+        let _ = render_graph
             .begin_render_pass("gbuffer", Extent2D::default())
-            .unwrap();
-        gbuffer.write(color_component);
-        gbuffer.write(position_component);
-        gbuffer.write(tangent_component);
-        gbuffer.write(normal_component);
-        let _ = render_graph.commit_render_pass(gbuffer);
+            .unwrap()
+            .write(color_component)
+            .write(position_component)
+            .write(tangent_component)
+            .write(normal_component)
+            .commit();
 
-        let mut compose_gbuffer = render_graph
+        let _ = render_graph
             .begin_render_pass("compose_gbuffer", Extent2D::default())
-            .unwrap();
-        compose_gbuffer.read(color_component);
-        compose_gbuffer.read(position_component);
-        compose_gbuffer.read(tangent_component);
-        compose_gbuffer.read(normal_component);
-        compose_gbuffer.write(output_image);
-        let _ = render_graph.commit_render_pass(compose_gbuffer);
-
+            .unwrap()
+            .read(color_component)
+            .read(position_component)
+            .read(tangent_component)
+            .read(normal_component)
+            .write(output_image)
+            .commit();
         // adding an empty pass that outputs to an unused buffer
-        let mut unused_pass = render_graph
+        let _ = render_graph
             .begin_render_pass("unused", Extent2D::default())
-            .unwrap();
-        unused_pass.read(color_component);
-        unused_pass.read(position_component);
-        unused_pass.read(tangent_component);
-        unused_pass.read(normal_component);
-        unused_pass.write(unused);
-        let _ = render_graph.commit_render_pass(unused_pass);
+            .unwrap()
+            .read(color_component)
+            .read(position_component)
+            .read(tangent_component)
+            .read(normal_component)
+            .write(unused)
+            .commit();
 
         render_graph.persist_resource(&output_image);
 
@@ -1428,25 +1444,25 @@ mod test {
             let r2 = alloc("r2", &mut render_graph);
             let r3 = alloc("r3", &mut render_graph);
 
-            let mut p1 = render_graph
+            let _ = render_graph
                 .begin_render_pass("p1", Extent2D::default())
-                .unwrap();
-            p1.writes(&[r1, r2]);
-            render_graph.commit_render_pass(p1);
+                .unwrap()
+                .writes(&[r1, r2])
+                .commit();
 
-            let mut p2 = render_graph
+            let _ = render_graph
                 .begin_render_pass("p2", Extent2D::default())
-                .unwrap();
-            p2.reads(&[r1, r2]);
-            p2.writes(&[r3]);
-            render_graph.commit_render_pass(p2);
+                .unwrap()
+                .reads(&[r1, r2])
+                .writes(&[r3])
+                .commit();
 
-            let mut p3 = render_graph
+            let _ = render_graph
                 .begin_render_pass("p3", Extent2D::default())
-                .unwrap();
-            p3.reads(&[r3]);
-            p3.writes(&[r1, r2]);
-            render_graph.commit_render_pass(p3);
+                .unwrap()
+                .reads(&[r3])
+                .writes(&[r1, r2])
+                .commit();
 
             render_graph.persist_resource(&r3);
 
@@ -1460,18 +1476,18 @@ mod test {
             let r1 = alloc("r1", &mut render_graph);
             let r2 = alloc("r2", &mut render_graph);
 
-            let mut p1 = render_graph
+            let _ = render_graph
                 .begin_render_pass("p1", Extent2D::default())
-                .unwrap();
-            p1.writes(&[r1, r2]);
-            render_graph.commit_render_pass(p1);
+                .unwrap()
+                .writes(&[r1, r2])
+                .commit();
 
-            let mut p2 = render_graph
+            let _ = render_graph
                 .begin_render_pass("p2", Extent2D::default())
-                .unwrap();
-            p2.reads(&[r1, r2]);
-            p2.writes(&[r1]);
-            render_graph.commit_render_pass(p2);
+                .unwrap()
+                .reads(&[r1, r2])
+                .writes(&[r1])
+                .commit();
 
             render_graph.persist_resource(&r1);
 
@@ -1489,56 +1505,57 @@ mod test {
         let r2 = alloc("r2", &mut render_graph);
         let r3 = alloc("r3", &mut render_graph);
         let r4 = alloc("r4", &mut render_graph);
-        let rb = alloc("rb", &mut render_graph);
-
-        let mut p1 = render_graph
-            .begin_render_pass("p1", Extent2D::default())
-            .unwrap();
-        p1.writes(&[r1, r2, r3, r4]);
-        render_graph.commit_render_pass(p1);
-
-        let mut p2 = render_graph
-            .begin_render_pass("p2", Extent2D::default())
-            .unwrap();
         let r5 = alloc("r5", &mut render_graph);
-        p2.reads(&[r1, r3]);
-        p2.writes(&[r5]);
-        render_graph.commit_render_pass(p2);
-
-        let mut p3 = render_graph
-            .begin_render_pass("p3", Extent2D::default())
-            .unwrap();
         let r6 = alloc("r6", &mut render_graph);
         let r7 = alloc("r7", &mut render_graph);
         let r8 = alloc("r8", &mut render_graph);
-        p3.reads(&[r2, r4]);
-        p3.writes(&[r6, r7, r8]);
-        render_graph.commit_render_pass(p3);
-
-        // pruned
-        let mut u1 = render_graph
-            .begin_render_pass("u1", Extent2D::default())
-            .unwrap();
-        let ru1 = alloc("ru1", &mut render_graph);
-        let ru2 = alloc("ru2", &mut render_graph);
-        u1.reads(&[r7, r8]);
-        u1.writes(&[ru1, ru2]);
-
-        let mut p4 = render_graph
-            .begin_render_pass("p4", Extent2D::default())
-            .unwrap();
         let r9 = alloc("r9", &mut render_graph);
         let r10 = alloc("r10", &mut render_graph);
-        p4.reads(&[r7, r8]);
-        p4.writes(&[r9, r10]);
-        render_graph.commit_render_pass(p4);
+        let rb = alloc("rb", &mut render_graph);
 
-        let mut pb = render_graph
+        let ru1 = alloc("ru1", &mut render_graph);
+        let ru2 = alloc("ru2", &mut render_graph);
+
+        let _ = render_graph
+            .begin_render_pass("p1", Extent2D::default())
+            .unwrap()
+            .writes(&[r1, r2, r3, r4])
+            .commit();
+        let _ = render_graph
+            .begin_render_pass("p2", Extent2D::default())
+            .unwrap()
+            .reads(&[r1, r3])
+            .writes(&[r5])
+            .commit();
+
+        let _p3 = render_graph
+            .begin_render_pass("p3", Extent2D::default())
+            .unwrap()
+            .reads(&[r2, r4])
+            .writes(&[r6, r7, r8])
+            .commit();
+
+        // pruned
+        let _ = render_graph
+            .begin_render_pass("u1", Extent2D::default())
+            .unwrap()
+            .reads(&[r7, r8])
+            .writes(&[ru1, ru2])
+            .commit();
+
+        let _ = render_graph
+            .begin_render_pass("p4", Extent2D::default())
+            .unwrap()
+            .reads(&[r7, r8])
+            .writes(&[r9, r10])
+            .commit();
+
+        let _ = render_graph
             .begin_render_pass("pb", Extent2D::default())
-            .unwrap();
-        pb.reads(&[r9, r10]);
-        pb.writes(&[rb]);
-        render_graph.commit_render_pass(pb);
+            .unwrap()
+            .reads(&[r9, r10])
+            .writes(&[rb])
+            .commit();
 
         render_graph.persist_resource(&rb);
 

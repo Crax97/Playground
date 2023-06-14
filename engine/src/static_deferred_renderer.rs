@@ -692,37 +692,37 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let mut gbuffer_pass = self
             .render_graph
-            .begin_render_pass("GBuffer", swapchain_extents)?;
-        gbuffer_pass.writes(&[
-            position_buffer,
-            normal_buffer,
-            diffuse_buffer,
-            emissive_buffer,
-            pbr_buffer,
-        ]);
-        gbuffer_pass.mark_external();
-        let gbuffer_pass = self.render_graph.commit_render_pass(gbuffer_pass);
+            .begin_render_pass("GBuffer", swapchain_extents)?
+            .writes(&[
+                position_buffer,
+                normal_buffer,
+                diffuse_buffer,
+                emissive_buffer,
+                pbr_buffer,
+            ])
+            .mark_external()
+            .commit();
 
-        let mut combine_pass = self
+        let combine_pass = self
             .render_graph
-            .begin_render_pass("GBufferCombine", swapchain_extents)?;
-        combine_pass.writes(&[color_buffer]);
-        combine_pass.reads(&[
-            position_buffer,
-            normal_buffer,
-            diffuse_buffer,
-            emissive_buffer,
-            pbr_buffer,
-        ]);
-        let combine_pass = self.render_graph.commit_render_pass(combine_pass);
+            .begin_render_pass("GBufferCombine", swapchain_extents)?
+            .writes(&[color_buffer])
+            .reads(&[
+                position_buffer,
+                normal_buffer,
+                diffuse_buffer,
+                emissive_buffer,
+                pbr_buffer,
+            ])
+            .commit();
 
         let mut present_render_pass = self
             .render_graph
-            .begin_render_pass("Present", swapchain_extents)?;
-        present_render_pass.writes(&[swapchain_buffer]);
-        present_render_pass.reads(&[color_buffer]);
-        present_render_pass.mark_external();
-        let present_render_pass = self.render_graph.commit_render_pass(present_render_pass);
+            .begin_render_pass("Present", swapchain_extents)?
+            .writes(&[swapchain_buffer])
+            .reads(&[color_buffer])
+            .mark_external()
+            .commit();
 
         self.render_graph.compile()?;
 

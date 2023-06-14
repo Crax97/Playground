@@ -461,12 +461,12 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         )?;
         self.render_graph.persist_resource(&color_buffer);
 
-        let mut forward_pass = self
+        let forward_pass_handle = self
             .render_graph
-            .begin_render_pass("ForwardPass", swapchain_extents)?;
-        forward_pass.writes(&[color_buffer, depth_buffer]);
-        forward_pass.mark_external();
-        let forward_pass = self.render_graph.commit_render_pass(forward_pass);
+            .begin_render_pass("ForwardPass", swapchain_extents)?
+            .writes(&[color_buffer, depth_buffer])
+            .mark_external()
+            .commit();
 
         self.render_graph.compile()?;
 
@@ -476,7 +476,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
             crate::app_state().time().frames_since_start(),
         );
 
-        context.register_callback(&forward_pass, |_: &Gpu, ctx| {
+        context.register_callback(&forward_pass_handle, |_: &Gpu, ctx| {
             for (pipeline, primitives) in pipeline_hashmap.iter() {
                 {
                     let pipeline = self.resource_map.get(pipeline);
@@ -528,7 +528,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         });
 
         context.inject_external_renderpass(
-            &forward_pass,
+            &forward_pass_handle,
             self.material_context
                 .get_material_render_pass(MaterialDomain::Surface),
         );
