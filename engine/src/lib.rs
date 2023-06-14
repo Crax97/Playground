@@ -8,6 +8,7 @@ mod scene;
 mod static_deferred_renderer;
 mod texture;
 mod time;
+mod utils;
 
 use std::thread::ThreadId;
 

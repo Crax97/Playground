@@ -405,19 +405,6 @@ impl MaterialContext for ForwardRendererMaterialContext {
         self.render_passes.get(&domain).unwrap()
     }
 }
-#[rustfmt::skip]
-mod constants {
-    use nalgebra::Matrix4;
-    pub(super) const Z_INVERT_MATRIX: Matrix4<f32> = 
-
-        Matrix4::<f32>::new(
-        -1.0, 0.0, 0.0, 0.0, 
-        0.0, -1.0, 0.0, 0.0, 
-        0.0, 0.0, 1.0, 0.0, 
-        0.0, 0.0, 0.0, 1.0,
-    );
-}
-
 impl RenderingPipeline for ForwardRenderingPipeline {
     fn render(
         &mut self,
@@ -430,7 +417,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
             .write_buffer_data(
                 &self.camera_buffer,
                 &[PerFrameData {
-                    view: constants::Z_INVERT_MATRIX * pov.view(),
+                    view: crate::utils::constants::Z_INVERT_MATRIX * pov.view(),
                     projection: pov.projection(),
                 }],
             )
