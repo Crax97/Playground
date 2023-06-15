@@ -43,9 +43,11 @@ fn main() -> anyhow::Result<()> {
     let cpu_image = cpu_image.into_rgba8();
 
     let vertex_module =
-        utils::read_file_to_vk_module(&engine::app_state().gpu, "./shaders/vertex.spirv")?;
-    let fragment_module =
-        utils::read_file_to_vk_module(&engine::app_state().gpu, "./shaders/fragment.spirv")?;
+        utils::read_file_to_vk_module(&engine::app_state().gpu, "./shaders/vertex_deferred.spirv")?;
+    let fragment_module = utils::read_file_to_vk_module(
+        &engine::app_state().gpu,
+        "./shaders/fragment_deferred.spirv",
+    )?;
 
     let mesh_data = MeshCreateInfo {
         label: Some("Quad mesh"),

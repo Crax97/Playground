@@ -1063,7 +1063,8 @@ impl GpuRunner {
         let pass = RenderPass::new(&ctx.gpu, &description)?;
         self.render_passes.insert(id, pass);
 
-        trace!("Created new render pass {}", pass_info.label);
+        /// TODO: enable me
+        //trace!("Created new render pass {}", pass_info.label);
         Ok(&self.render_passes[&id])
     }
 
