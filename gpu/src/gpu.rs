@@ -13,16 +13,17 @@ use ash::{
         make_api_version, AccessFlags, ApplicationInfo, BufferCreateFlags, BufferUsageFlags,
         CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
         CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo,
-        CommandPoolResetFlags, DebugUtilsObjectNameInfoEXT, DependencyFlags, DescriptorBufferInfo,
-        DescriptorImageInfo, DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags,
-        DeviceQueueCreateInfo, Extent2D, Extent3D, Fence, FramebufferCreateFlags, Handle,
-        ImageAspectFlags, ImageCreateFlags, ImageLayout, ImageSubresourceLayers,
-        ImageSubresourceRange, ImageTiling, ImageType, ImageViewCreateFlags, ImageViewType,
-        InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D,
-        PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType,
-        PipelineStageFlags, Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo,
-        ShaderModuleCreateFlags, SharingMode, StructureType, SubmitInfo, WriteDescriptorSet,
-        API_VERSION_1_3,
+        CommandPoolResetFlags, DebugUtilsMessageSeverityFlagsEXT, DebugUtilsMessageTypeFlagsEXT,
+        DebugUtilsMessengerCreateFlagsEXT, DebugUtilsMessengerCreateInfoEXT,
+        DebugUtilsObjectNameInfoEXT, DependencyFlags, DescriptorBufferInfo, DescriptorImageInfo,
+        DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo,
+        Extent2D, Extent3D, Fence, FramebufferCreateFlags, Handle, ImageAspectFlags,
+        ImageCreateFlags, ImageLayout, ImageSubresourceLayers, ImageSubresourceRange, ImageTiling,
+        ImageType, ImageViewCreateFlags, ImageViewType, InstanceCreateFlags, InstanceCreateInfo,
+        MemoryHeap, MemoryHeapFlags, Offset3D, PhysicalDevice, PhysicalDeviceFeatures,
+        PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags, Queue, QueueFlags,
+        SampleCountFlags, SamplerCreateInfo, ShaderModuleCreateFlags, SharingMode, StructureType,
+        SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
     },
     *,
 };
@@ -33,8 +34,8 @@ use thiserror::Error;
 use winit::window::Window;
 
 use crate::{
-    GpuFramebuffer, GpuImageView, GpuShaderModule, ImageMemoryBarrier, PipelineBarrierInfo,
-    QueueType, RenderPass,
+    get_allocation_callbacks, GpuFramebuffer, GpuImageView, GpuShaderModule, ImageMemoryBarrier,
+    PipelineBarrierInfo, QueueType, RenderPass,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -75,6 +76,7 @@ pub struct GpuState {
     pub gpu_memory_allocator: Arc<RefCell<dyn GpuAllocator>>,
     pub descriptor_set_allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
     pub debug_utilities: Option<DebugUtils>,
+    messenger: Option<vk::DebugUtilsMessengerEXT>,
 }
 
 pub struct GpuThreadLocalState {
@@ -193,6 +195,26 @@ pub struct SelectedPhysicalDevice {
     pub device_features: PhysicalDeviceFeatures,
 }
 
+#[cfg(debug_assertions)]
+unsafe extern "system" fn on_message(
+    message_severity: DebugUtilsMessageSeverityFlagsEXT,
+    message_types: DebugUtilsMessageTypeFlagsEXT,
+    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+    p_user_data: *mut std::ffi::c_void,
+) -> u32 {
+    let cb_data: vk::DebugUtilsMessengerCallbackDataEXT = *p_callback_data;
+    let message = CStr::from_ptr(cb_data.p_message);
+    if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::ERROR) {
+        log::error!("VULKAN ERROR: {:?}", message);
+        std::process::abort();
+    } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::INFO) {
+        log::info!("Vulkan - : {:?}", message);
+    } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::WARNING) {
+        log::warn!("Vulkan - : {:?}", message);
+    }
+
+    0
+}
 impl QueueFamilies {
     pub fn is_valid(&self) -> bool {
         self.graphics_family.count > 0
@@ -267,7 +289,32 @@ impl Gpu {
         let descriptor_set_allocator = PooledDescriptorSetAllocator::new(logical_device.clone())?;
 
         let debug_utilities = if configuration.enable_debug_utilities {
-            Some(DebugUtils::new(&entry, &instance))
+            let utilities = DebugUtils::new(&entry, &instance);
+
+            Some(utilities)
+        } else {
+            None
+        };
+
+        #[cfg(debug_assertions)]
+        let messenger = if let Some(utils) = &debug_utilities {
+            Some(unsafe {
+                utils.create_debug_utils_messenger(
+                    &DebugUtilsMessengerCreateInfoEXT {
+                        s_type: StructureType::DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+                        p_next: std::ptr::null(),
+                        flags: DebugUtilsMessengerCreateFlagsEXT::empty(),
+                        message_severity: DebugUtilsMessageSeverityFlagsEXT::ERROR
+                            | DebugUtilsMessageSeverityFlagsEXT::INFO
+                            | DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+                            | DebugUtilsMessageSeverityFlagsEXT::WARNING,
+                        message_type: DebugUtilsMessageTypeFlagsEXT::from_raw(0xFFFFFFF),
+                        pfn_user_callback: Some(on_message),
+                        p_user_data: std::ptr::null_mut(),
+                    },
+                    get_allocation_callbacks(),
+                )
+            }?)
         } else {
             None
         };
@@ -283,6 +330,7 @@ impl Gpu {
             description,
             queue_families,
             debug_utilities,
+            messenger,
             gpu_memory_allocator: Arc::new(RefCell::new(gpu_memory_allocator)),
             descriptor_set_allocator: Arc::new(RefCell::new(descriptor_set_allocator)),
         });
