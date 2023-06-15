@@ -449,6 +449,27 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
             );
         }
     }
+    pub fn draw(
+        &mut self,
+        vertex_count: u32,
+        instance_count: u32,
+        first_vertex: u32,
+        first_instance: u32,
+    ) {
+        self.prepare_draw();
+        self.has_draw_command = true;
+        self.command_buffer.has_recorded_anything = true;
+        let device = self.command_buffer.gpu.vk_logical_device();
+        unsafe {
+            device.cmd_draw(
+                self.command_buffer.inner(),
+                vertex_count,
+                instance_count,
+                first_vertex,
+                first_instance,
+            );
+        }
+    }
 
     fn prepare_draw(&self) {
         let device = self.command_buffer.gpu.vk_logical_device();

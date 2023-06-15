@@ -308,7 +308,10 @@ impl Gpu {
                             | DebugUtilsMessageSeverityFlagsEXT::INFO
                             | DebugUtilsMessageSeverityFlagsEXT::VERBOSE
                             | DebugUtilsMessageSeverityFlagsEXT::WARNING,
-                        message_type: DebugUtilsMessageTypeFlagsEXT::from_raw(0xFFFFFFF),
+                        message_type: DebugUtilsMessageTypeFlagsEXT::GENERAL
+                            | DebugUtilsMessageTypeFlagsEXT::DEVICE_ADDRESS_BINDING
+                            | DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                            | DebugUtilsMessageTypeFlagsEXT::VALIDATION,
                         pfn_user_callback: Some(on_message),
                         p_user_data: std::ptr::null_mut(),
                     },

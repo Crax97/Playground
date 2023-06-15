@@ -374,7 +374,7 @@ impl<'a, 'e> GraphRunContext<'a, 'e> {
         }
     }
 
-    pub(crate) fn register_callback<F: Fn(&Gpu, &mut RenderPassContext) + 'e>(
+    pub(crate) fn register_callback<F: FnMut(&Gpu, &mut RenderPassContext) + 'e>(
         &mut self,
         handle: &RenderPassHandle,
         callback: F,
@@ -382,7 +382,7 @@ impl<'a, 'e> GraphRunContext<'a, 'e> {
         self.callbacks.register_callback(handle, callback)
     }
 
-    pub fn register_end_callback<F: Fn(&Gpu, &mut EndContext) + 'e>(&mut self, callback: F) {
+    pub fn register_end_callback<F: FnMut(&Gpu, &mut EndContext) + 'e>(&mut self, callback: F) {
         self.callbacks.register_end_callback(callback)
     }
 
@@ -409,11 +409,9 @@ impl<'a, 'e> GraphRunContext<'a, 'e> {
 trait RenderGraphRunner {
     fn run_graph(
         &mut self,
-        context: &GraphRunContext,
+        context: &mut GraphRunContext,
         graph: &CompiledRenderGraph,
-        callbacks: &Callbacks,
         resource_allocator: &mut DefaultResourceAllocator,
-        external_resources: &ExternalResources,
     ) -> anyhow::Result<()>;
 }
 
@@ -566,19 +564,19 @@ pub struct CompiledRenderGraph {
 
 #[derive(Default)]
 struct Callbacks<'g> {
-    callbacks: HashMap<usize, Box<dyn Fn(&Gpu, &mut RenderPassContext) + 'g>>,
-    end_callback: Option<Box<dyn Fn(&Gpu, &mut EndContext) + 'g>>,
+    callbacks: HashMap<usize, Box<dyn FnMut(&Gpu, &mut RenderPassContext) + 'g>>,
+    end_callback: Option<Box<dyn FnMut(&Gpu, &mut EndContext) + 'g>>,
 }
 
 impl<'g> Callbacks<'g> {
-    pub fn register_callback<F: Fn(&Gpu, &mut RenderPassContext) + 'g>(
+    pub fn register_callback<F: FnMut(&Gpu, &mut RenderPassContext) + 'g>(
         &mut self,
         handle: &RenderPassHandle,
         callback: F,
     ) {
         self.callbacks.insert(handle.id, Box::new(callback));
     }
-    pub fn register_end_callback<F: Fn(&Gpu, &mut EndContext) + 'g>(&mut self, callback: F) {
+    pub fn register_end_callback<F: FnMut(&Gpu, &mut EndContext) + 'g>(&mut self, callback: F) {
         self.end_callback = Some(Box::new(callback));
     }
 }
@@ -674,15 +672,13 @@ impl RenderGraph {
         Ok(())
     }
 
-    pub fn run(&self, ctx: GraphRunContext) -> anyhow::Result<()> {
+    pub fn run(&self, mut ctx: GraphRunContext) -> anyhow::Result<()> {
         let mut runner = GpuRunner::new();
 
         runner.run_graph(
-            &ctx,
+            &mut ctx,
             &self.cached_graph,
-            &ctx.callbacks,
             &mut self.resource_allocator.borrow_mut(),
-            &ctx.external_resources,
         )
     }
 
@@ -812,17 +808,16 @@ impl GpuRunner {
     }
 
     pub fn get_image<'r, 'e>(
-        ctx: &GraphRunContext,
+        ctx: &'e GraphRunContext,
         graph: &CompiledRenderGraph,
         id: &ResourceId,
         allocator: &'r mut DefaultResourceAllocator,
-        external_resources: &ExternalResources<'e>,
     ) -> anyhow::Result<&'e GpuImage>
     where
         'r: 'e,
     {
-        if external_resources.external_images.contains_key(id) {
-            Ok(external_resources.external_images[id])
+        if ctx.external_resources.external_images.contains_key(id) {
+            Ok(ctx.external_resources.external_images[id])
         } else {
             let desc = match &graph.resources_used[id].ty {
                 AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
@@ -915,15 +910,15 @@ impl GpuRunner {
                     stage_mask: PipelineStageFlags::TOP_OF_PIPE,
                 });
                 let new_layout = TransitionInfo {
-                    layout: match desc.format {
-                        ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
-                            if desc.present {
-                                ImageLayout::PRESENT_SRC_KHR
-                            } else {
+                    layout: if desc.present {
+                        ImageLayout::PRESENT_SRC_KHR
+                    } else {
+                        match desc.format {
+                            ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
                                 ImageLayout::COLOR_ATTACHMENT_OPTIMAL
                             }
+                            ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                         }
-                        ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                     },
                     access_mask: AccessFlags::SHADER_READ | access_flag,
                     stage_mask: PipelineStageFlags::ALL_GRAPHICS,
@@ -1089,12 +1084,15 @@ impl GpuRunner {
         ctx: &GraphRunContext,
         rp: &usize,
         graph: &CompiledRenderGraph,
-        external_resources: &ExternalResources,
     ) -> Result<(), anyhow::Error> {
         {
             let pass_info = &graph.pass_infos[*rp];
             if pass_info.is_external {
-                if !external_resources.external_render_passes.contains_key(rp) {
+                if !ctx
+                    .external_resources
+                    .external_render_passes
+                    .contains_key(rp)
+                {
                     panic!(
                         "RenderPass {} is external, but it hasn't been injected",
                         pass_info.label
@@ -1111,11 +1109,9 @@ impl GpuRunner {
 impl RenderGraphRunner for GpuRunner {
     fn run_graph(
         &mut self,
-        ctx: &GraphRunContext,
+        ctx: &mut GraphRunContext,
         graph: &CompiledRenderGraph,
-        callbacks: &Callbacks,
         resource_allocator: &mut DefaultResourceAllocator,
-        external_resources: &ExternalResources,
     ) -> anyhow::Result<()> {
         self.resource_states.clear();
         resource_allocator.update(ctx.current_iteration);
@@ -1134,13 +1130,7 @@ impl RenderGraphRunner for GpuRunner {
                         [0.0, 0.3, 0.3, 1.0],
                     );
                     for id in resources {
-                        let image = Self::get_image(
-                            ctx,
-                            graph,
-                            id,
-                            resource_allocator,
-                            external_resources,
-                        )?;
+                        let image = Self::get_image(ctx, graph, id, resource_allocator)?;
                         self.transition_image_read(graph, &mut command_buffer, id, image);
                     }
                 }
@@ -1151,37 +1141,19 @@ impl RenderGraphRunner for GpuRunner {
                     );
 
                     for id in resources {
-                        let image = Self::get_image(
-                            ctx,
-                            graph,
-                            id,
-                            resource_allocator,
-                            external_resources,
-                        )?;
+                        let image = Self::get_image(ctx, graph, id, resource_allocator)?;
                         self.transition_image_write(graph, &mut command_buffer, id, image);
                     }
                 }
                 GraphOperation::ExecuteRenderPass(rp) => {
-                    self.ensure_render_pass_exists(ctx, rp, graph, external_resources)?;
+                    self.ensure_render_pass_exists(ctx, rp, graph)?;
                     let info = &graph.pass_infos[*rp];
 
-                    ensure_graph_allocated_image_views_exist(
-                        ctx,
-                        info,
-                        external_resources,
-                        graph,
-                        resource_allocator,
-                    )?;
-                    ensure_graph_allocated_samplers_exists(
-                        ctx,
-                        info,
-                        external_resources,
-                        graph,
-                        resource_allocator,
-                    )?;
+                    ensure_graph_allocated_image_views_exist(ctx, info, graph, resource_allocator)?;
+                    ensure_graph_allocated_samplers_exists(ctx, info, graph, resource_allocator)?;
                     let views = resolve_image_views_unchecked(
                         info,
-                        external_resources,
+                        &ctx.external_resources,
                         &resource_allocator.image_views,
                     );
 
@@ -1189,7 +1161,6 @@ impl RenderGraphRunner for GpuRunner {
                         ctx,
                         info,
                         graph,
-                        external_resources,
                         &resource_allocator.image_views,
                         &resource_allocator.samplers,
                         &mut resource_allocator.descriptors,
@@ -1197,7 +1168,7 @@ impl RenderGraphRunner for GpuRunner {
 
                     let framebuffer_hash = compute_framebuffer_hash(info, &views);
 
-                    let pass = self.get_renderpass(*rp, external_resources);
+                    let pass = self.get_renderpass(*rp, &ctx.external_resources);
                     let framebuffer = resource_allocator.framebuffers.get(
                         ctx,
                         &info.clone(),
@@ -1209,7 +1180,7 @@ impl RenderGraphRunner for GpuRunner {
                         },
                     )?;
 
-                    let cb = callbacks.callbacks.get(rp);
+                    let cb = ctx.callbacks.callbacks.get_mut(rp);
                     let clear_color_values: Vec<_> = info
                         .writes
                         .iter()
@@ -1261,7 +1232,7 @@ impl RenderGraphRunner for GpuRunner {
                 }
             }
         }
-        if let Some(end_cb) = &callbacks.end_callback {
+        if let Some(end_cb) = &mut ctx.callbacks.end_callback {
             end_cb(
                 &ctx.gpu,
                 &mut EndContext {
@@ -1305,12 +1276,15 @@ fn hash_image_views(views: &Vec<&GpuImageView>) -> u64 {
 fn ensure_graph_allocated_image_views_exist(
     ctx: &GraphRunContext,
     info: &RenderPassInfo,
-    external_resources: &ExternalResources,
     graph: &CompiledRenderGraph,
     resource_allocator: &mut DefaultResourceAllocator,
 ) -> Result<(), anyhow::Error> {
     for writes in &info.writes {
-        let _ = if !external_resources.external_image_views.contains_key(writes) {
+        let _ = if !ctx
+            .external_resources
+            .external_image_views
+            .contains_key(writes)
+        {
             let desc = match &graph.resources_used[writes].ty {
                 AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
             };
@@ -1321,7 +1295,11 @@ fn ensure_graph_allocated_image_views_exist(
         };
     }
     for writes in &info.reads {
-        let _ = if !external_resources.external_image_views.contains_key(writes) {
+        let _ = if !ctx
+            .external_resources
+            .external_image_views
+            .contains_key(writes)
+        {
             let desc = match &graph.resources_used[writes].ty {
                 AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
             };
@@ -1337,12 +1315,15 @@ fn ensure_graph_allocated_image_views_exist(
 fn ensure_graph_allocated_samplers_exists(
     ctx: &GraphRunContext,
     info: &RenderPassInfo,
-    external_resources: &ExternalResources,
     graph: &CompiledRenderGraph,
     resource_allocator: &mut DefaultResourceAllocator,
 ) -> Result<(), anyhow::Error> {
     for writes in &info.reads {
-        let _ = if !external_resources.external_image_views.contains_key(writes) {
+        let _ = if !ctx
+            .external_resources
+            .external_image_views
+            .contains_key(writes)
+        {
             let desc = match &graph.resources_used[writes].ty {
                 AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
             };
@@ -1376,7 +1357,6 @@ fn resolve_input_descriptor_set<'e, 'a, 'd>(
     ctx: &GraphRunContext,
     info: &RenderPassInfo,
     graph: &CompiledRenderGraph,
-    external_resources: &ExternalResources<'e>,
     image_view_allocator: &'a ResourceAllocator<GpuImageView, ImageDescription, ResourceId>,
     sampler_allocator: &'a ResourceAllocator<GpuSampler, ImageDescription, ResourceId>,
     descriptor_view_allocator: &'a mut ResourceAllocator<GpuDescriptorSet, RenderPassInfo, u64>,
@@ -1387,8 +1367,12 @@ fn resolve_input_descriptor_set<'e, 'a, 'd>(
     }
     let mut descriptors = vec![];
     for (idx, read) in info.reads.iter().enumerate() {
-        let view = if external_resources.external_image_views.contains_key(read) {
-            external_resources.external_image_views[read]
+        let view = if ctx
+            .external_resources
+            .external_image_views
+            .contains_key(read)
+        {
+            ctx.external_resources.external_image_views[read]
         } else {
             image_view_allocator.get_unchecked(read)
         };

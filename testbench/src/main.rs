@@ -153,10 +153,20 @@ fn main() -> anyhow::Result<()> {
         .gpu
         .write_buffer_data(&index_buffer, indices)?;
 
+    let screen_quad_module =
+        utils::read_file_to_vk_module(&engine::app_state().gpu, "./shaders/screen_quad.spirv")?;
+    let gbuffer_combine_module =
+        utils::read_file_to_vk_module(&engine::app_state().gpu, "./shaders/gbuffer_combine.spirv")?;
+    let texture_copy_module =
+        utils::read_file_to_vk_module(&engine::app_state().gpu, "./shaders/texture_copy.spirv")?;
+
     let mut scene_renderer = DeferredRenderingPipeline::new(
         &engine::app_state().gpu,
         resource_map.clone(),
         &engine::app_state().swapchain,
+        screen_quad_module,
+        gbuffer_combine_module,
+        texture_copy_module,
     )?;
 
     let material_1 = scene_renderer.get_context().create_material(

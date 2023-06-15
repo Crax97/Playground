@@ -140,6 +140,7 @@ pub struct FragmentStageInfo<'a> {
 pub enum PrimitiveTopology {
     #[default]
     TriangleList,
+    TriangleStrip,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -155,6 +156,8 @@ pub enum CullMode {
     #[default]
     Back,
     Front,
+    None,
+    FrontAndBack,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -522,6 +525,7 @@ impl Pipeline {
                 flags: PipelineInputAssemblyStateCreateFlags::empty(),
                 topology: match pipeline_description.input_topology {
                     PrimitiveTopology::TriangleList => vk::PrimitiveTopology::TRIANGLE_LIST,
+                    PrimitiveTopology::TriangleStrip => vk::PrimitiveTopology::TRIANGLE_STRIP,
                 },
                 primitive_restart_enable: if pipeline_description.primitive_restart {
                     vk::TRUE
@@ -567,6 +571,8 @@ impl Pipeline {
                 cull_mode: match pipeline_description.cull_mode {
                     CullMode::Back => vk::CullModeFlags::BACK,
                     CullMode::Front => vk::CullModeFlags::FRONT,
+                    CullMode::None => vk::CullModeFlags::NONE,
+                    CullMode::FrontAndBack => vk::CullModeFlags::FRONT_AND_BACK,
                 },
                 front_face: match pipeline_description.front_face {
                     FrontFace::CounterClockWise => vk::FrontFace::COUNTER_CLOCKWISE,

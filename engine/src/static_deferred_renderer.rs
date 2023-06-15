@@ -32,14 +32,14 @@ use std::{collections::HashMap, mem::size_of, rc::Rc};
 use ash::{
     prelude::VkResult,
     vk::{
-        self, BufferUsageFlags, CompareOp, IndexType, PipelineBindPoint, PipelineStageFlags,
-        PushConstantRange, ShaderStageFlags, StencilOpState,
+        self, BufferUsageFlags, CompareOp, Extent2D, IndexType, PipelineBindPoint,
+        PipelineStageFlags, PushConstantRange, ShaderStageFlags, StencilOpState,
     },
 };
 use gpu::{
     BindingElement, BufferCreateInfo, BufferRange, DepthStencilState, DescriptorInfo,
     DescriptorSetInfo, FragmentStageInfo, GlobalBinding, Gpu, GpuBuffer, GpuDescriptorSet,
-    ImageFormat, MemoryDomain, Pipeline, PipelineDescription, Swapchain, ToVk,
+    GpuShaderModule, ImageFormat, MemoryDomain, Pipeline, PipelineDescription, Swapchain, ToVk,
     VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
 use nalgebra::{Matrix4, Vector2, Vector3};
@@ -75,12 +75,21 @@ pub struct DeferredRenderingPipeline {
     material_context: DeferredRenderingMaterialContext,
     render_graph: RenderGraph,
     present_render_pass: RenderPass,
+    screen_quad: GpuShaderModule,
+    gbuffer_combine: GpuShaderModule,
+
+    combine_pipeline: Option<Pipeline>,
+    copy_pipeline: Pipeline,
 }
 impl DeferredRenderingPipeline {
     pub fn new(
         gpu: &Gpu,
         resource_map: Rc<ResourceMap>,
         swapchain: &Swapchain,
+
+        screen_quad: GpuShaderModule,
+        gbuffer_combine: GpuShaderModule,
+        texture_copy: GpuShaderModule,
     ) -> anyhow::Result<Self> {
         let camera_buffer = {
             let create_info = BufferCreateInfo {
@@ -111,6 +120,68 @@ impl DeferredRenderingPipeline {
 
         let present_render_pass = Self::create_present_render_pass(gpu, swapchain)?;
 
+        let copy_pipeline = Pipeline::new(
+            gpu,
+            &present_render_pass,
+            &PipelineDescription {
+                global_bindings: &[GlobalBinding {
+                    set_index: 0,
+                    elements: &[BindingElement {
+                        binding_type: gpu::BindingType::CombinedImageSampler,
+                        index: 0,
+                        stage: gpu::ShaderStage::Fragment,
+                    }],
+                }],
+                vertex_inputs: &[],
+                vertex_stage: Some(VertexStageInfo {
+                    entry_point: "main",
+                    module: &screen_quad,
+                }),
+                fragment_stage: Some(FragmentStageInfo {
+                    entry_point: "main",
+                    module: &texture_copy,
+                    color_attachments: &[RenderPassAttachment {
+                        format: swapchain.present_format(),
+                        samples: SampleCountFlags::TYPE_1,
+                        load_op: AttachmentLoadOp::DONT_CARE,
+                        store_op: AttachmentStoreOp::STORE,
+                        stencil_load_op: AttachmentLoadOp::DONT_CARE,
+                        stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                        initial_layout: ImageLayout::UNDEFINED,
+                        final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                        blend_state: BlendState {
+                            blend_enable: false,
+                            src_color_blend_factor: BlendFactor::ONE,
+                            dst_color_blend_factor: BlendFactor::ZERO,
+                            color_blend_op: BlendOp::ADD,
+                            src_alpha_blend_factor: BlendFactor::ONE,
+                            dst_alpha_blend_factor: BlendFactor::ZERO,
+                            alpha_blend_op: BlendOp::ADD,
+                            color_write_mask: ColorComponentFlags::RGBA,
+                        },
+                    }],
+                    depth_stencil_attachments: &[],
+                }),
+                input_topology: gpu::PrimitiveTopology::TriangleStrip,
+                primitive_restart: false,
+                polygon_mode: gpu::PolygonMode::Fill,
+                cull_mode: gpu::CullMode::None,
+                front_face: gpu::FrontFace::ClockWise,
+                depth_stencil_state: DepthStencilState {
+                    depth_test_enable: false,
+                    depth_write_enable: false,
+                    depth_compare_op: CompareOp::ALWAYS,
+                    stencil_test_enable: false,
+                    front: StencilOpState::default(),
+                    back: StencilOpState::default(),
+                    min_depth_bounds: 0.0,
+                    max_depth_bounds: 1.0,
+                },
+                logic_op: None,
+                push_constant_ranges: &[],
+            },
+        )?;
+
         let render_graph = RenderGraph::new();
 
         Ok(Self {
@@ -120,6 +191,10 @@ impl DeferredRenderingPipeline {
             material_context,
             render_graph,
             present_render_pass,
+            screen_quad,
+            gbuffer_combine,
+            combine_pipeline: None,
+            copy_pipeline,
         })
     }
 
@@ -196,7 +271,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::PRESENT_SRC_KHR,
+                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -217,7 +292,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::PRESENT_SRC_KHR,
+                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -238,7 +313,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::PRESENT_SRC_KHR,
+                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -259,7 +334,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::PRESENT_SRC_KHR,
+                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -280,7 +355,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::PRESENT_SRC_KHR,
+                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -301,7 +376,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::PRESENT_SRC_KHR,
+                final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -409,7 +484,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::PRESENT_SRC_KHR,
+                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -430,7 +505,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::PRESENT_SRC_KHR,
+                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -451,7 +526,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::PRESENT_SRC_KHR,
+                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -472,7 +547,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::PRESENT_SRC_KHR,
+                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -493,7 +568,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::PRESENT_SRC_KHR,
+                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -675,21 +750,21 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             height: swapchain_extents.height,
             format: ImageFormat::Rgba8,
             samples: 1,
-            present: true,
+            present: false,
         };
         let framebuffer_vector_desc = crate::ImageDescription {
             width: swapchain_extents.width,
             height: swapchain_extents.height,
             format: ImageFormat::RgbaFloat,
             samples: 1,
-            present: true,
+            present: false,
         };
         let framebuffer_depth_desc = crate::ImageDescription {
             width: swapchain_extents.width,
             height: swapchain_extents.height,
             format: ImageFormat::Depth,
             samples: 1,
-            present: true,
+            present: false,
         };
         let framebuffer_swapchain_desc = crate::ImageDescription {
             width: swapchain_extents.width,
@@ -820,6 +895,112 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     }
                 }
             }
+        });
+        context.register_callback(&combine_pass, |gpu: &Gpu, ctx| {
+            let pipeline = self.combine_pipeline.get_or_insert_with(|| {
+                Pipeline::new(
+                    gpu,
+                    ctx.render_pass,
+                    &PipelineDescription {
+                        global_bindings: &[GlobalBinding {
+                            set_index: 0,
+                            elements: &[
+                                BindingElement {
+                                    binding_type: gpu::BindingType::CombinedImageSampler,
+                                    index: 0,
+                                    stage: gpu::ShaderStage::Fragment,
+                                },
+                                BindingElement {
+                                    binding_type: gpu::BindingType::CombinedImageSampler,
+                                    index: 1,
+                                    stage: gpu::ShaderStage::Fragment,
+                                },
+                                BindingElement {
+                                    binding_type: gpu::BindingType::CombinedImageSampler,
+                                    index: 2,
+                                    stage: gpu::ShaderStage::Fragment,
+                                },
+                                BindingElement {
+                                    binding_type: gpu::BindingType::CombinedImageSampler,
+                                    index: 3,
+                                    stage: gpu::ShaderStage::Fragment,
+                                },
+                                BindingElement {
+                                    binding_type: gpu::BindingType::CombinedImageSampler,
+                                    index: 4,
+                                    stage: gpu::ShaderStage::Fragment,
+                                },
+                            ],
+                        }],
+                        vertex_inputs: &[],
+                        vertex_stage: Some(VertexStageInfo {
+                            entry_point: "main",
+                            module: &self.screen_quad,
+                        }),
+                        fragment_stage: Some(FragmentStageInfo {
+                            entry_point: "main",
+                            module: &self.gbuffer_combine,
+                            color_attachments: &[RenderPassAttachment {
+                                format: ImageFormat::Rgba8.to_vk(),
+                                samples: SampleCountFlags::TYPE_1,
+                                load_op: AttachmentLoadOp::DONT_CARE,
+                                store_op: AttachmentStoreOp::STORE,
+                                stencil_load_op: AttachmentLoadOp::DONT_CARE,
+                                stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                                initial_layout: ImageLayout::UNDEFINED,
+                                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                                blend_state: BlendState {
+                                    blend_enable: false,
+                                    src_color_blend_factor: BlendFactor::ONE,
+                                    dst_color_blend_factor: BlendFactor::ZERO,
+                                    color_blend_op: BlendOp::ADD,
+                                    src_alpha_blend_factor: BlendFactor::ONE,
+                                    dst_alpha_blend_factor: BlendFactor::ZERO,
+                                    alpha_blend_op: BlendOp::ADD,
+                                    color_write_mask: ColorComponentFlags::RGBA,
+                                },
+                            }],
+                            depth_stencil_attachments: &[],
+                        }),
+                        input_topology: gpu::PrimitiveTopology::TriangleStrip,
+                        primitive_restart: false,
+                        polygon_mode: gpu::PolygonMode::Fill,
+                        cull_mode: gpu::CullMode::None,
+                        front_face: gpu::FrontFace::ClockWise,
+                        depth_stencil_state: DepthStencilState {
+                            depth_test_enable: false,
+                            depth_write_enable: false,
+                            depth_compare_op: CompareOp::ALWAYS,
+                            stencil_test_enable: false,
+                            front: StencilOpState::default(),
+                            back: StencilOpState::default(),
+                            min_depth_bounds: 0.0,
+                            max_depth_bounds: 1.0,
+                        },
+                        logic_op: None,
+                        push_constant_ranges: &[],
+                    },
+                )
+                .expect("Failed to create combine pipeline")
+            });
+            ctx.render_pass_command.bind_pipeline(&pipeline);
+            ctx.render_pass_command.bind_descriptor_sets(
+                PipelineBindPoint::GRAPHICS,
+                &pipeline,
+                0,
+                &[ctx.read_descriptor_set.unwrap()],
+            );
+            ctx.render_pass_command.draw(4, 1, 0, 0);
+        });
+        context.register_callback(&present_render_pass, |_: &Gpu, ctx| {
+            ctx.render_pass_command.bind_pipeline(&self.copy_pipeline);
+            ctx.render_pass_command.bind_descriptor_sets(
+                PipelineBindPoint::GRAPHICS,
+                &self.copy_pipeline,
+                0,
+                &[ctx.read_descriptor_set.unwrap()],
+            );
+            ctx.render_pass_command.draw(4, 1, 0, 0);
         });
 
         context.inject_external_renderpass(
