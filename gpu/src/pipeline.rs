@@ -105,7 +105,7 @@ pub struct VertexStageInfo<'a> {
     pub module: &'a GpuShaderModule,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct BlendState {
     pub blend_enable: bool,
     pub src_color_blend_factor: vk::BlendFactor,

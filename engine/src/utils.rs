@@ -127,15 +127,10 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
                             stencil_store_op: AttachmentStoreOp::DONT_CARE,
                             initial_layout: ImageLayout::UNDEFINED,
                             final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                            blend_state: BlendState {
-                                blend_enable: false,
-                                src_color_blend_factor: BlendFactor::ONE,
-                                dst_color_blend_factor: BlendFactor::ZERO,
-                                color_blend_op: BlendOp::ADD,
-                                src_alpha_blend_factor: BlendFactor::ONE,
-                                dst_alpha_blend_factor: BlendFactor::ZERO,
-                                alpha_blend_op: BlendOp::ADD,
-                                color_write_mask: ColorComponentFlags::RGBA,
+                            blend_state: if let Some(state) = pass_info.blend_state {
+                                state
+                            } else {
+                                BlendState::default()
                             },
                         }),
                     gpu::ImageFormat::Depth => {

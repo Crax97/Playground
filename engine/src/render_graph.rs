@@ -507,6 +507,7 @@ pub struct RenderPassInfo {
     pub writes: Vec<ResourceId>,
     pub reads: Vec<ResourceId>,
     pub extents: Extent2D,
+    pub blend_state: Option<BlendState>,
     pub is_external: bool,
 }
 
@@ -547,6 +548,11 @@ impl<'g> RenderPassBuilder<'g> {
     }
     pub fn reads(mut self, handles: &[ResourceId]) -> Self {
         self.pass.reads.append(&mut handles.to_owned());
+        self
+    }
+
+    pub fn with_blend_state(mut self, blend_state: BlendState) -> Self {
+        self.pass.blend_state = Some(blend_state);
         self
     }
 
@@ -655,6 +661,7 @@ impl RenderGraph {
                 reads: Default::default(),
                 extents,
                 is_external: false,
+                blend_state: None,
             },
             graph: self,
         })
@@ -1033,15 +1040,19 @@ impl GpuRunner {
                     }
                     ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                 },
-                blend_state: BlendState {
-                    blend_enable: true,
-                    src_color_blend_factor: BlendFactor::ONE,
-                    dst_color_blend_factor: BlendFactor::ZERO,
-                    color_blend_op: BlendOp::ADD,
-                    src_alpha_blend_factor: BlendFactor::ONE,
-                    dst_alpha_blend_factor: BlendFactor::ZERO,
-                    alpha_blend_op: BlendOp::ADD,
-                    color_write_mask: ColorComponentFlags::RGBA,
+                blend_state: if let Some(state) = pass_info.blend_state {
+                    state
+                } else {
+                    BlendState {
+                        blend_enable: true,
+                        src_color_blend_factor: BlendFactor::ONE,
+                        dst_color_blend_factor: BlendFactor::ZERO,
+                        color_blend_op: BlendOp::ADD,
+                        src_alpha_blend_factor: BlendFactor::ONE,
+                        dst_alpha_blend_factor: BlendFactor::ZERO,
+                        alpha_blend_op: BlendOp::ADD,
+                        color_write_mask: ColorComponentFlags::RGBA,
+                    }
                 },
             })
             .collect();
