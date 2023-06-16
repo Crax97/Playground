@@ -54,7 +54,7 @@ where
     fn create(gpu: &Gpu, desc: &D, additional: &A) -> anyhow::Result<Self>;
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct RenderPassHandle {
     label: &'static str,
     id: usize,
@@ -415,11 +415,30 @@ trait RenderGraphRunner {
     ) -> anyhow::Result<()>;
 }
 
-#[derive(Hash, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Copy, Clone, Eq, Ord, Debug)]
 pub struct ResourceId {
     label: &'static str,
     raw: u64,
 }
+
+impl std::hash::Hash for ResourceId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.raw.hash(state);
+    }
+}
+
+impl PartialEq for ResourceId {
+    fn eq(&self, other: &Self) -> bool {
+        self.raw == other.raw
+    }
+}
+
+impl PartialOrd for ResourceId {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.raw.partial_cmp(&other.raw)
+    }
+}
+
 impl ResourceId {
     fn make(label: &'static str) -> ResourceId {
         let mut hasher = DefaultHasher::new();
@@ -448,8 +467,8 @@ pub enum AllocationType {
 
 #[derive(Hash, Copy, Clone)]
 pub struct ResourceInfo {
-    label: &'static str,
-    ty: AllocationType,
+    pub label: &'static str,
+    pub ty: AllocationType,
 }
 
 pub struct RenderGraph {
@@ -468,6 +487,9 @@ pub enum CompileError {
     ResourceAlreadyDefined(ResourceId, String),
     RenderPassAlreadyDefined(String),
     CyclicGraph,
+    RenderPassNotFound(RenderPassHandle),
+    ResourceNotFound(ResourceId),
+    GraphNotCompiledYet,
 }
 
 impl std::fmt::Display for CompileError {
@@ -481,11 +503,11 @@ impl Error for CompileError {}
 pub type GraphResult<T> = Result<T, CompileError>;
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RenderPassInfo {
-    label: &'static str,
-    writes: Vec<ResourceId>,
-    reads: Vec<ResourceId>,
-    extents: Extent2D,
-    is_external: bool,
+    pub label: &'static str,
+    pub writes: Vec<ResourceId>,
+    pub reads: Vec<ResourceId>,
+    pub extents: Extent2D,
+    pub is_external: bool,
 }
 
 impl Hash for RenderPassInfo {
@@ -612,9 +634,9 @@ impl RenderGraph {
 
     fn create_unique_id(&mut self, label: &'static str) -> GraphResult<ResourceId> {
         let id = ResourceId::make(label);
-        if self.allocations.contains_key(&id) {
-            return Err(CompileError::ResourceAlreadyDefined(id, label.to_owned()));
-        }
+        // if self.allocations.get(&id).is_some() {
+        //     return Err(CompileError::ResourceAlreadyDefined(id, label.to_owned()));
+        // }
         Ok(id)
     }
 
@@ -682,14 +704,15 @@ impl RenderGraph {
         )
     }
 
-    fn prune_passes(&mut self, compiled: &mut CompiledRenderGraph) {
+    fn prune_passes(&self, compiled: &mut CompiledRenderGraph) {
+        let mut passes: Vec<_> = self.passes.iter().map(|r| r.clone()).collect();
         let mut working_set: Vec<_> = self.persistent_resources.iter().map(|r| *r).collect();
         let mut used_resources = working_set.clone();
         let mut write_resources: HashSet<ResourceId> = HashSet::default();
         while !working_set.is_empty() {
             let mut remove = None;
 
-            for (index, pass) in self.passes.iter().enumerate().rev() {
+            for (index, pass) in passes.iter().enumerate().rev() {
                 let mut found = false;
                 for target in &used_resources {
                     if pass.writes.contains(target) {
@@ -707,7 +730,7 @@ impl RenderGraph {
                 }
             }
             if let Some(index) = remove {
-                self.passes.remove(index);
+                passes.remove(index);
             }
         }
 
@@ -788,10 +811,26 @@ impl RenderGraph {
         }
     }
 
-    fn prepare_for_next_frame(&mut self) {
+    pub fn prepare_for_next_frame(&mut self) {
         self.passes.clear();
         self.persistent_resources.clear();
-        self.allocations.clear();
+    }
+
+    pub fn get_renderpass_info(
+        &self,
+        handle: RenderPassHandle,
+    ) -> Result<RenderPassInfo, CompileError> {
+        self.passes
+            .get(handle.id)
+            .cloned()
+            .ok_or(CompileError::RenderPassNotFound(handle.clone()))
+    }
+
+    pub fn get_resource_info(&self, resource: &ResourceId) -> GraphResult<ResourceInfo> {
+        self.allocations
+            .get(resource)
+            .cloned()
+            .ok_or(CompileError::ResourceNotFound(resource.clone()))
     }
 }
 
@@ -1384,7 +1423,7 @@ fn resolve_input_descriptor_set<'e, 'a, 'd>(
                 image_view: view,
                 image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             }),
-            binding_stage: gpu::ShaderStage::Fragment,
+            binding_stage: gpu::ShaderStage::VertexFragment,
         })
     }
 

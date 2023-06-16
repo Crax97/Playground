@@ -70,7 +70,9 @@ impl<'a> std::hash::Hash for DescriptorType<'a> {
 pub enum ShaderStage {
     Vertex,
     Fragment,
+    VertexFragment,
     Compute,
+    All,
 }
 
 #[derive(Clone, Hash)]

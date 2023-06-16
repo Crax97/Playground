@@ -39,7 +39,7 @@ impl Material {
                     offset: 0,
                     size: vk::WHOLE_SIZE,
                 }),
-                binding_stage: gpu::ShaderStage::Vertex,
+                binding_stage: gpu::ShaderStage::VertexFragment,
             });
             bind_index += 1;
         }
@@ -52,7 +52,7 @@ impl Material {
                     image_view: &texture.rgba_view,
                     image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 }),
-                binding_stage: gpu::ShaderStage::Fragment,
+                binding_stage: gpu::ShaderStage::VertexFragment,
             });
             bind_index += 1;
         }

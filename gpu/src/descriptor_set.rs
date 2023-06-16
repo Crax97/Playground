@@ -114,6 +114,10 @@ impl PooledDescriptorSetAllocator {
                 super::ShaderStage::Vertex => ShaderStageFlags::VERTEX,
                 super::ShaderStage::Fragment => ShaderStageFlags::FRAGMENT,
                 super::ShaderStage::Compute => ShaderStageFlags::COMPUTE,
+                crate::ShaderStage::VertexFragment => {
+                    ShaderStageFlags::VERTEX | ShaderStageFlags::FRAGMENT
+                }
+                crate::ShaderStage::All => ShaderStageFlags::ALL_GRAPHICS,
             };
             let descriptor_type = match descriptor_info.element_type {
                 super::DescriptorType::UniformBuffer(_) => DescriptorType::UNIFORM_BUFFER,

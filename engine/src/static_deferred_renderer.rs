@@ -56,6 +56,7 @@ use crate::{
     camera::Camera,
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
+    utils::{self, FragmentState, ModuleInfo, RenderGraphPipelineDescription},
     GraphRunContext, RenderGraph, RenderingPipeline, Scene, ScenePrimitive,
 };
 
@@ -112,7 +113,7 @@ impl DeferredRenderingPipeline {
                     offset: 0,
                     size: vk::WHOLE_SIZE,
                 }),
-                binding_stage: gpu::ShaderStage::Vertex,
+                binding_stage: gpu::ShaderStage::VertexFragment,
             }],
         })?;
 
@@ -129,7 +130,7 @@ impl DeferredRenderingPipeline {
                     elements: &[BindingElement {
                         binding_type: gpu::BindingType::CombinedImageSampler,
                         index: 0,
-                        stage: gpu::ShaderStage::Fragment,
+                        stage: gpu::ShaderStage::VertexFragment,
                     }],
                 }],
                 vertex_inputs: &[],
@@ -470,7 +471,7 @@ impl DeferredRenderingMaterialContext {
             .map(|(i, _)| BindingElement {
                 binding_type: gpu::BindingType::CombinedImageSampler,
                 index: i as _,
-                stage: gpu::ShaderStage::Fragment,
+                stage: gpu::ShaderStage::VertexFragment,
             })
             .collect();
 
@@ -589,7 +590,7 @@ impl DeferredRenderingMaterialContext {
                     elements: &[BindingElement {
                         binding_type: gpu::BindingType::Uniform,
                         index: 0,
-                        stage: gpu::ShaderStage::Vertex,
+                        stage: gpu::ShaderStage::VertexFragment,
                     }],
                 },
                 GlobalBinding {
@@ -803,7 +804,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         self.render_graph.persist_resource(&swapchain_buffer);
 
-        let mut gbuffer_pass = self
+        let gbuffer_pass = self
             .render_graph
             .begin_render_pass("GBuffer", swapchain_extents)?
             .writes(&[
@@ -830,7 +831,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             ])
             .commit();
 
-        let mut present_render_pass = self
+        let present_render_pass = self
             .render_graph
             .begin_render_pass("Present", swapchain_extents)?
             .writes(&[swapchain_buffer])
@@ -838,6 +839,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .mark_external()
             .commit();
 
+        let combine_pass_info = self.render_graph.get_renderpass_info(combine_pass)?;
         self.render_graph.compile()?;
 
         let mut context = GraphRunContext::new(
@@ -898,87 +900,43 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         });
         context.register_callback(&combine_pass, |gpu: &Gpu, ctx| {
             let pipeline = self.combine_pipeline.get_or_insert_with(|| {
-                Pipeline::new(
-                    gpu,
+                utils::create_pipeline_for_graph_renderpass(
+                    &self.render_graph,
+                    &combine_pass_info,
                     ctx.render_pass,
-                    &PipelineDescription {
-                        global_bindings: &[GlobalBinding {
-                            set_index: 0,
-                            elements: &[
-                                BindingElement {
-                                    binding_type: gpu::BindingType::CombinedImageSampler,
-                                    index: 0,
-                                    stage: gpu::ShaderStage::Fragment,
-                                },
-                                BindingElement {
-                                    binding_type: gpu::BindingType::CombinedImageSampler,
-                                    index: 1,
-                                    stage: gpu::ShaderStage::Fragment,
-                                },
-                                BindingElement {
-                                    binding_type: gpu::BindingType::CombinedImageSampler,
-                                    index: 2,
-                                    stage: gpu::ShaderStage::Fragment,
-                                },
-                                BindingElement {
-                                    binding_type: gpu::BindingType::CombinedImageSampler,
-                                    index: 3,
-                                    stage: gpu::ShaderStage::Fragment,
-                                },
-                                BindingElement {
-                                    binding_type: gpu::BindingType::CombinedImageSampler,
-                                    index: 4,
-                                    stage: gpu::ShaderStage::Fragment,
-                                },
-                            ],
-                        }],
+                    gpu,
+                    &RenderGraphPipelineDescription {
                         vertex_inputs: &[],
-                        vertex_stage: Some(VertexStageInfo {
-                            entry_point: "main",
-                            module: &self.screen_quad,
-                        }),
-                        fragment_stage: Some(FragmentStageInfo {
-                            entry_point: "main",
-                            module: &self.gbuffer_combine,
-                            color_attachments: &[RenderPassAttachment {
-                                format: ImageFormat::Rgba8.to_vk(),
-                                samples: SampleCountFlags::TYPE_1,
-                                load_op: AttachmentLoadOp::DONT_CARE,
-                                store_op: AttachmentStoreOp::STORE,
-                                stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                                stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                                initial_layout: ImageLayout::UNDEFINED,
-                                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                                blend_state: BlendState {
-                                    blend_enable: false,
-                                    src_color_blend_factor: BlendFactor::ONE,
-                                    dst_color_blend_factor: BlendFactor::ZERO,
-                                    color_blend_op: BlendOp::ADD,
-                                    src_alpha_blend_factor: BlendFactor::ONE,
-                                    dst_alpha_blend_factor: BlendFactor::ZERO,
-                                    alpha_blend_op: BlendOp::ADD,
-                                    color_write_mask: ColorComponentFlags::RGBA,
-                                },
-                            }],
-                            depth_stencil_attachments: &[],
-                        }),
-                        input_topology: gpu::PrimitiveTopology::TriangleStrip,
-                        primitive_restart: false,
-                        polygon_mode: gpu::PolygonMode::Fill,
-                        cull_mode: gpu::CullMode::None,
-                        front_face: gpu::FrontFace::ClockWise,
-                        depth_stencil_state: DepthStencilState {
-                            depth_test_enable: false,
-                            depth_write_enable: false,
-                            depth_compare_op: CompareOp::ALWAYS,
-                            stencil_test_enable: false,
-                            front: StencilOpState::default(),
-                            back: StencilOpState::default(),
-                            min_depth_bounds: 0.0,
-                            max_depth_bounds: 1.0,
+                        stage: utils::RenderStage::Graphics {
+                            vertex: ModuleInfo {
+                                module: &self.screen_quad,
+                                entry_point: "main",
+                            },
+                            fragment: ModuleInfo {
+                                module: &self.gbuffer_combine,
+                                entry_point: "main",
+                            },
                         },
-                        logic_op: None,
-                        push_constant_ranges: &[],
+                        fragment_state: FragmentState {
+                            input_topology: gpu::PrimitiveTopology::TriangleStrip,
+                            primitive_restart: false,
+                            polygon_mode: gpu::PolygonMode::Fill,
+                            cull_mode: gpu::CullMode::None,
+                            front_face: gpu::FrontFace::ClockWise,
+                            depth_stencil_state: DepthStencilState {
+                                depth_test_enable: false,
+                                depth_write_enable: false,
+                                depth_compare_op: CompareOp::ALWAYS,
+                                stencil_test_enable: false,
+                                front: StencilOpState::default(),
+                                back: StencilOpState::default(),
+                                min_depth_bounds: 0.0,
+                                max_depth_bounds: 1.0,
+                            },
+                            logic_op: None,
+                            push_constant_ranges: &[],
+                            ..Default::default()
+                        },
                     },
                 )
                 .expect("Failed to create combine pipeline")

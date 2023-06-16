@@ -119,7 +119,7 @@ impl ForwardRenderingPipeline {
                     offset: 0,
                     size: vk::WHOLE_SIZE,
                 }),
-                binding_stage: gpu::ShaderStage::Vertex,
+                binding_stage: gpu::ShaderStage::VertexFragment,
             }],
         })?;
 
@@ -251,7 +251,7 @@ impl ForwardRendererMaterialContext {
             .map(|(i, _)| BindingElement {
                 binding_type: gpu::BindingType::CombinedImageSampler,
                 index: i as _,
-                stage: gpu::ShaderStage::Fragment,
+                stage: gpu::ShaderStage::VertexFragment,
             })
             .collect();
 

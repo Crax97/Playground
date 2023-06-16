@@ -68,6 +68,10 @@ impl From<&BindingElement> for DescriptorSetLayoutBinding {
                 ShaderStage::Vertex => ShaderStageFlags::VERTEX,
                 ShaderStage::Fragment => ShaderStageFlags::FRAGMENT,
                 ShaderStage::Compute => ShaderStageFlags::COMPUTE,
+                ShaderStage::VertexFragment => {
+                    ShaderStageFlags::VERTEX | ShaderStageFlags::FRAGMENT
+                }
+                ShaderStage::All => ShaderStageFlags::ALL_GRAPHICS,
             },
             p_immutable_samplers: std::ptr::null(),
         }
