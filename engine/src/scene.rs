@@ -28,7 +28,7 @@ use crate::{
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     mesh::Mesh,
-    GraphRunContext, RenderGraph,
+    GpuRunner, GraphRunContext, RenderGraph,
 };
 
 use ash::vk::{
@@ -91,6 +91,7 @@ pub struct ForwardRenderingPipeline {
     camera_buffer_descriptor_set: GpuDescriptorSet,
     material_context: ForwardRendererMaterialContext,
     render_graph: RenderGraph,
+    runner: GpuRunner,
 }
 impl ForwardRenderingPipeline {
     pub fn new(
@@ -133,6 +134,7 @@ impl ForwardRenderingPipeline {
             camera_buffer_descriptor_set,
             material_context,
             render_graph,
+            runner: GpuRunner::new(),
         })
     }
 }
@@ -533,7 +535,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 .get_material_render_pass(MaterialDomain::Surface),
         );
         context.inject_external_image(&color_buffer, image, view);
-        self.render_graph.run(context)?;
+        self.render_graph.run(context, &mut self.runner)?;
 
         Ok(())
     }

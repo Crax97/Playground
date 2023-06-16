@@ -53,11 +53,12 @@ struct PerFrameData {
 }
 
 use crate::{
+    app_state,
     camera::Camera,
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     utils::{self, FragmentState, ModuleInfo, RenderGraphPipelineDescription},
-    GraphRunContext, RenderGraph, RenderingPipeline, Scene, ScenePrimitive,
+    GpuRunner, GraphRunContext, RenderGraph, RenderingPipeline, Scene, ScenePrimitive,
 };
 
 use ash::vk::{
@@ -81,6 +82,7 @@ pub struct DeferredRenderingPipeline {
 
     combine_pipeline: Option<Pipeline>,
     copy_pipeline: Pipeline,
+    runner: GpuRunner,
 }
 impl DeferredRenderingPipeline {
     pub fn new(
@@ -196,6 +198,7 @@ impl DeferredRenderingPipeline {
             gbuffer_combine,
             combine_pipeline: None,
             copy_pipeline,
+            runner: GpuRunner::new(),
         })
     }
 
@@ -829,6 +832,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 emissive_buffer,
                 pbr_buffer,
             ])
+            // TODO .blend_mode()
             .commit();
 
         let present_render_pass = self
@@ -898,6 +902,45 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 }
             }
         });
+
+        // let pipeline = self.runner.create_pipeline_for_renderpass(
+        //     &app_state().gpu,
+        //     &combine_pass,
+        //     &RenderGraphPipelineDescription {
+        //         vertex_inputs: &[],
+        //         stage: utils::RenderStage::Graphics {
+        //             vertex: ModuleInfo {
+        //                 module: &self.screen_quad,
+        //                 entry_point: "main",
+        //             },
+        //             fragment: ModuleInfo {
+        //                 module: &self.gbuffer_combine,
+        //                 entry_point: "main",
+        //             },
+        //         },
+        //         fragment_state: FragmentState {
+        //             input_topology: gpu::PrimitiveTopology::TriangleStrip,
+        //             primitive_restart: false,
+        //             polygon_mode: gpu::PolygonMode::Fill,
+        //             cull_mode: gpu::CullMode::None,
+        //             front_face: gpu::FrontFace::ClockWise,
+        //             depth_stencil_state: DepthStencilState {
+        //                 depth_test_enable: false,
+        //                 depth_write_enable: false,
+        //                 depth_compare_op: CompareOp::ALWAYS,
+        //                 stencil_test_enable: false,
+        //                 front: StencilOpState::default(),
+        //                 back: StencilOpState::default(),
+        //                 min_depth_bounds: 0.0,
+        //                 max_depth_bounds: 1.0,
+        //             },
+        //             logic_op: None,
+        //             push_constant_ranges: &[],
+        //             ..Default::default()
+        //         },
+        //     },
+        // )?;
+
         context.register_callback(&combine_pass, |gpu: &Gpu, ctx| {
             let pipeline = self.combine_pipeline.get_or_insert_with(|| {
                 utils::create_pipeline_for_graph_renderpass(
@@ -968,7 +1011,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         );
         context.inject_external_renderpass(&present_render_pass, &self.present_render_pass);
         context.inject_external_image(&swapchain_buffer, image, view);
-        self.render_graph.run(context)?;
+        self.render_graph.run(context, &mut self.runner)?;
 
         Ok(())
     }

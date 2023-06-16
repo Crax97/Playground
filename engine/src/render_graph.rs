@@ -406,7 +406,7 @@ impl<'a, 'e> GraphRunContext<'a, 'e> {
     }
 }
 
-trait RenderGraphRunner {
+pub trait RenderGraphRunner {
     fn run_graph(
         &mut self,
         context: &mut GraphRunContext,
@@ -694,9 +694,11 @@ impl RenderGraph {
         Ok(())
     }
 
-    pub fn run(&self, mut ctx: GraphRunContext) -> anyhow::Result<()> {
-        let mut runner = GpuRunner::new();
-
+    pub fn run<R: RenderGraphRunner>(
+        &self,
+        mut ctx: GraphRunContext,
+        runner: &mut R,
+    ) -> anyhow::Result<()> {
         runner.run_graph(
             &mut ctx,
             &self.cached_graph,
@@ -834,7 +836,7 @@ impl RenderGraph {
     }
 }
 
-struct GpuRunner {
+pub struct GpuRunner {
     resource_states: HashMap<ResourceId, TransitionInfo>,
     render_passes: HashMap<usize, RenderPass>,
 }
@@ -1097,8 +1099,7 @@ impl GpuRunner {
         let pass = RenderPass::new(&ctx.gpu, &description)?;
         self.render_passes.insert(id, pass);
 
-        /// TODO: enable me
-        //trace!("Created new render pass {}", pass_info.label);
+        trace!("Created new render pass {}", pass_info.label);
         Ok(&self.render_passes[&id])
     }
 
