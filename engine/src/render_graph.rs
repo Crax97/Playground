@@ -170,6 +170,10 @@ impl<
     }
 
     fn remove_unused_resources(&mut self, current_iteration: u64) {
+        if self.lifetime == 0 {
+            return;
+        }
+
         self.resources.retain(|id, res| {
             let can_live = current_iteration - res.last_frame_used < self.lifetime;
             if !can_live {
@@ -188,7 +192,7 @@ impl<
 struct ExternalResources<'a> {
     external_images: HashMap<ResourceId, &'a GpuImage>,
     external_image_views: HashMap<ResourceId, &'a GpuImageView>,
-    external_render_passes: HashMap<usize, &'a RenderPass>,
+    external_render_passes: HashMap<RenderPassHandle, &'a RenderPass>,
 }
 
 impl<'a> ExternalResources<'a> {
@@ -207,7 +211,7 @@ impl<'a> ExternalResources<'a> {
         handle: &RenderPassHandle,
         render_pass: &'a RenderPass,
     ) {
-        self.external_render_passes.insert(handle.id, render_pass);
+        self.external_render_passes.insert(*handle, render_pass);
     }
 }
 
@@ -235,7 +239,7 @@ impl CreateFrom<ImageDescription, ()> for GpuImage {
 }
 
 impl CreateFrom<ImageDescription, ()> for GpuSampler {
-    fn create(gpu: &Gpu, desc: &ImageDescription, _: &()) -> anyhow::Result<Self> {
+    fn create(gpu: &Gpu, _: &ImageDescription, _: &()) -> anyhow::Result<Self> {
         Ok(gpu
             .create_sampler(&SamplerCreateInfo {
                 s_type: StructureType::SAMPLER_CREATE_INFO,
@@ -296,6 +300,112 @@ struct RenderGraphFramebufferCreateInfo<'a> {
 struct DescriptorSetCreateInfo<'a> {
     inputs: &'a [DescriptorInfo<'a>],
 }
+impl<'a> CreateFrom<RenderPassInfo, CompiledRenderGraph> for RenderPass {
+    fn create(
+        gpu: &Gpu,
+        pass_info: &RenderPassInfo,
+        graph: &CompiledRenderGraph,
+    ) -> anyhow::Result<Self> {
+        let writes: Vec<_> = pass_info
+            .writes
+            .iter()
+            .filter_map(|id| {
+                let resource_desc = &graph.resources_used[&id];
+                match &resource_desc.ty {
+                    AllocationType::Image(image_desc)
+                    | AllocationType::ExternalImage(image_desc) => Some(image_desc),
+                }
+            })
+            .map(|image_desc| RenderPassAttachment {
+                format: image_desc.format.to_vk(),
+                samples: SampleCountFlags::TYPE_1,
+                load_op: AttachmentLoadOp::CLEAR,
+                store_op: AttachmentStoreOp::STORE,
+                stencil_load_op: AttachmentLoadOp::DONT_CARE,
+                stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                initial_layout: ImageLayout::UNDEFINED,
+                final_layout: match image_desc.format {
+                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                        if image_desc.present {
+                            ImageLayout::PRESENT_SRC_KHR
+                        } else {
+                            ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                        }
+                    }
+                    ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                },
+                blend_state: if let Some(state) = pass_info.blend_state {
+                    state
+                } else {
+                    BlendState {
+                        blend_enable: true,
+                        src_color_blend_factor: BlendFactor::ONE,
+                        dst_color_blend_factor: BlendFactor::ZERO,
+                        color_blend_op: BlendOp::ADD,
+                        src_alpha_blend_factor: BlendFactor::ONE,
+                        dst_alpha_blend_factor: BlendFactor::ZERO,
+                        alpha_blend_op: BlendOp::ADD,
+                        color_write_mask: ColorComponentFlags::RGBA,
+                    }
+                },
+            })
+            .collect();
+
+        let color_attachments: Vec<_> = writes
+            .iter()
+            .enumerate()
+            .filter(|(_, attach)| attach.format != ImageFormat::Depth.to_vk())
+            .map(|(i, _)| AttachmentReference {
+                attachment: i as _,
+                layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            })
+            .collect();
+        let depth_attachments: Vec<_> = pass_info
+            .writes
+            .iter()
+            .map(|id| &graph.resources_used[id])
+            .enumerate()
+            .filter_map(|(idx, info)| match &info.ty {
+                AllocationType::Image(info) | AllocationType::ExternalImage(info) => {
+                    if info.format == ImageFormat::Depth {
+                        Some(idx)
+                    } else {
+                        None
+                    }
+                }
+            })
+            .map(|i| AttachmentReference {
+                attachment: i as _,
+                layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            })
+            .collect();
+
+        let description = RenderPassDescription {
+            attachments: &writes,
+            subpasses: &[SubpassDescription {
+                pipeline_bind_point: PipelineBindPoint::GRAPHICS,
+                flags: SubpassDescriptionFlags::empty(),
+                input_attachments: &[],
+                color_attachments: &color_attachments,
+                resolve_attachments: &[],
+                depth_stencil_attachment: &depth_attachments,
+                preserve_attachments: &[],
+            }],
+            dependencies: &[SubpassDependency {
+                src_subpass: vk::SUBPASS_EXTERNAL,
+                dst_subpass: 0,
+                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                src_access_mask: AccessFlags::empty(),
+                dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                dependency_flags: DependencyFlags::empty(),
+            }],
+        };
+        let pass = RenderPass::new(&gpu, &description)?;
+
+        Ok(pass)
+    }
+}
 
 impl<'a> CreateFrom<RenderPassInfo, RenderGraphFramebufferCreateInfo<'a>> for GpuFramebuffer {
     fn create(
@@ -317,7 +427,7 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraphFramebufferCreateInfo<'a>> for Gp
 impl<'a> CreateFrom<RenderPassInfo, DescriptorSetCreateInfo<'a>> for GpuDescriptorSet {
     fn create(
         gpu: &Gpu,
-        info: &RenderPassInfo,
+        _: &RenderPassInfo,
         additional: &DescriptorSetCreateInfo,
     ) -> anyhow::Result<Self> {
         Ok(gpu
@@ -327,12 +437,16 @@ impl<'a> CreateFrom<RenderPassInfo, DescriptorSetCreateInfo<'a>> for GpuDescript
             .expect("Failed to create framebuffer"))
     }
 }
+
+type RenderPassAllocator = ResourceAllocator<RenderPass, RenderPassInfo, RenderPassHandle>;
+
 pub struct DefaultResourceAllocator {
     images: ResourceAllocator<GpuImage, ImageDescription, ResourceId>,
     image_views: ResourceAllocator<GpuImageView, ImageDescription, ResourceId>,
     samplers: ResourceAllocator<GpuSampler, ImageDescription, ResourceId>,
     framebuffers: ResourceAllocator<GpuFramebuffer, RenderPassInfo, FramebufferHandle>,
     descriptors: ResourceAllocator<GpuDescriptorSet, RenderPassInfo, u64>,
+    render_passes: RenderPassAllocator,
 }
 
 impl DefaultResourceAllocator {
@@ -340,9 +454,10 @@ impl DefaultResourceAllocator {
         Self {
             images: ResourceAllocator::new(2),
             image_views: ResourceAllocator::new(2),
+            framebuffers: ResourceAllocator::new(5),
+            render_passes: RenderPassAllocator::new(0),
             samplers: ResourceAllocator::new(2),
             descriptors: ResourceAllocator::new(2),
-            framebuffers: ResourceAllocator::new(5),
         }
     }
 }
@@ -352,6 +467,10 @@ impl DefaultResourceAllocator {
         self.framebuffers.remove_unused_resources(current_iteration);
         self.image_views.remove_unused_resources(current_iteration);
         self.images.remove_unused_resources(current_iteration);
+        self.samplers.remove_unused_resources(current_iteration);
+        self.descriptors.remove_unused_resources(current_iteration);
+        self.render_passes
+            .remove_unused_resources(current_iteration);
     }
 }
 pub struct GraphRunContext<'a, 'e> {
@@ -472,7 +591,7 @@ pub struct ResourceInfo {
 }
 
 pub struct RenderGraph {
-    passes: Vec<RenderPassInfo>,
+    passes: HashMap<RenderPassHandle, RenderPassInfo>,
     allocations: HashMap<ResourceId, ResourceInfo>,
     persistent_resources: HashSet<ResourceId>,
     resource_allocator: RefCell<DefaultResourceAllocator>,
@@ -509,6 +628,15 @@ pub struct RenderPassInfo {
     pub extents: Extent2D,
     pub blend_state: Option<BlendState>,
     pub is_external: bool,
+}
+
+impl RenderPassInfo {
+    fn writes(&self, resource: &ResourceId) -> bool {
+        self.writes.contains(resource)
+    }
+    fn writes_any(&self, resources: &[ResourceId]) -> bool {
+        resources.iter().any(|r| self.writes(r))
+    }
 }
 
 impl Hash for RenderPassInfo {
@@ -570,7 +698,7 @@ impl<'g> RenderPassBuilder<'g> {
 pub enum GraphOperation {
     TransitionRead(Vec<ResourceId>),
     TransitionWrite(Vec<ResourceId>),
-    ExecuteRenderPass(usize),
+    ExecuteRenderPass(RenderPassHandle),
 }
 
 pub struct RenderPassContext<'p, 'g> {
@@ -585,14 +713,22 @@ pub struct EndContext<'p, 'g> {
 
 #[derive(Default, Clone)]
 pub struct CompiledRenderGraph {
-    pass_infos: Vec<RenderPassInfo>,
+    pass_infos: HashMap<RenderPassHandle, RenderPassInfo>,
+    pass_sequence: Vec<RenderPassHandle>,
     resources_used: HashMap<ResourceId, ResourceInfo>,
     graph_operations: Vec<GraphOperation>,
 }
 
+impl CompiledRenderGraph {
+    fn schedule_pass(&mut self, handle: RenderPassHandle, pass_info: RenderPassInfo) {
+        self.pass_sequence.push(handle);
+        self.pass_infos.insert(handle, pass_info.clone());
+    }
+}
+
 #[derive(Default)]
 struct Callbacks<'g> {
-    callbacks: HashMap<usize, Box<dyn FnMut(&Gpu, &mut RenderPassContext) + 'g>>,
+    callbacks: HashMap<RenderPassHandle, Box<dyn FnMut(&Gpu, &mut RenderPassContext) + 'g>>,
     end_callback: Option<Box<dyn FnMut(&Gpu, &mut EndContext) + 'g>>,
 }
 
@@ -602,7 +738,7 @@ impl<'g> Callbacks<'g> {
         handle: &RenderPassHandle,
         callback: F,
     ) {
-        self.callbacks.insert(handle.id, Box::new(callback));
+        self.callbacks.insert(*handle, Box::new(callback));
     }
     pub fn register_end_callback<F: FnMut(&Gpu, &mut EndContext) + 'g>(&mut self, callback: F) {
         self.end_callback = Some(Box::new(callback));
@@ -612,7 +748,7 @@ impl<'g> Callbacks<'g> {
 impl RenderGraph {
     pub fn new() -> Self {
         Self {
-            passes: vec![],
+            passes: Default::default(),
             allocations: HashMap::default(),
             persistent_resources: HashSet::default(),
             resource_allocator: RefCell::new(DefaultResourceAllocator::new()),
@@ -674,7 +810,7 @@ impl RenderGraph {
             id,
             label: &pass.label,
         };
-        self.passes.push(pass);
+        self.passes.insert(handle, pass);
         handle
     }
 
@@ -688,8 +824,7 @@ impl RenderGraph {
         }
         let mut compiled = CompiledRenderGraph::default();
 
-        self.prune_passes(&mut compiled);
-        self.ensure_graph_acyclic(&compiled)?;
+        self.prune_passes(&mut compiled)?;
         let merge_candidates = self.find_merge_candidates(&mut compiled);
 
         self.find_optimal_execution_order(&mut compiled, merge_candidates);
@@ -713,65 +848,60 @@ impl RenderGraph {
         )
     }
 
-    fn prune_passes(&self, compiled: &mut CompiledRenderGraph) {
-        let mut passes: Vec<_> = self.passes.iter().map(|r| r.clone()).collect();
-        let mut working_set: Vec<_> = self.persistent_resources.iter().map(|r| *r).collect();
-        let mut used_resources = working_set.clone();
-        let mut write_resources: HashSet<ResourceId> = HashSet::default();
+    fn prune_passes(&self, compiled: &mut CompiledRenderGraph) -> GraphResult<()> {
+        let mut render_passes = self.passes.clone();
+
+        let mut working_set: Vec<_> = self.persistent_resources.iter().cloned().collect();
+
         while !working_set.is_empty() {
-            let mut remove = None;
-
-            for (index, pass) in passes.iter().enumerate().rev() {
-                let mut found = false;
-                for target in &used_resources {
-                    if pass.writes.contains(target) {
-                        compiled.pass_infos.push(pass.clone());
-                        remove = Some(index);
-                        working_set = pass.reads.clone();
-                        used_resources.extend(&pass.reads.clone());
-                        write_resources.extend(&pass.writes.clone());
-                        found = true;
-                        break;
+            // Find a render pass that writes to any of the resources in the working set
+            let writing_passes: Vec<_> = render_passes
+                .iter()
+                .filter_map(|(h, p)| {
+                    if p.writes_any(&working_set) {
+                        Some(*h)
+                    } else {
+                        None
                     }
-                }
-                if found {
-                    break;
-                }
-            }
-            if let Some(index) = remove {
-                passes.remove(index);
-            }
-        }
+                })
+                .collect();
 
-        for used_resource in used_resources {
-            compiled
-                .resources_used
-                .insert(used_resource, self.allocations[&used_resource].clone());
-        }
-        for used_resource in write_resources {
-            compiled
-                .resources_used
-                .insert(used_resource, self.allocations[&used_resource].clone());
-        }
+            // If there's more than one pass that writes to any of the working set, the graph
+            // is not acyclic: refuse it
+            if writing_passes.len() > 1 {
+                return Err(CompileError::CyclicGraph);
+            }
 
-        compiled.pass_infos.reverse();
+            // If we found a pass that writes to the working set
+            // update the pass's reads with the working set
+            if let Some(handle) = writing_passes.first() {
+                let writing_pass = render_passes.remove(&handle).unwrap();
+
+                working_set = writing_pass.reads.iter().cloned().collect();
+
+                compiled.schedule_pass(*handle, writing_pass.clone());
+
+                // 3. Record all the resources used by the pass
+                for read in writing_pass.reads {
+                    compiled
+                        .resources_used
+                        .insert(read, self.allocations[&read]);
+                }
+                for write in writing_pass.writes {
+                    compiled
+                        .resources_used
+                        .insert(write, self.allocations[&write]);
+                }
+            } else {
+                working_set.clear();
+            }
+        }
+        compiled.pass_sequence.reverse();
+        Ok(())
     }
 
     fn render_pass_is_defined_already(&self, label: &str) -> bool {
-        self.passes.iter().find(|p| p.label == label).is_some()
-    }
-
-    fn ensure_graph_acyclic(&self, compiled: &CompiledRenderGraph) -> GraphResult<()> {
-        let mut written_resources: HashSet<ResourceId> = Default::default();
-        for pass in &compiled.pass_infos {
-            for res in &pass.writes {
-                if written_resources.contains(res) {
-                    return Err(CompileError::CyclicGraph);
-                }
-                written_resources.insert(*res);
-            }
-        }
-        Ok(())
+        self.passes.values().find(|p| p.label == label).is_some()
     }
 
     fn find_merge_candidates(&self, compiled: &mut CompiledRenderGraph) -> Vec<Vec<usize>> {
@@ -779,11 +909,11 @@ impl RenderGraph {
 
         let mut merge_candidates = vec![];
 
-        while let Some((pass_i, pass)) = passes.pop() {
+        while let Some((pass_i, (_, pass))) = passes.pop() {
             let matching_passes: Vec<_> = passes
                 .iter()
                 .enumerate()
-                .filter(|(_, (_, p))| p.reads.iter().any(|read| pass.reads.contains(read)))
+                .filter(|(_, (_, (_, p)))| p.reads.iter().any(|read| pass.reads.contains(read)))
                 .map(|(i, _)| i)
                 .collect();
 
@@ -807,7 +937,8 @@ impl RenderGraph {
         _merge_candidates: Vec<Vec<usize>>,
     ) {
         // TODO: Upgrade to merge candidates
-        for (i, pass) in compiled.pass_infos.iter().enumerate() {
+        for handle in compiled.pass_sequence.iter() {
+            let pass = compiled.pass_infos[handle].clone();
             compiled
                 .graph_operations
                 .push(GraphOperation::TransitionRead(pass.reads.clone()));
@@ -816,7 +947,7 @@ impl RenderGraph {
                 .push(GraphOperation::TransitionWrite(pass.writes.clone()));
             compiled
                 .graph_operations
-                .push(GraphOperation::ExecuteRenderPass(i));
+                .push(GraphOperation::ExecuteRenderPass(*handle));
         }
     }
 
@@ -827,10 +958,10 @@ impl RenderGraph {
 
     pub fn get_renderpass_info(
         &self,
-        handle: RenderPassHandle,
+        handle: &RenderPassHandle,
     ) -> Result<RenderPassInfo, CompileError> {
         self.passes
-            .get(handle.id)
+            .get(handle)
             .cloned()
             .ok_or(CompileError::RenderPassNotFound(handle.clone()))
     }
@@ -845,13 +976,11 @@ impl RenderGraph {
 
 pub struct GpuRunner {
     resource_states: HashMap<ResourceId, TransitionInfo>,
-    render_passes: HashMap<usize, RenderPass>,
 }
 impl GpuRunner {
     pub fn new() -> Self {
         Self {
             resource_states: Default::default(),
-            render_passes: Default::default(),
         }
     }
 
@@ -1005,119 +1134,11 @@ impl GpuRunner {
         }
     }
 
-    fn create_render_pass(
-        &mut self,
-        ctx: &GraphRunContext,
-        graph: &CompiledRenderGraph,
-        pass_info: &RenderPassInfo,
-        id: usize,
-    ) -> Result<&RenderPass, anyhow::Error> {
-        let writes: Vec<_> = pass_info
-            .writes
-            .iter()
-            .filter_map(|id| {
-                let resource_desc = &graph.resources_used[&id];
-                match &resource_desc.ty {
-                    AllocationType::Image(image_desc)
-                    | AllocationType::ExternalImage(image_desc) => Some(image_desc),
-                }
-            })
-            .map(|image_desc| RenderPassAttachment {
-                format: image_desc.format.to_vk(),
-                samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::CLEAR,
-                store_op: AttachmentStoreOp::STORE,
-                stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: ImageLayout::UNDEFINED,
-                final_layout: match image_desc.format {
-                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
-                        if image_desc.present {
-                            ImageLayout::PRESENT_SRC_KHR
-                        } else {
-                            ImageLayout::COLOR_ATTACHMENT_OPTIMAL
-                        }
-                    }
-                    ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                },
-                blend_state: if let Some(state) = pass_info.blend_state {
-                    state
-                } else {
-                    BlendState {
-                        blend_enable: true,
-                        src_color_blend_factor: BlendFactor::ONE,
-                        dst_color_blend_factor: BlendFactor::ZERO,
-                        color_blend_op: BlendOp::ADD,
-                        src_alpha_blend_factor: BlendFactor::ONE,
-                        dst_alpha_blend_factor: BlendFactor::ZERO,
-                        alpha_blend_op: BlendOp::ADD,
-                        color_write_mask: ColorComponentFlags::RGBA,
-                    }
-                },
-            })
-            .collect();
-
-        let color_attachments: Vec<_> = writes
-            .iter()
-            .enumerate()
-            .filter(|(_, attach)| attach.format != ImageFormat::Depth.to_vk())
-            .map(|(i, _)| AttachmentReference {
-                attachment: i as _,
-                layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            })
-            .collect();
-        let depth_attachments: Vec<_> = pass_info
-            .writes
-            .iter()
-            .map(|id| &graph.resources_used[id])
-            .enumerate()
-            .filter_map(|(idx, info)| match &info.ty {
-                AllocationType::Image(info) | AllocationType::ExternalImage(info) => {
-                    if info.format == ImageFormat::Depth {
-                        Some(idx)
-                    } else {
-                        None
-                    }
-                }
-            })
-            .map(|i| AttachmentReference {
-                attachment: i as _,
-                layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            })
-            .collect();
-
-        let description = RenderPassDescription {
-            attachments: &writes,
-            subpasses: &[SubpassDescription {
-                pipeline_bind_point: PipelineBindPoint::GRAPHICS,
-                flags: SubpassDescriptionFlags::empty(),
-                input_attachments: &[],
-                color_attachments: &color_attachments,
-                resolve_attachments: &[],
-                depth_stencil_attachment: &depth_attachments,
-                preserve_attachments: &[],
-            }],
-            dependencies: &[SubpassDependency {
-                src_subpass: vk::SUBPASS_EXTERNAL,
-                dst_subpass: 0,
-                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                src_access_mask: AccessFlags::empty(),
-                dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                dependency_flags: DependencyFlags::empty(),
-            }],
-        };
-        let pass = RenderPass::new(&ctx.gpu, &description)?;
-        self.render_passes.insert(id, pass);
-
-        trace!("Created new render pass {}", pass_info.label);
-        Ok(&self.render_passes[&id])
-    }
-
     fn get_renderpass<'e, 'a>(
         &'a self,
-        id: usize,
+        id: &RenderPassHandle,
         external_resources: &ExternalResources<'e>,
+        pass_allocator: &'e RenderPassAllocator,
     ) -> &'e RenderPass
     where
         'a: 'e,
@@ -1125,19 +1146,18 @@ impl GpuRunner {
         if external_resources.external_render_passes.contains_key(&id) {
             return &external_resources.external_render_passes[&id];
         }
-        self.render_passes
-            .get(&id)
-            .expect(&format!("Failed to find renderpass with id {}", id))
+        pass_allocator.get_unchecked(id)
     }
 
     fn ensure_render_pass_exists(
         &mut self,
         ctx: &GraphRunContext,
-        rp: &usize,
+        rp: &RenderPassHandle,
+        pass_allocator: &mut RenderPassAllocator,
         graph: &CompiledRenderGraph,
     ) -> Result<(), anyhow::Error> {
         {
-            let pass_info = &graph.pass_infos[*rp];
+            let pass_info = &graph.pass_infos[rp];
             if pass_info.is_external {
                 if !ctx
                     .external_resources
@@ -1149,8 +1169,8 @@ impl GpuRunner {
                         pass_info.label
                     );
                 }
-            } else if !self.render_passes.contains_key(rp) {
-                self.create_render_pass(ctx, graph, pass_info, *rp)?;
+            } else {
+                pass_allocator.ensure_resource_exists(ctx.gpu, pass_info, rp, graph)?;
             };
         }
         Ok(())
@@ -1197,8 +1217,13 @@ impl RenderGraphRunner for GpuRunner {
                     }
                 }
                 GraphOperation::ExecuteRenderPass(rp) => {
-                    self.ensure_render_pass_exists(ctx, rp, graph)?;
-                    let info = &graph.pass_infos[*rp];
+                    self.ensure_render_pass_exists(
+                        ctx,
+                        rp,
+                        &mut resource_allocator.render_passes,
+                        graph,
+                    )?;
+                    let info = &graph.pass_infos[rp];
 
                     ensure_graph_allocated_image_views_exist(ctx, info, graph, resource_allocator)?;
                     ensure_graph_allocated_samplers_exists(ctx, info, graph, resource_allocator)?;
@@ -1211,7 +1236,6 @@ impl RenderGraphRunner for GpuRunner {
                     let read_descriptor_set = resolve_input_descriptor_set(
                         ctx,
                         info,
-                        graph,
                         &resource_allocator.image_views,
                         &resource_allocator.samplers,
                         &mut resource_allocator.descriptors,
@@ -1219,7 +1243,11 @@ impl RenderGraphRunner for GpuRunner {
 
                     let framebuffer_hash = compute_framebuffer_hash(info, &views);
 
-                    let pass = self.get_renderpass(*rp, &ctx.external_resources);
+                    let pass = self.get_renderpass(
+                        rp,
+                        &ctx.external_resources,
+                        &resource_allocator.render_passes,
+                    );
                     let framebuffer = resource_allocator.framebuffers.get(
                         ctx,
                         &info.clone(),
@@ -1407,7 +1435,6 @@ where
 fn resolve_input_descriptor_set<'e, 'a, 'd>(
     ctx: &GraphRunContext,
     info: &RenderPassInfo,
-    graph: &CompiledRenderGraph,
     image_view_allocator: &'a ResourceAllocator<GpuImageView, ImageDescription, ResourceId>,
     sampler_allocator: &'a ResourceAllocator<GpuSampler, ImageDescription, ResourceId>,
     descriptor_view_allocator: &'a mut ResourceAllocator<GpuDescriptorSet, RenderPassInfo, u64>,
@@ -1537,7 +1564,7 @@ mod test {
         let normal_component = alloc("normal", &mut render_graph);
         let output_image = alloc("output", &mut render_graph);
 
-        let _ = render_graph
+        let gb = render_graph
             .begin_render_pass("gbuffer", Extent2D::default())
             .unwrap()
             .write(color_component)
@@ -1546,7 +1573,7 @@ mod test {
             .write(normal_component)
             .commit();
 
-        let _ = render_graph
+        let cm = render_graph
             .begin_render_pass("compose_gbuffer", Extent2D::default())
             .unwrap()
             .read(color_component)
@@ -1559,16 +1586,19 @@ mod test {
         // We need the color component: this will let the 'gbuffer' render pass live
         render_graph.persist_resource(&output_image);
 
-        assert_eq!(render_graph.passes[0].label, "gbuffer");
-        assert_eq!(render_graph.passes[1].label, "compose_gbuffer");
+        assert_eq!(render_graph.passes[&gb].label, "gbuffer");
+        assert_eq!(render_graph.passes[&cm].label, "compose_gbuffer");
         render_graph.compile().unwrap();
 
         assert_eq!(render_graph.cached_graph.pass_infos.len(), 2);
-        assert_eq!(render_graph.cached_graph.pass_infos[0].label, "gbuffer");
+        assert_eq!(render_graph.cached_graph.pass_infos[&gb].label, "gbuffer");
         assert_eq!(
-            render_graph.cached_graph.pass_infos[1].label,
+            render_graph.cached_graph.pass_infos[&cm].label,
             "compose_gbuffer"
         );
+
+        assert_eq!(render_graph.cached_graph.pass_sequence[0], gb);
+        assert_eq!(render_graph.cached_graph.pass_sequence[1], cm);
     }
 
     #[test]
@@ -1582,7 +1612,7 @@ mod test {
         let output_image = alloc("output", &mut render_graph);
         let unused = alloc("unused", &mut render_graph);
 
-        let _ = render_graph
+        let gb = render_graph
             .begin_render_pass("gbuffer", Extent2D::default())
             .unwrap()
             .write(color_component)
@@ -1591,7 +1621,7 @@ mod test {
             .write(normal_component)
             .commit();
 
-        let _ = render_graph
+        let cm = render_graph
             .begin_render_pass("compose_gbuffer", Extent2D::default())
             .unwrap()
             .read(color_component)
@@ -1613,16 +1643,16 @@ mod test {
 
         render_graph.persist_resource(&output_image);
 
-        assert_eq!(render_graph.passes[0].label, "gbuffer");
-        assert_eq!(render_graph.passes[1].label, "compose_gbuffer");
+        assert_eq!(render_graph.passes[&gb].label, "gbuffer");
+        assert_eq!(render_graph.passes[&cm].label, "compose_gbuffer");
         render_graph.compile().unwrap();
 
         // We need the color component: this will let the 'gbuffer' render pass live
 
         assert_eq!(render_graph.cached_graph.pass_infos.len(), 2);
-        assert_eq!(render_graph.cached_graph.pass_infos[0].label, "gbuffer");
+        assert_eq!(render_graph.cached_graph.pass_infos[&gb].label, "gbuffer");
         assert_eq!(
-            render_graph.cached_graph.pass_infos[1].label,
+            render_graph.cached_graph.pass_infos[&cm].label,
             "compose_gbuffer"
         );
     }
@@ -1656,8 +1686,8 @@ mod test {
             let _ = render_graph
                 .begin_render_pass("p3", Extent2D::default())
                 .unwrap()
-                .reads(&[r3])
-                .writes(&[r1, r2])
+                .reads(&[r1, r2])
+                .writes(&[r3])
                 .commit();
 
             render_graph.persist_resource(&r3);
@@ -1759,16 +1789,16 @@ mod test {
         for pass in &render_graph.cached_graph.pass_infos {
             println!("{:?}", pass);
         }
-        assert_eq!(render_graph.cached_graph.pass_infos.len(), 4);
-        assert_eq!(render_graph.cached_graph.pass_infos[0].label, "p1");
-        assert_eq!(render_graph.cached_graph.pass_infos[1].label, "p3");
-        assert_eq!(render_graph.cached_graph.pass_infos[2].label, "p4");
-        assert_eq!(render_graph.cached_graph.pass_infos[3].label, "pb");
+        assert_eq!(render_graph.cached_graph.pass_sequence.len(), 4);
+        assert_eq!(render_graph.cached_graph.pass_sequence[0].label, "p1");
+        assert_eq!(render_graph.cached_graph.pass_sequence[1].label, "p3");
+        assert_eq!(render_graph.cached_graph.pass_sequence[2].label, "p4");
+        assert_eq!(render_graph.cached_graph.pass_sequence[3].label, "pb");
         assert!(render_graph
             .cached_graph
             .pass_infos
             .iter()
-            .find(|p| p.label == "u1")
+            .find(|(_, p)| p.label == "u1")
             .is_none());
         assert_eq!(render_graph.cached_graph.resources_used.len(), 10);
         assert!(render_graph

@@ -754,8 +754,10 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             })
             .commit();
 
-        let combine_pass_info = self.render_graph.get_renderpass_info(combine_pass)?;
-        let present_pass_info = self.render_graph.get_renderpass_info(present_render_pass)?;
+        let combine_pass_info = self.render_graph.get_renderpass_info(&combine_pass)?;
+        let present_pass_info = self
+            .render_graph
+            .get_renderpass_info(&present_render_pass)?;
         self.render_graph.compile()?;
 
         let mut context = GraphRunContext::new(
