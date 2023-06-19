@@ -32,8 +32,8 @@ use std::{collections::HashMap, mem::size_of, rc::Rc};
 use ash::{
     prelude::VkResult,
     vk::{
-        self, BufferUsageFlags, CompareOp, Extent2D, IndexType, PipelineBindPoint,
-        PipelineStageFlags, PushConstantRange, ShaderStageFlags, StencilOpState,
+        self, BufferUsageFlags, CompareOp, IndexType, PipelineBindPoint, PipelineStageFlags,
+        PushConstantRange, ShaderStageFlags, StencilOpState,
     },
 };
 use gpu::{
@@ -57,8 +57,8 @@ use crate::{
     camera::Camera,
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
-    utils::{self, FragmentState, ModuleInfo, RenderGraphPipelineDescription},
-    GpuRunner, GraphRunContext, RenderGraph, RenderingPipeline, Scene, ScenePrimitive,
+    FragmentState, GpuRunner, GraphRunContext, ModuleInfo, RenderGraph,
+    RenderGraphPipelineDescription, RenderStage, RenderingPipeline, Scene, ScenePrimitive,
 };
 
 use ash::vk::{
@@ -80,15 +80,12 @@ pub struct DeferredRenderingPipeline {
     texture_copy: GpuShaderModule,
     gbuffer_combine: GpuShaderModule,
 
-    combine_pipeline: Option<Pipeline>,
-    copy_pipeline: Option<Pipeline>,
     runner: GpuRunner,
 }
 impl DeferredRenderingPipeline {
     pub fn new(
         gpu: &Gpu,
         resource_map: Rc<ResourceMap>,
-        swapchain: &Swapchain,
 
         screen_quad: GpuShaderModule,
         gbuffer_combine: GpuShaderModule,
@@ -119,7 +116,7 @@ impl DeferredRenderingPipeline {
             }],
         })?;
 
-        let material_context = DeferredRenderingMaterialContext::new(gpu, swapchain)?;
+        let material_context = DeferredRenderingMaterialContext::new(gpu)?;
 
         let render_graph = RenderGraph::new();
 
@@ -132,8 +129,6 @@ impl DeferredRenderingPipeline {
             screen_quad,
             gbuffer_combine,
             texture_copy,
-            combine_pipeline: None,
-            copy_pipeline: None,
             runner: GpuRunner::new(),
         })
     }
@@ -141,11 +136,10 @@ impl DeferredRenderingPipeline {
 
 pub struct DeferredRenderingMaterialContext {
     render_passes: HashMap<MaterialDomain, RenderPass>,
-    swapchain_present_format: Format,
 }
 
 impl DeferredRenderingMaterialContext {
-    pub fn new(gpu: &Gpu, swapchain: &Swapchain) -> VkResult<Self> {
+    pub fn new(gpu: &Gpu) -> VkResult<Self> {
         let mut render_passes: HashMap<MaterialDomain, RenderPass> = HashMap::new();
 
         let attachments = &[
@@ -327,10 +321,7 @@ impl DeferredRenderingMaterialContext {
 
         render_passes.insert(MaterialDomain::Surface, surface_render_pass);
 
-        Ok(Self {
-            render_passes,
-            swapchain_present_format: swapchain.present_format(),
-        })
+        Ok(Self { render_passes })
     }
 
     fn create_pipeline<'a>(
@@ -740,8 +731,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let present_render_pass = self
             .render_graph
             .begin_render_pass("Present", swapchain_extents)?
-            .writes(&[swapchain_buffer])
             .reads(&[color_buffer])
+            .writes(&[swapchain_buffer])
             .with_blend_state(BlendState {
                 blend_enable: false,
                 src_color_blend_factor: BlendFactor::ONE,
@@ -754,12 +745,85 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             })
             .commit();
 
-        let combine_pass_info = self.render_graph.get_renderpass_info(&combine_pass)?;
-        let present_pass_info = self
-            .render_graph
-            .get_renderpass_info(&present_render_pass)?;
         self.render_graph.compile()?;
 
+        let combine_handle = self.render_graph.create_pipeline_for_render_pass(
+            &crate::app_state().gpu,
+            &combine_pass,
+            "CombinePipeline",
+            &RenderGraphPipelineDescription {
+                vertex_inputs: &[],
+                stage: RenderStage::Graphics {
+                    vertex: ModuleInfo {
+                        module: &self.screen_quad,
+                        entry_point: "main",
+                    },
+                    fragment: ModuleInfo {
+                        module: &self.gbuffer_combine,
+                        entry_point: "main",
+                    },
+                },
+                fragment_state: FragmentState {
+                    input_topology: gpu::PrimitiveTopology::TriangleStrip,
+                    primitive_restart: false,
+                    polygon_mode: gpu::PolygonMode::Fill,
+                    cull_mode: gpu::CullMode::None,
+                    front_face: gpu::FrontFace::ClockWise,
+                    depth_stencil_state: DepthStencilState {
+                        depth_test_enable: false,
+                        depth_write_enable: false,
+                        depth_compare_op: CompareOp::ALWAYS,
+                        stencil_test_enable: false,
+                        front: StencilOpState::default(),
+                        back: StencilOpState::default(),
+                        min_depth_bounds: 0.0,
+                        max_depth_bounds: 1.0,
+                    },
+                    logic_op: None,
+                    push_constant_ranges: &[],
+                    ..Default::default()
+                },
+            },
+        )?;
+
+        let present_handle = self.render_graph.create_pipeline_for_render_pass(
+            &app_state().gpu,
+            &present_render_pass,
+            "Present",
+            &RenderGraphPipelineDescription {
+                vertex_inputs: &[],
+                stage: RenderStage::Graphics {
+                    vertex: ModuleInfo {
+                        module: &self.screen_quad,
+                        entry_point: "main",
+                    },
+                    fragment: ModuleInfo {
+                        module: &self.texture_copy,
+                        entry_point: "main",
+                    },
+                },
+                fragment_state: FragmentState {
+                    input_topology: gpu::PrimitiveTopology::TriangleStrip,
+                    primitive_restart: false,
+                    polygon_mode: gpu::PolygonMode::Fill,
+                    cull_mode: gpu::CullMode::None,
+                    front_face: gpu::FrontFace::ClockWise,
+                    depth_stencil_state: DepthStencilState {
+                        depth_test_enable: false,
+                        depth_write_enable: false,
+                        depth_compare_op: CompareOp::ALWAYS,
+                        stencil_test_enable: false,
+                        front: StencilOpState::default(),
+                        back: StencilOpState::default(),
+                        min_depth_bounds: 0.0,
+                        max_depth_bounds: 1.0,
+                    },
+                    logic_op: None,
+                    push_constant_ranges: &[],
+                    ..Default::default()
+                },
+            },
+        )?;
         let mut context = GraphRunContext::new(
             &crate::app_state().gpu,
             &mut crate::app_state_mut().swapchain,
@@ -817,49 +881,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             }
         });
 
-        context.register_callback(&combine_pass, |gpu: &Gpu, ctx| {
-            let pipeline = self.combine_pipeline.get_or_insert_with(|| {
-                utils::create_pipeline_for_graph_renderpass(
-                    &self.render_graph,
-                    &combine_pass_info,
-                    ctx.render_pass,
-                    gpu,
-                    &RenderGraphPipelineDescription {
-                        vertex_inputs: &[],
-                        stage: utils::RenderStage::Graphics {
-                            vertex: ModuleInfo {
-                                module: &self.screen_quad,
-                                entry_point: "main",
-                            },
-                            fragment: ModuleInfo {
-                                module: &self.gbuffer_combine,
-                                entry_point: "main",
-                            },
-                        },
-                        fragment_state: FragmentState {
-                            input_topology: gpu::PrimitiveTopology::TriangleStrip,
-                            primitive_restart: false,
-                            polygon_mode: gpu::PolygonMode::Fill,
-                            cull_mode: gpu::CullMode::None,
-                            front_face: gpu::FrontFace::ClockWise,
-                            depth_stencil_state: DepthStencilState {
-                                depth_test_enable: false,
-                                depth_write_enable: false,
-                                depth_compare_op: CompareOp::ALWAYS,
-                                stencil_test_enable: false,
-                                front: StencilOpState::default(),
-                                back: StencilOpState::default(),
-                                min_depth_bounds: 0.0,
-                                max_depth_bounds: 1.0,
-                            },
-                            logic_op: None,
-                            push_constant_ranges: &[],
-                            ..Default::default()
-                        },
-                    },
-                )
-                .expect("Failed to create combine pipeline")
-            });
+        context.register_callback(&combine_pass, |_: &Gpu, ctx| {
+            let pipeline = ctx.render_graph.get_pipeline(&combine_handle).unwrap();
+
             ctx.render_pass_command.bind_pipeline(&pipeline);
             ctx.render_pass_command.bind_descriptor_sets(
                 PipelineBindPoint::GRAPHICS,
@@ -869,49 +893,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             );
             ctx.render_pass_command.draw(4, 1, 0, 0);
         });
-        context.register_callback(&present_render_pass, |gpu: &Gpu, ctx| {
-            let pipeline = self.copy_pipeline.get_or_insert_with(|| {
-                utils::create_pipeline_for_graph_renderpass(
-                    &self.render_graph,
-                    &present_pass_info,
-                    ctx.render_pass,
-                    gpu,
-                    &RenderGraphPipelineDescription {
-                        vertex_inputs: &[],
-                        stage: utils::RenderStage::Graphics {
-                            vertex: ModuleInfo {
-                                module: &self.screen_quad,
-                                entry_point: "main",
-                            },
-                            fragment: ModuleInfo {
-                                module: &self.texture_copy,
-                                entry_point: "main",
-                            },
-                        },
-                        fragment_state: FragmentState {
-                            input_topology: gpu::PrimitiveTopology::TriangleStrip,
-                            primitive_restart: false,
-                            polygon_mode: gpu::PolygonMode::Fill,
-                            cull_mode: gpu::CullMode::None,
-                            front_face: gpu::FrontFace::ClockWise,
-                            depth_stencil_state: DepthStencilState {
-                                depth_test_enable: false,
-                                depth_write_enable: false,
-                                depth_compare_op: CompareOp::ALWAYS,
-                                stencil_test_enable: false,
-                                front: StencilOpState::default(),
-                                back: StencilOpState::default(),
-                                min_depth_bounds: 0.0,
-                                max_depth_bounds: 1.0,
-                            },
-                            logic_op: None,
-                            push_constant_ranges: &[],
-                            ..Default::default()
-                        },
-                    },
-                )
-                .expect("Failed to create present pipeline")
-            });
+        context.register_callback(&present_render_pass, |_: &Gpu, ctx| {
+            let pipeline = ctx.render_graph.get_pipeline(&present_handle).unwrap();
             ctx.render_pass_command.bind_pipeline(pipeline);
             ctx.render_pass_command.bind_descriptor_sets(
                 PipelineBindPoint::GRAPHICS,

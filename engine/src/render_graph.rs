@@ -24,8 +24,15 @@ use gpu::{
     BeginRenderPassInfo, BlendState, CommandBuffer, DescriptorInfo, DescriptorSetInfo,
     FramebufferCreateInfo, Gpu, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView,
     GpuSampler, ImageCreateInfo, ImageFormat, ImageMemoryBarrier, ImageViewCreateInfo,
-    MemoryDomain, PipelineBarrierInfo, RenderPass, RenderPassAttachment, RenderPassCommand,
-    RenderPassDescription, SubpassDescription, Swapchain, ToVk, TransitionInfo,
+    MemoryDomain, Pipeline, PipelineBarrierInfo, RenderPass, RenderPassAttachment,
+    RenderPassCommand, RenderPassDescription, SubpassDescription, Swapchain, ToVk, TransitionInfo,
+};
+
+use ash::vk::PushConstantRange;
+use gpu::{
+    BindingElement, CullMode, DepthStencilAttachment, DepthStencilState, FragmentStageInfo,
+    FrontFace, GlobalBinding, GpuShaderModule, LogicOp, PipelineDescription, PolygonMode,
+    PrimitiveTopology, VertexBindingDescription, VertexStageInfo,
 };
 use log::trace;
 
@@ -62,6 +69,11 @@ pub struct RenderPassHandle {
 
 impl RenderPassHandle {}
 
+#[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct PipelineHandle {
+    label: &'static str,
+    owner: RenderPassHandle,
+}
 #[derive(Hash, PartialOrd, Ord, PartialEq, Eq, Clone, Copy, Debug)]
 struct FramebufferHandle {
     render_pass_label: &'static str,
@@ -104,11 +116,26 @@ impl<
     where
         R: CreateFrom<D, A>,
     {
-        self.ensure_resource_exists(ctx.gpu, desc, id, additional)?;
-        self.ensure_resource_hasnt_changed(ctx.gpu, desc, id, additional)?;
-        self.update_resource_access_time(id, ctx.current_iteration);
+        self.get_explicit(ctx.gpu, ctx.current_iteration, desc, id, additional)
+    }
+
+    fn get_explicit<A>(
+        &mut self,
+        gpu: &Gpu,
+        current_iteration: u64,
+        desc: &D,
+        id: &ID,
+        additional: &A,
+    ) -> anyhow::Result<&R>
+    where
+        R: CreateFrom<D, A>,
+    {
+        self.ensure_resource_exists(gpu, desc, id, additional)?;
+        self.ensure_resource_hasnt_changed(gpu, desc, id, additional)?;
+        self.update_resource_access_time(id, current_iteration);
         Ok(self.get_unchecked(id))
     }
+
     fn get_unchecked(&self, id: &ID) -> &R {
         &self.resources[id].inner
     }
@@ -529,7 +556,7 @@ pub trait RenderGraphRunner {
     fn run_graph(
         &mut self,
         context: &mut GraphRunContext,
-        graph: &CompiledRenderGraph,
+        graph: &RenderGraph,
         resource_allocator: &mut DefaultResourceAllocator,
     ) -> anyhow::Result<()>;
 }
@@ -590,6 +617,167 @@ pub struct ResourceInfo {
     pub ty: AllocationType,
 }
 
+#[derive(Hash)]
+pub struct ModuleInfo<'a> {
+    pub module: &'a GpuShaderModule,
+    pub entry_point: &'a str,
+}
+
+#[derive(Hash)]
+pub enum RenderStage<'a> {
+    Graphics {
+        vertex: ModuleInfo<'a>,
+        fragment: ModuleInfo<'a>,
+    },
+    Compute {
+        shader: ModuleInfo<'a>,
+    },
+}
+
+// This struct contains all the repetitive stuff that has mostly does not change in pipelines, so that
+// it can be ..default()ed when needed
+
+pub struct FragmentState<'a> {
+    pub input_topology: PrimitiveTopology,
+    pub primitive_restart: bool,
+    pub polygon_mode: PolygonMode,
+    pub cull_mode: CullMode,
+    pub front_face: FrontFace,
+    pub depth_stencil_state: DepthStencilState,
+    pub logic_op: Option<LogicOp>,
+    pub push_constant_ranges: &'a [PushConstantRange],
+}
+
+impl<'a> Default for FragmentState<'a> {
+    fn default() -> Self {
+        Self {
+            input_topology: Default::default(),
+            primitive_restart: false,
+            polygon_mode: PolygonMode::Fill,
+            cull_mode: CullMode::None,
+            front_face: FrontFace::ClockWise,
+            depth_stencil_state: DepthStencilState {
+                depth_test_enable: false,
+                ..Default::default()
+            },
+            logic_op: None,
+            push_constant_ranges: Default::default(),
+        }
+    }
+}
+
+pub struct RenderGraphPipelineDescription<'a> {
+    pub vertex_inputs: &'a [VertexBindingDescription<'a>],
+    pub stage: RenderStage<'a>,
+    pub fragment_state: FragmentState<'a>,
+}
+
+pub(crate) fn create_pipeline_for_graph_renderpass(
+    graph: &RenderGraph,
+    pass_info: &RenderPassInfo,
+    vk_renderpass: &RenderPass,
+    gpu: &Gpu,
+    description: &RenderGraphPipelineDescription,
+) -> anyhow::Result<Pipeline> {
+    let mut set_zero_bindings = vec![];
+    for (idx, read) in pass_info.reads.iter().enumerate() {
+        let resource = graph.get_resource_info(read)?;
+        set_zero_bindings.push(BindingElement {
+            binding_type: match resource.ty {
+                crate::AllocationType::Image(_) | crate::AllocationType::ExternalImage(_) => {
+                    gpu::BindingType::CombinedImageSampler
+                }
+            },
+            index: idx as _,
+            stage: gpu::ShaderStage::VertexFragment,
+        });
+    }
+
+    let (mut color_attachments, mut depth_stencil_attachments) = (vec![], vec![]);
+
+    for (_, write) in pass_info.writes.iter().enumerate() {
+        let resource = graph.get_resource_info(write)?;
+
+        match resource.ty {
+            crate::AllocationType::Image(desc) | crate::AllocationType::ExternalImage(desc) => {
+                let format = desc.format.to_vk();
+                let samples = match desc.samples {
+                    1 => SampleCountFlags::TYPE_1,
+                    2 => SampleCountFlags::TYPE_2,
+                    4 => SampleCountFlags::TYPE_4,
+                    8 => SampleCountFlags::TYPE_8,
+                    16 => SampleCountFlags::TYPE_16,
+                    32 => SampleCountFlags::TYPE_32,
+                    64 => SampleCountFlags::TYPE_64,
+                    _ => panic!("Invalid sample count! {}", desc.samples),
+                };
+                match &desc.format {
+                    gpu::ImageFormat::Rgba8 | gpu::ImageFormat::RgbaFloat => color_attachments
+                        .push(RenderPassAttachment {
+                            format,
+                            samples,
+                            load_op: AttachmentLoadOp::DONT_CARE,
+                            store_op: AttachmentStoreOp::STORE,
+                            stencil_load_op: AttachmentLoadOp::DONT_CARE,
+                            stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                            initial_layout: ImageLayout::UNDEFINED,
+                            final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                            blend_state: if let Some(state) = pass_info.blend_state {
+                                state
+                            } else {
+                                BlendState::default()
+                            },
+                        }),
+                    gpu::ImageFormat::Depth => {
+                        depth_stencil_attachments.push(DepthStencilAttachment {})
+                    }
+                }
+            }
+        }
+    }
+
+    let description = PipelineDescription {
+        global_bindings: &[GlobalBinding {
+            set_index: 0,
+            elements: &set_zero_bindings,
+        }],
+        vertex_inputs: &description.vertex_inputs,
+        vertex_stage: if let RenderStage::Graphics { vertex, .. } = &description.stage {
+            Some(VertexStageInfo {
+                entry_point: vertex.entry_point,
+                module: vertex.module,
+            })
+        } else {
+            None
+        },
+        fragment_stage: if let RenderStage::Graphics {
+            vertex: _,
+            fragment,
+        } = &description.stage
+        {
+            Some(FragmentStageInfo {
+                entry_point: fragment.entry_point,
+                module: fragment.module,
+                color_attachments: &color_attachments,
+                depth_stencil_attachments: &depth_stencil_attachments,
+            })
+        } else {
+            None
+        },
+
+        input_topology: description.fragment_state.input_topology,
+        primitive_restart: description.fragment_state.primitive_restart,
+        polygon_mode: description.fragment_state.polygon_mode,
+        cull_mode: description.fragment_state.cull_mode,
+        front_face: description.fragment_state.front_face,
+        depth_stencil_state: description.fragment_state.depth_stencil_state,
+        logic_op: description.fragment_state.logic_op,
+        push_constant_ranges: &description.fragment_state.push_constant_ranges,
+    };
+
+    Ok(Pipeline::new(gpu, vk_renderpass, &description)?)
+}
+
 pub struct RenderGraph {
     passes: HashMap<RenderPassHandle, RenderPassInfo>,
     allocations: HashMap<ResourceId, ResourceInfo>,
@@ -599,6 +787,8 @@ pub struct RenderGraph {
     hasher: DefaultHasher,
     cached_graph_hash: u64,
     cached_graph: CompiledRenderGraph,
+
+    render_pass_pipelines: HashMap<PipelineHandle, Pipeline>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -608,6 +798,7 @@ pub enum CompileError {
     CyclicGraph,
     RenderPassNotFound(RenderPassHandle),
     ResourceNotFound(ResourceId),
+    PipelineNotDefined(PipelineHandle),
     GraphNotCompiledYet,
 }
 
@@ -702,6 +893,7 @@ pub enum GraphOperation {
 }
 
 pub struct RenderPassContext<'p, 'g> {
+    pub render_graph: &'p RenderGraph,
     pub render_pass: &'p RenderPass,
     pub render_pass_command: RenderPassCommand<'p, 'g>,
     pub framebuffer: &'p GpuFramebuffer,
@@ -756,6 +948,8 @@ impl RenderGraph {
             hasher: DefaultHasher::default(),
             cached_graph_hash: 0,
             cached_graph: CompiledRenderGraph::default(),
+
+            render_pass_pipelines: Default::default(),
         }
     }
 
@@ -841,11 +1035,7 @@ impl RenderGraph {
         mut ctx: GraphRunContext,
         runner: &mut R,
     ) -> anyhow::Result<()> {
-        runner.run_graph(
-            &mut ctx,
-            &self.cached_graph,
-            &mut self.resource_allocator.borrow_mut(),
-        )
+        runner.run_graph(&mut ctx, &self, &mut self.resource_allocator.borrow_mut())
     }
 
     fn prune_passes(&self, compiled: &mut CompiledRenderGraph) -> GraphResult<()> {
@@ -971,6 +1161,53 @@ impl RenderGraph {
             .get(resource)
             .cloned()
             .ok_or(CompileError::ResourceNotFound(resource.clone()))
+    }
+
+    pub(crate) fn get_pipeline(&self, pipeline_handle: &PipelineHandle) -> GraphResult<&Pipeline> {
+        self.render_pass_pipelines
+            .get(pipeline_handle)
+            .ok_or(CompileError::PipelineNotDefined(*pipeline_handle))
+    }
+
+    pub(crate) fn create_pipeline_for_render_pass(
+        &mut self,
+        gpu: &Gpu,
+        pass_handle: &RenderPassHandle,
+        pipeline_label: &'static str,
+        pipeline_description: &RenderGraphPipelineDescription<'_>,
+    ) -> anyhow::Result<PipelineHandle> {
+        let handle = PipelineHandle {
+            label: pipeline_label,
+            owner: *pass_handle,
+        };
+
+        if !self.render_pass_pipelines.contains_key(&handle) {
+            let mut allocator = self.resource_allocator.borrow_mut();
+            let pass_info = &self.cached_graph.pass_infos[pass_handle];
+            let pass = allocator.render_passes.get_explicit(
+                gpu,
+                0,
+                &pass_info,
+                pass_handle,
+                &self.cached_graph,
+            )?;
+            let pipeline = create_pipeline_for_graph_renderpass(
+                self,
+                pass_info,
+                pass,
+                gpu,
+                pipeline_description,
+            )?;
+
+            trace!(
+                "Created new pipeline '{}' for render pass '{}'",
+                pipeline_label,
+                pass_handle.label
+            );
+            self.render_pass_pipelines.insert(handle, pipeline);
+        }
+
+        Ok(handle)
     }
 }
 
@@ -1181,7 +1418,7 @@ impl RenderGraphRunner for GpuRunner {
     fn run_graph(
         &mut self,
         ctx: &mut GraphRunContext,
-        graph: &CompiledRenderGraph,
+        graph: &RenderGraph,
         resource_allocator: &mut DefaultResourceAllocator,
     ) -> anyhow::Result<()> {
         self.resource_states.clear();
@@ -1193,7 +1430,7 @@ impl RenderGraphRunner for GpuRunner {
             &format!("Rendering frame {}", ctx.current_iteration),
             [0.0, 0.3, 0.0, 1.0],
         );
-        for op in &graph.graph_operations {
+        for op in &graph.cached_graph.graph_operations {
             match op {
                 GraphOperation::TransitionRead(resources) => {
                     command_buffer.insert_debug_label(
@@ -1201,8 +1438,14 @@ impl RenderGraphRunner for GpuRunner {
                         [0.0, 0.3, 0.3, 1.0],
                     );
                     for id in resources {
-                        let image = Self::get_image(ctx, graph, id, resource_allocator)?;
-                        self.transition_image_read(graph, &mut command_buffer, id, image);
+                        let image =
+                            Self::get_image(ctx, &graph.cached_graph, id, resource_allocator)?;
+                        self.transition_image_read(
+                            &graph.cached_graph,
+                            &mut command_buffer,
+                            id,
+                            image,
+                        );
                     }
                 }
                 GraphOperation::TransitionWrite(resources) => {
@@ -1212,8 +1455,14 @@ impl RenderGraphRunner for GpuRunner {
                     );
 
                     for id in resources {
-                        let image = Self::get_image(ctx, graph, id, resource_allocator)?;
-                        self.transition_image_write(graph, &mut command_buffer, id, image);
+                        let image =
+                            Self::get_image(ctx, &graph.cached_graph, id, resource_allocator)?;
+                        self.transition_image_write(
+                            &graph.cached_graph,
+                            &mut command_buffer,
+                            id,
+                            image,
+                        );
                     }
                 }
                 GraphOperation::ExecuteRenderPass(rp) => {
@@ -1221,12 +1470,22 @@ impl RenderGraphRunner for GpuRunner {
                         ctx,
                         rp,
                         &mut resource_allocator.render_passes,
-                        graph,
+                        &graph.cached_graph,
                     )?;
-                    let info = &graph.pass_infos[rp];
+                    let info = &graph.cached_graph.pass_infos[rp];
 
-                    ensure_graph_allocated_image_views_exist(ctx, info, graph, resource_allocator)?;
-                    ensure_graph_allocated_samplers_exists(ctx, info, graph, resource_allocator)?;
+                    ensure_graph_allocated_image_views_exist(
+                        ctx,
+                        info,
+                        &graph.cached_graph,
+                        resource_allocator,
+                    )?;
+                    ensure_graph_allocated_samplers_exists(
+                        ctx,
+                        info,
+                        &graph.cached_graph,
+                        resource_allocator,
+                    )?;
                     let views = resolve_image_views_unchecked(
                         info,
                         &ctx.external_resources,
@@ -1264,7 +1523,7 @@ impl RenderGraphRunner for GpuRunner {
                         .writes
                         .iter()
                         .map(|rd| {
-                            let res_info = &graph.resources_used[rd];
+                            let res_info = &graph.cached_graph.resources_used[rd];
                             match &res_info.ty {
                                 AllocationType::Image(desc)
                                 | AllocationType::ExternalImage(desc) => match desc.format {
@@ -1298,6 +1557,7 @@ impl RenderGraphRunner for GpuRunner {
                             },
                         });
                     let mut context = RenderPassContext {
+                        render_graph: graph,
                         render_pass: &pass,
                         framebuffer,
                         render_pass_command,

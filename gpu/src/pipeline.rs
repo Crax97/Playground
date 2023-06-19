@@ -78,20 +78,20 @@ impl From<&BindingElement> for DescriptorSetLayoutBinding {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InputRate {
     PerVertex,
     PerInstance,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Hash)]
 pub struct VertexAttributeDescription {
     pub location: u32,
     pub format: vk::Format,
     pub offset: u32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Hash)]
 pub struct VertexBindingDescription<'a> {
     pub binding: u32,
     pub input_rate: InputRate,
@@ -140,7 +140,7 @@ pub struct FragmentStageInfo<'a> {
     pub depth_stencil_attachments: &'a [DepthStencilAttachment],
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Hash)]
 pub enum PrimitiveTopology {
     #[default]
     TriangleList,
@@ -155,7 +155,7 @@ pub enum PolygonMode {
     Point,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Hash)]
 pub enum CullMode {
     #[default]
     Back,
@@ -164,7 +164,7 @@ pub enum CullMode {
     FrontAndBack,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Hash)]
 pub enum FrontFace {
     #[default]
     ClockWise,
@@ -183,7 +183,7 @@ pub struct DepthStencilState {
     pub max_depth_bounds: f32,
 }
 
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, Hash)]
 pub enum LogicOp {
     #[default]
     Clear,

@@ -7,8 +7,8 @@ use ash::vk::{BufferUsageFlags, PresentModeKHR};
 use gpu::{BufferCreateInfo, MemoryDomain};
 
 use engine::{
-    Camera, DeferredRenderingPipeline, ForwardRenderingPipeline, MaterialDescription,
-    MaterialDomain, Mesh, MeshCreateInfo, RenderingPipeline, Scene, ScenePrimitive, Texture,
+    Camera, DeferredRenderingPipeline, MaterialDescription, MaterialDomain, Mesh, MeshCreateInfo,
+    RenderingPipeline, Scene, ScenePrimitive, Texture,
 };
 use nalgebra::*;
 use resource_map::ResourceMap;
@@ -163,7 +163,6 @@ fn main() -> anyhow::Result<()> {
     let mut scene_renderer = DeferredRenderingPipeline::new(
         &engine::app_state().gpu,
         resource_map.clone(),
-        &engine::app_state().swapchain,
         screen_quad_module,
         gbuffer_combine_module,
         texture_copy_module,
