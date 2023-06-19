@@ -34,6 +34,7 @@ use gpu::{
     FrontFace, GlobalBinding, GpuShaderModule, LogicOp, PipelineDescription, PolygonMode,
     PrimitiveTopology, VertexBindingDescription, VertexStageInfo,
 };
+use indexmap::IndexSet;
 use log::trace;
 
 pub struct LifetimeAllocation<R, D> {
@@ -814,8 +815,8 @@ pub type GraphResult<T> = Result<T, CompileError>;
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RenderPassInfo {
     pub label: &'static str,
-    pub writes: Vec<ResourceId>,
-    pub reads: Vec<ResourceId>,
+    pub writes: IndexSet<ResourceId>,
+    pub reads: IndexSet<ResourceId>,
     pub extents: Extent2D,
     pub blend_state: Option<BlendState>,
     pub is_external: bool,
@@ -825,8 +826,8 @@ impl RenderPassInfo {
     fn writes(&self, resource: &ResourceId) -> bool {
         self.writes.contains(resource)
     }
-    fn writes_any(&self, resources: &[ResourceId]) -> bool {
-        resources.iter().any(|r| self.writes(r))
+    fn writes_any<'s, R: IntoIterator<Item = &'s ResourceId>>(&self, resources: R) -> bool {
+        resources.into_iter().any(|r| self.writes(r))
     }
 }
 
@@ -853,20 +854,27 @@ pub struct RenderPassBuilder<'g> {
 impl<'g> RenderPassBuilder<'g> {
     pub fn write(mut self, handle: ResourceId) -> Self {
         assert!(!self.pass.writes.contains(&handle));
-        self.pass.writes.push(handle);
+        self.pass.writes.insert(handle);
         self
     }
     pub fn writes(mut self, handles: &[ResourceId]) -> Self {
-        self.pass.writes.append(&mut handles.to_owned());
+        for handle in handles {
+            assert!(!self.pass.writes.contains(handle));
+        }
+
+        self.pass.writes.extend(handles.into_iter());
         self
     }
     pub fn read(mut self, handle: ResourceId) -> Self {
         assert!(!self.pass.reads.contains(&handle));
-        self.pass.reads.push(handle);
+        self.pass.reads.insert(handle);
         self
     }
     pub fn reads(mut self, handles: &[ResourceId]) -> Self {
-        self.pass.reads.append(&mut handles.to_owned());
+        for handle in handles {
+            assert!(!self.pass.writes.contains(handle));
+        }
+        self.pass.reads.extend(handles.into_iter());
         self
     }
 
@@ -887,8 +895,8 @@ impl<'g> RenderPassBuilder<'g> {
 
 #[derive(Clone, Debug)]
 pub enum GraphOperation {
-    TransitionRead(Vec<ResourceId>),
-    TransitionWrite(Vec<ResourceId>),
+    TransitionRead(IndexSet<ResourceId>),
+    TransitionWrite(IndexSet<ResourceId>),
     ExecuteRenderPass(RenderPassHandle),
 }
 
@@ -1041,14 +1049,14 @@ impl RenderGraph {
     fn prune_passes(&self, compiled: &mut CompiledRenderGraph) -> GraphResult<()> {
         let mut render_passes = self.passes.clone();
 
-        let mut working_set: Vec<_> = self.persistent_resources.iter().cloned().collect();
+        let mut working_set: HashSet<_> = self.persistent_resources.iter().cloned().collect();
 
         while !working_set.is_empty() {
             // Find a render pass that writes to any of the resources in the working set
             let writing_passes: Vec<_> = render_passes
                 .iter()
                 .filter_map(|(h, p)| {
-                    if p.writes_any(&working_set) {
+                    if p.writes_any(working_set.iter()) {
                         Some(*h)
                     } else {
                         None

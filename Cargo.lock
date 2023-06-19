@@ -392,6 +392,7 @@ dependencies = [
  "env_logger",
  "gpu",
  "image",
+ "indexmap",
  "log",
  "memoffset 0.8.0",
  "nalgebra",
