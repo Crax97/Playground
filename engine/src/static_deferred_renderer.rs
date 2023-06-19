@@ -716,8 +716,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             })
             .commit();
 
-        self.render_graph.compile()?;
-
         let combine_handle = self.render_graph.create_pipeline_for_render_pass(
             &crate::app_state().gpu,
             &combine_pass,
@@ -795,6 +793,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 },
             },
         )?;
+
+        self.render_graph.compile()?;
+
         let mut context = GraphRunContext::new(
             &crate::app_state().gpu,
             &mut crate::app_state_mut().swapchain,
