@@ -731,7 +731,7 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
     description: &RenderGraphPipelineDescription,
 ) -> anyhow::Result<Pipeline> {
     let mut set_zero_bindings = vec![];
-    for (idx, read) in pass_info.reads.iter().enumerate() {
+    for (idx, read) in pass_info.shader_reads.iter().enumerate() {
         let resource = graph.get_resource_info(read)?;
         set_zero_bindings.push(BindingElement {
             binding_type: match resource.ty {
@@ -861,13 +861,31 @@ impl std::fmt::Display for CompileError {
 
 impl Error for CompileError {}
 
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ResourceLayout {
+    #[default]
+    Unknown,
+    ShaderRead,
+    ShaderOutput,
+    AttachmentRead,
+    AttachmentWrite,
+    Present,
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ResourceUsage {
+    input: ResourceLayout,
+    output: ResourceLayout,
+}
+
 pub type GraphResult<T> = Result<T, CompileError>;
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RenderPassInfo {
     pub label: &'static str,
     pub attachment_writes: IndexSet<ResourceId>,
-    pub reads: IndexSet<ResourceId>,
+    pub shader_reads: IndexSet<ResourceId>,
     pub attachment_reads: IndexSet<ResourceId>,
+    pub resource_usages: HashMap<ResourceId, ResourceUsage>,
     pub extents: Extent2D,
     pub blend_state: Option<BlendState>,
     pub is_external: bool,
@@ -898,7 +916,7 @@ impl Hash for RenderPassInfo {
         for write in &self.attachment_writes {
             write.hash(state);
         }
-        for read in &self.reads {
+        for read in &self.shader_reads {
             read.hash(state);
         }
     }
@@ -934,15 +952,15 @@ impl<'g> RenderPassBuilder<'g> {
     }
 
     pub fn read(mut self, handle: ResourceId) -> Self {
-        assert!(!self.pass.reads.contains(&handle));
-        self.pass.reads.insert(handle);
+        assert!(!self.pass.shader_reads.contains(&handle));
+        self.pass.shader_reads.insert(handle);
         self
     }
     pub fn reads(mut self, handles: &[ResourceId]) -> Self {
         for handle in handles {
             assert!(!self.pass.attachment_writes.contains(handle));
         }
-        self.pass.reads.extend(handles.into_iter());
+        self.pass.shader_reads.extend(handles.into_iter());
         self
     }
 
@@ -1068,8 +1086,9 @@ impl RenderGraph {
             pass: RenderPassInfo {
                 label,
                 attachment_writes: Default::default(),
-                reads: Default::default(),
+                shader_reads: Default::default(),
                 attachment_reads: Default::default(),
+                resource_usages: Default::default(),
                 extents,
                 is_external: false,
                 blend_state: None,
@@ -1098,6 +1117,7 @@ impl RenderGraph {
         let mut compiled = CompiledRenderGraph::default();
 
         self.prune_passes(&mut compiled)?;
+        self.mark_resource_usages(&compiled);
         let merge_candidates = self.find_merge_candidates(&mut compiled);
 
         self.find_optimal_execution_order(&mut compiled, merge_candidates);
@@ -1147,13 +1167,13 @@ impl RenderGraph {
             if let Some(handle) = writing_passes.first() {
                 let writing_pass = render_passes.remove(&handle).unwrap();
 
-                working_set = writing_pass.reads.iter().cloned().collect();
+                working_set = writing_pass.shader_reads.iter().cloned().collect();
                 working_set.extend(writing_pass.attachment_reads.iter());
 
                 compiled.schedule_pass(*handle);
 
                 // 3. Record all the resources used by the pass
-                for read in writing_pass.reads {
+                for read in writing_pass.shader_reads {
                     compiled.resources_used.insert(read);
                 }
                 for write in writing_pass.attachment_writes {
@@ -1185,9 +1205,9 @@ impl RenderGraph {
                 .enumerate()
                 .filter(|(_, (_, p))| {
                     self.passes[*p]
-                        .reads
+                        .shader_reads
                         .iter()
-                        .any(|read| self.passes[pass].reads.contains(read))
+                        .any(|read| self.passes[pass].shader_reads.contains(read))
                 })
                 .map(|(i, _)| i)
                 .collect();
@@ -1216,7 +1236,9 @@ impl RenderGraph {
             let pass = &self.passes[handle];
             compiled
                 .graph_operations
-                .push(GraphOperation::TransitionShaderRead(pass.reads.clone()));
+                .push(GraphOperation::TransitionShaderRead(
+                    pass.shader_reads.clone(),
+                ));
             compiled
                 .graph_operations
                 .push(GraphOperation::TransitionAttachmentRead(
@@ -1304,6 +1326,53 @@ impl RenderGraph {
         }
 
         Ok(handle)
+    }
+
+    fn mark_resource_usages(&mut self, compiled: &CompiledRenderGraph) {
+        self.mark_output_resource_usages(compiled);
+        self.mark_input_resource_usages(compiled);
+    }
+
+    fn mark_output_resource_usages(&mut self, compiled: &CompiledRenderGraph) {
+        let mut resource_usages = HashMap::new();
+        for persistent in &self.persistent_resources {
+            resource_usages.insert(*persistent, ResourceLayout::Present);
+        }
+        for pass_id in compiled.pass_sequence.iter().rev() {
+            let pass_info = self.passes.get_mut(pass_id).expect("Failed to find pass");
+            for write in &pass_info.attachment_writes {
+                pass_info.resource_usages.entry(*write).or_default().output =
+                    *resource_usages.entry(*write).or_default();
+            }
+
+            for shader_read in &pass_info.shader_reads {
+                resource_usages.insert(*shader_read, ResourceLayout::ShaderRead);
+            }
+            for attachment_read in &pass_info.attachment_reads {
+                resource_usages.insert(*attachment_read, ResourceLayout::AttachmentRead);
+            }
+        }
+    }
+
+    fn mark_input_resource_usages(&mut self, compiled: &CompiledRenderGraph) {
+        let mut resource_usages = HashMap::new();
+        for persistent in &self.persistent_resources {
+            resource_usages.insert(*persistent, ResourceLayout::Present);
+        }
+        for pass_id in compiled.pass_sequence.iter() {
+            let pass_info = self.passes.get_mut(pass_id).expect("Failed to find pass");
+            for read in &pass_info.attachment_reads {
+                pass_info.resource_usages.entry(*read).or_default().output =
+                    *resource_usages.entry(*read).or_default();
+            }
+            for read in &pass_info.shader_reads {
+                pass_info.resource_usages.entry(*read).or_default().output =
+                    *resource_usages.entry(*read).or_default();
+            }
+            for write in &pass_info.attachment_writes {
+                resource_usages.insert(*write, ResourceLayout::AttachmentWrite);
+            }
+        }
     }
 }
 
@@ -1801,7 +1870,7 @@ fn ensure_graph_allocated_image_views_exist(
             resource_allocator.image_views.get(ctx, &desc, res, image)?;
         };
     }
-    for writes in &info.reads {
+    for writes in &info.shader_reads {
         let _ = if !ctx
             .external_resources
             .external_image_views
@@ -1825,7 +1894,7 @@ fn ensure_graph_allocated_samplers_exists(
     graph: &RenderGraph,
     resource_allocator: &mut DefaultResourceAllocator,
 ) -> Result<(), anyhow::Error> {
-    for writes in &info.reads {
+    for writes in &info.shader_reads {
         let _ = if !ctx
             .external_resources
             .external_image_views
@@ -1876,11 +1945,11 @@ fn resolve_input_descriptor_set<'e, 'a, 'd>(
     descriptor_view_allocator: &'a mut ResourceAllocator<GpuDescriptorSet, RenderPassInfo, u64>,
 ) -> Option<&'a GpuDescriptorSet> {
     let mut hasher = DefaultHasher::new();
-    if info.reads.is_empty() {
+    if info.shader_reads.is_empty() {
         return None;
     }
     let mut descriptors = vec![];
-    for (idx, read) in info.reads.iter().enumerate() {
+    for (idx, read) in info.shader_reads.iter().enumerate() {
         let view = if ctx
             .external_resources
             .external_image_views
@@ -1920,7 +1989,7 @@ fn resolve_input_descriptor_set<'e, 'a, 'd>(
 mod test {
     use ash::vk::Extent2D;
 
-    use crate::{CompileError, ResourceId};
+    use crate::{CompileError, ResourceId, ResourceLayout, ResourceUsage};
 
     use super::{ImageDescription, RenderGraph};
 
@@ -2159,6 +2228,32 @@ mod test {
         assert_eq!(render_graph.passes[&cm].label, "compose_gbuffer");
         render_graph.compile().unwrap();
 
+        assert_eq!(
+            render_graph.passes[&d].resource_usages[&depth_component].output,
+            ResourceLayout::AttachmentRead
+        );
+
+        assert_eq!(
+            render_graph.passes[&gb].resource_usages[&color_component].output,
+            ResourceLayout::ShaderRead
+        );
+        assert_eq!(
+            render_graph.passes[&gb].resource_usages[&position_component].output,
+            ResourceLayout::ShaderRead
+        );
+        assert_eq!(
+            render_graph.passes[&gb].resource_usages[&tangent_component].output,
+            ResourceLayout::ShaderRead
+        );
+        assert_eq!(
+            render_graph.passes[&gb].resource_usages[&normal_component].output,
+            ResourceLayout::ShaderRead
+        );
+
+        assert_eq!(
+            render_graph.passes[&cm].resource_usages[&output_image].output,
+            ResourceLayout::Present
+        );
         assert_eq!(render_graph.cached_graph.pass_sequence.len(), 3);
         assert_eq!(
             render_graph.passes[&render_graph.cached_graph.pass_sequence[0]].label,
