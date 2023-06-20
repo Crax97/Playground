@@ -329,17 +329,19 @@ struct DescriptorSetCreateInfo<'a> {
 }
 impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
     fn create(gpu: &Gpu, pass_info: &RenderPassInfo, graph: &RenderGraph) -> anyhow::Result<Self> {
-        let writes: Vec<_> = pass_info
-            .writes
-            .iter()
-            .filter_map(|id| {
-                let resource_desc = &graph.allocations[&id];
-                match &resource_desc.ty {
-                    AllocationType::Image(image_desc)
-                    | AllocationType::ExternalImage(image_desc) => Some(image_desc),
+        let mut color_attachments = vec![];
+        let mut depth_attachments = vec![];
+
+        let mut all_attachments: Vec<_> = vec![];
+        let mut index = 0;
+        for write in &pass_info.attachment_writes {
+            let image_desc = &graph.allocations[&write];
+            let image_desc = match &image_desc.ty {
+                AllocationType::Image(image_desc) | AllocationType::ExternalImage(image_desc) => {
+                    image_desc
                 }
-            })
-            .map(|image_desc| RenderPassAttachment {
+            };
+            let attachment = RenderPassAttachment {
                 format: image_desc.format.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
                 load_op: AttachmentLoadOp::CLEAR,
@@ -371,40 +373,91 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
                         color_write_mask: ColorComponentFlags::RGBA,
                     }
                 },
-            })
-            .collect();
+            };
+            all_attachments.push(attachment);
 
-        let color_attachments: Vec<_> = writes
-            .iter()
-            .enumerate()
-            .filter(|(_, attach)| attach.format != ImageFormat::Depth.to_vk())
-            .map(|(i, _)| AttachmentReference {
-                attachment: i as _,
-                layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            })
-            .collect();
-        let depth_attachments: Vec<_> = pass_info
-            .writes
-            .iter()
-            .map(|id| &graph.allocations[id])
-            .enumerate()
-            .filter_map(|(idx, info)| match &info.ty {
-                AllocationType::Image(info) | AllocationType::ExternalImage(info) => {
-                    if info.format == ImageFormat::Depth {
-                        Some(idx)
-                    } else {
-                        None
-                    }
+            match image_desc.format {
+                ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                    color_attachments.push(AttachmentReference {
+                        attachment: index as _,
+                        layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                    })
                 }
-            })
-            .map(|i| AttachmentReference {
-                attachment: i as _,
-                layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            })
-            .collect();
+                ImageFormat::Depth => depth_attachments.push(AttachmentReference {
+                    attachment: index as _,
+                    layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                }),
+            }
+            index += 1;
+        }
+        for read in &pass_info.attachment_reads {
+            let image_desc = &graph.allocations[&read];
+            let image_desc = match &image_desc.ty {
+                AllocationType::Image(image_desc) | AllocationType::ExternalImage(image_desc) => {
+                    image_desc
+                }
+            };
+            let attachment = RenderPassAttachment {
+                format: image_desc.format.to_vk(),
+                samples: SampleCountFlags::TYPE_1,
+                load_op: AttachmentLoadOp::LOAD,
+                store_op: AttachmentStoreOp::NONE,
+                stencil_load_op: AttachmentLoadOp::DONT_CARE,
+                stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                initial_layout: match image_desc.format {
+                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                        if image_desc.present {
+                            ImageLayout::PRESENT_SRC_KHR
+                        } else {
+                            ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                        }
+                    }
+                    ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                },
+                final_layout: match image_desc.format {
+                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                        if image_desc.present {
+                            ImageLayout::PRESENT_SRC_KHR
+                        } else {
+                            ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                        }
+                    }
+                    ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                },
+                blend_state: if let Some(state) = pass_info.blend_state {
+                    state
+                } else {
+                    BlendState {
+                        blend_enable: true,
+                        src_color_blend_factor: BlendFactor::ONE,
+                        dst_color_blend_factor: BlendFactor::ZERO,
+                        color_blend_op: BlendOp::ADD,
+                        src_alpha_blend_factor: BlendFactor::ONE,
+                        dst_alpha_blend_factor: BlendFactor::ZERO,
+                        alpha_blend_op: BlendOp::ADD,
+                        color_write_mask: ColorComponentFlags::RGBA,
+                    }
+                },
+            };
+            all_attachments.push(attachment);
+
+            match image_desc.format {
+                ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                    color_attachments.push(AttachmentReference {
+                        attachment: index as _,
+                        layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                    })
+                }
+                ImageFormat::Depth => depth_attachments.push(AttachmentReference {
+                    attachment: index as _,
+                    layout: ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                }),
+            }
+            index += 1;
+        }
 
         let description = RenderPassDescription {
-            attachments: &writes,
+            attachments: &all_attachments,
             subpasses: &[SubpassDescription {
                 pipeline_bind_point: PipelineBindPoint::GRAPHICS,
                 flags: SubpassDescriptionFlags::empty(),
@@ -693,7 +746,7 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
 
     let (mut color_attachments, mut depth_stencil_attachments) = (vec![], vec![]);
 
-    for (_, write) in pass_info.writes.iter().enumerate() {
+    for (_, write) in pass_info.attachment_writes.iter().enumerate() {
         let resource = graph.get_resource_info(write)?;
 
         match resource.ty {
@@ -812,8 +865,9 @@ pub type GraphResult<T> = Result<T, CompileError>;
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RenderPassInfo {
     pub label: &'static str,
-    pub writes: IndexSet<ResourceId>,
+    pub attachment_writes: IndexSet<ResourceId>,
     pub reads: IndexSet<ResourceId>,
+    pub attachment_reads: IndexSet<ResourceId>,
     pub extents: Extent2D,
     pub blend_state: Option<BlendState>,
     pub is_external: bool,
@@ -822,11 +876,17 @@ pub struct RenderPassInfo {
 }
 
 impl RenderPassInfo {
-    fn writes(&self, resource: &ResourceId) -> bool {
-        self.writes.contains(resource)
+    fn uses_as_write_attachment(&self, resource: &ResourceId) -> bool {
+        self.attachment_writes.contains(resource)
     }
-    fn writes_any<'s, R: IntoIterator<Item = &'s ResourceId>>(&self, resources: R) -> bool {
-        resources.into_iter().any(|r| self.writes(r))
+
+    fn has_any_as_write_attachment<'s, R: IntoIterator<Item = &'s ResourceId>>(
+        &self,
+        resources: R,
+    ) -> bool {
+        resources
+            .into_iter()
+            .any(|r| self.uses_as_write_attachment(r))
     }
 }
 
@@ -835,7 +895,7 @@ impl Hash for RenderPassInfo {
         self.label.hash(state);
         self.extents.hash(state);
         self.is_external.hash(state);
-        for write in &self.writes {
+        for write in &self.attachment_writes {
             write.hash(state);
         }
         for read in &self.reads {
@@ -852,18 +912,27 @@ pub struct RenderPassBuilder<'g> {
 
 impl<'g> RenderPassBuilder<'g> {
     pub fn write(mut self, handle: ResourceId) -> Self {
-        assert!(!self.pass.writes.contains(&handle));
-        self.pass.writes.insert(handle);
+        assert!(!self.pass.attachment_writes.contains(&handle));
+        self.pass.attachment_writes.insert(handle);
         self
     }
-    pub fn writes(mut self, handles: &[ResourceId]) -> Self {
+    pub fn writes_attachments(mut self, handles: &[ResourceId]) -> Self {
         for handle in handles {
-            assert!(!self.pass.writes.contains(handle));
+            assert!(!self.pass.attachment_writes.contains(handle));
         }
 
-        self.pass.writes.extend(handles.into_iter());
+        self.pass.attachment_writes.extend(handles.into_iter());
         self
     }
+    pub fn reads_attachments(mut self, handles: &[ResourceId]) -> Self {
+        for handle in handles {
+            assert!(!self.pass.attachment_reads.contains(handle));
+        }
+
+        self.pass.attachment_reads.extend(handles.into_iter());
+        self
+    }
+
     pub fn read(mut self, handle: ResourceId) -> Self {
         assert!(!self.pass.reads.contains(&handle));
         self.pass.reads.insert(handle);
@@ -871,7 +940,7 @@ impl<'g> RenderPassBuilder<'g> {
     }
     pub fn reads(mut self, handles: &[ResourceId]) -> Self {
         for handle in handles {
-            assert!(!self.pass.writes.contains(handle));
+            assert!(!self.pass.attachment_writes.contains(handle));
         }
         self.pass.reads.extend(handles.into_iter());
         self
@@ -894,8 +963,9 @@ impl<'g> RenderPassBuilder<'g> {
 
 #[derive(Clone, Debug)]
 pub enum GraphOperation {
-    TransitionRead(IndexSet<ResourceId>),
-    TransitionWrite(IndexSet<ResourceId>),
+    TransitionShaderRead(IndexSet<ResourceId>),
+    TransitionAttachmentWrite(IndexSet<ResourceId>),
+    TransitionAttachmentRead(IndexSet<ResourceId>),
     ExecuteRenderPass(RenderPassHandle),
 }
 
@@ -997,8 +1067,9 @@ impl RenderGraph {
         Ok(RenderPassBuilder {
             pass: RenderPassInfo {
                 label,
-                writes: Default::default(),
+                attachment_writes: Default::default(),
                 reads: Default::default(),
+                attachment_reads: Default::default(),
                 extents,
                 is_external: false,
                 blend_state: None,
@@ -1052,11 +1123,12 @@ impl RenderGraph {
         let mut working_set: HashSet<_> = self.persistent_resources.iter().cloned().collect();
 
         while !working_set.is_empty() {
-            // Find a render pass that writes to any of the resources in the working set
+            // Find a render pass that writes any of the attachments in the working set
+            // or reads any of the attachments in the working set
             let writing_passes: Vec<_> = render_passes
                 .iter()
                 .filter_map(|(h, p)| {
-                    if p.writes_any(working_set.iter()) {
+                    if p.has_any_as_write_attachment(working_set.iter()) {
                         Some(*h)
                     } else {
                         None
@@ -1076,6 +1148,7 @@ impl RenderGraph {
                 let writing_pass = render_passes.remove(&handle).unwrap();
 
                 working_set = writing_pass.reads.iter().cloned().collect();
+                working_set.extend(writing_pass.attachment_reads.iter());
 
                 compiled.schedule_pass(*handle);
 
@@ -1083,7 +1156,7 @@ impl RenderGraph {
                 for read in writing_pass.reads {
                     compiled.resources_used.insert(read);
                 }
-                for write in writing_pass.writes {
+                for write in writing_pass.attachment_writes {
                     compiled.resources_used.insert(write);
                 }
             } else {
@@ -1143,10 +1216,17 @@ impl RenderGraph {
             let pass = &self.passes[handle];
             compiled
                 .graph_operations
-                .push(GraphOperation::TransitionRead(pass.reads.clone()));
+                .push(GraphOperation::TransitionShaderRead(pass.reads.clone()));
             compiled
                 .graph_operations
-                .push(GraphOperation::TransitionWrite(pass.writes.clone()));
+                .push(GraphOperation::TransitionAttachmentRead(
+                    pass.attachment_reads.clone(),
+                ));
+            compiled
+                .graph_operations
+                .push(GraphOperation::TransitionAttachmentWrite(
+                    pass.attachment_writes.clone(),
+                ));
             compiled
                 .graph_operations
                 .push(GraphOperation::ExecuteRenderPass(*handle));
@@ -1256,7 +1336,7 @@ impl GpuRunner {
         }
     }
 
-    fn transition_image_read(
+    fn transition_shader_read(
         &mut self,
         graph: &RenderGraph,
         command_buffer: &mut CommandBuffer,
@@ -1317,7 +1397,72 @@ impl GpuRunner {
         }
     }
 
-    fn transition_image_write(
+    fn transition_attachment_read(
+        &mut self,
+        graph: &RenderGraph,
+        command_buffer: &mut CommandBuffer,
+        id: &ResourceId,
+        image: &GpuImage,
+    ) {
+        let resource_info = &graph.allocations[id];
+        match &resource_info.ty {
+            AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
+                let access_flag = match desc.format {
+                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                        AccessFlags::COLOR_ATTACHMENT_READ
+                    }
+                    ImageFormat::Depth => AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ,
+                };
+
+                let old_layout = self.resource_states.entry(*id).or_insert(TransitionInfo {
+                    layout: ImageLayout::UNDEFINED,
+                    access_mask: AccessFlags::empty(),
+                    stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+                });
+                let new_layout = TransitionInfo {
+                    layout: match desc.format {
+                        ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                            ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                        }
+                        ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                    },
+                    access_mask: AccessFlags::INPUT_ATTACHMENT_READ | access_flag,
+                    stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                };
+
+                let aspect_mask = match desc.format {
+                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => ImageAspectFlags::COLOR,
+                    ImageFormat::Depth => ImageAspectFlags::DEPTH,
+                };
+
+                let memory_barrier = ImageMemoryBarrier {
+                    src_access_mask: old_layout.access_mask,
+                    dst_access_mask: new_layout.access_mask,
+                    old_layout: old_layout.layout,
+                    new_layout: new_layout.layout,
+                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                    image,
+                    subresource_range: ImageSubresourceRange {
+                        aspect_mask,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    },
+                };
+                command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                    src_stage_mask: old_layout.stage_mask,
+                    dst_stage_mask: new_layout.stage_mask,
+                    dependency_flags: DependencyFlags::empty(),
+                    image_memory_barriers: &[memory_barrier],
+                    ..Default::default()
+                });
+                self.resource_states.insert(*id, new_layout);
+            }
+        }
+    }
+    fn transition_attachment_write(
         &mut self,
         graph: &RenderGraph,
         command_buffer: &mut CommandBuffer,
@@ -1448,25 +1593,35 @@ impl RenderGraphRunner for GpuRunner {
         );
         for op in &graph.cached_graph.graph_operations {
             match op {
-                GraphOperation::TransitionRead(resources) => {
+                GraphOperation::TransitionShaderRead(resources) => {
                     command_buffer.insert_debug_label(
-                        "Transitioning resources to read",
+                        "Transitioning resources to shader inputs",
                         [0.0, 0.3, 0.3, 1.0],
                     );
                     for id in resources {
                         let image = Self::get_image(ctx, &graph, id, resource_allocator)?;
-                        self.transition_image_read(&graph, &mut command_buffer, id, image);
+                        self.transition_shader_read(&graph, &mut command_buffer, id, image);
                     }
                 }
-                GraphOperation::TransitionWrite(resources) => {
+                GraphOperation::TransitionAttachmentRead(resources) => {
                     command_buffer.insert_debug_label(
-                        "Transitioning resources to write",
+                        "Transitioning resources to attachment inputs",
+                        [0.0, 0.3, 0.3, 1.0],
+                    );
+                    for id in resources {
+                        let image = Self::get_image(ctx, &graph, id, resource_allocator)?;
+                        self.transition_attachment_read(&graph, &mut command_buffer, id, image);
+                    }
+                }
+                GraphOperation::TransitionAttachmentWrite(resources) => {
+                    command_buffer.insert_debug_label(
+                        "Transitioning resources to attachment outputs",
                         [0.0, 0.3, 0.3, 1.0],
                     );
 
                     for id in resources {
                         let image = Self::get_image(ctx, &graph, id, resource_allocator)?;
-                        self.transition_image_write(&graph, &mut command_buffer, id, image);
+                        self.transition_attachment_write(&graph, &mut command_buffer, id, image);
                     }
                 }
                 GraphOperation::ExecuteRenderPass(rp) => {
@@ -1519,8 +1674,9 @@ impl RenderGraphRunner for GpuRunner {
 
                     let cb = ctx.callbacks.callbacks.get_mut(rp);
                     let clear_color_values: Vec<_> = info
-                        .writes
+                        .attachment_writes
                         .iter()
+                        .chain(info.attachment_reads.iter())
                         .map(|rd| {
                             let res_info = &graph.allocations[rd];
                             match &res_info.ty {
@@ -1617,7 +1773,7 @@ fn ensure_graph_allocated_image_views_exist(
     graph: &RenderGraph,
     resource_allocator: &mut DefaultResourceAllocator,
 ) -> Result<(), anyhow::Error> {
-    for writes in &info.writes {
+    for writes in &info.attachment_writes {
         let _ = if !ctx
             .external_resources
             .external_image_views
@@ -1630,6 +1786,19 @@ fn ensure_graph_allocated_image_views_exist(
             resource_allocator
                 .image_views
                 .get(ctx, &desc, writes, image)?;
+        };
+    }
+    for res in &info.attachment_reads {
+        let _ = if !ctx
+            .external_resources
+            .external_image_views
+            .contains_key(res)
+        {
+            let desc = match &graph.allocations[res].ty {
+                AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
+            };
+            let image = resource_allocator.images.get(ctx, &desc, res, &())?;
+            resource_allocator.image_views.get(ctx, &desc, res, image)?;
         };
     }
     for writes in &info.reads {
@@ -1680,11 +1849,19 @@ where
     'a: 'e,
 {
     let mut views = vec![];
-    for writes in &info.writes {
+    for writes in &info.attachment_writes {
         let view = if external_resources.external_image_views.contains_key(writes) {
             &external_resources.external_image_views[writes]
         } else {
             image_views_allocator.get_unchecked(writes)
+        };
+        views.push(view);
+    }
+    for reads in &info.attachment_reads {
+        let view = if external_resources.external_image_views.contains_key(reads) {
+            &external_resources.external_image_views[reads]
+        } else {
+            image_views_allocator.get_unchecked(reads)
         };
         views.push(view);
     }
@@ -1926,6 +2103,78 @@ mod test {
     }
 
     #[test]
+    pub fn survive_3() {
+        let mut render_graph = RenderGraph::new();
+
+        let depth_component = alloc("depth", &mut render_graph);
+        let color_component = alloc("color1", &mut render_graph);
+        let position_component = alloc("position", &mut render_graph);
+        let tangent_component = alloc("tangent", &mut render_graph);
+        let normal_component = alloc("normal", &mut render_graph);
+        let output_image = alloc("output", &mut render_graph);
+        let unused = alloc("unused", &mut render_graph);
+
+        let d = render_graph
+            .begin_render_pass("depth", Extent2D::default())
+            .unwrap()
+            .writes_attachments(&[depth_component])
+            .commit();
+
+        let gb = render_graph
+            .begin_render_pass("gbuffer", Extent2D::default())
+            .unwrap()
+            .writes_attachments(&[
+                color_component,
+                position_component,
+                tangent_component,
+                normal_component,
+            ])
+            .reads_attachments(&[depth_component])
+            .commit();
+
+        let cm = render_graph
+            .begin_render_pass("compose_gbuffer", Extent2D::default())
+            .unwrap()
+            .read(color_component)
+            .read(position_component)
+            .read(tangent_component)
+            .read(normal_component)
+            .write(output_image)
+            .commit();
+        // adding an empty pass that outputs to an unused buffer
+        let _ = render_graph
+            .begin_render_pass("unused", Extent2D::default())
+            .unwrap()
+            .read(color_component)
+            .read(position_component)
+            .read(tangent_component)
+            .read(normal_component)
+            .write(unused)
+            .commit();
+
+        render_graph.persist_resource(&output_image);
+
+        assert_eq!(render_graph.passes[&d].label, "depth");
+        assert_eq!(render_graph.passes[&gb].label, "gbuffer");
+        assert_eq!(render_graph.passes[&cm].label, "compose_gbuffer");
+        render_graph.compile().unwrap();
+
+        assert_eq!(render_graph.cached_graph.pass_sequence.len(), 3);
+        assert_eq!(
+            render_graph.passes[&render_graph.cached_graph.pass_sequence[0]].label,
+            "depth"
+        );
+        assert_eq!(
+            render_graph.passes[&render_graph.cached_graph.pass_sequence[1]].label,
+            "gbuffer"
+        );
+        assert_eq!(
+            render_graph.passes[&render_graph.cached_graph.pass_sequence[2]].label,
+            "compose_gbuffer"
+        );
+    }
+
+    #[test]
     // A cycle happens when a render pass writes to a resource that
     // has been written in an early pass. To avoid so, we should introduce something
     // like resource aliasing
@@ -1941,21 +2190,21 @@ mod test {
             let _ = render_graph
                 .begin_render_pass("p1", Extent2D::default())
                 .unwrap()
-                .writes(&[r1, r2])
+                .writes_attachments(&[r1, r2])
                 .commit();
 
             let _ = render_graph
                 .begin_render_pass("p2", Extent2D::default())
                 .unwrap()
                 .reads(&[r1, r2])
-                .writes(&[r3])
+                .writes_attachments(&[r3])
                 .commit();
 
             let _ = render_graph
                 .begin_render_pass("p3", Extent2D::default())
                 .unwrap()
                 .reads(&[r1, r2])
-                .writes(&[r3])
+                .writes_attachments(&[r3])
                 .commit();
 
             render_graph.persist_resource(&r3);
@@ -1973,14 +2222,14 @@ mod test {
             let _ = render_graph
                 .begin_render_pass("p1", Extent2D::default())
                 .unwrap()
-                .writes(&[r1, r2])
+                .writes_attachments(&[r1, r2])
                 .commit();
 
             let _ = render_graph
                 .begin_render_pass("p2", Extent2D::default())
                 .unwrap()
                 .reads(&[r1, r2])
-                .writes(&[r1])
+                .writes_attachments(&[r1])
                 .commit();
 
             render_graph.persist_resource(&r1);
@@ -2013,20 +2262,20 @@ mod test {
         let _ = render_graph
             .begin_render_pass("p1", Extent2D::default())
             .unwrap()
-            .writes(&[r1, r2, r3, r4])
+            .writes_attachments(&[r1, r2, r3, r4])
             .commit();
         let _ = render_graph
             .begin_render_pass("p2", Extent2D::default())
             .unwrap()
             .reads(&[r1, r3])
-            .writes(&[r5])
+            .writes_attachments(&[r5])
             .commit();
 
         let _p3 = render_graph
             .begin_render_pass("p3", Extent2D::default())
             .unwrap()
             .reads(&[r2, r4])
-            .writes(&[r6, r7, r8])
+            .writes_attachments(&[r6, r7, r8])
             .commit();
 
         // pruned
@@ -2034,21 +2283,21 @@ mod test {
             .begin_render_pass("u1", Extent2D::default())
             .unwrap()
             .reads(&[r7, r8])
-            .writes(&[ru1, ru2])
+            .writes_attachments(&[ru1, ru2])
             .commit();
 
         let _ = render_graph
             .begin_render_pass("p4", Extent2D::default())
             .unwrap()
             .reads(&[r7, r8])
-            .writes(&[r9, r10])
+            .writes_attachments(&[r9, r10])
             .commit();
 
         let _ = render_graph
             .begin_render_pass("pb", Extent2D::default())
             .unwrap()
             .reads(&[r9, r10])
-            .writes(&[rb])
+            .writes_attachments(&[rb])
             .commit();
 
         render_graph.persist_resource(&rb);

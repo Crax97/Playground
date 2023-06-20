@@ -223,14 +223,14 @@ impl DeferredRenderingMaterialContext {
             RenderPassAttachment {
                 format: ImageFormat::Depth.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::CLEAR,
-                store_op: AttachmentStoreOp::STORE,
+                load_op: AttachmentLoadOp::LOAD,
+                store_op: AttachmentStoreOp::NONE,
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: ImageLayout::UNDEFINED,
+                initial_layout: ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
                 final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                 blend_state: BlendState {
-                    blend_enable: true,
+                    blend_enable: false,
                     src_color_blend_factor: BlendFactor::ONE,
                     dst_color_blend_factor: BlendFactor::ZERO,
                     color_blend_op: BlendOp::ADD,
@@ -274,7 +274,7 @@ impl DeferredRenderingMaterialContext {
                     resolve_attachments: &[],
                     depth_stencil_attachment: &[AttachmentReference {
                         attachment: 5,
-                        layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                        layout: ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
                     }],
                     preserve_attachments: &[],
                 }],
@@ -515,7 +515,7 @@ impl DeferredRenderingMaterialContext {
             front_face: gpu::FrontFace::ClockWise,
             depth_stencil_state: DepthStencilState {
                 depth_test_enable: true,
-                depth_write_enable: true,
+                depth_write_enable: false,
                 depth_compare_op: CompareOp::LESS,
                 stencil_test_enable: false,
                 front: StencilOpState::default(),
@@ -652,17 +652,23 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         self.render_graph.persist_resource(&swapchain_buffer);
 
+        let dbuffer_pass = self
+            .render_graph
+            .begin_render_pass("EarlyZPass", swapchain_extents)?
+            .writes_attachments(&[depth_buffer])
+            .commit();
+
         let gbuffer_pass = self
             .render_graph
             .begin_render_pass("GBuffer", swapchain_extents)?
-            .writes(&[
+            .writes_attachments(&[
                 position_buffer,
                 normal_buffer,
                 diffuse_buffer,
                 emissive_buffer,
                 pbr_buffer,
-                depth_buffer,
             ])
+            .reads_attachments(&[depth_buffer])
             .mark_external()
             .with_blend_state(BlendState {
                 blend_enable: false,
@@ -679,7 +685,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let combine_pass = self
             .render_graph
             .begin_render_pass("GBufferCombine", swapchain_extents)?
-            .writes(&[color_buffer])
+            .writes_attachments(&[color_buffer])
             .reads(&[
                 position_buffer,
                 normal_buffer,
@@ -702,8 +708,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let present_render_pass = self
             .render_graph
             .begin_render_pass("Present", swapchain_extents)?
-            .reads(&[position_buffer])
-            .writes(&[swapchain_buffer])
+            .reads(&[color_buffer])
+            .writes_attachments(&[swapchain_buffer])
             .with_blend_state(BlendState {
                 blend_enable: false,
                 src_color_blend_factor: BlendFactor::ONE,
@@ -801,7 +807,56 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             &mut crate::app_state_mut().swapchain,
             crate::app_state().time().frames_since_start(),
         );
-
+        context.register_callback(&dbuffer_pass, |_: &Gpu, ctx| {
+            //for (pipeline, primitives) in pipeline_hashmap.iter() {
+            //    {
+            //        let pipeline = self.resource_map.get(pipeline);
+            //        ctx.render_pass_command.bind_descriptor_sets(
+            //            PipelineBindPoint::GRAPHICS,
+            //            &pipeline.0,
+            //            0,
+            //            &[&self.camera_buffer_descriptor_set],
+            //        );
+            //        for (idx, primitive) in primitives.iter().enumerate() {
+            //            let primitive_label = ctx.render_pass_command.begin_debug_region(
+            //                &format!("Rendering primitive {}", idx),
+            //                [0.0, 0.3, 0.4, 1.0],
+            //            );
+            //            let mesh = self.resource_map.get(&primitive.mesh);
+            //            let material = self.resource_map.get(&primitive.material);
+            //
+            //            ctx.render_pass_command.bind_pipeline(&pipeline.0);
+            //            ctx.render_pass_command.bind_descriptor_sets(
+            //                PipelineBindPoint::GRAPHICS,
+            //                &pipeline.0,
+            //                1,
+            //                &[&material.resources_descriptor_set],
+            //            );
+            //
+            //            ctx.render_pass_command.bind_index_buffer(
+            //                &mesh.index_buffer,
+            //                0,
+            //                IndexType::UINT32,
+            //            );
+            //            ctx.render_pass_command.bind_vertex_buffer(
+            //                0,
+            //                &[
+            //                    &mesh.position_component,
+            //                    &mesh.color_component,
+            //                    &mesh.normal_component,
+            //                    &mesh.tangent_component,
+            //                    &mesh.uv_component,
+            //                ],
+            //                &[0, 0, 0, 0, 0],
+            //            );
+            //            ctx.render_pass_command
+            //                .push_constant(&pipeline.0, &primitive.transform, 0);
+            //            ctx.render_pass_command.draw_indexed(6, 1, 0, 0, 0);
+            //            primitive_label.end();
+            //        }
+            //    }
+            //}
+        });
         context.register_callback(&gbuffer_pass, |_: &Gpu, ctx| {
             for (pipeline, primitives) in pipeline_hashmap.iter() {
                 {

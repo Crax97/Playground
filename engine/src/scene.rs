@@ -466,7 +466,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         let forward_pass_handle = self
             .render_graph
             .begin_render_pass("ForwardPass", swapchain_extents)?
-            .writes(&[color_buffer, depth_buffer])
+            .writes_attachments(&[color_buffer, depth_buffer])
             .mark_external()
             .commit();
 
