@@ -28,7 +28,7 @@ use crate::{
     gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     mesh::Mesh,
-    GpuRunner, GraphRunContext, RenderGraph,
+    GpuRunner, GraphRunContext, PipelineTarget, RenderGraph,
 };
 
 use ash::vk::{
@@ -229,18 +229,6 @@ impl ForwardRendererMaterialContext {
         })
     }
 
-    fn create_pipeline<'a>(
-        &self,
-        gpu: &Gpu,
-        material_description: &'a MaterialDescription<'a>,
-    ) -> VkResult<Pipeline> {
-        match material_description.domain {
-            MaterialDomain::Surface => {
-                self.create_surface_material_pipeline(gpu, material_description)
-            }
-        }
-    }
-
     fn create_surface_material_pipeline<'a>(
         &self,
         gpu: &Gpu,
@@ -391,14 +379,16 @@ impl MaterialContext for ForwardRendererMaterialContext {
         resource_map: &ResourceMap,
         material_description: MaterialDescription,
     ) -> VkResult<Material> {
-        let pipeline = self.create_pipeline(gpu, &material_description)?;
+        let pipeline = self.create_surface_material_pipeline(gpu, &material_description)?;
 
         let pipeline = resource_map.add(GpuPipeline(pipeline));
+        let mut pipelines = HashMap::new();
+        pipelines.insert(PipelineTarget::ColorAndDepth, pipeline);
 
         Material::new(
             gpu,
             resource_map,
-            pipeline,
+            pipelines,
             material_description.uniform_buffers,
             material_description.input_textures,
         )
@@ -430,13 +420,13 @@ impl RenderingPipeline for ForwardRenderingPipeline {
 
         let (image, view) = swapchain.acquire_next_image()?;
 
-        let mut pipeline_hashmap: HashMap<ResourceHandle<GpuPipeline>, Vec<ScenePrimitive>> =
+        let mut color_depth_hashmap: HashMap<ResourceHandle<GpuPipeline>, Vec<ScenePrimitive>> =
             HashMap::new();
 
         for primitive in scene.primitives.iter() {
             let material = self.resource_map.get(&primitive.material);
-            pipeline_hashmap
-                .entry(material.pipeline.clone())
+            color_depth_hashmap
+                .entry(material.pipelines[&PipelineTarget::ColorAndDepth].clone())
                 .or_default()
                 .push(primitive.clone());
         }
@@ -479,7 +469,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         );
 
         context.register_callback(&forward_pass_handle, |_: &Gpu, ctx| {
-            for (pipeline, primitives) in pipeline_hashmap.iter() {
+            for (pipeline, primitives) in color_depth_hashmap.iter() {
                 {
                     let pipeline = self.resource_map.get(pipeline);
                     ctx.render_pass_command.bind_descriptor_sets(

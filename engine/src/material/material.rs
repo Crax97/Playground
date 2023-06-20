@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use ash::{
     prelude::VkResult,
     vk::{self, ImageLayout},
@@ -9,13 +11,20 @@ use resource_map::{Resource, ResourceHandle, ResourceMap};
 
 use crate::{gpu_pipeline::GpuPipeline, texture::Texture};
 
-#[derive(PartialEq, Eq, Hash, Copy, Clone)]
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 pub enum MaterialDomain {
     Surface,
+    DepthOnly,
+}
+
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
+pub enum PipelineTarget {
+    ColorAndDepth,
+    DepthOnly,
 }
 
 pub struct Material {
-    pub pipeline: ResourceHandle<GpuPipeline>,
+    pub pipelines: HashMap<PipelineTarget, ResourceHandle<GpuPipeline>>,
     pub uniform_buffers: Vec<GpuBuffer>,
     pub textures: Vec<ResourceHandle<Texture>>,
     pub resources_descriptor_set: GpuDescriptorSet,
@@ -25,7 +34,7 @@ impl Material {
     pub fn new(
         gpu: &Gpu,
         resource_map: &ResourceMap,
-        pipeline: ResourceHandle<GpuPipeline>,
+        pipelines: HashMap<PipelineTarget, ResourceHandle<GpuPipeline>>,
         uniform_buffers: Vec<GpuBuffer>,
         textures: Vec<ResourceHandle<Texture>>,
     ) -> VkResult<Self> {
@@ -61,7 +70,7 @@ impl Material {
         })?;
 
         Ok(Self {
-            pipeline,
+            pipelines,
             uniform_buffers,
             textures,
             resources_descriptor_set,

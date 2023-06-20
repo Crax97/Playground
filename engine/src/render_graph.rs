@@ -1492,7 +1492,7 @@ impl GpuRunner {
                             ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
                                 ImageLayout::COLOR_ATTACHMENT_OPTIMAL
                             }
-                            ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                            ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
                         }
                     },
                     access_mask: AccessFlags::SHADER_READ | access_flag,
