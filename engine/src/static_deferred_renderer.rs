@@ -702,7 +702,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let present_render_pass = self
             .render_graph
             .begin_render_pass("Present", swapchain_extents)?
-            .reads(&[color_buffer])
+            .reads(&[position_buffer])
             .writes(&[swapchain_buffer])
             .with_blend_state(BlendState {
                 blend_enable: false,

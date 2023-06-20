@@ -611,6 +611,8 @@ pub enum AllocationType {
 pub struct ResourceInfo {
     pub label: &'static str,
     pub ty: AllocationType,
+
+    defined_this_frame: bool,
 }
 
 #[derive(Hash)]
@@ -966,6 +968,7 @@ impl RenderGraph {
         let allocation = ResourceInfo {
             ty: AllocationType::Image(description.clone()),
             label,
+            defined_this_frame: true,
         };
         self.allocations.insert(id, allocation);
         Ok(id)
@@ -973,9 +976,13 @@ impl RenderGraph {
 
     fn create_unique_id(&mut self, label: &'static str) -> GraphResult<ResourceId> {
         let id = ResourceId::make(label);
-        // if self.allocations.get(&id).is_some() {
-        //     return Err(CompileError::ResourceAlreadyDefined(id, label.to_owned()));
-        // }
+        if self
+            .allocations
+            .get(&id)
+            .is_some_and(|info| info.defined_this_frame)
+        {
+            return Err(CompileError::ResourceAlreadyDefined(id, label.to_owned()));
+        }
         Ok(id)
     }
 
@@ -1151,6 +1158,10 @@ impl RenderGraph {
 
         for pass in self.passes.values_mut() {
             pass.defined_this_frame = false;
+        }
+
+        for resource in self.allocations.values_mut() {
+            resource.defined_this_frame = false;
         }
     }
 
