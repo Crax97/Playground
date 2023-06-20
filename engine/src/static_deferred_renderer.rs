@@ -169,7 +169,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -190,7 +190,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -211,7 +211,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -232,7 +232,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -253,7 +253,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -367,7 +367,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -388,7 +388,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -409,7 +409,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -430,7 +430,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -451,7 +451,7 @@ impl DeferredRenderingMaterialContext {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -892,6 +892,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             })
             .commit();
 
+        self.render_graph.compile()?;
+
         let combine_handle = self.render_graph.create_pipeline_for_render_pass(
             &crate::app_state().gpu,
             &combine_pass,
@@ -969,8 +971,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 },
             },
         )?;
-
-        self.render_graph.compile()?;
 
         let mut context = GraphRunContext::new(
             &crate::app_state().gpu,

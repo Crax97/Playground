@@ -23,9 +23,9 @@ use ash::vk::{
 use gpu::{
     BeginRenderPassInfo, BlendState, CommandBuffer, DescriptorInfo, DescriptorSetInfo,
     FramebufferCreateInfo, Gpu, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView,
-    GpuSampler, ImageCreateInfo, ImageFormat, ImageMemoryBarrier, ImageViewCreateInfo,
-    MemoryDomain, Pipeline, PipelineBarrierInfo, RenderPass, RenderPassAttachment,
-    RenderPassCommand, RenderPassDescription, SubpassDescription, Swapchain, ToVk, TransitionInfo,
+    GpuSampler, ImageCreateInfo, ImageFormat, ImageViewCreateInfo, MemoryDomain, Pipeline,
+    RenderPass, RenderPassAttachment, RenderPassCommand, RenderPassDescription, SubpassDescription,
+    Swapchain, ToVk, TransitionInfo,
 };
 
 use ash::vk::PushConstantRange;
@@ -341,24 +341,42 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
                     image_desc
                 }
             };
+            let final_layout = match pass_info.resource_usages[write].output {
+                ResourceLayout::Unknown => ImageLayout::GENERAL,
+                ResourceLayout::ShaderRead => ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                ResourceLayout::AttachmentRead => match image_desc.format {
+                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => ImageLayout::READ_ONLY_OPTIMAL,
+                    ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                },
+                ResourceLayout::Present => ImageLayout::PRESENT_SRC_KHR,
+                _ => unreachable!(),
+            };
             let attachment = RenderPassAttachment {
                 format: image_desc.format.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::CLEAR,
-                store_op: AttachmentStoreOp::STORE,
+                load_op: match pass_info.resource_usages[write].input {
+                    ResourceLayout::Unknown => AttachmentLoadOp::DONT_CARE,
+
+                    _ => AttachmentLoadOp::CLEAR,
+                },
+                store_op: match pass_info.resource_usages[write].output {
+                    ResourceLayout::Unknown => AttachmentStoreOp::DONT_CARE,
+                    _ => AttachmentStoreOp::STORE,
+                },
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: ImageLayout::UNDEFINED,
-                final_layout: match image_desc.format {
-                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
-                        if image_desc.present {
-                            ImageLayout::PRESENT_SRC_KHR
-                        } else {
+                initial_layout: match pass_info.resource_usages[write].input {
+                    ResourceLayout::Unknown => ImageLayout::UNDEFINED,
+                    ResourceLayout::ShaderWrite => todo!(),
+                    ResourceLayout::AttachmentWrite => match image_desc.format {
+                        ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
                             ImageLayout::COLOR_ATTACHMENT_OPTIMAL
                         }
-                    }
-                    ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                        ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    },
+                    _ => unreachable!(),
                 },
+                final_layout,
                 blend_state: if let Some(state) = pass_info.blend_state {
                     state
                 } else {
@@ -404,25 +422,28 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
                 store_op: AttachmentStoreOp::NONE,
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: match image_desc.format {
-                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
-                        if image_desc.present {
-                            ImageLayout::PRESENT_SRC_KHR
-                        } else {
+                initial_layout: match pass_info.resource_usages[read].input {
+                    ResourceLayout::Unknown => ImageLayout::UNDEFINED,
+                    ResourceLayout::ShaderWrite => todo!(),
+                    ResourceLayout::AttachmentWrite => match image_desc.format {
+                        ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
                             ImageLayout::COLOR_ATTACHMENT_OPTIMAL
                         }
-                    }
-                    ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                        ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    },
+                    _ => unreachable!(),
                 },
-                final_layout: match image_desc.format {
-                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
-                        if image_desc.present {
-                            ImageLayout::PRESENT_SRC_KHR
-                        } else {
-                            ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                final_layout: match pass_info.resource_usages[read].output {
+                    ResourceLayout::Unknown => ImageLayout::GENERAL,
+                    ResourceLayout::ShaderRead => ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    ResourceLayout::AttachmentRead => match image_desc.format {
+                        ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                            ImageLayout::READ_ONLY_OPTIMAL
                         }
-                    }
-                    ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                        ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+                    },
+                    ResourceLayout::Present => ImageLayout::PRESENT_SRC_KHR,
+                    _ => unreachable!(),
                 },
                 blend_state: if let Some(state) = pass_info.blend_state {
                     state
@@ -866,7 +887,7 @@ pub enum ResourceLayout {
     #[default]
     Unknown,
     ShaderRead,
-    ShaderOutput,
+    ShaderWrite,
     AttachmentRead,
     AttachmentWrite,
     Present,
@@ -1329,12 +1350,33 @@ impl RenderGraph {
     }
 
     fn mark_resource_usages(&mut self, compiled: &CompiledRenderGraph) {
-        self.mark_output_resource_usages(compiled);
         self.mark_input_resource_usages(compiled);
+        self.mark_output_resource_usages(compiled);
+    }
+
+    fn mark_input_resource_usages(&mut self, compiled: &CompiledRenderGraph) {
+        let mut resource_usages = HashMap::new();
+        for pass_id in compiled.pass_sequence.iter() {
+            let pass_info = self.passes.get_mut(pass_id).expect("Failed to find pass");
+            for write in &pass_info.attachment_writes {
+                resource_usages.insert(*write, ResourceLayout::AttachmentWrite);
+            }
+            for read in &pass_info.attachment_reads {
+                pass_info.resource_usages.entry(*read).or_default().input =
+                    *resource_usages.entry(*read).or_default();
+            }
+            for read in &pass_info.shader_reads {
+                pass_info.resource_usages.entry(*read).or_default().input =
+                    *resource_usages.entry(*read).or_default();
+            }
+        }
     }
 
     fn mark_output_resource_usages(&mut self, compiled: &CompiledRenderGraph) {
         let mut resource_usages = HashMap::new();
+        for resource in &compiled.resources_used {
+            resource_usages.insert(*resource, ResourceLayout::Unknown);
+        }
         for persistent in &self.persistent_resources {
             resource_usages.insert(*persistent, ResourceLayout::Present);
         }
@@ -1350,27 +1392,6 @@ impl RenderGraph {
             }
             for attachment_read in &pass_info.attachment_reads {
                 resource_usages.insert(*attachment_read, ResourceLayout::AttachmentRead);
-            }
-        }
-    }
-
-    fn mark_input_resource_usages(&mut self, compiled: &CompiledRenderGraph) {
-        let mut resource_usages = HashMap::new();
-        for persistent in &self.persistent_resources {
-            resource_usages.insert(*persistent, ResourceLayout::Present);
-        }
-        for pass_id in compiled.pass_sequence.iter() {
-            let pass_info = self.passes.get_mut(pass_id).expect("Failed to find pass");
-            for read in &pass_info.attachment_reads {
-                pass_info.resource_usages.entry(*read).or_default().output =
-                    *resource_usages.entry(*read).or_default();
-            }
-            for read in &pass_info.shader_reads {
-                pass_info.resource_usages.entry(*read).or_default().output =
-                    *resource_usages.entry(*read).or_default();
-            }
-            for write in &pass_info.attachment_writes {
-                resource_usages.insert(*write, ResourceLayout::AttachmentWrite);
             }
         }
     }
@@ -1402,202 +1423,6 @@ impl GpuRunner {
                 AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
             };
             allocator.images.get(ctx, &desc, id, &())
-        }
-    }
-
-    fn transition_shader_read(
-        &mut self,
-        graph: &RenderGraph,
-        command_buffer: &mut CommandBuffer,
-        id: &ResourceId,
-        image: &GpuImage,
-    ) {
-        let resource_info = &graph.allocations[id];
-        match &resource_info.ty {
-            AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
-                let access_flag = match desc.format {
-                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
-                        AccessFlags::COLOR_ATTACHMENT_READ
-                    }
-                    ImageFormat::Depth => AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ,
-                };
-
-                let old_layout = self.resource_states.entry(*id).or_insert(TransitionInfo {
-                    layout: ImageLayout::UNDEFINED,
-                    access_mask: AccessFlags::empty(),
-                    stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-                });
-                let new_layout = TransitionInfo {
-                    layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                    access_mask: AccessFlags::SHADER_READ | access_flag,
-                    stage_mask: PipelineStageFlags::ALL_GRAPHICS,
-                };
-
-                let aspect_mask = match desc.format {
-                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => ImageAspectFlags::COLOR,
-                    ImageFormat::Depth => ImageAspectFlags::DEPTH,
-                };
-
-                let memory_barrier = ImageMemoryBarrier {
-                    src_access_mask: old_layout.access_mask,
-                    dst_access_mask: new_layout.access_mask,
-                    old_layout: old_layout.layout,
-                    new_layout: new_layout.layout,
-                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                    image,
-                    subresource_range: ImageSubresourceRange {
-                        aspect_mask,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1,
-                    },
-                };
-                command_buffer.pipeline_barrier(&PipelineBarrierInfo {
-                    src_stage_mask: old_layout.stage_mask,
-                    dst_stage_mask: new_layout.stage_mask,
-                    dependency_flags: DependencyFlags::empty(),
-                    image_memory_barriers: &[memory_barrier],
-                    ..Default::default()
-                });
-                self.resource_states.insert(*id, new_layout);
-            }
-        }
-    }
-
-    fn transition_attachment_read(
-        &mut self,
-        graph: &RenderGraph,
-        command_buffer: &mut CommandBuffer,
-        id: &ResourceId,
-        image: &GpuImage,
-    ) {
-        let resource_info = &graph.allocations[id];
-        match &resource_info.ty {
-            AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
-                let access_flag = match desc.format {
-                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
-                        AccessFlags::COLOR_ATTACHMENT_READ
-                    }
-                    ImageFormat::Depth => AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ,
-                };
-
-                let old_layout = self.resource_states.entry(*id).or_insert(TransitionInfo {
-                    layout: ImageLayout::UNDEFINED,
-                    access_mask: AccessFlags::empty(),
-                    stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-                });
-                let new_layout = TransitionInfo {
-                    layout: match desc.format {
-                        ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
-                            ImageLayout::COLOR_ATTACHMENT_OPTIMAL
-                        }
-                        ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                    },
-                    access_mask: AccessFlags::INPUT_ATTACHMENT_READ | access_flag,
-                    stage_mask: PipelineStageFlags::ALL_GRAPHICS,
-                };
-
-                let aspect_mask = match desc.format {
-                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => ImageAspectFlags::COLOR,
-                    ImageFormat::Depth => ImageAspectFlags::DEPTH,
-                };
-
-                let memory_barrier = ImageMemoryBarrier {
-                    src_access_mask: old_layout.access_mask,
-                    dst_access_mask: new_layout.access_mask,
-                    old_layout: old_layout.layout,
-                    new_layout: new_layout.layout,
-                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                    image,
-                    subresource_range: ImageSubresourceRange {
-                        aspect_mask,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1,
-                    },
-                };
-                command_buffer.pipeline_barrier(&PipelineBarrierInfo {
-                    src_stage_mask: old_layout.stage_mask,
-                    dst_stage_mask: new_layout.stage_mask,
-                    dependency_flags: DependencyFlags::empty(),
-                    image_memory_barriers: &[memory_barrier],
-                    ..Default::default()
-                });
-                self.resource_states.insert(*id, new_layout);
-            }
-        }
-    }
-    fn transition_attachment_write(
-        &mut self,
-        graph: &RenderGraph,
-        command_buffer: &mut CommandBuffer,
-        id: &ResourceId,
-        image: &GpuImage,
-    ) {
-        let resource_info = &graph.allocations[id];
-        match &resource_info.ty {
-            AllocationType::Image(desc) | AllocationType::ExternalImage(desc) => {
-                let access_flag = match desc.format {
-                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
-                        AccessFlags::COLOR_ATTACHMENT_WRITE
-                    }
-                    ImageFormat::Depth => AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                };
-
-                let old_layout = self.resource_states.entry(*id).or_insert(TransitionInfo {
-                    layout: ImageLayout::UNDEFINED,
-                    access_mask: AccessFlags::empty(),
-                    stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-                });
-                let new_layout = TransitionInfo {
-                    layout: if desc.present {
-                        ImageLayout::PRESENT_SRC_KHR
-                    } else {
-                        match desc.format {
-                            ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
-                                ImageLayout::COLOR_ATTACHMENT_OPTIMAL
-                            }
-                            ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                        }
-                    },
-                    access_mask: AccessFlags::SHADER_READ | access_flag,
-                    stage_mask: PipelineStageFlags::ALL_GRAPHICS,
-                };
-
-                let aspect_mask = match desc.format {
-                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => ImageAspectFlags::COLOR,
-                    ImageFormat::Depth => ImageAspectFlags::DEPTH,
-                };
-
-                let memory_barrier = ImageMemoryBarrier {
-                    src_access_mask: old_layout.access_mask,
-                    dst_access_mask: new_layout.access_mask,
-                    old_layout: old_layout.layout,
-                    new_layout: new_layout.layout,
-                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                    image,
-                    subresource_range: ImageSubresourceRange {
-                        aspect_mask,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1,
-                    },
-                };
-                command_buffer.pipeline_barrier(&PipelineBarrierInfo {
-                    src_stage_mask: old_layout.stage_mask,
-                    dst_stage_mask: new_layout.stage_mask,
-                    dependency_flags: DependencyFlags::empty(),
-                    image_memory_barriers: &[memory_barrier],
-                    ..Default::default()
-                });
-                self.resource_states.insert(*id, new_layout);
-            }
         }
     }
 
@@ -1662,37 +1487,6 @@ impl RenderGraphRunner for GpuRunner {
         );
         for op in &graph.cached_graph.graph_operations {
             match op {
-                GraphOperation::TransitionShaderRead(resources) => {
-                    command_buffer.insert_debug_label(
-                        "Transitioning resources to shader inputs",
-                        [0.0, 0.3, 0.3, 1.0],
-                    );
-                    for id in resources {
-                        let image = Self::get_image(ctx, &graph, id, resource_allocator)?;
-                        self.transition_shader_read(&graph, &mut command_buffer, id, image);
-                    }
-                }
-                GraphOperation::TransitionAttachmentRead(resources) => {
-                    command_buffer.insert_debug_label(
-                        "Transitioning resources to attachment inputs",
-                        [0.0, 0.3, 0.3, 1.0],
-                    );
-                    for id in resources {
-                        let image = Self::get_image(ctx, &graph, id, resource_allocator)?;
-                        self.transition_attachment_read(&graph, &mut command_buffer, id, image);
-                    }
-                }
-                GraphOperation::TransitionAttachmentWrite(resources) => {
-                    command_buffer.insert_debug_label(
-                        "Transitioning resources to attachment outputs",
-                        [0.0, 0.3, 0.3, 1.0],
-                    );
-
-                    for id in resources {
-                        let image = Self::get_image(ctx, &graph, id, resource_allocator)?;
-                        self.transition_attachment_write(&graph, &mut command_buffer, id, image);
-                    }
-                }
                 GraphOperation::ExecuteRenderPass(rp) => {
                     self.ensure_render_pass_exists(
                         ctx,
@@ -1792,6 +1586,10 @@ impl RenderGraphRunner for GpuRunner {
                         cb(&ctx.gpu, &mut context);
                     }
                     render_pass_label.end();
+                }
+                _ => {
+                    // In Vulkan most layout transitions can be handled through render passes.
+                    // Still, i'm keeping the various Transition* operations for debugging purposes
                 }
             }
         }
@@ -1989,7 +1787,7 @@ fn resolve_input_descriptor_set<'e, 'a, 'd>(
 mod test {
     use ash::vk::Extent2D;
 
-    use crate::{CompileError, ResourceId, ResourceLayout, ResourceUsage};
+    use crate::{CompileError, ResourceId, ResourceLayout};
 
     use super::{ImageDescription, RenderGraph};
 
