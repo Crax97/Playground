@@ -341,7 +341,10 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
                     image_desc
                 }
             };
-            let final_layout = match pass_info.resource_usages[write].output {
+
+            let resource_usage = pass_info.resource_usage(write);
+
+            let final_layout = match resource_usage.output {
                 ResourceLayout::Unknown => ImageLayout::GENERAL,
                 ResourceLayout::ShaderRead => ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 ResourceLayout::AttachmentRead => match image_desc.format {
@@ -354,18 +357,18 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
             let attachment = RenderPassAttachment {
                 format: image_desc.format.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
-                load_op: match pass_info.resource_usages[write].input {
+                load_op: match resource_usage.input {
                     ResourceLayout::Unknown => AttachmentLoadOp::DONT_CARE,
 
                     _ => AttachmentLoadOp::CLEAR,
                 },
-                store_op: match pass_info.resource_usages[write].output {
+                store_op: match resource_usage.output {
                     ResourceLayout::Unknown => AttachmentStoreOp::DONT_CARE,
                     _ => AttachmentStoreOp::STORE,
                 },
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: match pass_info.resource_usages[write].input {
+                initial_layout: match resource_usage.input {
                     ResourceLayout::Unknown => ImageLayout::UNDEFINED,
                     ResourceLayout::ShaderWrite => todo!(),
                     ResourceLayout::AttachmentWrite => match image_desc.format {
@@ -415,6 +418,7 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
                     image_desc
                 }
             };
+            let resource_usage = pass_info.resource_usage(read);
             let attachment = RenderPassAttachment {
                 format: image_desc.format.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
@@ -422,7 +426,7 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
                 store_op: AttachmentStoreOp::NONE,
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: match pass_info.resource_usages[read].input {
+                initial_layout: match resource_usage.input {
                     ResourceLayout::Unknown => ImageLayout::UNDEFINED,
                     ResourceLayout::ShaderWrite => todo!(),
                     ResourceLayout::AttachmentWrite => match image_desc.format {
@@ -433,7 +437,7 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
                     },
                     _ => unreachable!(),
                 },
-                final_layout: match pass_info.resource_usages[read].output {
+                final_layout: match resource_usage.output {
                     ResourceLayout::Unknown => ImageLayout::GENERAL,
                     ResourceLayout::ShaderRead => ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                     ResourceLayout::AttachmentRead => match image_desc.format {
@@ -927,6 +931,16 @@ impl RenderPassInfo {
             .into_iter()
             .any(|r| self.uses_as_write_attachment(r))
     }
+
+    fn resource_usage(&self, resource: &ResourceId) -> ResourceUsage {
+        *self
+            .resource_usages
+            .get(resource)
+            .unwrap_or(&ResourceUsage {
+                input: ResourceLayout::Unknown,
+                output: ResourceLayout::Unknown,
+            })
+    }
 }
 
 impl Hash for RenderPassInfo {
@@ -1374,9 +1388,6 @@ impl RenderGraph {
 
     fn mark_output_resource_usages(&mut self, compiled: &CompiledRenderGraph) {
         let mut resource_usages = HashMap::new();
-        for resource in &compiled.resources_used {
-            resource_usages.insert(*resource, ResourceLayout::Unknown);
-        }
         for persistent in &self.persistent_resources {
             resource_usages.insert(*persistent, ResourceLayout::Present);
         }
