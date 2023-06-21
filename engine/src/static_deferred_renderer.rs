@@ -856,7 +856,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .render_graph
             .begin_render_pass("GBufferCombine", swapchain_extents)?
             .writes_attachments(&[color_buffer])
-            .reads(&[
+            .shader_reads(&[
                 position_buffer,
                 normal_buffer,
                 diffuse_buffer,
@@ -878,7 +878,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let present_render_pass = self
             .render_graph
             .begin_render_pass("Present", swapchain_extents)?
-            .reads(&[color_buffer])
+            .shader_reads(&[color_buffer])
             .writes_attachments(&[swapchain_buffer])
             .with_blend_state(BlendState {
                 blend_enable: false,

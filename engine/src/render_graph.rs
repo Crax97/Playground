@@ -991,7 +991,7 @@ impl<'g> RenderPassBuilder<'g> {
         self.pass.shader_reads.insert(handle);
         self
     }
-    pub fn reads(mut self, handles: &[ResourceId]) -> Self {
+    pub fn shader_reads(mut self, handles: &[ResourceId]) -> Self {
         for handle in handles {
             assert!(!self.pass.attachment_writes.contains(handle));
         }
@@ -2100,14 +2100,14 @@ mod test {
             let _ = render_graph
                 .begin_render_pass("p2", Extent2D::default())
                 .unwrap()
-                .reads(&[r1, r2])
+                .shader_reads(&[r1, r2])
                 .writes_attachments(&[r3])
                 .commit();
 
             let _ = render_graph
                 .begin_render_pass("p3", Extent2D::default())
                 .unwrap()
-                .reads(&[r1, r2])
+                .shader_reads(&[r1, r2])
                 .writes_attachments(&[r3])
                 .commit();
 
@@ -2132,7 +2132,7 @@ mod test {
             let _ = render_graph
                 .begin_render_pass("p2", Extent2D::default())
                 .unwrap()
-                .reads(&[r1, r2])
+                .shader_reads(&[r1, r2])
                 .writes_attachments(&[r1])
                 .commit();
 
@@ -2171,14 +2171,14 @@ mod test {
         let _ = render_graph
             .begin_render_pass("p2", Extent2D::default())
             .unwrap()
-            .reads(&[r1, r3])
+            .shader_reads(&[r1, r3])
             .writes_attachments(&[r5])
             .commit();
 
         let _p3 = render_graph
             .begin_render_pass("p3", Extent2D::default())
             .unwrap()
-            .reads(&[r2, r4])
+            .shader_reads(&[r2, r4])
             .writes_attachments(&[r6, r7, r8])
             .commit();
 
@@ -2186,21 +2186,21 @@ mod test {
         let _ = render_graph
             .begin_render_pass("u1", Extent2D::default())
             .unwrap()
-            .reads(&[r7, r8])
+            .shader_reads(&[r7, r8])
             .writes_attachments(&[ru1, ru2])
             .commit();
 
         let _ = render_graph
             .begin_render_pass("p4", Extent2D::default())
             .unwrap()
-            .reads(&[r7, r8])
+            .shader_reads(&[r7, r8])
             .writes_attachments(&[r9, r10])
             .commit();
 
         let _ = render_graph
             .begin_render_pass("pb", Extent2D::default())
             .unwrap()
-            .reads(&[r9, r10])
+            .shader_reads(&[r9, r10])
             .writes_attachments(&[rb])
             .commit();
 
