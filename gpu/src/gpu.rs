@@ -79,6 +79,17 @@ pub struct GpuState {
     messenger: Option<vk::DebugUtilsMessengerEXT>,
 }
 
+impl Drop for GpuState {
+    fn drop(&mut self) {
+        if let (Some(messenger), Some(debug_utils)) = (&self.messenger, &self.debug_utilities) {
+            unsafe {
+                debug_utils
+                    .destroy_debug_utils_messenger(messenger.clone(), get_allocation_callbacks())
+            };
+        }
+    }
+}
+
 pub struct GpuThreadLocalState {
     pub graphics_command_pool: vk::CommandPool,
     pub compute_command_pool: vk::CommandPool,
@@ -198,9 +209,9 @@ pub struct SelectedPhysicalDevice {
 #[cfg(debug_assertions)]
 unsafe extern "system" fn on_message(
     message_severity: DebugUtilsMessageSeverityFlagsEXT,
-    message_types: DebugUtilsMessageTypeFlagsEXT,
+    _message_types: DebugUtilsMessageTypeFlagsEXT,
     p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
-    p_user_data: *mut std::ffi::c_void,
+    _p_user_data: *mut std::ffi::c_void,
 ) -> u32 {
     let cb_data: vk::DebugUtilsMessengerCallbackDataEXT = *p_callback_data;
     let message = CStr::from_ptr(cb_data.p_message);
