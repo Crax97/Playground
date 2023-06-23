@@ -381,7 +381,6 @@ impl MaterialContext for ForwardRendererMaterialContext {
     ) -> VkResult<Material> {
         let pipeline = self.create_surface_material_pipeline(gpu, &material_description)?;
 
-        let pipeline = resource_map.add(GpuPipeline(pipeline));
         let mut pipelines = HashMap::new();
         pipelines.insert(PipelineTarget::ColorAndDepth, pipeline);
 
@@ -420,13 +419,12 @@ impl RenderingPipeline for ForwardRenderingPipeline {
 
         let (image, view) = swapchain.acquire_next_image()?;
 
-        let mut color_depth_hashmap: HashMap<ResourceHandle<GpuPipeline>, Vec<ScenePrimitive>> =
-            HashMap::new();
+        let mut color_depth_hashmap: HashMap<&Pipeline, Vec<ScenePrimitive>> = HashMap::new();
 
         for primitive in scene.primitives.iter() {
             let material = self.resource_map.get(&primitive.material);
             color_depth_hashmap
-                .entry(material.pipelines[&PipelineTarget::ColorAndDepth].clone())
+                .entry(&material.pipelines[&PipelineTarget::ColorAndDepth])
                 .or_default()
                 .push(primitive.clone());
         }
@@ -471,10 +469,9 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         context.register_callback(&forward_pass_handle, |_: &Gpu, ctx| {
             for (pipeline, primitives) in color_depth_hashmap.iter() {
                 {
-                    let pipeline = self.resource_map.get(pipeline);
                     ctx.render_pass_command.bind_descriptor_sets(
                         PipelineBindPoint::GRAPHICS,
-                        &pipeline.0,
+                        &pipeline,
                         0,
                         &[&self.camera_buffer_descriptor_set],
                     );
@@ -486,10 +483,10 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                         let mesh = self.resource_map.get(&primitive.mesh);
                         let material = self.resource_map.get(&primitive.material);
 
-                        ctx.render_pass_command.bind_pipeline(&pipeline.0);
+                        ctx.render_pass_command.bind_pipeline(&pipeline);
                         ctx.render_pass_command.bind_descriptor_sets(
                             PipelineBindPoint::GRAPHICS,
-                            &pipeline.0,
+                            &pipeline,
                             1,
                             &[&material.resources_descriptor_set],
                         );
@@ -511,7 +508,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                             &[0, 0, 0, 0, 0],
                         );
                         ctx.render_pass_command
-                            .push_constant(&pipeline.0, &primitive.transform, 0);
+                            .push_constant(&pipeline, &primitive.transform, 0);
                         ctx.render_pass_command.draw_indexed(6, 1, 0, 0, 0);
                         primitive_label.end();
                     }

@@ -702,11 +702,9 @@ impl MaterialContext for DeferredRenderingMaterialContext {
         material_description: MaterialDescription,
     ) -> VkResult<Material> {
         let color_pipeline = self.create_surface_material_pipeline(gpu, &material_description)?;
-        let color_pipeline = resource_map.add(GpuPipeline(color_pipeline));
 
         let depth_pipeline =
             self.create_surface_depth_only_material_pipeline(gpu, &material_description)?;
-        let depth_pipeline = resource_map.add(GpuPipeline(depth_pipeline));
 
         let mut pipelines = HashMap::new();
         pipelines.insert(PipelineTarget::ColorAndDepth, color_pipeline);
@@ -746,19 +744,17 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let (image, view) = swapchain.acquire_next_image()?;
 
-        let mut color_depth_hashmap: HashMap<ResourceHandle<GpuPipeline>, Vec<ScenePrimitive>> =
-            HashMap::new();
-        let mut depth_hashmap: HashMap<ResourceHandle<GpuPipeline>, Vec<ScenePrimitive>> =
-            HashMap::new();
+        let mut color_depth_hashmap: HashMap<&Pipeline, Vec<ScenePrimitive>> = HashMap::new();
+        let mut depth_hashmap: HashMap<&Pipeline, Vec<ScenePrimitive>> = HashMap::new();
 
         for primitive in scene.primitives.iter() {
             let material = self.resource_map.get(&primitive.material);
             color_depth_hashmap
-                .entry(material.pipelines[&PipelineTarget::ColorAndDepth].clone())
+                .entry(&material.pipelines[&PipelineTarget::ColorAndDepth])
                 .or_default()
                 .push(primitive.clone());
             depth_hashmap
-                .entry(material.pipelines[&PipelineTarget::DepthOnly].clone())
+                .entry(&material.pipelines[&PipelineTarget::DepthOnly])
                 .or_default()
                 .push(primitive.clone());
         }
@@ -980,10 +976,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         context.register_callback(&dbuffer_pass, |_: &Gpu, ctx| {
             for (pipeline, primitives) in depth_hashmap.iter() {
                 {
-                    let pipeline = self.resource_map.get(pipeline);
                     ctx.render_pass_command.bind_descriptor_sets(
                         PipelineBindPoint::GRAPHICS,
-                        &pipeline.0,
+                        &pipeline,
                         0,
                         &[&self.camera_buffer_descriptor_set],
                     );
@@ -995,10 +990,10 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                         let mesh = self.resource_map.get(&primitive.mesh);
                         let material = self.resource_map.get(&primitive.material);
 
-                        ctx.render_pass_command.bind_pipeline(&pipeline.0);
+                        ctx.render_pass_command.bind_pipeline(&pipeline);
                         ctx.render_pass_command.bind_descriptor_sets(
                             PipelineBindPoint::GRAPHICS,
-                            &pipeline.0,
+                            &pipeline,
                             1,
                             &[&material.resources_descriptor_set],
                         );
@@ -1020,7 +1015,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                             &[0, 0, 0, 0, 0],
                         );
                         ctx.render_pass_command
-                            .push_constant(&pipeline.0, &primitive.transform, 0);
+                            .push_constant(&pipeline, &primitive.transform, 0);
                         ctx.render_pass_command.draw_indexed(6, 1, 0, 0, 0);
                         primitive_label.end();
                     }
@@ -1030,10 +1025,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         context.register_callback(&gbuffer_pass, |_: &Gpu, ctx| {
             for (pipeline, primitives) in color_depth_hashmap.iter() {
                 {
-                    let pipeline = self.resource_map.get(pipeline);
                     ctx.render_pass_command.bind_descriptor_sets(
                         PipelineBindPoint::GRAPHICS,
-                        &pipeline.0,
+                        &pipeline,
                         0,
                         &[&self.camera_buffer_descriptor_set],
                     );
@@ -1045,10 +1039,10 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                         let mesh = self.resource_map.get(&primitive.mesh);
                         let material = self.resource_map.get(&primitive.material);
 
-                        ctx.render_pass_command.bind_pipeline(&pipeline.0);
+                        ctx.render_pass_command.bind_pipeline(&pipeline);
                         ctx.render_pass_command.bind_descriptor_sets(
                             PipelineBindPoint::GRAPHICS,
-                            &pipeline.0,
+                            &pipeline,
                             1,
                             &[&material.resources_descriptor_set],
                         );
@@ -1070,7 +1064,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                             &[0, 0, 0, 0, 0],
                         );
                         ctx.render_pass_command
-                            .push_constant(&pipeline.0, &primitive.transform, 0);
+                            .push_constant(&pipeline, &primitive.transform, 0);
                         ctx.render_pass_command.draw_indexed(6, 1, 0, 0, 0);
                         primitive_label.end();
                     }

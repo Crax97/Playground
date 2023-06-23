@@ -96,6 +96,6 @@ impl Mesh {
 
 impl Resource for Mesh {
     fn get_description(&self) -> &str {
-        "todo"
+        "Mesh"
     }
 }

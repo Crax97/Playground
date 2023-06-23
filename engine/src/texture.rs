@@ -90,6 +90,6 @@ impl Texture {
 
 impl Resource for Texture {
     fn get_description(&self) -> &str {
-        "todo"
+        "Texture"
     }
 }

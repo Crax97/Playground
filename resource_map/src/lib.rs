@@ -84,8 +84,6 @@ impl<R: Resource + 'static> Drop for ResourceHandle<R> {
                 map.resources -= 1;
                 let arena = map.types_map.get_mut::<Arena<R>>().unwrap();
                 let res = arena.remove(self.id.id);
-
-                println!("Drp {}", res.unwrap().get_description());
             }
             // else the map has been dropped before the ids
         }

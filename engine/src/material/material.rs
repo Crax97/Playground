@@ -5,7 +5,8 @@ use ash::{
     vk::{self, ImageLayout},
 };
 use gpu::{
-    BufferRange, DescriptorInfo, DescriptorSetInfo, Gpu, GpuBuffer, GpuDescriptorSet, SamplerState,
+    BufferRange, DescriptorInfo, DescriptorSetInfo, Gpu, GpuBuffer, GpuDescriptorSet, Pipeline,
+    SamplerState,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 
@@ -24,7 +25,7 @@ pub enum PipelineTarget {
 }
 
 pub struct Material {
-    pub pipelines: HashMap<PipelineTarget, ResourceHandle<GpuPipeline>>,
+    pub pipelines: HashMap<PipelineTarget, Pipeline>,
     pub uniform_buffers: Vec<GpuBuffer>,
     pub textures: Vec<ResourceHandle<Texture>>,
     pub resources_descriptor_set: GpuDescriptorSet,
@@ -34,7 +35,7 @@ impl Material {
     pub fn new(
         gpu: &Gpu,
         resource_map: &ResourceMap,
-        pipelines: HashMap<PipelineTarget, ResourceHandle<GpuPipeline>>,
+        pipelines: HashMap<PipelineTarget, Pipeline>,
         uniform_buffers: Vec<GpuBuffer>,
         textures: Vec<ResourceHandle<Texture>>,
     ) -> VkResult<Self> {
@@ -80,6 +81,6 @@ impl Material {
 
 impl Resource for Material {
     fn get_description(&self) -> &str {
-        "todo"
+        "Material"
     }
 }
