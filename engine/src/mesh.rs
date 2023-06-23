@@ -21,6 +21,8 @@ pub struct Mesh {
     pub normal_component: GpuBuffer,
     pub tangent_component: GpuBuffer,
     pub uv_component: GpuBuffer,
+
+    pub index_count: u32,
 }
 
 impl Mesh {
@@ -90,6 +92,7 @@ impl Mesh {
             normal_component,
             tangent_component,
             uv_component,
+            index_count: create_info.indices.len() as _,
         })
     }
 }

@@ -1013,9 +1013,11 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                             ],
                             &[0, 0, 0, 0, 0],
                         );
+                        let index_count = self.resource_map.get(&primitive.mesh).index_count;
                         ctx.render_pass_command
                             .push_constant(&pipeline, &primitive.transform, 0);
-                        ctx.render_pass_command.draw_indexed(6, 1, 0, 0, 0);
+                        ctx.render_pass_command
+                            .draw_indexed(index_count, 1, 0, 0, 0);
                         primitive_label.end();
                     }
                 }
@@ -1062,9 +1064,11 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                             ],
                             &[0, 0, 0, 0, 0],
                         );
+                        let index_count = self.resource_map.get(&primitive.mesh).index_count;
                         ctx.render_pass_command
                             .push_constant(&pipeline, &primitive.transform, 0);
-                        ctx.render_pass_command.draw_indexed(6, 1, 0, 0, 0);
+                        ctx.render_pass_command
+                            .draw_indexed(index_count, 1, 0, 0, 0);
                         primitive_label.end();
                     }
                 }
