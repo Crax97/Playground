@@ -65,6 +65,7 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
             width: 1240,
             height: 720,
         })
+        .with_title(A::window_name())
         .build(&event_loop)?;
 
     engine::init(A::window_name(), window)?;
