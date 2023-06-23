@@ -26,6 +26,7 @@ memoffset = "0.8"
 image = "0.24.6"
 
 env_logger = "0.10.0"
+gltf = "1.2.0"
 
 gpu = { path = "../gpu" }
 resource_map = { path = "../resource_map" }

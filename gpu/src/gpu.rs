@@ -985,6 +985,10 @@ impl Gpu {
     }
 
     pub fn write_buffer_data<T: Copy>(&self, buffer: &GpuBuffer, data: &[T]) -> VkResult<()> {
+        if data.len() == 0 {
+            return Ok(());
+        }
+
         if buffer.memory_domain.contains(MemoryDomain::HostVisible) {
             buffer.write_data(data);
         } else {
