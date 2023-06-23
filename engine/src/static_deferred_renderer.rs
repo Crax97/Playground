@@ -14,7 +14,7 @@ use gpu::{
     VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
 use nalgebra::{Matrix4, Vector2, Vector3};
-use resource_map::{ ResourceMap};
+use resource_map::ResourceMap;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -182,7 +182,7 @@ impl DeferredRenderingMaterialContext {
             },
             // Normals
             RenderPassAttachment {
-                format: ImageFormat::RgbaFloat.to_vk(),
+                format: ImageFormat::Rgba8.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
                 load_op: AttachmentLoadOp::CLEAR,
                 store_op: AttachmentStoreOp::STORE,
@@ -803,7 +803,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .use_image("position-buffer", &framebuffer_vector_desc)?;
         let normal_buffer = self
             .render_graph
-            .use_image("normal_buffer", &framebuffer_vector_desc)?;
+            .use_image("normal_buffer", &framebuffer_rgba_desc)?;
         let diffuse_buffer = self
             .render_graph
             .use_image("diffuse_buffer", &framebuffer_rgba_desc)?;
