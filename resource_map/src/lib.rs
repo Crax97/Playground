@@ -1,6 +1,7 @@
 use std::{
     cell::RefCell,
     marker::PhantomData,
+    rc::Rc,
     sync::{Arc, Weak},
 };
 use thunderdome::{Arena, Index};
@@ -30,9 +31,23 @@ where
 {
     _marker: PhantomData<R>,
     pub(crate) id: ResourceId,
-    pub(crate) reference_counter: u32,
+    pub(crate) reference_counter: Rc<RefCell<u32>>,
 
     resource_map: Weak<RefCell<ResourceMapState>>,
+}
+
+impl<R: Resource + 'static> ResourceHandle<R> {
+    fn inc_ref_count(&self) -> u32 {
+        let mut counter = self.reference_counter.borrow_mut();
+        *counter = *counter + 1;
+        *counter
+    }
+
+    fn dec_ref_count(&self) -> u32 {
+        let mut counter = self.reference_counter.borrow_mut();
+        *counter = *counter - 1;
+        *counter
+    }
 }
 
 impl<R: Resource + 'static> PartialEq for ResourceHandle<R> {
@@ -50,10 +65,11 @@ impl<R: Resource + 'static> std::hash::Hash for ResourceHandle<R> {
 }
 impl<R: Resource + 'static> Clone for ResourceHandle<R> {
     fn clone(&self) -> Self {
+        self.inc_ref_count();
         Self {
             _marker: self._marker,
             id: self.id.clone(),
-            reference_counter: self.reference_counter.clone() + 1,
+            reference_counter: self.reference_counter.clone(),
             resource_map: self.resource_map.clone(),
         }
     }
@@ -61,14 +77,15 @@ impl<R: Resource + 'static> Clone for ResourceHandle<R> {
 
 impl<R: Resource + 'static> Drop for ResourceHandle<R> {
     fn drop(&mut self) {
-        self.reference_counter -= 1;
-
-        if self.reference_counter == 0 {
+        let ref_count = self.dec_ref_count();
+        if ref_count == 0 {
             if let Some(map) = self.resource_map.upgrade() {
                 let mut map = map.borrow_mut();
                 map.resources -= 1;
                 let arena = map.types_map.get_mut::<Arena<R>>().unwrap();
-                arena.remove(self.id.id);
+                let res = arena.remove(self.id.id);
+
+                println!("Drp {}", res.unwrap().get_description());
             }
             // else the map has been dropped before the ids
         }
@@ -94,7 +111,7 @@ impl ResourceMap {
         ResourceHandle {
             _marker: PhantomData,
             id: ResourceId { id },
-            reference_counter: 1,
+            reference_counter: Rc::new(RefCell::new(1)),
             resource_map: Arc::downgrade(&self.map),
         }
     }
