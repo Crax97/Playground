@@ -10,7 +10,7 @@ use gpu::{
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 
-use crate::{gpu_pipeline::GpuPipeline, texture::Texture};
+use crate::texture::Texture;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 pub enum MaterialDomain {

@@ -25,7 +25,6 @@ struct PerFrameData {
 
 use crate::{
     camera::Camera,
-    gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     mesh::Mesh,
     GpuRunner, GraphRunContext, PipelineTarget, RenderGraph,

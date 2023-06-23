@@ -1,12 +1,10 @@
 mod app;
 mod utils;
 
-use std::{io::BufReader, mem::size_of, rc::Rc};
+use std::{io::BufReader, rc::Rc};
 
 use app::{bootstrap, App};
-use ash::vk::{BufferUsageFlags, PresentModeKHR};
-
-use gpu::{BufferCreateInfo, MemoryDomain};
+use ash::vk::PresentModeKHR;
 
 use engine::{
     Camera, DeferredRenderingPipeline, MaterialDescription, MaterialDomain, Mesh, MeshCreateInfo,

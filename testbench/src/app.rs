@@ -1,6 +1,5 @@
 use engine::AppState;
 use log::trace;
-use nalgebra::*;
 use winit::{dpi::PhysicalSize, event::Event, event_loop::ControlFlow};
 
 pub trait App {

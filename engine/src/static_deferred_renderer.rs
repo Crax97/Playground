@@ -14,7 +14,7 @@ use gpu::{
     VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
 use nalgebra::{Matrix4, Vector2, Vector3};
-use resource_map::{ResourceHandle, ResourceMap};
+use resource_map::{ ResourceMap};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -26,7 +26,6 @@ struct PerFrameData {
 use crate::{
     app_state,
     camera::Camera,
-    gpu_pipeline::GpuPipeline,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     FragmentState, GpuRunner, GraphRunContext, ModuleInfo, PipelineTarget, RenderGraph,
     RenderGraphPipelineDescription, RenderStage, RenderingPipeline, Scene, ScenePrimitive,
