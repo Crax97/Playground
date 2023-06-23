@@ -7,8 +7,19 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Launch",
-            "program": "${workspaceFolder}/target/debug/vulkan_learning.exe",
+            "name": "Launch Planes",
+            "program": "${workspaceFolder}/target/debug/planes.exe",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_LOG": "info,trace,debug,warn,error"
+            },
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Launch GLTF Viewer",
+            "program": "${workspaceFolder}/target/debug/gltf_viewer.exe",
             "args": [],
             "cwd": "${workspaceFolder}",
             "env": {
