@@ -65,22 +65,9 @@ impl GLTFViewer {
         let (document, buffers, mut images) = gltf::import(path)?;
 
         for (index, gltf_image) in images.iter_mut().enumerate() {
-            if gltf_image.format == gltf::image::Format::R8G8B8 {
-                let dyn_image = DynamicImage::ImageRgb8(
-                    ImageBuffer::from_vec(
-                        gltf_image.width,
-                        gltf_image.height,
-                        gltf_image.pixels.clone(),
-                    )
-                    .expect("Failed to create image"),
-                );
-                let data = dyn_image.to_rgba8().to_vec();
-                gltf_image.pixels = data;
-                gltf_image.format = gltf::image::Format::R8G8B8A8;
-            }
-
             let vk_format = match gltf_image.format {
                 gltf::image::Format::R8G8B8A8 => gpu::ImageFormat::Rgba8.to_vk(),
+                gltf::image::Format::R8G8B8 => gpu::ImageFormat::Rgb8.to_vk(),
                 gltf::image::Format::R32G32B32A32FLOAT => gpu::ImageFormat::RgbaFloat.to_vk(),
                 f => panic!("Unsupported format! {:?}", f),
             };

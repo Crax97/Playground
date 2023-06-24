@@ -17,25 +17,26 @@ use ash::{
         DebugUtilsMessengerCreateFlagsEXT, DebugUtilsMessengerCreateInfoEXT,
         DebugUtilsObjectNameInfoEXT, DependencyFlags, DescriptorBufferInfo, DescriptorImageInfo,
         DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo,
-        Extent2D, Extent3D, Fence, FramebufferCreateFlags, Handle, ImageAspectFlags,
-        ImageCreateFlags, ImageLayout, ImageSubresourceLayers, ImageSubresourceRange, ImageTiling,
-        ImageType, ImageViewCreateFlags, ImageViewType, InstanceCreateFlags, InstanceCreateInfo,
-        MemoryHeap, MemoryHeapFlags, Offset3D, PhysicalDevice, PhysicalDeviceFeatures,
-        PhysicalDeviceProperties, PhysicalDeviceType, PipelineStageFlags, Queue, QueueFlags,
-        SampleCountFlags, SamplerCreateInfo, ShaderModuleCreateFlags, SharingMode, StructureType,
-        SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
+        Extent2D, Extent3D, Fence, Format, FormatFeatureFlags, FramebufferCreateFlags, Handle,
+        ImageAspectFlags, ImageCreateFlags, ImageLayout, ImageSubresourceLayers,
+        ImageSubresourceRange, ImageTiling, ImageType, ImageViewCreateFlags, ImageViewType,
+        InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D,
+        PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType,
+        PipelineStageFlags, Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo,
+        ShaderModuleCreateFlags, SharingMode, StructureType, SubmitInfo, WriteDescriptorSet,
+        API_VERSION_1_3,
     },
     *,
 };
 
-use log::{error, trace};
+use log::{error, trace, warn};
 use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 use winit::window::Window;
 
 use crate::{
-    get_allocation_callbacks, GpuFramebuffer, GpuImageView, GpuShaderModule, ImageMemoryBarrier,
-    PipelineBarrierInfo, QueueType, RenderPass,
+    get_allocation_callbacks, GpuFramebuffer, GpuImageView, GpuShaderModule, ImageFormat,
+    ImageMemoryBarrier, PipelineBarrierInfo, QueueType, RenderPass, ToVk,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -63,6 +64,11 @@ impl GpuDescription {
     }
 }
 
+#[derive(Default, Clone, Copy)]
+struct SupportedFeatures {
+    supports_rgb_images: bool,
+}
+
 pub struct GpuState {
     pub entry: Entry,
     pub instance: Instance,
@@ -76,6 +82,7 @@ pub struct GpuState {
     pub gpu_memory_allocator: Arc<RefCell<dyn GpuAllocator>>,
     pub descriptor_set_allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
     pub debug_utilities: Option<DebugUtils>,
+    features: SupportedFeatures,
     messenger: Option<vk::DebugUtilsMessengerEXT>,
 }
 
@@ -276,6 +283,8 @@ impl Gpu {
             &physical_device,
         )?;
 
+        let supported_features = find_supported_features(&instance, physical_device);
+
         let logical_device = Self::create_device(
             &configuration,
             &device_extensions,
@@ -345,6 +354,7 @@ impl Gpu {
             queue_families,
             debug_utilities,
             messenger,
+            features: supported_features,
             gpu_memory_allocator: Arc::new(RefCell::new(gpu_memory_allocator)),
             descriptor_set_allocator: Arc::new(RefCell::new(descriptor_set_allocator)),
         });
@@ -806,6 +816,34 @@ impl Gpu {
     }
 }
 
+fn find_supported_features(
+    instance: &Instance,
+    physical_device: SelectedPhysicalDevice,
+) -> SupportedFeatures {
+    let mut supported_features = SupportedFeatures::default();
+
+    let rgb_format_properties = unsafe {
+        instance.get_physical_device_format_properties(
+            physical_device.physical_device,
+            vk::Format::R8G8B8_UNORM,
+        )
+    };
+
+    if (rgb_format_properties.linear_tiling_features
+        & rgb_format_properties.optimal_tiling_features)
+        .contains(
+            FormatFeatureFlags::COLOR_ATTACHMENT
+                | FormatFeatureFlags::SAMPLED_IMAGE
+                | FormatFeatureFlags::TRANSFER_DST
+                | FormatFeatureFlags::TRANSFER_SRC,
+        )
+    {
+        supported_features.supports_rgb_images = true;
+        trace!("Selected physical device supports RGB Images");
+    }
+    supported_features
+}
+
 fn create_staging_buffer(state: &Arc<GpuState>) -> VkResult<GpuBuffer> {
     let mb_64 = 1024 * 1024 * 64;
     let family = state.queue_families.clone();
@@ -1049,13 +1087,18 @@ impl Gpu {
         memory_domain: MemoryDomain,
         data: Option<&[u8]>,
     ) -> VkResult<GpuImage> {
+        let mut format = create_info.format;
+        if format == ImageFormat::Rgb8.to_vk() && !self.state.features.supports_rgb_images {
+            format = ImageFormat::Rgba8.to_vk();
+        }
+
         let image = unsafe {
             let create_info = vk::ImageCreateInfo {
                 s_type: StructureType::IMAGE_CREATE_INFO,
                 p_next: std::ptr::null(),
                 flags: ImageCreateFlags::empty(),
                 image_type: ImageType::TYPE_2D,
-                format: create_info.format,
+                format,
                 extent: Extent3D {
                     width: create_info.width,
                     height: create_info.height,
@@ -1107,11 +1150,27 @@ impl Gpu {
                 width: create_info.width,
                 height: create_info.height,
             },
-            create_info.format.into(),
+            format.into(),
         )?;
 
         if let Some(data) = data {
-            self.write_image_data(&image, data)?
+            if create_info.format == ImageFormat::Rgb8.to_vk()
+                && !self.state.features.supports_rgb_images
+            {
+                let mut rgba_data = vec![];
+                let rgba_size = create_info.width * create_info.height * 4;
+                rgba_data.reserve(rgba_size as _);
+                for chunk in data.chunks(3) {
+                    rgba_data.push(chunk[0]);
+                    rgba_data.push(chunk[1]);
+                    rgba_data.push(chunk[2]);
+                    rgba_data.push(255);
+                }
+
+                self.write_image_data(&image, &rgba_data)?
+            } else {
+                self.write_image_data(&image, data)?
+            }
         }
 
         Ok(image)
@@ -1119,20 +1178,32 @@ impl Gpu {
 
     pub fn create_image_view(&self, create_info: &ImageViewCreateInfo) -> VkResult<GpuImageView> {
         let image = create_info.image.inner;
+
+        let gpu_view_format: ImageFormat = create_info.format.into();
+        let format = if gpu_view_format == create_info.image.format {
+            create_info.format
+        } else {
+            warn!(
+                "Creating an image view of an image with a different format: Requested {:?} but image uses {:?}! Using Image format",
+            gpu_view_format,
+            create_info.image.format);
+            create_info.image.format.to_vk()
+        };
+
         let vk_create_info = vk::ImageViewCreateInfo {
             s_type: StructureType::IMAGE_VIEW_CREATE_INFO,
             p_next: std::ptr::null(),
             flags: ImageViewCreateFlags::empty(),
             image,
             view_type: create_info.view_type,
-            format: create_info.format,
+            format,
             components: create_info.components,
             subresource_range: create_info.subresource_range,
         };
         GpuImageView::create(
             self.vk_logical_device(),
             &vk_create_info,
-            create_info.format.into(),
+            gpu_view_format,
             create_info.image.extents,
         )
     }

@@ -252,7 +252,7 @@ impl CreateFrom<ImageDescription, ()> for GpuImage {
                     height: desc.height,
                     format: desc.format.to_vk(),
                     usage: match desc.format {
-                        ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                        ImageFormat::Rgba8 | ImageFormat::Rgb8 | ImageFormat::RgbaFloat => {
                             ImageUsageFlags::COLOR_ATTACHMENT
                         }
                         ImageFormat::Depth => ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
@@ -306,7 +306,9 @@ impl CreateFrom<ImageDescription, GpuImage> for GpuImageView {
                 components: ComponentMapping::default(),
                 subresource_range: ImageSubresourceRange {
                     aspect_mask: match desc.format {
-                        ImageFormat::Rgba8 | ImageFormat::RgbaFloat => ImageAspectFlags::COLOR,
+                        ImageFormat::Rgba8 | ImageFormat::Rgb8 | ImageFormat::RgbaFloat => {
+                            ImageAspectFlags::COLOR
+                        }
                         ImageFormat::Depth => ImageAspectFlags::DEPTH,
                     },
                     base_mip_level: 0,
@@ -349,7 +351,9 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
                 ResourceLayout::Unknown => ImageLayout::GENERAL,
                 ResourceLayout::ShaderRead => ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 ResourceLayout::AttachmentRead => match image_desc.format {
-                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => ImageLayout::READ_ONLY_OPTIMAL,
+                    ImageFormat::Rgba8 | ImageFormat::Rgb8 | ImageFormat::RgbaFloat => {
+                        ImageLayout::READ_ONLY_OPTIMAL
+                    }
                     ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
                 },
                 ResourceLayout::Present => ImageLayout::PRESENT_SRC_KHR,
@@ -373,7 +377,7 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
                     ResourceLayout::Unknown => ImageLayout::UNDEFINED,
                     ResourceLayout::ShaderWrite => todo!(),
                     ResourceLayout::AttachmentWrite => match image_desc.format {
-                        ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                        ImageFormat::Rgba8 | ImageFormat::Rgb8 | ImageFormat::RgbaFloat => {
                             ImageLayout::COLOR_ATTACHMENT_OPTIMAL
                         }
                         ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -399,7 +403,7 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
             all_attachments.push(attachment);
 
             match image_desc.format {
-                ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                ImageFormat::Rgba8 | ImageFormat::Rgb8 | ImageFormat::RgbaFloat => {
                     color_attachments.push(AttachmentReference {
                         attachment: index as _,
                         layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
@@ -431,7 +435,7 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
                     ResourceLayout::Unknown => ImageLayout::UNDEFINED,
                     ResourceLayout::ShaderWrite => todo!(),
                     ResourceLayout::AttachmentWrite => match image_desc.format {
-                        ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                        ImageFormat::Rgba8 | ImageFormat::Rgb8 | ImageFormat::RgbaFloat => {
                             ImageLayout::COLOR_ATTACHMENT_OPTIMAL
                         }
                         ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -442,7 +446,7 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
                     ResourceLayout::Unknown => ImageLayout::GENERAL,
                     ResourceLayout::ShaderRead => ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                     ResourceLayout::AttachmentRead => match image_desc.format {
-                        ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                        ImageFormat::Rgba8 | ImageFormat::Rgb8 | ImageFormat::RgbaFloat => {
                             ImageLayout::READ_ONLY_OPTIMAL
                         }
                         ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
@@ -468,7 +472,7 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
             all_attachments.push(attachment);
 
             match image_desc.format {
-                ImageFormat::Rgba8 | ImageFormat::RgbaFloat => {
+                ImageFormat::Rgba8 | ImageFormat::Rgb8 | ImageFormat::RgbaFloat => {
                     color_attachments.push(AttachmentReference {
                         attachment: index as _,
                         layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
@@ -789,8 +793,8 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
                     _ => panic!("Invalid sample count! {}", desc.samples),
                 };
                 match &desc.format {
-                    gpu::ImageFormat::Rgba8 | gpu::ImageFormat::RgbaFloat => color_attachments
-                        .push(RenderPassAttachment {
+                    gpu::ImageFormat::Rgba8 | ImageFormat::Rgb8 | gpu::ImageFormat::RgbaFloat => {
+                        color_attachments.push(RenderPassAttachment {
                             format,
                             samples,
                             load_op: AttachmentLoadOp::DONT_CARE,
@@ -804,7 +808,8 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
                             } else {
                                 BlendState::default()
                             },
-                        }),
+                        })
+                    }
                     gpu::ImageFormat::Depth => {
                         depth_stencil_attachments.push(DepthStencilAttachment {})
                     }
@@ -1557,7 +1562,9 @@ impl RenderGraphRunner for GpuRunner {
                             match &res_info.ty {
                                 AllocationType::Image(desc)
                                 | AllocationType::ExternalImage(desc) => match desc.format {
-                                    ImageFormat::Rgba8 | ImageFormat::RgbaFloat => ClearValue {
+                                    ImageFormat::Rgba8
+                                    | ImageFormat::Rgb8
+                                    | ImageFormat::RgbaFloat => ClearValue {
                                         color: vk::ClearColorValue {
                                             float32: [0.0, 0.0, 0.0, 0.0],
                                         },
