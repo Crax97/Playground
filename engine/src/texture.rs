@@ -42,7 +42,6 @@ pub struct Texture {
 impl Texture {
     fn new_impl(
         gpu: &Gpu,
-        resource_map: &Rc<ResourceMap>,
         width: u32,
         height: u32,
         data: Option<&[u8]>,
@@ -107,7 +106,7 @@ impl Texture {
         height: u32,
         label: Option<&str>,
     ) -> VkResult<Self> {
-        let (image, view, sampler) = Self::new_impl(gpu, resource_map, width, height, None, label)?;
+        let (image, view, sampler) = Self::new_impl(gpu, width, height, None, label)?;
         let image = resource_map.add(ImageResource(image));
         let image_view = TextureImageView { image, view };
         let image_view = resource_map.add(image_view);
@@ -125,8 +124,7 @@ impl Texture {
         data: &[u8],
         label: Option<&str>,
     ) -> VkResult<Self> {
-        let (image, view, sampler) =
-            Self::new_impl(gpu, resource_map, width, height, Some(data), label)?;
+        let (image, view, sampler) = Self::new_impl(gpu, width, height, Some(data), label)?;
 
         let image = resource_map.add(ImageResource(image));
         let image_view = TextureImageView { image, view };

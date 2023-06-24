@@ -17,7 +17,7 @@ use ash::{
         DebugUtilsMessengerCreateFlagsEXT, DebugUtilsMessengerCreateInfoEXT,
         DebugUtilsObjectNameInfoEXT, DependencyFlags, DescriptorBufferInfo, DescriptorImageInfo,
         DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo,
-        Extent2D, Extent3D, Fence, Format, FormatFeatureFlags, FramebufferCreateFlags, Handle,
+        Extent2D, Extent3D, Fence, FormatFeatureFlags, FramebufferCreateFlags, Handle,
         ImageAspectFlags, ImageCreateFlags, ImageLayout, ImageSubresourceLayers,
         ImageSubresourceRange, ImageTiling, ImageType, ImageViewCreateFlags, ImageViewType,
         InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D,

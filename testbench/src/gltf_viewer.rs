@@ -1,13 +1,12 @@
 mod app;
 mod utils;
 
-use std::{io::BufReader, rc::Rc};
+use std::rc::Rc;
 
 use app::{bootstrap, App};
 use ash::vk::{
-    ComponentMapping, Filter, ImageAspectFlags, ImageSubresource, ImageSubresourceRange,
-    ImageUsageFlags, ImageViewType, PresentModeKHR, SamplerAddressMode, SamplerCreateInfo,
-    SamplerCreateInfoBuilder,
+    ComponentMapping, Filter, ImageAspectFlags, ImageSubresourceRange, ImageUsageFlags,
+    ImageViewType, PresentModeKHR, SamplerAddressMode, SamplerCreateInfo,
 };
 
 use engine::{
@@ -15,12 +14,9 @@ use engine::{
     MaterialDomain, Mesh, MeshCreateInfo, RenderingPipeline, SamplerResource, Scene,
     ScenePrimitive, Texture, TextureImageView,
 };
-use gpu::{
-    GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, ImageViewCreateInfo, MemoryDomain, ToVk,
-};
-use image::{DynamicImage, ImageBuffer, RgbImage};
+use gpu::{ImageCreateInfo, ImageViewCreateInfo, MemoryDomain, ToVk};
 use nalgebra::*;
-use resource_map::{Resource, ResourceMap};
+use resource_map::ResourceMap;
 use winit::event::ElementState;
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -193,6 +189,11 @@ impl GLTFViewer {
                         positions.push(vector![vert[0], vert[1], vert[2]]);
                     }
                 }
+                if let Some(iter) = reader.read_colors(0) {
+                    for vert in iter.into_rgb_f32() {
+                        colors.push(vector![vert[0], vert[1], vert[2]]);
+                    }
+                }
                 if let Some(iter) = reader.read_normals() {
                     for vec in iter {
                         normals.push(vector![vec[0], vec[1], vec[2]]);
@@ -313,7 +314,7 @@ impl App for GLTFViewer {
 
     fn input(
         &mut self,
-        app_state: &engine::AppState,
+        _app_state: &engine::AppState,
         event: winit::event::DeviceEvent,
     ) -> anyhow::Result<()> {
         match event {
