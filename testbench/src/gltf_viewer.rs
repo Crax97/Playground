@@ -92,12 +92,12 @@ impl GLTFViewer {
                 format: vk_format,
                 usage: ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST,
             };
-            let gpu_image = app_state
-                .gpu
-                .create_image(&image_create_info, MemoryDomain::DeviceLocal)?;
-            app_state
-                .gpu
-                .write_image_data(&gpu_image, &gltf_image.pixels)?;
+            let gpu_image = app_state.gpu.create_image(
+                &image_create_info,
+                MemoryDomain::DeviceLocal,
+                Some(&gltf_image.pixels),
+            )?;
+
             let gpu_image_view = app_state.gpu.create_image_view(&ImageViewCreateInfo {
                 image: &gpu_image,
                 view_type: ImageViewType::TYPE_2D,

@@ -45,6 +45,7 @@ impl Texture {
         resource_map: &Rc<ResourceMap>,
         width: u32,
         height: u32,
+        data: Option<&[u8]>,
         label: Option<&str>,
     ) -> VkResult<(GpuImage, GpuImageView, GpuSampler)> {
         let image = gpu.create_image(
@@ -56,6 +57,7 @@ impl Texture {
                 usage: ImageUsageFlags::TRANSFER_DST | ImageUsageFlags::SAMPLED,
             },
             MemoryDomain::DeviceLocal,
+            data,
         )?;
 
         let rgba_view = gpu.create_image_view(&gpu::ImageViewCreateInfo {
@@ -105,7 +107,7 @@ impl Texture {
         height: u32,
         label: Option<&str>,
     ) -> VkResult<Self> {
-        let (image, view, sampler) = Self::new_impl(gpu, resource_map, width, height, label)?;
+        let (image, view, sampler) = Self::new_impl(gpu, resource_map, width, height, None, label)?;
         let image = resource_map.add(ImageResource(image));
         let image_view = TextureImageView { image, view };
         let image_view = resource_map.add(image_view);
@@ -123,9 +125,9 @@ impl Texture {
         data: &[u8],
         label: Option<&str>,
     ) -> VkResult<Self> {
-        let (image, view, sampler) = Self::new_impl(gpu, resource_map, width, height, label)?;
+        let (image, view, sampler) =
+            Self::new_impl(gpu, resource_map, width, height, Some(data), label)?;
 
-        gpu.write_image_data(&image, data)?;
         let image = resource_map.add(ImageResource(image));
         let image_view = TextureImageView { image, view };
         let image_view = resource_map.add(image_view);

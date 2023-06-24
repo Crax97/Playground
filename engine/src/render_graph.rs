@@ -260,6 +260,7 @@ impl CreateFrom<ImageDescription, ()> for GpuImage {
                         | ImageUsageFlags::SAMPLED,
                 },
                 MemoryDomain::DeviceLocal,
+                None,
             )
             .expect("Failed to create image resource"))
     }

@@ -1047,6 +1047,7 @@ impl Gpu {
         &self,
         create_info: &ImageCreateInfo,
         memory_domain: MemoryDomain,
+        data: Option<&[u8]>,
     ) -> VkResult<GpuImage> {
         let image = unsafe {
             let create_info = vk::ImageCreateInfo {
@@ -1097,7 +1098,7 @@ impl Gpu {
         }?;
         self.set_object_debug_name(create_info.label, image)?;
 
-        GpuImage::create(
+        let image = GpuImage::create(
             self,
             image,
             allocation,
@@ -1107,7 +1108,13 @@ impl Gpu {
                 height: create_info.height,
             },
             create_info.format.into(),
-        )
+        )?;
+
+        if let Some(data) = data {
+            self.write_image_data(&image, data)?
+        }
+
+        Ok(image)
     }
 
     pub fn create_image_view(&self, create_info: &ImageViewCreateInfo) -> VkResult<GpuImageView> {
