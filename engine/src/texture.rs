@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use ash::{
     prelude::VkResult,
     vk::{
@@ -7,16 +9,44 @@ use ash::{
     },
 };
 use gpu::{Gpu, GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, MemoryDomain};
-use resource_map::Resource;
+use resource_map::{Resource, ResourceHandle, ResourceMap};
 
+pub struct ImageResource(pub GpuImage);
+impl Resource for ImageResource {
+    fn get_description(&self) -> &str {
+        "GPU Image"
+    }
+}
+
+pub struct TextureImageView {
+    pub view: GpuImageView,
+    pub image: ResourceHandle<ImageResource>,
+}
+impl Resource for TextureImageView {
+    fn get_description(&self) -> &str {
+        "GPU Image View"
+    }
+}
+
+pub struct SamplerResource(pub GpuSampler);
+impl Resource for SamplerResource {
+    fn get_description(&self) -> &str {
+        "GPU Sampler"
+    }
+}
 pub struct Texture {
-    pub image: GpuImage,
-    pub rgba_view: GpuImageView,
-    pub sampler: GpuSampler,
+    pub image_view: ResourceHandle<TextureImageView>,
+    pub sampler: ResourceHandle<SamplerResource>,
 }
 
 impl Texture {
-    pub fn new_empty(gpu: &Gpu, width: u32, height: u32, label: Option<&str>) -> VkResult<Self> {
+    fn new_impl(
+        gpu: &Gpu,
+        resource_map: &Rc<ResourceMap>,
+        width: u32,
+        height: u32,
+        label: Option<&str>,
+    ) -> VkResult<(GpuImage, GpuImageView, GpuSampler)> {
         let image = gpu.create_image(
             &ImageCreateInfo {
                 label,
@@ -65,26 +95,46 @@ impl Texture {
             border_color: BorderColor::default(),
             unnormalized_coordinates: vk::FALSE,
         })?;
+        Ok((image, rgba_view, sampler))
+    }
+
+    pub fn new_empty(
+        gpu: &Gpu,
+        resource_map: &Rc<ResourceMap>,
+        width: u32,
+        height: u32,
+        label: Option<&str>,
+    ) -> VkResult<Self> {
+        let (image, view, sampler) = Self::new_impl(gpu, resource_map, width, height, label)?;
+        let image = resource_map.add(ImageResource(image));
+        let image_view = TextureImageView { image, view };
+        let image_view = resource_map.add(image_view);
+        let sampler = resource_map.add(SamplerResource(sampler));
         Ok(Self {
-            image,
-            rgba_view,
+            image_view,
             sampler,
         })
     }
     pub fn new_with_data(
         gpu: &Gpu,
+        resource_map: &Rc<ResourceMap>,
         width: u32,
         height: u32,
         data: &[u8],
         label: Option<&str>,
     ) -> VkResult<Self> {
-        let mut texture = Self::new_empty(gpu, width, height, label)?;
-        texture.copy_data_immediate(gpu, data)?;
-        Ok(texture)
-    }
+        let (image, view, sampler) = Self::new_impl(gpu, resource_map, width, height, label)?;
 
-    fn copy_data_immediate(&mut self, gpu: &Gpu, data: &[u8]) -> VkResult<()> {
-        gpu.write_image_data(&self.image, data)
+        gpu.write_image_data(&image, data)?;
+        let image = resource_map.add(ImageResource(image));
+        let image_view = TextureImageView { image, view };
+        let image_view = resource_map.add(image_view);
+        let sampler = resource_map.add(SamplerResource(sampler));
+
+        Ok(Self {
+            image_view,
+            sampler,
+        })
     }
 }
 

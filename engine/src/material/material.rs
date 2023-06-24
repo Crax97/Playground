@@ -58,8 +58,8 @@ impl Material {
             uniform_descriptors.push(DescriptorInfo {
                 binding: bind_index,
                 element_type: gpu::DescriptorType::CombinedImageSampler(SamplerState {
-                    sampler: &texture.sampler,
-                    image_view: &texture.rgba_view,
+                    sampler: &resource_map.get(&texture.sampler).0,
+                    image_view: &resource_map.get(&texture.image_view).view,
                     image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 }),
                 binding_stage: gpu::ShaderStage::VertexFragment,

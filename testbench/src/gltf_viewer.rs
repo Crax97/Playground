@@ -4,14 +4,23 @@ mod utils;
 use std::{io::BufReader, rc::Rc};
 
 use app::{bootstrap, App};
-use ash::vk::PresentModeKHR;
+use ash::vk::{
+    ComponentMapping, Filter, ImageAspectFlags, ImageSubresource, ImageSubresourceRange,
+    ImageUsageFlags, ImageViewType, PresentModeKHR, SamplerAddressMode, SamplerCreateInfo,
+    SamplerCreateInfoBuilder,
+};
 
 use engine::{
-    AppState, Camera, DeferredRenderingPipeline, MaterialDescription, MaterialDomain, Mesh,
-    MeshCreateInfo, RenderingPipeline, Scene, ScenePrimitive, Texture,
+    AppState, Camera, DeferredRenderingPipeline, ImageResource, MaterialDescription,
+    MaterialDomain, Mesh, MeshCreateInfo, RenderingPipeline, SamplerResource, Scene,
+    ScenePrimitive, Texture, TextureImageView,
 };
+use gpu::{
+    GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, ImageViewCreateInfo, MemoryDomain, ToVk,
+};
+use image::{DynamicImage, ImageBuffer, RgbImage};
 use nalgebra::*;
-use resource_map::ResourceMap;
+use resource_map::{Resource, ResourceMap};
 use winit::event::ElementState;
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -43,25 +52,122 @@ impl GLTFViewer {
         resource_map: Rc<ResourceMap>,
         path: &str,
     ) -> anyhow::Result<Scene> {
-        let cpu_image = image::load(
-            BufReader::new(std::fs::File::open("images/texture.jpg")?),
-            image::ImageFormat::Jpeg,
-        )?;
-        let cpu_image = cpu_image.into_rgba8();
-
         let vertex_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/vertex_deferred.spirv")?;
         let fragment_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/fragment_deferred.spirv")?;
 
-        let texture = Texture::new_with_data(
-            &app_state.gpu,
-            cpu_image.width(),
-            cpu_image.height(),
-            &cpu_image,
-            Some("Quad texture david"),
-        )?;
-        let texture = resource_map.add(texture);
+        let mut allocated_images = vec![];
+        let mut allocated_image_views = vec![];
+        let mut allocated_samplers = vec![];
+        let mut allocated_textures = vec![];
+
+        let (document, buffers, mut images) = gltf::import(path)?;
+
+        for (index, gltf_image) in images.iter_mut().enumerate() {
+            if gltf_image.format == gltf::image::Format::R8G8B8 {
+                let dyn_image = DynamicImage::ImageRgb8(
+                    ImageBuffer::from_vec(
+                        gltf_image.width,
+                        gltf_image.height,
+                        gltf_image.pixels.clone(),
+                    )
+                    .expect("Failed to create image"),
+                );
+                let data = dyn_image.to_rgba8().to_vec();
+                gltf_image.pixels = data;
+                gltf_image.format = gltf::image::Format::R8G8B8A8;
+            }
+
+            let vk_format = match gltf_image.format {
+                gltf::image::Format::R8G8B8A8 => gpu::ImageFormat::Rgba8.to_vk(),
+                gltf::image::Format::R32G32B32A32FLOAT => gpu::ImageFormat::RgbaFloat.to_vk(),
+                f => panic!("Unsupported format! {:?}", f),
+            };
+            let label = format!("glTF Image #{}", index);
+            let image_create_info = ImageCreateInfo {
+                label: Some(&label),
+                width: gltf_image.width,
+                height: gltf_image.height,
+                format: vk_format,
+                usage: ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST,
+            };
+            let gpu_image = app_state
+                .gpu
+                .create_image(&image_create_info, MemoryDomain::DeviceLocal)?;
+            app_state
+                .gpu
+                .write_image_data(&gpu_image, &gltf_image.pixels)?;
+            let gpu_image_view = app_state.gpu.create_image_view(&ImageViewCreateInfo {
+                image: &gpu_image,
+                view_type: ImageViewType::TYPE_2D,
+                format: vk_format,
+                components: ComponentMapping::default(),
+                subresource_range: ImageSubresourceRange {
+                    aspect_mask: ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+            })?;
+            let img_index = resource_map.add(ImageResource(gpu_image));
+            allocated_images.push(img_index.clone());
+            let view_index = resource_map.add(TextureImageView {
+                image: img_index,
+                view: gpu_image_view,
+            });
+            allocated_image_views.push(view_index);
+        }
+
+        for sampler in document.samplers() {
+            let builder = SamplerCreateInfo::builder()
+                .address_mode_u(match &sampler.wrap_s() {
+                    gltf::texture::WrappingMode::ClampToEdge => SamplerAddressMode::CLAMP_TO_EDGE,
+                    gltf::texture::WrappingMode::MirroredRepeat => {
+                        SamplerAddressMode::MIRRORED_REPEAT
+                    }
+                    gltf::texture::WrappingMode::Repeat => SamplerAddressMode::REPEAT,
+                })
+                .address_mode_v(match &sampler.wrap_t() {
+                    gltf::texture::WrappingMode::ClampToEdge => SamplerAddressMode::CLAMP_TO_EDGE,
+                    gltf::texture::WrappingMode::MirroredRepeat => {
+                        SamplerAddressMode::MIRRORED_REPEAT
+                    }
+                    gltf::texture::WrappingMode::Repeat => SamplerAddressMode::REPEAT,
+                })
+                .mag_filter(
+                    match sampler
+                        .mag_filter()
+                        .unwrap_or(gltf::texture::MagFilter::Nearest)
+                    {
+                        gltf::texture::MagFilter::Nearest => Filter::NEAREST,
+                        gltf::texture::MagFilter::Linear => Filter::LINEAR,
+                    },
+                )
+                .min_filter(
+                    match sampler
+                        .min_filter()
+                        .unwrap_or(gltf::texture::MinFilter::Nearest)
+                    {
+                        gltf::texture::MinFilter::Nearest => Filter::NEAREST,
+                        gltf::texture::MinFilter::Linear => Filter::LINEAR,
+                        x => {
+                            log::warn!("glTF: unsupported filter! {:?}", x);
+                            Filter::LINEAR
+                        }
+                    },
+                );
+            let sam = app_state.gpu.create_sampler(&builder.build())?;
+            allocated_samplers.push(resource_map.add(SamplerResource(sam)))
+        }
+
+        for texture in document.textures() {
+            allocated_textures.push(resource_map.add(Texture {
+                sampler: allocated_samplers[texture.sampler().index().unwrap_or(0)].clone(),
+                image_view: allocated_image_views[texture.source().index()].clone(),
+            }))
+        }
 
         let material = scene_renderer.get_context().create_material(
             &app_state.gpu,
@@ -69,14 +175,13 @@ impl GLTFViewer {
             MaterialDescription {
                 domain: MaterialDomain::Surface,
                 uniform_buffers: vec![],
-                input_textures: vec![texture.clone()],
+                input_textures: vec![allocated_textures[0].clone()],
                 fragment_module: &fragment_module,
                 vertex_module: &vertex_module,
             },
         )?;
         let material = resource_map.add(material);
 
-        let (document, buffers, images) = gltf::import(path)?;
         let mut engine_scene = Scene::new();
 
         let mut meshes = vec![];

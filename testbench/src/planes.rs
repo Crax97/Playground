@@ -45,7 +45,7 @@ impl App for PlanesApp {
     where
         Self: Sized,
     {
-        let resource_map = Rc::new(ResourceMap::new());
+        let mut resource_map = Rc::new(ResourceMap::new());
 
         let camera = Camera {
             location: point![2.0, 2.0, 2.0],
@@ -112,6 +112,7 @@ impl App for PlanesApp {
 
         let texture = Texture::new_with_data(
             &app_state.gpu,
+            &resource_map,
             cpu_image.width(),
             cpu_image.height(),
             &cpu_image,
