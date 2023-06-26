@@ -28,7 +28,7 @@ use crate::{
     camera::Camera,
     material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
     FragmentState, GpuRunner, GraphRunContext, ModuleInfo, PipelineTarget, RenderGraph,
-    RenderGraphPipelineDescription, RenderStage, RenderingPipeline, Scene, ScenePrimitive,
+    RenderGraphPipelineDescription, RenderStage, RenderingPipeline, Scene, ScenePrimitive, Texture,
 };
 
 use ash::vk::{

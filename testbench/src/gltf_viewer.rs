@@ -39,6 +39,9 @@ pub struct GLTFViewer {
     movement: Vector3<f32>,
     scene_renderer: DeferredRenderingPipeline,
     scene: Scene,
+
+    white_texture: Texture,
+    black_texture: Texture,
 }
 
 impl GLTFViewer {
@@ -298,6 +301,23 @@ impl App for GLTFViewer {
             .swapchain
             .select_present_mode(PresentModeKHR::MAILBOX)?;
 
+        let white_texture = Texture::new_with_data(
+            gpu,
+            &resource_map,
+            1,
+            1,
+            &[255, 255, 255, 255],
+            Some("White texture"),
+        )?;
+        let black_texture = Texture::new_with_data(
+            gpu,
+            &resource_map,
+            1,
+            1,
+            &[0, 0, 0, 255],
+            Some("Black texture"),
+        )?;
+
         Ok(Self {
             resource_map,
             camera,
@@ -309,6 +329,8 @@ impl App for GLTFViewer {
             movement,
             scene_renderer,
             scene,
+            white_texture,
+            black_texture,
         })
     }
 
