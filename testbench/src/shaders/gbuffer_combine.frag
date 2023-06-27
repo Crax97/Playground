@@ -45,8 +45,8 @@ void main() {
     FragmentInfo fragInfo = getFragmentInfo(uv);
     
     LightInfo testLightInfo;
-    testLightInfo.position = vec3(100.0, 50.0, 0.0);
-    testLightInfo.color = rgb(247, 143, 111);
+    testLightInfo.position = vec3(100.0, -50.0, 0.0);
+    testLightInfo.color = rgb(255, 255, 255);
         
     vec3 lightA = calculateLightInfluence(testLightInfo, fragInfo);
       

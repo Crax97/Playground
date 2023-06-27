@@ -160,6 +160,17 @@ impl GLTFViewer {
             let sam = app_state.gpu.create_sampler(&builder.build())?;
             allocated_samplers.push(resource_map.add(SamplerResource(sam)))
         }
+        
+        if allocated_samplers.is_empty() {
+            // add default sampler
+            let builder = SamplerCreateInfo::builder()
+                .address_mode_u(SamplerAddressMode::REPEAT)
+                .address_mode_v(SamplerAddressMode::REPEAT)
+                .mag_filter(Filter::LINEAR)
+                .min_filter(Filter::LINEAR);
+            let sam = app_state.gpu.create_sampler(&builder.build())?;
+            allocated_samplers.push(resource_map.add(SamplerResource(sam)))
+        }
 
         for texture in document.textures() {
             allocated_textures.push(resource_map.add(Texture {
@@ -392,7 +403,7 @@ impl App for GLTFViewer {
             resource_map.clone(),
             &white_texture,
             &black_texture,
-            "gltf_models/cube/Cube.gltf",
+            "gltf_models/bottle/glTF/WaterBottle.gltf",
         )?;
         engine::app_state_mut()
             .swapchain

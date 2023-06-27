@@ -33,7 +33,6 @@ void main() {
     gl_Position = mv * WorldPos;
     fragOut.color = inColor;
     fragOut.uv = inUv;
-    fragOut.uv.y = 1.0 - fragOut.uv.y;
     fragOut.Position = WorldPos.xyz;
     fragOut.Normal = inNormal;
     fragOut.model = pod.model;
