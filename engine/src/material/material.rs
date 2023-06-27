@@ -41,18 +41,6 @@ impl Material {
     ) -> VkResult<Self> {
         let mut uniform_descriptors = vec![];
         let mut bind_index = 0;
-        for buffer in uniform_buffers.iter() {
-            uniform_descriptors.push(DescriptorInfo {
-                binding: bind_index,
-                element_type: gpu::DescriptorType::UniformBuffer(BufferRange {
-                    handle: &buffer,
-                    offset: 0,
-                    size: vk::WHOLE_SIZE,
-                }),
-                binding_stage: gpu::ShaderStage::VertexFragment,
-            });
-            bind_index += 1;
-        }
         for texture in textures.iter() {
             let texture = resource_map.get(texture);
             uniform_descriptors.push(DescriptorInfo {
@@ -61,6 +49,18 @@ impl Material {
                     sampler: &resource_map.get(&texture.sampler).0,
                     image_view: &resource_map.get(&texture.image_view).view,
                     image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                }),
+                binding_stage: gpu::ShaderStage::VertexFragment,
+            });
+            bind_index += 1;
+        }
+        for buffer in uniform_buffers.iter() {
+            uniform_descriptors.push(DescriptorInfo {
+                binding: bind_index,
+                element_type: gpu::DescriptorType::UniformBuffer(BufferRange {
+                    handle: &buffer,
+                    offset: 0,
+                    size: vk::WHOLE_SIZE,
                 }),
                 binding_stage: gpu::ShaderStage::VertexFragment,
             });

@@ -12,6 +12,8 @@ struct FragmentOut {
     vec3 Position;
     vec3 Normal;
     vec3 Tangent;
+    mat4 model;
+    mat3 TBN;
     vec2 uv;
     vec3 color;
 };

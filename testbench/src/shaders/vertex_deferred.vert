@@ -19,6 +19,8 @@ struct FragmentOut {
     vec3 Position;
     vec3 Normal;
     vec3 Tangent;
+    mat4 model;
+    mat3 TBN;
     vec2 uv;
     vec3 color;
 };
@@ -31,8 +33,15 @@ void main() {
     gl_Position = mv * WorldPos;
     fragOut.color = inColor;
     fragOut.uv = inUv;
+    fragOut.uv.y = 1.0 - fragOut.uv.y;
     fragOut.Position = WorldPos.xyz;
     fragOut.Normal = inNormal;
+    fragOut.model = pod.model;
     fragOut.Tangent = inTangent;
 
+    vec3 T = normalize(vec3(pod.model * vec4(inTangent, 0.0)));
+    vec3 N = normalize(vec3(pod.model * vec4(inNormal, 0.0)));
+    vec3 B = normalize(cross(T, N));
+    mat3 TBN = transpose(mat3(T, B, N));
+    fragOut.TBN = TBN;
 }

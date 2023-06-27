@@ -345,7 +345,7 @@ impl DeferredRenderingMaterialContext {
         gpu: &Gpu,
         material_description: &'a MaterialDescription<'a>,
     ) -> VkResult<Pipeline> {
-        let texture_bindings: Vec<_> = material_description
+        let mut bindings: Vec<_> = material_description
             .input_textures
             .iter()
             .enumerate()
@@ -355,6 +355,16 @@ impl DeferredRenderingMaterialContext {
                 stage: gpu::ShaderStage::VertexFragment,
             })
             .collect();
+
+        let mut idx = bindings.len();
+        for _ in &material_description.uniform_buffers {
+            bindings.push(BindingElement {
+                binding_type: gpu::BindingType::Uniform,
+                index: idx as _,
+                stage: gpu::ShaderStage::VertexFragment,
+            });
+            idx = idx + 1;
+        }
 
         let color_attachments = &[
             // Position
@@ -464,8 +474,9 @@ impl DeferredRenderingMaterialContext {
             },
         ];
 
-        let descfription = PipelineDescription {
+        let description = PipelineDescription {
             global_bindings: &[
+                // camera
                 GlobalBinding {
                     set_index: 0,
                     elements: &[BindingElement {
@@ -474,9 +485,10 @@ impl DeferredRenderingMaterialContext {
                         stage: gpu::ShaderStage::VertexFragment,
                     }],
                 },
+                // shader inputs
                 GlobalBinding {
                     set_index: 1,
-                    elements: &texture_bindings,
+                    elements: &bindings,
                 },
             ],
             vertex_inputs: &[
@@ -566,7 +578,7 @@ impl DeferredRenderingMaterialContext {
         Pipeline::new(
             gpu,
             self.get_material_render_pass(MaterialDomain::Surface),
-            &descfription,
+            &description,
         )
     }
     fn create_surface_depth_only_material_pipeline<'a>(
@@ -574,7 +586,7 @@ impl DeferredRenderingMaterialContext {
         gpu: &Gpu,
         material_description: &'a MaterialDescription<'a>,
     ) -> VkResult<Pipeline> {
-        let texture_bindings: Vec<_> = material_description
+        let mut bindings: Vec<_> = material_description
             .input_textures
             .iter()
             .enumerate()
@@ -584,6 +596,15 @@ impl DeferredRenderingMaterialContext {
                 stage: gpu::ShaderStage::VertexFragment,
             })
             .collect();
+        let mut idx = bindings.len();
+        for _ in &material_description.uniform_buffers {
+            bindings.push(BindingElement {
+                binding_type: gpu::BindingType::Uniform,
+                index: idx as _,
+                stage: gpu::ShaderStage::VertexFragment,
+            });
+            idx = idx + 1;
+        }
 
         let color_attachments = &[];
 
@@ -599,7 +620,7 @@ impl DeferredRenderingMaterialContext {
                 },
                 GlobalBinding {
                     set_index: 1,
-                    elements: &texture_bindings,
+                    elements: &bindings,
                 },
             ],
             vertex_inputs: &[

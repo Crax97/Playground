@@ -5,8 +5,8 @@ use std::rc::Rc;
 
 use app::{bootstrap, App};
 use ash::vk::{
-    ComponentMapping, Filter, ImageAspectFlags, ImageSubresourceRange, ImageUsageFlags,
-    ImageViewType, PresentModeKHR, SamplerAddressMode, SamplerCreateInfo,
+    BufferUsageFlags, ComponentMapping, Filter, ImageAspectFlags, ImageSubresourceRange,
+    ImageUsageFlags, ImageViewType, PresentModeKHR, SamplerAddressMode, SamplerCreateInfo,
 };
 
 use engine::{
@@ -14,9 +14,9 @@ use engine::{
     MaterialDomain, Mesh, MeshCreateInfo, RenderingPipeline, SamplerResource, Scene,
     ScenePrimitive, Texture, TextureImageView,
 };
-use gpu::{ImageCreateInfo, ImageViewCreateInfo, MemoryDomain, ToVk};
+use gpu::{BufferCreateInfo, ImageCreateInfo, ImageViewCreateInfo, MemoryDomain, ToVk};
 use nalgebra::*;
-use resource_map::ResourceMap;
+use resource_map::{ResourceHandle, ResourceMap};
 use winit::event::ElementState;
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -28,6 +28,15 @@ struct VertexData {
 const SPEED: f32 = 0.1;
 const ROTATION_SPEED: f32 = 3.0;
 const MIN_DELTA: f32 = 1.0;
+
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct PbrProperties {
+    pub base_color: Vector4<f32>,         // vec4
+    pub metallic_roughness: Vector4<f32>, // vec4
+    pub emissive_color: Vector4<f32>,     // vec3
+}
+
 pub struct GLTFViewer {
     resource_map: Rc<ResourceMap>,
     camera: Camera,
@@ -39,9 +48,8 @@ pub struct GLTFViewer {
     movement: Vector3<f32>,
     scene_renderer: DeferredRenderingPipeline,
     scene: Scene,
-
-    white_texture: Texture,
-    black_texture: Texture,
+    pub white_texture: ResourceHandle<Texture>,
+    pub black_texture: ResourceHandle<Texture>,
 }
 
 impl GLTFViewer {
@@ -49,17 +57,22 @@ impl GLTFViewer {
         app_state: &AppState,
         scene_renderer: &mut dyn RenderingPipeline,
         resource_map: Rc<ResourceMap>,
+        white: &ResourceHandle<Texture>,
+        black: &ResourceHandle<Texture>,
         path: &str,
     ) -> anyhow::Result<Scene> {
         let vertex_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/vertex_deferred.spirv")?;
-        let fragment_module =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/fragment_deferred.spirv")?;
+        let fragment_module = utils::read_file_to_vk_module(
+            &app_state.gpu,
+            "./shaders/metallic_roughness_pbr.spirv",
+        )?;
 
         let mut allocated_images = vec![];
         let mut allocated_image_views = vec![];
         let mut allocated_samplers = vec![];
         let mut allocated_textures = vec![];
+        let mut allocated_materials = vec![];
 
         let (document, buffers, mut images) = gltf::import(path)?;
 
@@ -155,18 +168,79 @@ impl GLTFViewer {
             }))
         }
 
-        let material = scene_renderer.get_context().create_material(
-            &app_state.gpu,
-            &resource_map,
-            MaterialDescription {
-                domain: MaterialDomain::Surface,
-                uniform_buffers: vec![],
-                input_textures: vec![allocated_textures[0].clone()],
-                fragment_module: &fragment_module,
-                vertex_module: &vertex_module,
-            },
-        )?;
-        let material = resource_map.add(material);
+        for gltf_material in document.materials() {
+            let base_texture =
+                if let Some(base) = gltf_material.pbr_metallic_roughness().base_color_texture() {
+                    allocated_textures[base.texture().index()].clone()
+                } else {
+                    white.clone()
+                };
+            let normal_texture = if let Some(base) = gltf_material.normal_texture() {
+                allocated_textures[base.texture().index()].clone()
+            } else {
+                white.clone()
+            };
+            let occlusion_texture = if let Some(base) = gltf_material.occlusion_texture() {
+                allocated_textures[base.texture().index()].clone()
+            } else {
+                white.clone()
+            };
+            let emissive_texture = if let Some(base) = gltf_material.emissive_texture() {
+                allocated_textures[base.texture().index()].clone()
+            } else {
+                black.clone()
+            };
+            let metallic_roughness = if let Some(base) = gltf_material
+                .pbr_metallic_roughness()
+                .metallic_roughness_texture()
+            {
+                allocated_textures[base.texture().index()].clone()
+            } else {
+                white.clone()
+            };
+
+            let params = {
+                let buf = app_state.gpu.create_buffer(
+                    &BufferCreateInfo {
+                        label: Some("Pbr Properties"),
+                        size: std::mem::size_of::<PbrProperties>(),
+                        usage: BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM_BUFFER,
+                    },
+                    MemoryDomain::DeviceLocal,
+                )?;
+
+                let gltf_props = gltf_material.pbr_metallic_roughness();
+                let mut props = PbrProperties::default();
+                let emissive = gltf_material.emissive_factor();
+                props.base_color = Vector4::from_row_slice(&gltf_props.base_color_factor());
+                props.metallic_roughness.x = gltf_props.metallic_factor();
+                props.metallic_roughness.y = gltf_props.roughness_factor();
+                props.emissive_color = vector![emissive[0], emissive[1], emissive[2], 1.0];
+
+                app_state.gpu.write_buffer_data(&buf, &[props])?;
+                buf
+            };
+
+            let material = scene_renderer.get_context().create_material(
+                &app_state.gpu,
+                &resource_map,
+                MaterialDescription {
+                    domain: MaterialDomain::Surface,
+                    uniform_buffers: vec![params],
+                    input_textures: vec![
+                        base_texture,
+                        normal_texture,
+                        occlusion_texture,
+                        emissive_texture,
+                        metallic_roughness,
+                    ],
+                    fragment_module: &fragment_module,
+                    vertex_module: &vertex_module,
+                },
+            )?;
+            let material = resource_map.add(material);
+            allocated_materials.push(material);
+        }
 
         let mut engine_scene = Scene::new();
 
@@ -237,9 +311,11 @@ impl GLTFViewer {
                     * Matrix4::new_nonuniform_scaling(&Vector3::from_row_slice(&scale));
 
                 if let Some(mesh) = node.mesh() {
+                    let prim = mesh.primitives().next().unwrap();
+                    let mat = prim.material().index().unwrap_or(0);
                     engine_scene.add(ScenePrimitive {
                         mesh: meshes[mesh.index()].clone(),
-                        material: material.clone(),
+                        material: allocated_materials[mat].clone(),
                         transform,
                     });
                 }
@@ -291,32 +367,36 @@ impl App for GLTFViewer {
             texture_copy_module,
         )?;
 
-        let scene = Self::read_gltf(
-            app_state,
-            &mut scene_renderer,
-            resource_map.clone(),
-            "gltf_models/cube/Cube.gltf",
-        )?;
-        engine::app_state_mut()
-            .swapchain
-            .select_present_mode(PresentModeKHR::MAILBOX)?;
-
         let white_texture = Texture::new_with_data(
-            gpu,
+            &app_state.gpu,
             &resource_map,
             1,
             1,
             &[255, 255, 255, 255],
             Some("White texture"),
         )?;
+        let white_texture = resource_map.add(white_texture);
         let black_texture = Texture::new_with_data(
-            gpu,
+            &app_state.gpu,
             &resource_map,
             1,
             1,
             &[0, 0, 0, 255],
             Some("Black texture"),
         )?;
+        let black_texture = resource_map.add(black_texture);
+
+        let scene = Self::read_gltf(
+            app_state,
+            &mut scene_renderer,
+            resource_map.clone(),
+            &white_texture,
+            &black_texture,
+            "gltf_models/cube/Cube.gltf",
+        )?;
+        engine::app_state_mut()
+            .swapchain
+            .select_present_mode(PresentModeKHR::MAILBOX)?;
 
         Ok(Self {
             resource_map,
@@ -330,7 +410,7 @@ impl App for GLTFViewer {
             scene_renderer,
             scene,
             white_texture,
-            black_texture,
+            black_texture
         })
     }
 
