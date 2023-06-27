@@ -408,7 +408,7 @@ impl App for GLTFViewer {
             resource_map.clone(),
             &white_texture,
             &black_texture,
-            "gltf_models/bottle/glTF/WaterBottle.gltf",
+            "gltf_models/helmet/glTF/WaterBottle.gltf",
         )?;
         engine::app_state_mut()
             .swapchain

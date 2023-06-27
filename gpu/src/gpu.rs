@@ -939,12 +939,13 @@ impl Gpu {
         create_info: &BufferCreateInfo,
         memory_domain: MemoryDomain,
     ) -> VkResult<GpuBuffer> {
+        let size = create_info.size as u64;
         let family = self.state.queue_families.clone();
         let create_info_vk = vk::BufferCreateInfo {
             s_type: StructureType::BUFFER_CREATE_INFO,
             p_next: std::ptr::null(),
             flags: BufferCreateFlags::empty(),
-            size: create_info.size as u64,
+            size,
             usage: create_info.usage
                 | if memory_domain.contains(MemoryDomain::HostVisible) {
                     BufferUsageFlags::empty()
