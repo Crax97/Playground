@@ -25,7 +25,7 @@ struct VertexData {
     pub color: Vector3<f32>,
     pub uv: Vector2<f32>,
 }
-const SPEED: f32 = 0.1;
+const SPEED: f32 = 0.01;
 const ROTATION_SPEED: f32 = 3.0;
 const MIN_DELTA: f32 = 1.0;
 
@@ -318,9 +318,13 @@ impl GLTFViewer {
             for node in scene.nodes() {
                 let node_transform = node.transform();
                 let (pos, rot, scale) = node_transform.decomposed();
+                let rotation = UnitQuaternion::from_quaternion(Quaternion::new(rot[0],rot[1],-rot[2],rot[3]));
+                let rot_matrix  = rotation.to_homogeneous();
+                
                 let transform = Matrix4::new_translation(&Vector3::from_row_slice(&pos))
-                    * Matrix4::new_nonuniform_scaling(&Vector3::from_row_slice(&scale));
-
+                    * Matrix4::new_nonuniform_scaling(&Vector3::from_row_slice(&scale))
+                    * rot_matrix;
+                
                 if let Some(mesh) = node.mesh() {
                     let prim = mesh.primitives().next().unwrap();
                     let mat = prim.material().index().unwrap_or(0);
@@ -351,6 +355,7 @@ impl App for GLTFViewer {
         let camera = Camera {
             location: point![2.0, 2.0, 2.0],
             forward: vector![0.0, -1.0, -1.0].normalize(),
+            near: 0.0001,
             ..Default::default()
         };
 
@@ -467,7 +472,7 @@ impl App for GLTFViewer {
 
     fn update(&mut self, _app_state: &mut engine::AppState) -> anyhow::Result<()> {
         if self.rotation_movement > 0.0 {
-            self.rot_z += self.movement.y;
+            self.rot_z += -self.movement.y;
             self.rot_z = self.rot_z.clamp(-89.0, 89.0);
             self.rot_x += self.movement.x;
         } else {

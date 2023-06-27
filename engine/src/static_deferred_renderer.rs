@@ -13,12 +13,13 @@ use gpu::{
     GpuShaderModule, ImageFormat, MemoryDomain, Pipeline, PipelineDescription, Swapchain, ToVk,
     VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
-use nalgebra::{Matrix4, Vector2, Vector3};
+use nalgebra::{Matrix4, Vector2, Vector3, Vector4};
 use resource_map::ResourceMap;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct PerFrameData {
+    eye: Vector4<f32>,
     view: nalgebra::Matrix4<f32>,
     projection: nalgebra::Matrix4<f32>,
 }
@@ -203,7 +204,7 @@ impl DeferredRenderingMaterialContext {
             },
             // Diffuse
             RenderPassAttachment {
-                format: Format::R8G8B8A8_UNORM,
+                format: ImageFormat::Rgba8.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
                 load_op: AttachmentLoadOp::CLEAR,
                 store_op: AttachmentStoreOp::STORE,
@@ -224,7 +225,7 @@ impl DeferredRenderingMaterialContext {
             },
             // Emissive
             RenderPassAttachment {
-                format: Format::R8G8B8A8_UNORM,
+                format: ImageFormat::Rgba8.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
                 load_op: AttachmentLoadOp::CLEAR,
                 store_op: AttachmentStoreOp::STORE,
@@ -245,7 +246,7 @@ impl DeferredRenderingMaterialContext {
             },
             // Metal/Roughness
             RenderPassAttachment {
-                format: Format::R8G8B8A8_UNORM,
+                format: ImageFormat::Rgba8.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
                 load_op: AttachmentLoadOp::CLEAR,
                 store_op: AttachmentStoreOp::STORE,
@@ -390,7 +391,7 @@ impl DeferredRenderingMaterialContext {
             },
             // Normals
             RenderPassAttachment {
-                format: ImageFormat::RgbaFloat.to_vk(),
+                format: ImageFormat::Rgba8.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
                 load_op: AttachmentLoadOp::CLEAR,
                 store_op: AttachmentStoreOp::STORE,
@@ -411,7 +412,7 @@ impl DeferredRenderingMaterialContext {
             },
             // Diffuse
             RenderPassAttachment {
-                format: Format::R8G8B8A8_UNORM,
+                format: ImageFormat::Rgba8.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
                 load_op: AttachmentLoadOp::CLEAR,
                 store_op: AttachmentStoreOp::STORE,
@@ -432,7 +433,7 @@ impl DeferredRenderingMaterialContext {
             },
             // Emissive
             RenderPassAttachment {
-                format: Format::R8G8B8A8_UNORM,
+                format: ImageFormat::Rgba8.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
                 load_op: AttachmentLoadOp::CLEAR,
                 store_op: AttachmentStoreOp::STORE,
@@ -453,7 +454,7 @@ impl DeferredRenderingMaterialContext {
             },
             // Metal/Roughness
             RenderPassAttachment {
-                format: Format::R8G8B8A8_UNORM,
+                format: ImageFormat::Rgba8.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
                 load_op: AttachmentLoadOp::CLEAR,
                 store_op: AttachmentStoreOp::STORE,
@@ -748,13 +749,15 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         scene: &Scene,
         swapchain: &mut Swapchain,
     ) -> anyhow::Result<()> {
+        let projection = pov.projection();
         super::app_state()
             .gpu
             .write_buffer_data(
                 &self.camera_buffer,
                 &[PerFrameData {
-                    view: crate::utils::constants::Z_INVERT_MATRIX * pov.view(),
-                    projection: pov.projection(),
+                    eye: Vector4::new(pov.forward[0],  pov.forward[1], pov.forward[2], 0.0),
+                    view: pov.view(),
+                    projection: projection * crate::utils::constants::Z_INVERT_MATRIX,
                 }],
             )
             .unwrap();
@@ -943,7 +946,11 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                         max_depth_bounds: 1.0,
                     },
                     logic_op: None,
-                    push_constant_ranges: &[],
+                    push_constant_ranges: &[ash::vk::PushConstantRange {
+                        offset: 0,
+                        size: std::mem::size_of::<Vector4<f32>>() as _,
+                        stage_flags: ShaderStageFlags::ALL
+                    }],
                     ..Default::default()
                 },
             },
@@ -1085,6 +1092,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                             ],
                             &[0, 0, 0, 0, 0],
                         );
+                        
                         let index_count = self.resource_map.get(&primitive.mesh).index_count;
                         ctx.render_pass_command
                             .push_constant(&pipeline, &primitive.transform, 0);
@@ -1098,7 +1106,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         context.register_callback(&combine_pass, |_: &Gpu, ctx| {
             let pipeline = ctx.render_graph.get_pipeline(&combine_handle).unwrap();
-
+            ctx.render_pass_command.push_constant(&pipeline, &pov.location, 0);
             ctx.render_pass_command.bind_pipeline(&pipeline);
             ctx.render_pass_command.bind_descriptor_sets(
                 PipelineBindPoint::GRAPHICS,
@@ -1118,6 +1126,29 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 &[ctx.read_descriptor_set.unwrap()],
             );
             ctx.render_pass_command.draw(4, 1, 0, 0);
+        });
+        
+        context.set_clear_callback(&gbuffer_pass, |handle| {
+            if handle == &normal_buffer {
+                   ash::vk::ClearValue {
+                        color: ash::vk::ClearColorValue {
+                            float32: [0.5, 0.5, 0.5, 1.0]
+                        }
+                   } 
+            } else if handle == &depth_buffer {
+                ash::vk::ClearValue {
+                    depth_stencil: ash::vk::ClearDepthStencilValue {
+                        depth: 1.0,
+                        stencil: 255,
+                    }
+                }
+            } else {
+                ash::vk::ClearValue {
+                    color: ash::vk::ClearColorValue {
+                        float32: [0.0, 0.0, 0.0, 1.0]
+                    }
+                }
+            }
         });
 
         context.inject_external_renderpass(

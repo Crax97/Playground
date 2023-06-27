@@ -37,7 +37,19 @@ layout(location = 0) in FragmentOut fragOut;
 
 void main() {
     outPosition = vec4(fragOut.Position, 0.0);
-    outNormal = vec4( fragOut.TBN * texture(normalSampler, fragOut.uv).xyz, 1.0);
+
+    vec3 T = normalize(vec3(fragOut.model * vec4(fragOut.Tangent, 0.0))); // * vec3(-1, -1, 1);
+    vec3 N = normalize(vec3(fragOut.model * vec4(fragOut.Normal, 0.0))) ; //* vec3(-1, -1, 1);
+    vec3 B = normalize(cross(N, T));
+    mat3 TBN = mat3(T, B, N);
+    vec3 sample_normal = texture(normalSampler, fragOut.uv).xyz;
+    sample_normal = sample_normal * 2.0 - 1.0;
+
+    sample_normal = normalize(TBN * sample_normal);
+    sample_normal = (sample_normal + 1.0) * 0.5;
+    
+    // outNormal = vec4((N + 1.0) * 0.5, 1.0);
+    outNormal = vec4(sample_normal, 1.0);
     outDiffuse = texture(baseColorSampler, fragOut.uv) * pbrProperties.baseColor;
     outEmissive = texture(emissiveSampler, fragOut.uv) * vec4(pbrProperties.emissiveFactor, 1.0);
     outPbr = texture(metallicRoughnessSampler, fragOut.uv) * pbrProperties.metallicRoughness;

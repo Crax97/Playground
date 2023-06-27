@@ -7,6 +7,7 @@ layout(location = 3) in vec3 inTangent;
 layout(location = 4) in vec2 inUv;
 
 layout(set = 0, binding = 0) uniform PerFrameData {
+    vec4 eye;
     mat4 view;
     mat4 proj;
 } pfd;
@@ -40,7 +41,7 @@ void main() {
 
     vec3 T = normalize(vec3(pod.model * vec4(inTangent, 0.0)));
     vec3 N = normalize(vec3(pod.model * vec4(inNormal, 0.0)));
-    vec3 B = normalize(cross(T, N));
+    vec3 B = normalize(cross(N, T));
     mat3 TBN = transpose(mat3(T, B, N));
     fragOut.TBN = TBN;
 }

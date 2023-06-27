@@ -607,6 +607,15 @@ impl<'a, 'e> GraphRunContext<'a, 'e> {
         self.callbacks.register_callback(handle, callback)
     }
 
+
+    pub fn set_clear_callback<F: Fn(&ResourceId) -> ash::vk::ClearValue + 'e>(
+        &mut self,
+        handle: &RenderPassHandle,
+        callback: F,
+    ) {
+        self.callbacks.set_clear_callback(handle, Box::new(callback));
+    }
+    
     pub fn register_end_callback<F: FnMut(&Gpu, &mut EndContext) + 'e>(&mut self, callback: F) {
         self.callbacks.register_end_callback(callback)
     }
@@ -1055,6 +1064,7 @@ impl CompiledRenderGraph {
 #[derive(Default)]
 struct Callbacks<'g> {
     callbacks: HashMap<RenderPassHandle, Box<dyn FnMut(&Gpu, &mut RenderPassContext) + 'g>>,
+    clear_color_cbs: HashMap<RenderPassHandle, Box<dyn Fn(&ResourceId) -> ash::vk::ClearValue + 'g>>,
     end_callback: Option<Box<dyn FnMut(&Gpu, &mut EndContext) + 'g>>,
 }
 
@@ -1065,6 +1075,13 @@ impl<'g> Callbacks<'g> {
         callback: F,
     ) {
         self.callbacks.insert(*handle, Box::new(callback));
+    }
+    pub fn set_clear_callback<F: Fn(&ResourceId) -> ash::vk::ClearValue + 'g>(
+        &mut self,
+        handle: &RenderPassHandle,
+        callback: F,
+    ) {
+        self.clear_color_cbs.insert(*handle, Box::new(callback));
     }
     pub fn register_end_callback<F: FnMut(&Gpu, &mut EndContext) + 'g>(&mut self, callback: F) {
         self.end_callback = Some(Box::new(callback));
@@ -1553,29 +1570,34 @@ impl RenderGraphRunner for GpuRunner {
                     )?;
 
                     let cb = ctx.callbacks.callbacks.get_mut(rp);
+                    let clear = ctx.callbacks.clear_color_cbs.get(rp);
                     let clear_color_values: Vec<_> = info
                         .attachment_writes
                         .iter()
                         .chain(info.attachment_reads.iter())
                         .map(|rd| {
-                            let res_info = &graph.allocations[rd];
-                            match &res_info.ty {
-                                AllocationType::Image(desc)
-                                | AllocationType::ExternalImage(desc) => match desc.format {
-                                    ImageFormat::Rgba8
-                                    | ImageFormat::Rgb8
-                                    | ImageFormat::RgbaFloat => ClearValue {
-                                        color: vk::ClearColorValue {
-                                            float32: [0.0, 0.0, 0.0, 0.0],
+                            if let Some(func) = clear {
+                                func(rd)
+                            } else {
+                                let res_info = &graph.allocations[rd];
+                                match &res_info.ty {
+                                    AllocationType::Image(desc)
+                                    | AllocationType::ExternalImage(desc) => match desc.format {
+                                        ImageFormat::Rgba8
+                                        | ImageFormat::Rgb8
+                                        | ImageFormat::RgbaFloat => ClearValue {
+                                            color: vk::ClearColorValue {
+                                                float32: [0.0, 0.0, 0.0, 0.0],
+                                            },
+                                        },
+                                        ImageFormat::Depth => ClearValue {
+                                            depth_stencil: ClearDepthStencilValue {
+                                                depth: 1.0,
+                                                stencil: 255,
+                                            },
                                         },
                                     },
-                                    ImageFormat::Depth => ClearValue {
-                                        depth_stencil: ClearDepthStencilValue {
-                                            depth: 1.0,
-                                            stencil: 255,
-                                        },
-                                    },
-                                },
+                                }
                             }
                         })
                         .collect();

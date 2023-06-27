@@ -353,10 +353,14 @@ impl Gpu {
             description,
             queue_families,
             debug_utilities,
-            messenger,
             features: supported_features,
             gpu_memory_allocator: Arc::new(RefCell::new(gpu_memory_allocator)),
             descriptor_set_allocator: Arc::new(RefCell::new(descriptor_set_allocator)),
+
+            #[cfg(debug_assertions)]
+            messenger,
+            #[cfg(not(debug_assertions))]
+            messenger: None
         });
 
         let thread_local_state = GpuThreadLocalState::new(state.clone())?;

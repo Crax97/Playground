@@ -8,5 +8,7 @@ layout(set = 0, binding = 0) uniform sampler2D source;
 
 
 void main() {
-    color = texture(source, uv);
+    vec2 nuv = uv;
+    nuv.y = 1.0 - nuv.y;
+    color = texture(source, nuv);
 }
