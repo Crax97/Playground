@@ -473,14 +473,16 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
 
     fn prepare_draw(&self) {
         let device = self.command_buffer.gpu.vk_logical_device();
-
+        
+        // Negate height because of Khronos brain farts
+        let height = self.render_area.extent.height as f32;
         let viewport = match self.viewport_area {
             Some(viewport) => viewport,
             None => Viewport {
                 x: 0 as f32,
-                y: 0 as f32,
+                y: height,
                 width: self.render_area.extent.width as f32,
-                height: self.render_area.extent.height as f32,
+                height: -height,
                 min_depth: 0.0,
                 max_depth: 1.0,
             },
