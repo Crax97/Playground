@@ -757,7 +757,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 &[PerFrameData {
                     eye: Vector4::new(pov.forward[0],  pov.forward[1], pov.forward[2], 0.0),
                     view: pov.view(),
-                    projection: projection * crate::utils::constants::Z_INVERT_MATRIX,
+                    projection,
                 }],
             )
             .unwrap();

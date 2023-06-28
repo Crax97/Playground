@@ -32,8 +32,8 @@ struct FragmentInfo {
 
 FragmentInfo get_fragment_info(vec2 in_uv) {
     FragmentInfo info;
-    info.diffuse = texture(difSampler, uv).rgb;
-    info.emissive = texture(emissSampler, uv);
+    info.diffuse = texture(difSampler, in_uv).rgb;
+    info.emissive = texture(emissSampler, in_uv);
     info.position = texture(posSampler, in_uv).xyz;
     info.normal = texture(normSampler, in_uv).xyz;
     info.normal = info.normal * 2.0 - 1.0;

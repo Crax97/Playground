@@ -407,7 +407,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
             .write_buffer_data(
                 &self.camera_buffer,
                 &[PerFrameData {
-                    view: crate::utils::constants::Z_INVERT_MATRIX * pov.view(),
+                    view: pov.view(),
                     projection: pov.projection(),
                 }],
             )

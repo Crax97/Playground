@@ -39,7 +39,7 @@ impl Default for Camera {
 
 impl Camera {
     pub fn view(&self) -> Matrix4<f32> {
-        Matrix4::look_at_lh(
+        Matrix4::look_at_rh(
             &self.location,
             &(self.location + self.forward),
             &vector![0.0, 0.0, 1.0],

@@ -321,7 +321,6 @@ impl GLTFViewer {
                 let (pos, rot, scale) = node_transform.decomposed();
                 let rotation = UnitQuaternion::from_quaternion(Quaternion::new(rot[0],rot[1],rot[2],rot[3]));
                 let rot_matrix  = rotation.to_homogeneous();
-                let rot_matrix = Rotation::<f32, 3>::new(vector![PI * 0.5, 0.0, 0.0]).to_homogeneous() * rot_matrix;
                 
                 let transform = Matrix4::new_translation(&Vector3::from_row_slice(&pos))
                     * Matrix4::new_nonuniform_scaling(&Vector3::from_row_slice(&scale))
@@ -476,7 +475,7 @@ impl App for GLTFViewer {
         if self.rotation_movement > 0.0 {
             self.rot_z += -self.movement.y;
             self.rot_z = self.rot_z.clamp(-89.0, 89.0);
-            self.rot_x += self.movement.x;
+            self.rot_x -= self.movement.x;
         } else {
             self.dist += self.movement.y * self.forward_movement * SPEED;
         }

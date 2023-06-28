@@ -29,12 +29,21 @@ struct FragmentOut {
 layout(location = 0) out FragmentOut fragOut;
 
 void main() {
-    mat4 mv = pfd.proj * pfd.view;
-    vec4 WorldPos = pod.model * vec4(inPosition, 1.0);
-    gl_Position = mv * WorldPos;
+
+    mat4 view_correct = mat4(
+      1, 0,  0, 0,
+      0, -1, 0, 0,
+      0, 0,  1, 0,
+      0, 0,  0, 1
+    );
+
+    mat4 mv = pfd.proj * view_correct * pfd.view;
+    vec4 world_pos = pod.model * vec4(inPosition, 1.0);
+    world_pos = world_pos.xzyw;
+    gl_Position = mv * world_pos;
     fragOut.color = inColor;
     fragOut.uv = inUv;
-    fragOut.Position = WorldPos.xyz;
+    fragOut.Position = world_pos.xyz;
     fragOut.Normal = inNormal;
     fragOut.model = pod.model;
     fragOut.Tangent = inTangent;
