@@ -750,13 +750,17 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         swapchain: &mut Swapchain,
     ) -> anyhow::Result<()> {
         let projection = pov.projection();
+        let flip =Matrix4::new(-1.0, 0.0, 0.0, 0.0,
+                                        0.0, -1.0, 0.0, 0.0,
+                                        0.0, 0.0, 1.0, 0.0,
+                                        0.0, 0.0, 0.0, 1.0);
         super::app_state()
             .gpu
             .write_buffer_data(
                 &self.camera_buffer,
                 &[PerFrameData {
                     eye: Vector4::new(pov.forward[0],  pov.forward[1], pov.forward[2], 0.0),
-                    view: pov.view(),
+                    view: flip * pov.view(),
                     projection,
                 }],
             )

@@ -44,7 +44,7 @@ pub struct GLTFViewer {
     forward_movement: f32,
     rotation_movement: f32,
     rot_x: f32,
-    rot_z: f32,
+    rot_y: f32,
     dist: f32,
     movement: Vector3<f32>,
     scene_renderer: DeferredRenderingPipeline,
@@ -326,6 +326,9 @@ impl GLTFViewer {
                     * Matrix4::new_nonuniform_scaling(&Vector3::from_row_slice(&scale))
                     * rot_matrix;
                 
+                let determinant = transform.determinant();
+                println!("Det: {determinant}");
+                
                 if let Some(mesh) = node.mesh() {
                     let prim = mesh.primitives().next().unwrap();
                     let mat = prim.material().index().unwrap_or(0);
@@ -421,7 +424,7 @@ impl App for GLTFViewer {
             forward_movement,
             rotation_movement,
             rot_x,
-            rot_z,
+            rot_y: rot_z,
             dist,
             movement,
             scene_renderer,
@@ -473,21 +476,16 @@ impl App for GLTFViewer {
 
     fn update(&mut self, _app_state: &mut engine::AppState) -> anyhow::Result<()> {
         if self.rotation_movement > 0.0 {
-            self.rot_z += -self.movement.y;
-            self.rot_z = self.rot_z.clamp(-89.0, 89.0);
-            self.rot_x -= self.movement.x;
+            self.rot_y += self.movement.x;
+            self.rot_x += -self.movement.y;
+            self.rot_x = self.rot_x.clamp(-89.0, 89.0);
         } else {
             self.dist += self.movement.y * self.forward_movement * SPEED;
         }
 
-        let new_forward = Rotation::<f32, 3>::from_axis_angle(
-            &Unit::new_normalize(vector![0.0, 0.0, 1.0]),
-            self.rot_x.to_radians(),
-        ) * Rotation::<f32, 3>::from_axis_angle(
-            &Unit::new_normalize(vector![0.0, 1.0, 0.0]),
-            -self.rot_z.to_radians(),
-        );
-        let new_forward = new_forward.to_homogeneous();
+        let rotation = Rotation::from_euler_angles( 0.0, self.rot_y.to_radians(), 0.0);
+        let rotation = rotation * Rotation::from_euler_angles(0.0, 0.0, self.rot_x.to_radians());
+        let new_forward = rotation.to_homogeneous();
         let new_forward = new_forward.column(0);
 
         let direction = vector![new_forward[0], new_forward[1], new_forward[2]];
