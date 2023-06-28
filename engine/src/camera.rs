@@ -42,7 +42,7 @@ impl Camera {
         Matrix4::look_at_rh(
             &self.location,
             &(self.location + self.forward),
-            &vector![0.0, 0.0, 1.0],
+            &vector![0.0, 1.0, 0.0],
         )
     }
     pub fn projection(&self) -> Matrix4<f32> {
