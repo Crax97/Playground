@@ -558,7 +558,7 @@ impl DeferredRenderingMaterialContext {
             primitive_restart: false,
             polygon_mode: gpu::PolygonMode::Fill,
             cull_mode: gpu::CullMode::Back,
-            front_face: gpu::FrontFace::ClockWise,
+            front_face: gpu::FrontFace::CounterClockWise,
             depth_stencil_state: DepthStencilState {
                 depth_test_enable: true,
                 depth_write_enable: false,
@@ -690,7 +690,7 @@ impl DeferredRenderingMaterialContext {
             primitive_restart: false,
             polygon_mode: gpu::PolygonMode::Fill,
             cull_mode: gpu::CullMode::Back,
-            front_face: gpu::FrontFace::ClockWise,
+            front_face: gpu::FrontFace::CounterClockWise,
             depth_stencil_state: DepthStencilState {
                 depth_test_enable: true,
                 depth_write_enable: true,
@@ -934,7 +934,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     primitive_restart: false,
                     polygon_mode: gpu::PolygonMode::Fill,
                     cull_mode: gpu::CullMode::None,
-                    front_face: gpu::FrontFace::ClockWise,
+                    front_face: gpu::FrontFace::CounterClockWise,
                     depth_stencil_state: DepthStencilState {
                         depth_test_enable: false,
                         depth_write_enable: false,
@@ -977,7 +977,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     primitive_restart: false,
                     polygon_mode: gpu::PolygonMode::Fill,
                     cull_mode: gpu::CullMode::None,
-                    front_face: gpu::FrontFace::ClockWise,
+                    front_face: gpu::FrontFace::CounterClockWise,
                     depth_stencil_state: DepthStencilState {
                         depth_test_enable: false,
                         depth_write_enable: false,

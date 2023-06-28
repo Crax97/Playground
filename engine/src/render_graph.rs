@@ -745,7 +745,7 @@ impl<'a> Default for FragmentState<'a> {
             primitive_restart: false,
             polygon_mode: PolygonMode::Fill,
             cull_mode: CullMode::None,
-            front_face: FrontFace::ClockWise,
+            front_face: FrontFace::CounterClockWise,
             depth_stencil_state: DepthStencilState {
                 depth_test_enable: false,
                 ..Default::default()

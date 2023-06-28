@@ -167,8 +167,8 @@ pub enum CullMode {
 #[derive(Clone, Copy, Debug, Default, Hash)]
 pub enum FrontFace {
     #[default]
-    ClockWise,
     CounterClockWise,
+    ClockWise,
 }
 
 #[derive(Copy, Clone, Default)]
