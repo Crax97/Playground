@@ -1,6 +1,7 @@
 mod app;
 mod utils;
 
+use std::f32::consts::PI;
 use std::rc::Rc;
 
 use app::{bootstrap, App};
@@ -318,8 +319,9 @@ impl GLTFViewer {
             for node in scene.nodes() {
                 let node_transform = node.transform();
                 let (pos, rot, scale) = node_transform.decomposed();
-                let rotation = UnitQuaternion::from_quaternion(Quaternion::new(rot[0],rot[1],-rot[2],rot[3]));
+                let rotation = UnitQuaternion::from_quaternion(Quaternion::new(rot[0],rot[1],rot[2],rot[3]));
                 let rot_matrix  = rotation.to_homogeneous();
+                let rot_matrix = Rotation::<f32, 3>::new(vector![PI * 0.5, 0.0, 0.0]).to_homogeneous() * rot_matrix;
                 
                 let transform = Matrix4::new_translation(&Vector3::from_row_slice(&pos))
                     * Matrix4::new_nonuniform_scaling(&Vector3::from_row_slice(&scale))
@@ -355,16 +357,16 @@ impl App for GLTFViewer {
         let camera = Camera {
             location: point![2.0, 2.0, 2.0],
             forward: vector![0.0, -1.0, -1.0].normalize(),
-            near: 0.0001,
+            near: 0.01,
             ..Default::default()
         };
 
         let forward_movement = 0.0;
         let rotation_movement = 0.0;
 
-        let rot_x = 45.0;
-        let rot_z = 55.0;
-        let dist = 5.0;
+        let rot_x = 0.0;
+        let rot_z = 0.0;
+        let dist = 1.0;
 
         let movement: Vector3<f32> = vector![0.0, 0.0, 0.0];
 
@@ -408,7 +410,7 @@ impl App for GLTFViewer {
             resource_map.clone(),
             &white_texture,
             &black_texture,
-            "gltf_models/helmet/glTF/WaterBottle.gltf",
+            "gltf_models/bottle/glTF/WaterBottle.gltf",
         )?;
         engine::app_state_mut()
             .swapchain
@@ -442,9 +444,9 @@ impl App for GLTFViewer {
                 } else {
                     0.0
                 };
-                if button == 3 {
+                if button == 1 {
                     self.rotation_movement = mul;
-                } else if button == 1 {
+                } else if button == 3 {
                     self.forward_movement = mul;
                 }
             }
