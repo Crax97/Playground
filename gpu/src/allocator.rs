@@ -12,7 +12,7 @@ use log::trace;
 
 bitflags! {
     #[repr(transparent)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    #[derive(Clone, Copy, Debug, Ord, PartialOrd, PartialEq, Eq, Hash)]
     pub struct MemoryDomain: u32 {
         const DeviceLocal =     0b00000001;
         const HostVisible =     0b00000010;
@@ -45,6 +45,7 @@ pub struct AllocationRequirements {
     pub memory_domain: MemoryDomain,
 }
 
+#[derive(Eq, Ord, PartialOrd, PartialEq)]
 pub struct MemoryAllocation {
     pub(crate) device_memory: DeviceMemory,
     pub(crate) offset: u64,

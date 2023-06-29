@@ -49,7 +49,6 @@ pub struct DeferredRenderingPipeline {
 
     camera_buffer: GpuBuffer,
     light_buffer: GpuBuffer,
-    camera_buffer_descriptor_set: GpuDescriptorSet,
     material_context: DeferredRenderingMaterialContext,
     render_graph: RenderGraph,
     screen_quad: GpuShaderModule,
@@ -91,19 +90,7 @@ impl DeferredRenderingPipeline {
             )?;
             buffer
         };
-
-        let camera_buffer_descriptor_set = gpu.create_descriptor_set(&DescriptorSetInfo {
-            descriptors: &[DescriptorInfo {
-                binding: 0,
-                element_type: gpu::DescriptorType::UniformBuffer(BufferRange {
-                    handle: &camera_buffer,
-                    offset: 0,
-                    size: vk::WHOLE_SIZE,
-                }),
-                binding_stage: gpu::ShaderStage::VertexFragment,
-            }],
-        })?;
-
+        
         let material_context = DeferredRenderingMaterialContext::new(gpu)?;
 
         let render_graph = RenderGraph::new();
@@ -112,7 +99,6 @@ impl DeferredRenderingPipeline {
             camera_buffer,
             light_buffer,
             resource_map,
-            camera_buffer_descriptor_set,
             material_context,
             render_graph,
             screen_quad,
@@ -830,40 +816,44 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             samples: 1,
             present: true,
         };
+        
+        let camera_buffer = self
+            .render_graph
+            .use_buffer("camera-buffer", std::mem::size_of::<PerFrameData>() as u64, true)?;
+        
+        let swapchain_image = self
+            .render_graph
+            .use_image("swapchain", &framebuffer_swapchain_desc, true)?;
+        let depth_target = self
+            .render_graph
+            .use_image("depth-buffer", &framebuffer_depth_desc, false)?;
+        let color_target = self
+            .render_graph
+            .use_image("color-buffer", &framebuffer_rgba_desc, false)?;
 
-        let swapchain_buffer = self
+        let position_target = self
             .render_graph
-            .use_image("swapchain", &framebuffer_swapchain_desc)?;
+            .use_image("position-buffer", &framebuffer_vector_desc, false)?;
+        let normal_target = self
+            .render_graph
+            .use_image("normal_buffer", &framebuffer_rgba_desc, false)?;
+        let diffuse_target = self
+            .render_graph
+            .use_image("diffuse_buffer", &framebuffer_rgba_desc, false)?;
+        let emissive_target = self
+            .render_graph
+            .use_image("emissive_buffer", &framebuffer_rgba_desc, false)?;
+        let pbr_target = self
+            .render_graph
+            .use_image("pbr_buffer", &framebuffer_rgba_desc, false)?;
 
-        let depth_buffer = self
-            .render_graph
-            .use_image("depth-buffer", &framebuffer_depth_desc)?;
-        let color_buffer = self
-            .render_graph
-            .use_image("color-buffer", &framebuffer_rgba_desc)?;
-
-        let position_buffer = self
-            .render_graph
-            .use_image("position-buffer", &framebuffer_vector_desc)?;
-        let normal_buffer = self
-            .render_graph
-            .use_image("normal_buffer", &framebuffer_rgba_desc)?;
-        let diffuse_buffer = self
-            .render_graph
-            .use_image("diffuse_buffer", &framebuffer_rgba_desc)?;
-        let emissive_buffer = self
-            .render_graph
-            .use_image("emissive_buffer", &framebuffer_rgba_desc)?;
-        let pbr_buffer = self
-            .render_graph
-            .use_image("pbr_buffer", &framebuffer_rgba_desc)?;
-
-        self.render_graph.persist_resource(&swapchain_buffer);
+        self.render_graph.persist_resource(&swapchain_image);
 
         let dbuffer_pass = self
             .render_graph
             .begin_render_pass("EarlyZPass", swapchain_extents)?
-            .writes_attachments(&[depth_buffer])
+            .writes_attachments(&[depth_target])
+            .shader_reads(&[camera_buffer])
             .mark_external()
             .commit();
 
@@ -871,13 +861,14 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .render_graph
             .begin_render_pass("GBuffer", swapchain_extents)?
             .writes_attachments(&[
-                position_buffer,
-                normal_buffer,
-                diffuse_buffer,
-                emissive_buffer,
-                pbr_buffer,
+                position_target,
+                normal_target,
+                diffuse_target,
+                emissive_target,
+                pbr_target,
             ])
-            .reads_attachments(&[depth_buffer])
+            .reads_attachments(&[depth_target])
+            .shader_reads(&[camera_buffer])
             .mark_external()
             .with_blend_state(BlendState {
                 blend_enable: false,
@@ -894,13 +885,13 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let combine_pass = self
             .render_graph
             .begin_render_pass("GBufferCombine", swapchain_extents)?
-            .writes_attachments(&[color_buffer])
+            .writes_attachments(&[color_target])
             .shader_reads(&[
-                position_buffer,
-                normal_buffer,
-                diffuse_buffer,
-                emissive_buffer,
-                pbr_buffer,
+                position_target,
+                normal_target,
+                diffuse_target,
+                emissive_target,
+                pbr_target,
             ])
             .with_blend_state(BlendState {
                 blend_enable: false,
@@ -917,8 +908,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let present_render_pass = self
             .render_graph
             .begin_render_pass("Present", swapchain_extents)?
-            .shader_reads(&[color_buffer])
-            .writes_attachments(&[swapchain_buffer])
+            .shader_reads(&[color_target])
+            .writes_attachments(&[swapchain_image])
             .with_blend_state(BlendState {
                 blend_enable: false,
                 src_color_blend_factor: BlendFactor::ONE,
@@ -1027,7 +1018,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                         PipelineBindPoint::GRAPHICS,
                         &pipeline,
                         0,
-                        &[&self.camera_buffer_descriptor_set],
+                        &[&ctx.read_descriptor_set.expect("No descriptor set???")],
                     );
                     for (idx, primitive) in primitives.iter().enumerate() {
                         let primitive_label = ctx.render_pass_command.begin_debug_region(
@@ -1074,12 +1065,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         context.register_callback(&gbuffer_pass, |_: &Gpu, ctx| {
             for (pipeline, primitives) in color_depth_hashmap.iter() {
                 {
-                    ctx.render_pass_command.bind_descriptor_sets(
-                        PipelineBindPoint::GRAPHICS,
-                        &pipeline,
-                        0,
-                        &[&self.camera_buffer_descriptor_set],
-                    );
+                    // ctx.render_pass_command.bind_descriptor_sets(
+                    //     PipelineBindPoint::GRAPHICS,
+                    //     &pipeline,
+                    //     0,
+                    //     &[&ctx.read_descriptor_set.expect("No descriptor set???")],
+                    // );
                     for (idx, primitive) in primitives.iter().enumerate() {
                         let primitive_label = ctx.render_pass_command.begin_debug_region(
                             &format!("Rendering primitive {}", idx),
@@ -1149,13 +1140,13 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         });
 
         context.set_clear_callback(&gbuffer_pass, |handle| {
-            if handle == &normal_buffer {
+            if handle == &normal_target {
                 ash::vk::ClearValue {
                     color: ash::vk::ClearColorValue {
                         float32: [0.5, 0.5, 0.5, 1.0]
                     }
                 }
-            } else if handle == &depth_buffer {
+            } else if handle == &depth_target {
                 ash::vk::ClearValue {
                     depth_stencil: ash::vk::ClearDepthStencilValue {
                         depth: 1.0,
@@ -1182,7 +1173,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 .get_material_render_pass(MaterialDomain::DepthOnly),
         );
 
-        context.inject_external_image(&swapchain_buffer, image, view);
+        context.inject_external_image(&swapchain_image, image, view);
+        context.injext_external_buffer(&camera_buffer, &self.camera_buffer);
         self.render_graph.run(context, &mut self.runner)?;
 
         Ok(())

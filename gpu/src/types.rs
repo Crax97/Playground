@@ -146,6 +146,7 @@ pub struct GpuBuffer {
     pub(super) allocation: MemoryAllocation,
     pub(super) allocator: Arc<RefCell<dyn GpuAllocator>>,
 }
+
 impl GpuBuffer {
     pub(super) fn create(
         device: ash::Device,
@@ -338,6 +339,7 @@ impl GpuDescriptorSet {
 }
 impl Drop for GpuDescriptorSet {
     fn drop(&mut self) {
+        println!("Dropped descriptor set!");
         self.allocator
             .borrow_mut()
             .deallocate(&self.allocation)

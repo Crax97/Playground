@@ -436,7 +436,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 format: gpu::ImageFormat::Depth,
                 samples: 1,
                 present: false,
-            },
+            }, false
         )?;
         let color_buffer = self.render_graph.use_image(
             "color-buffer",
@@ -446,7 +446,7 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 format: swapchain_format.into(),
                 samples: 1,
                 present: true,
-            },
+            }, true
         )?;
         self.render_graph.persist_resource(&color_buffer);
 
