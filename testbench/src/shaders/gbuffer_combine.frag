@@ -115,9 +115,14 @@ vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, LightInfo light_
 }
 
 
-vec3 calculate_light_influence(FragmentInfo frag_info, LightInfo light_info) {
+vec3 calculate_light_influence(FragmentInfo frag_info) {
+    vec3 ck = vec3(0.0);
     vec3 view = normalize(pfd.eye_pos.xyz - frag_info.position);
-    vec3 ck = cook_torrance(view, frag_info, light_info);
+    
+    for (uint i = 0; i < light_data.light_count; i ++) {
+        ck += cook_torrance(view, frag_info, light_data.lights[i]);
+    }
+    
     return ck + 0.2 * frag_info.diffuse;
 }
 
@@ -132,11 +137,6 @@ vec3 rgb(int r, int g, int b) {
 void main() {
     FragmentInfo fragInfo = get_fragment_info(uv);
     
-    LightInfo testLightInfo;
-    testLightInfo.position_radius.xyz = vec3(-10.0, -5.0, 5.0);
-    testLightInfo.position_radius.w = 1000;
-    testLightInfo.color.rgb = rgb(255, 255, 255);
-        
-    vec3 light_a = calculate_light_influence(fragInfo, testLightInfo);
+    vec3 light_a = calculate_light_influence(fragInfo);
     color = vec4(light_a, 1.0) + fragInfo.emissive;
 }

@@ -26,11 +26,26 @@ struct PerFrameData {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct LightInfo {
+union LightType {
+    ty: u32,
+    span: [u32; 4],
+}
+
+impl LightType {
+    fn new(v: u32) -> Self {
+        Self {
+            ty: v
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct GpuLightInfo {
     position_radius: Vector4<f32>,
     color: Vector4<f32>,
     extras: Vector4<f32>,
-    ty: u32,
+    ty: LightType,
 }
 
 use crate::{app_state, camera::Camera, material::{Material, MaterialContext, MaterialDescription, MaterialDomain}, FragmentState, GpuRunner, GraphRunContext, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderStage, RenderingPipeline, Scene, ScenePrimitive, Texture, BufferDescription, BufferType};
@@ -81,7 +96,7 @@ impl DeferredRenderingPipeline {
         let light_buffer = {
             let create_info = BufferCreateInfo {
                 label: Some("Light Buffer"),
-                size: std::mem::size_of::<LightInfo>() * 1000,
+                size: std::mem::size_of::<GpuLightInfo>() * 1000,
                 usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::STORAGE_BUFFER | BufferUsageFlags::TRANSFER_DST,
             };
             let buffer = gpu.create_buffer(
@@ -767,7 +782,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 }],
             )
             .unwrap();
-        let light_count: u32 = 3;
+        let light_count: u32 = 4;
         super::app_state()
             .gpu
             .write_buffer_data_with_offset(
@@ -781,23 +796,29 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .write_buffer_data_with_offset(
                 &self.light_buffer,
                 size_of::<u32>() as u64 * 4,
-                &[LightInfo {
-                    position_radius: vector![10.0, 20.0, 10.0, 100.0],
-                    color: vector![1.0, 0.0, 0.0, 1.0],
-                    extras: vector![0.0, 0.0, 0.0, 0.0],
-                    ty: 0,
-                },
-                LightInfo {
-                    position_radius: vector![20.0, -10.0, 40.0, 20.0],
+                &[GpuLightInfo {
+                    position_radius: vector![10.0, -20.0, 0.0, 100.0],
                     color: vector![0.0, 1.0, 0.0, 1.0],
                     extras: vector![0.0, 0.0, 0.0, 0.0],
-                    ty: 1,
+                    ty: LightType::new(0),
                 },
-                LightInfo {
-                    position_radius: vector![34.0, 50.0, 26.0, 80.0],
+                GpuLightInfo {
+                    position_radius: vector![-10.0, -20.0, 0.0, 50.0],
+                    color: vector![1.0, 0.0, 0.0, 1.0],
+                    extras: vector![0.0, 0.0, 0.0, 0.0],
+                    ty: LightType::new(1),
+                },
+                GpuLightInfo {
+                    position_radius: vector![0.0, -20.0, 20.0, 150.0],
                     color: vector![0.0, 0.0, 1.0, 1.0],
                     extras: vector![0.0, 0.0, 0.0, 0.0],
-                    ty: 3,
+                    ty: LightType::new(3),
+                },
+                GpuLightInfo {
+                    position_radius: vector![0.0, -20.0, 0.0, 150.0],
+                    color: vector![1.0, 1.0, 1.0, 1.0],
+                    extras: vector![0.0, 0.0, 0.0, 0.0],
+                    ty: LightType::new(3),
                 }],
             )
             .unwrap();
