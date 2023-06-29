@@ -1108,14 +1108,13 @@ impl RenderGraph {
         &mut self,
         label: &'static str,
         description: &ImageDescription,
-        external: bool,
     ) -> GraphResult<ResourceId> {
         let id = self.create_unique_id(label)?;
 
         let allocation = ResourceInfo {
             ty: AllocationType::Image(description.clone()),
             label,
-            external,
+            external: false,
             defined_this_frame: true,
         };
         self.allocations.insert(id, allocation);
@@ -1690,10 +1689,10 @@ fn ensure_graph_allocated_image_views_exist(
         {
             match &graph.allocations[writes].ty {
                 AllocationType::Image(d)  => {
-                    let image = resource_allocator.images.get(ctx, &desc, writes, &())?;
+                    let image = resource_allocator.images.get(ctx, &d, writes, &())?;
                     resource_allocator
                         .image_views
-                        .get(ctx, &desc, writes, image)?;
+                        .get(ctx, &d, writes, image)?;
                 },
             };
         };
@@ -1761,7 +1760,7 @@ where
     let mut views = vec![];
     for writes in &info.attachment_writes {
         let view = if external_resources.external_image_views.contains_key(writes) {
-            &external_resources.external_image_views[writes]
+            external_resources.external_image_views[writes]
         } else {
             image_views_allocator.get_unchecked(writes)
         };
@@ -1769,7 +1768,7 @@ where
     }
     for reads in &info.attachment_reads {
         let view = if external_resources.external_image_views.contains_key(reads) {
-            &external_resources.external_image_views[reads]
+            external_resources.external_image_views[reads]
         } else {
             image_views_allocator.get_unchecked(reads)
         };
@@ -1843,7 +1842,7 @@ mod test {
             present: false,
         };
 
-        rg.use_image(name, &description, false).unwrap()
+        rg.use_image(name, &description).unwrap()
     }
     #[test]
     pub fn prune_empty() {
@@ -1882,7 +1881,7 @@ mod test {
                 present: false,
             };
 
-            render_graph.use_image("color1", &description, false)
+            render_graph.use_image("color1", &description)
         };
         let is_defined = color_component_2.is_err_and(|id| {
             id == CompileError::ResourceAlreadyDefined(color_component_1, "color1".to_owned())
