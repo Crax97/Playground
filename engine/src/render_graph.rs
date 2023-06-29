@@ -340,7 +340,7 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
         for write in &pass_info.attachment_writes {
             let image_desc = &graph.allocations[&write];
             let image_desc = match &image_desc.ty {
-                AllocationType::Image(image_desc) | AllocationType::ExternalImage(image_desc) => {
+                AllocationType::Image(image_desc)  => {
                     image_desc
                 }
             };
@@ -419,7 +419,7 @@ impl<'a> CreateFrom<RenderPassInfo, RenderGraph> for RenderPass {
         for read in &pass_info.attachment_reads {
             let image_desc = &graph.allocations[&read];
             let image_desc = match &image_desc.ty {
-                AllocationType::Image(image_desc) | AllocationType::ExternalImage(image_desc) => {
+                AllocationType::Image(image_desc)  => {
                     image_desc
                 }
             };
@@ -696,14 +696,14 @@ pub struct ImageDescription {
 #[derive(Hash, Copy, Clone)]
 pub enum AllocationType {
     Image(ImageDescription),
-    ExternalImage(ImageDescription),
 }
 
 #[derive(Hash, Copy, Clone)]
 pub struct ResourceInfo {
     pub label: &'static str,
     pub ty: AllocationType,
-
+    pub external: bool,
+    
     defined_this_frame: bool,
 }
 
@@ -774,7 +774,7 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
         let resource = graph.get_resource_info(read)?;
         set_zero_bindings.push(BindingElement {
             binding_type: match resource.ty {
-                crate::AllocationType::Image(_) | crate::AllocationType::ExternalImage(_) => {
+                crate::AllocationType::Image(_) => {
                     gpu::BindingType::CombinedImageSampler
                 }
             },
@@ -789,7 +789,7 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
         let resource = graph.get_resource_info(write)?;
 
         match resource.ty {
-            crate::AllocationType::Image(desc) | crate::AllocationType::ExternalImage(desc) => {
+            crate::AllocationType::Image(desc) => {
                 let format = desc.format.to_vk();
                 let samples = match desc.samples {
                     1 => SampleCountFlags::TYPE_1,
@@ -1108,12 +1108,14 @@ impl RenderGraph {
         &mut self,
         label: &'static str,
         description: &ImageDescription,
+        external: bool,
     ) -> GraphResult<ResourceId> {
         let id = self.create_unique_id(label)?;
 
         let allocation = ResourceInfo {
             ty: AllocationType::Image(description.clone()),
             label,
+            external,
             defined_this_frame: true,
         };
         self.allocations.insert(id, allocation);
@@ -1454,7 +1456,7 @@ impl GpuRunner {
             Ok(ctx.external_resources.external_images[id])
         } else {
             let desc = match &graph.allocations[id].ty {
-                AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
+                AllocationType::Image(d)  => d.clone(),
             };
             allocator.images.get(ctx, &desc, id, &())
         }
@@ -1581,8 +1583,7 @@ impl RenderGraphRunner for GpuRunner {
                             } else {
                                 let res_info = &graph.allocations[rd];
                                 match &res_info.ty {
-                                    AllocationType::Image(desc)
-                                    | AllocationType::ExternalImage(desc) => match desc.format {
+                                    AllocationType::Image(desc) => match desc.format {
                                         ImageFormat::Rgba8
                                         | ImageFormat::Rgb8
                                         | ImageFormat::RgbaFloat => ClearValue {
@@ -1687,13 +1688,14 @@ fn ensure_graph_allocated_image_views_exist(
             .external_image_views
             .contains_key(writes)
         {
-            let desc = match &graph.allocations[writes].ty {
-                AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
+            match &graph.allocations[writes].ty {
+                AllocationType::Image(d)  => {
+                    let image = resource_allocator.images.get(ctx, &desc, writes, &())?;
+                    resource_allocator
+                        .image_views
+                        .get(ctx, &desc, writes, image)?;
+                },
             };
-            let image = resource_allocator.images.get(ctx, &desc, writes, &())?;
-            resource_allocator
-                .image_views
-                .get(ctx, &desc, writes, image)?;
         };
     }
     for res in &info.attachment_reads {
@@ -1703,7 +1705,7 @@ fn ensure_graph_allocated_image_views_exist(
             .contains_key(res)
         {
             let desc = match &graph.allocations[res].ty {
-                AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
+                AllocationType::Image(d)  => d.clone(),
             };
             let image = resource_allocator.images.get(ctx, &desc, res, &())?;
             resource_allocator.image_views.get(ctx, &desc, res, image)?;
@@ -1716,7 +1718,7 @@ fn ensure_graph_allocated_image_views_exist(
             .contains_key(writes)
         {
             let desc = match &graph.allocations[writes].ty {
-                AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
+                AllocationType::Image(d)  => d.clone(),
             };
             let image = resource_allocator.images.get(ctx, &desc, writes, &())?;
             resource_allocator
@@ -1740,7 +1742,7 @@ fn ensure_graph_allocated_samplers_exists(
             .contains_key(writes)
         {
             let desc = match &graph.allocations[writes].ty {
-                AllocationType::Image(d) | AllocationType::ExternalImage(d) => d.clone(),
+                AllocationType::Image(d)  => d.clone(),
             };
             resource_allocator.samplers.get(ctx, &desc, writes, &())?;
         };
@@ -1841,7 +1843,7 @@ mod test {
             present: false,
         };
 
-        rg.use_image(name, &description).unwrap()
+        rg.use_image(name, &description, false).unwrap()
     }
     #[test]
     pub fn prune_empty() {
@@ -1880,7 +1882,7 @@ mod test {
                 present: false,
             };
 
-            render_graph.use_image("color1", &description)
+            render_graph.use_image("color1", &description, false)
         };
         let is_defined = color_component_2.is_err_and(|id| {
             id == CompileError::ResourceAlreadyDefined(color_component_1, "color1".to_owned())
