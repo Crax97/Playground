@@ -7,7 +7,7 @@ use std::{
 };
 
 use ash::vk::{self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor, BufferUsageFlags, ClearDepthStencilValue, ClearValue, ColorComponentFlags, CompareOp, ComponentMapping, DependencyFlags, Extent2D, Filter, ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency, SubpassDescriptionFlags};
-use gpu::{BeginRenderPassInfo, BlendState, BufferCreateInfo, BufferRange, CommandBuffer, DescriptorInfo, DescriptorSetInfo, FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, ImageFormat, ImageViewCreateInfo, MemoryDomain, Pipeline, RenderPass, RenderPassAttachment, RenderPassCommand, RenderPassDescription, SubpassDescription, Swapchain, ToVk, TransitionInfo};
+use gpu::{BeginRenderPassInfo, BindingType, BlendState, BufferCreateInfo, BufferRange, CommandBuffer, DescriptorInfo, DescriptorSetInfo, FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, ImageFormat, ImageViewCreateInfo, MemoryDomain, Pipeline, RenderPass, RenderPassAttachment, RenderPassCommand, RenderPassDescription, SubpassDescription, Swapchain, ToVk, TransitionInfo};
 
 use ash::vk::PushConstantRange;
 use gpu::{
@@ -26,7 +26,8 @@ use log::trace;
         b some kind of description (e.g ImageView => ImageDescription)
     2. create a CreationInfo struct, which holds the description D + additional stuff to create the resource
     3. implement AsRef<D> for CreationInfo
-    4. implement CreateFrom<'a, CreationInfo> for GrapResT 
+    4. implement GraphResource for GraphResT
+    5. implement CreateFrom<'a, CreationInfo> for GrapResT 
     
     now you can add a ResourceAllocator<GraphResT, ID> to DefaultResourceAllocator
     
@@ -449,10 +450,6 @@ impl<'a> CreateFrom<'a, GraphImageViewCreateInfo<'_>> for GraphImageView {
     }
 }
 
-#[derive(Ord, PartialOrd, Eq, PartialEq, Debug, Clone)]
-pub struct BufferDescription {
-    length: u64,
-}
 
 pub struct GraphBuffer {
     inner: GpuBuffer,
@@ -988,12 +985,31 @@ pub struct ImageDescription {
     pub present: bool,
 }
 
+#[derive(Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Copy, Hash)]
+pub enum BufferType {
+    Storage,
+    Uniform,
+}
+
+impl From<BufferType> for BindingType {
+    fn from(value: BufferType) -> Self {
+        match value {
+            BufferType::Storage => BindingType::Storage,
+            BufferType::Uniform => BindingType::Uniform
+        }
+    }
+}
+
+#[derive(Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Copy, Hash)]
+pub struct BufferDescription {
+    pub length: u64,
+    pub ty: BufferType
+}
+
 #[derive(Hash, Copy, Clone)]
 pub enum AllocationType {
     Image(ImageDescription),
-    Buffer {
-        length: u64,
-    }
+    Buffer(BufferDescription)
 }
 
 #[derive(Hash, Copy, Clone)]
@@ -1075,8 +1091,8 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
                 AllocationType::Image(_) => {
                     gpu::BindingType::CombinedImageSampler
                 }
-                AllocationType::Buffer {..} => {
-                    gpu::BindingType::Uniform
+                AllocationType::Buffer (d) => {
+                    d.ty.into()
                 }
             },
             index: idx as _,
@@ -1463,13 +1479,11 @@ impl RenderGraph {
         Ok(id)
     }
 
-    pub fn use_buffer(&mut self, label: &'static str, length: u64, external: bool) -> GraphResult<ResourceId>  {
+    pub fn use_buffer(&mut self, label: &'static str, description: &BufferDescription, external: bool) -> GraphResult<ResourceId>  {
         let id = self.create_unique_id(label)?;
 
         let allocation = ResourceInfo {
-            ty: AllocationType::Buffer{
-                length
-            },
+            ty: AllocationType::Buffer(description.clone()),
             label,
             external,
             defined_this_frame: true,
@@ -2093,8 +2107,8 @@ fn ensure_graph_allocated_resources_exist(
                     resource_allocator.image_views
                         .get(ctx, &GraphImageViewCreateInfo { desc: d, image }, res)?;
                 },
-                AllocationType::Buffer {length} => {
-                    resource_allocator.buffers.ensure_resource_exists(ctx.gpu,  &BufferDescription { length: *length } , res)?;
+                AllocationType::Buffer (desc) => {
+                    resource_allocator.buffers.ensure_resource_exists(ctx.gpu,  desc , res)?;
                 },
             };
         };
@@ -2190,20 +2204,25 @@ fn resolve_input_descriptor_set<'e, 'a, 'd>(
                     binding_stage: gpu::ShaderStage::VertexFragment,
                 })
             }
-            AllocationType::Buffer { .. } => {
+            AllocationType::Buffer (desc) => {
                 let buffer = if resource_info.external {
                     ctx.external_resources.external_shader_resources[read].as_buffer()
                 } else {
                     buffer_allocator.get_unchecked(read).resource()
                 };
                 buffer.hash(&mut hasher);
+                let range = BufferRange {
+                    handle: buffer,
+                    offset: 0,
+                    size: vk::WHOLE_SIZE,
+                };
                 descriptors.push(DescriptorInfo {
                     binding: idx as _,
-                    element_type: gpu::DescriptorType::UniformBuffer(BufferRange {
-                        handle: buffer,
-                        offset: 0,
-                        size: vk::WHOLE_SIZE,
-                    }),
+                    element_type: if desc.ty == BufferType::Uniform {
+                        gpu::DescriptorType::UniformBuffer(range)
+                    } else {
+                        gpu::DescriptorType::StorageBuffer(range)
+                    }, 
                     binding_stage: gpu::ShaderStage::VertexFragment,
                 })
             }

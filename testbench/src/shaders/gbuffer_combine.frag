@@ -6,7 +6,6 @@ struct LightInfo {
     int type;
     vec4 extras;
 };
-
 const float PI = 3.14159265359;
 
 layout(location=0) in vec2 uv;
@@ -18,6 +17,11 @@ layout(set = 0, binding = 1) uniform sampler2D normSampler;
 layout(set = 0, binding = 2) uniform sampler2D difSampler;
 layout(set = 0, binding = 3) uniform sampler2D emissSampler;
 layout(set = 0, binding = 4) uniform sampler2D pbrSampler;
+
+layout(set = 0, binding = 5, std140) readonly buffer LightData {
+    uint light_count;
+    LightInfo lights[];
+} light_data;
 
 layout(push_constant) uniform PerFrameData {
     vec4 eye_pos;

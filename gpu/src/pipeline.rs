@@ -37,6 +37,7 @@ fn vk_bool(b: bool) -> u32 {
 #[derive(Clone, Copy, Debug)]
 pub enum BindingType {
     Uniform,
+    Storage,
     Sampler,
     CombinedImageSampler,
 }
@@ -60,6 +61,7 @@ impl From<&BindingElement> for DescriptorSetLayoutBinding {
             binding: b.index,
             descriptor_type: match b.binding_type {
                 BindingType::Uniform => DescriptorType::UNIFORM_BUFFER,
+                BindingType::Storage => DescriptorType::STORAGE_BUFFER,
                 BindingType::Sampler => DescriptorType::SAMPLER,
                 BindingType::CombinedImageSampler => DescriptorType::COMBINED_IMAGE_SAMPLER,
             },

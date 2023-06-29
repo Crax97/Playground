@@ -33,7 +33,7 @@ struct LightInfo {
     ty: Vector4<i32>,
 }
 
-use crate::{app_state, camera::Camera, material::{Material, MaterialContext, MaterialDescription, MaterialDomain}, FragmentState, GpuRunner, GraphRunContext, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderStage, RenderingPipeline, Scene, ScenePrimitive, Texture};
+use crate::{app_state, camera::Camera, material::{Material, MaterialContext, MaterialDescription, MaterialDomain}, FragmentState, GpuRunner, GraphRunContext, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderStage, RenderingPipeline, Scene, ScenePrimitive, Texture, BufferDescription, BufferType};
 
 use ash::vk::{
     AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
@@ -81,8 +81,8 @@ impl DeferredRenderingPipeline {
         let light_buffer = {
             let create_info = BufferCreateInfo {
                 label: Some("Light Buffer"),
-                size: std::mem::size_of::<LightInfo>(),
-                usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
+                size: std::mem::size_of::<LightInfo>() * 1000,
+                usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::STORAGE_BUFFER | BufferUsageFlags::TRANSFER_DST,
             };
             let buffer = gpu.create_buffer(
                 &create_info,
@@ -819,7 +819,19 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         
         let camera_buffer = self
             .render_graph
-            .use_buffer("camera-buffer", std::mem::size_of::<PerFrameData>() as u64, true)?;
+            .use_buffer("camera-buffer", &BufferDescription { 
+                length: std::mem::size_of::<PerFrameData>() as u64, 
+                ty: BufferType::Uniform
+            }, 
+    true)?;
+        
+        let light_buffer = self
+            .render_graph
+            .use_buffer("light-buffer", &BufferDescription {
+                length: std::mem::size_of::<PerFrameData>() as u64,
+                ty: BufferType::Storage
+            },
+    true)?;
         
         let swapchain_image = self
             .render_graph
@@ -892,6 +904,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 diffuse_target,
                 emissive_target,
                 pbr_target,
+                light_buffer
             ])
             .with_blend_state(BlendState {
                 blend_enable: false,
@@ -1175,6 +1188,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         context.inject_external_image(&swapchain_image, image, view);
         context.injext_external_buffer(&camera_buffer, &self.camera_buffer);
+        context.injext_external_buffer(&light_buffer, &self.light_buffer);
         self.render_graph.run(context, &mut self.runner)?;
 
         Ok(())
