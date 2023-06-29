@@ -1,8 +1,3 @@
-/*
-
-
-*/
-
 use std::{
     cell::RefCell,
     collections::{hash_map::DefaultHasher, HashMap, HashSet},
@@ -22,6 +17,22 @@ use gpu::{
 };
 use indexmap::IndexSet;
 use log::trace;
+
+/*
+ How to add another resource to DefaultResourceAllocator?
+    let ResT the resource you want to add
+    1. Wrap it into a GrapResT struct, which holds:
+        a. the resource (ResT)
+        b some kind of description (e.g ImageView => ImageDescription)
+    2. create a CreationInfo struct, which holds the description D + additional stuff to create the resource
+    3. implement AsRef<D> for CreationInfo
+    4. implement CreateFrom<'a, CreationInfo> for GrapResT 
+    
+    now you can add a ResourceAllocator<GraphResT, ID> to DefaultResourceAllocator
+    
+    /// Note to self: Simplify this god damn mess, there HAS to be a simpler way to just create graph allocated resources
+    ///       while automating resource lifetime/etc...     
+*/
 
 pub trait CreateFrom<'a, D>
     where
