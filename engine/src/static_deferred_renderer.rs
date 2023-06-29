@@ -13,7 +13,7 @@ use gpu::{
     GpuShaderModule, ImageFormat, MemoryDomain, Pipeline, PipelineDescription, Swapchain, ToVk,
     VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
-use nalgebra::{Matrix4, Vector2, Vector3, Vector4};
+use nalgebra::{Matrix4, vector, Vector2, Vector3, Vector4};
 use resource_map::ResourceMap;
 
 #[repr(C)]
@@ -30,7 +30,7 @@ struct LightInfo {
     position_radius: Vector4<f32>,
     color: Vector4<f32>,
     extras: Vector4<f32>,
-    ty: Vector4<i32>,
+    ty: u32,
 }
 
 use crate::{app_state, camera::Camera, material::{Material, MaterialContext, MaterialDescription, MaterialDomain}, FragmentState, GpuRunner, GraphRunContext, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderStage, RenderingPipeline, Scene, ScenePrimitive, Texture, BufferDescription, BufferType};
@@ -764,6 +764,40 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     eye: Vector4::new(pov.forward[0], pov.forward[1], pov.forward[2], 0.0),
                     view: crate::utils::constants::MATRIX_COORDINATE_FLIP * pov.view(),
                     projection,
+                }],
+            )
+            .unwrap();
+        let light_count: u32 = 3;
+        super::app_state()
+            .gpu
+            .write_buffer_data_with_offset(
+                &self.light_buffer,
+                0,
+                &[light_count],
+            )
+            .unwrap();
+        super::app_state()
+            .gpu
+            .write_buffer_data_with_offset(
+                &self.light_buffer,
+                size_of::<u32>() as u64 * 4,
+                &[LightInfo {
+                    position_radius: vector![10.0, 20.0, 10.0, 100.0],
+                    color: vector![1.0, 0.0, 0.0, 1.0],
+                    extras: vector![0.0, 0.0, 0.0, 0.0],
+                    ty: 0,
+                },
+                LightInfo {
+                    position_radius: vector![20.0, -10.0, 40.0, 20.0],
+                    color: vector![0.0, 1.0, 0.0, 1.0],
+                    extras: vector![0.0, 0.0, 0.0, 0.0],
+                    ty: 1,
+                },
+                LightInfo {
+                    position_radius: vector![34.0, 50.0, 26.0, 80.0],
+                    color: vector![0.0, 0.0, 1.0, 1.0],
+                    extras: vector![0.0, 0.0, 0.0, 0.0],
+                    ty: 3,
                 }],
             )
             .unwrap();

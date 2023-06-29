@@ -1028,17 +1028,23 @@ impl Gpu {
     }
 
     pub fn write_buffer_data<T: Copy>(&self, buffer: &GpuBuffer, data: &[T]) -> VkResult<()> {
+        self.write_buffer_data_with_offset(buffer, 0, data)
+    }
+
+
+    pub fn write_buffer_data_with_offset<T: Copy>(&self, buffer: &GpuBuffer, offset: u64, data: &[T]) -> VkResult<()> {
         if data.len() == 0 {
             return Ok(());
         }
 
         if buffer.memory_domain.contains(MemoryDomain::HostVisible) {
-            buffer.write_data(data);
+            buffer.write_data(offset, data);
         } else {
-            self.staging_buffer.write_data(data);
+            self.staging_buffer.write_data(0, data);
             self.copy_buffer(
                 &self.staging_buffer,
                 buffer,
+                offset,
                 data.len() * std::mem::size_of::<T>(),
             )?;
         }
@@ -1046,7 +1052,7 @@ impl Gpu {
     }
 
     pub fn write_image_data(&self, image: &GpuImage, data: &[u8]) -> VkResult<()> {
-        self.staging_buffer.write_data(data);
+        self.staging_buffer.write_data(0, data);
 
         self.transition_image_layout(
             image,
@@ -1243,6 +1249,7 @@ impl Gpu {
         &self,
         source_buffer: &GpuBuffer,
         dest_buffer: &GpuBuffer,
+        dest_offset: u64,
         size: usize,
     ) -> VkResult<()> {
         unsafe {
@@ -1286,7 +1293,7 @@ impl Gpu {
                 dst_buffer,
                 &[vk::BufferCopy {
                     src_offset: 0,
-                    dst_offset: 0,
+                    dst_offset: dest_offset as _,
                     size: size as u64,
                 }],
             );

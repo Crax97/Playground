@@ -2,9 +2,9 @@
 
 struct LightInfo {
     vec4 position_radius;
-    vec3 color;
-    int type;
+    vec4 color;
     vec4 extras;
+    uint type;
 };
 const float PI = 3.14159265359;
 
@@ -82,7 +82,7 @@ float d_trowbridge_reitz_ggx(vec3 n, vec3 h, float rough)
 }
 
 vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, LightInfo light_info) {
-    vec3 light_radiance = light_info.color;
+    vec3 light_radiance = light_info.color.rgb;
     
     vec3 light_dir = normalize(light_info.position_radius.xyz - frag_info.position);
     vec3 h = normalize(view_direction + light_dir);
@@ -135,7 +135,7 @@ void main() {
     LightInfo testLightInfo;
     testLightInfo.position_radius.xyz = vec3(-10.0, -5.0, 5.0);
     testLightInfo.position_radius.w = 1000;
-    testLightInfo.color = rgb(255, 255, 255);
+    testLightInfo.color.rgb = rgb(255, 255, 255);
         
     vec3 light_a = calculate_light_influence(fragInfo, testLightInfo);
     color = vec4(light_a, 1.0) + fragInfo.emissive;
