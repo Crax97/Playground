@@ -6,9 +6,9 @@ mod pipeline;
 mod swapchain;
 mod types;
 
+use ash::vk::ImageLayout;
 pub use crate::gpu::*;
 pub use allocator::*;
-use ash::vk::ImageLayout;
 pub use command_buffer::*;
 pub use pipeline::*;
 pub use swapchain::Swapchain;

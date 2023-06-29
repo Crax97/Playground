@@ -36,7 +36,7 @@ struct FragmentOut {
 layout(location = 0) in FragmentOut fragOut;
 
 void main() {
-    outPosition = vec4(fragOut.Position, 0.0);
+    outPosition = vec4(fragOut.Position, 1.0);
 
     vec3 T = normalize(vec3(fragOut.model * vec4(fragOut.Tangent, 0.0))); // * vec3(-1, -1, 1);
     vec3 N = normalize(vec3(fragOut.model * vec4(fragOut.Normal, 0.0))) ; //* vec3(-1, -1, 1);

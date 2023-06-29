@@ -24,13 +24,16 @@ struct PerFrameData {
     projection: nalgebra::Matrix4<f32>,
 }
 
-use crate::{
-    app_state,
-    camera::Camera,
-    material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
-    FragmentState, GpuRunner, GraphRunContext, ModuleInfo, PipelineTarget, RenderGraph,
-    RenderGraphPipelineDescription, RenderStage, RenderingPipeline, Scene, ScenePrimitive, Texture,
-};
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct LightInfo {
+    position_radius: Vector4<f32>,
+    color: Vector4<f32>,
+    extras: Vector4<f32>,
+    ty: Vector4<i32>,
+}
+
+use crate::{app_state, camera::Camera, material::{Material, MaterialContext, MaterialDescription, MaterialDomain}, FragmentState, GpuRunner, GraphRunContext, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderStage, RenderingPipeline, Scene, ScenePrimitive, Texture};
 
 use ash::vk::{
     AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
@@ -40,10 +43,12 @@ use ash::vk::{
 use gpu::{
     BlendState, RenderPass, RenderPassAttachment, RenderPassDescription, SubpassDescription,
 };
+
 pub struct DeferredRenderingPipeline {
     resource_map: Rc<ResourceMap>,
 
     camera_buffer: GpuBuffer,
+    light_buffer: GpuBuffer,
     camera_buffer_descriptor_set: GpuDescriptorSet,
     material_context: DeferredRenderingMaterialContext,
     render_graph: RenderGraph,
@@ -53,11 +58,11 @@ pub struct DeferredRenderingPipeline {
 
     runner: GpuRunner,
 }
+
 impl DeferredRenderingPipeline {
     pub fn new(
         gpu: &Gpu,
         resource_map: Rc<ResourceMap>,
-
         screen_quad: GpuShaderModule,
         gbuffer_combine: GpuShaderModule,
         texture_copy: GpuShaderModule,
@@ -66,6 +71,18 @@ impl DeferredRenderingPipeline {
             let create_info = BufferCreateInfo {
                 label: Some("Deferred Renderer - Camera buffer"),
                 size: std::mem::size_of::<PerFrameData>(),
+                usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
+            };
+            let buffer = gpu.create_buffer(
+                &create_info,
+                MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
+            )?;
+            buffer
+        };
+        let light_buffer = {
+            let create_info = BufferCreateInfo {
+                label: Some("Light Buffer"),
+                size: std::mem::size_of::<LightInfo>(),
                 usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
             };
             let buffer = gpu.create_buffer(
@@ -93,6 +110,7 @@ impl DeferredRenderingPipeline {
 
         Ok(Self {
             camera_buffer,
+            light_buffer,
             resource_map,
             camera_buffer_descriptor_set,
             material_context,
@@ -715,6 +733,7 @@ impl DeferredRenderingMaterialContext {
         )
     }
 }
+
 impl MaterialContext for DeferredRenderingMaterialContext {
     fn create_material(
         &self,
@@ -742,6 +761,7 @@ impl MaterialContext for DeferredRenderingMaterialContext {
         self.render_passes.get(&domain).unwrap()
     }
 }
+
 impl RenderingPipeline for DeferredRenderingPipeline {
     fn render(
         &mut self,
@@ -750,17 +770,13 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         swapchain: &mut Swapchain,
     ) -> anyhow::Result<()> {
         let projection = pov.projection();
-        let flip =Matrix4::new(-1.0, 0.0, 0.0, 0.0,
-                                        0.0, -1.0, 0.0, 0.0,
-                                        0.0, 0.0, 1.0, 0.0,
-                                        0.0, 0.0, 0.0, 1.0);
         super::app_state()
             .gpu
             .write_buffer_data(
                 &self.camera_buffer,
                 &[PerFrameData {
-                    eye: Vector4::new(pov.forward[0],  pov.forward[1], pov.forward[2], 0.0),
-                    view: flip * pov.view(),
+                    eye: Vector4::new(pov.forward[0], pov.forward[1], pov.forward[2], 0.0),
+                    view: crate::utils::constants::MATRIX_COORDINATE_FLIP * pov.view(),
                     projection,
                 }],
             )
@@ -953,7 +969,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     push_constant_ranges: &[ash::vk::PushConstantRange {
                         offset: 0,
                         size: std::mem::size_of::<Vector4<f32>>() as _,
-                        stage_flags: ShaderStageFlags::ALL
+                        stage_flags: ShaderStageFlags::ALL,
                     }],
                     ..Default::default()
                 },
@@ -1096,7 +1112,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                             ],
                             &[0, 0, 0, 0, 0],
                         );
-                        
+
                         let index_count = self.resource_map.get(&primitive.mesh).index_count;
                         ctx.render_pass_command
                             .push_constant(&pipeline, &primitive.transform, 0);
@@ -1131,14 +1147,14 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             );
             ctx.render_pass_command.draw(4, 1, 0, 0);
         });
-        
+
         context.set_clear_callback(&gbuffer_pass, |handle| {
             if handle == &normal_buffer {
-                   ash::vk::ClearValue {
-                        color: ash::vk::ClearColorValue {
-                            float32: [0.5, 0.5, 0.5, 1.0]
-                        }
-                   } 
+                ash::vk::ClearValue {
+                    color: ash::vk::ClearColorValue {
+                        float32: [0.5, 0.5, 0.5, 1.0]
+                    }
+                }
             } else if handle == &depth_buffer {
                 ash::vk::ClearValue {
                     depth_stencil: ash::vk::ClearDepthStencilValue {

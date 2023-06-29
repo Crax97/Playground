@@ -8,6 +8,8 @@ mod scene;
 mod static_deferred_renderer;
 mod texture;
 mod time;
+mod utils;
+
 use std::thread::ThreadId;
 
 use gpu::{Gpu, GpuConfiguration};
@@ -23,6 +25,7 @@ pub use scene::*;
 pub use static_deferred_renderer::*;
 pub use texture::*;
 pub use time::*;
+pub use utils::constants::*;
 
 struct GlobalState {
     app: *mut AppState,
