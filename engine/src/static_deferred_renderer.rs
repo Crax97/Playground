@@ -992,7 +992,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         self.render_graph.compile()?;
 
-        let combine_handle = self.render_graph.create_pipeline_for_render_pass(
+        self.render_graph.define_pipeline_for_renderpass(
             &crate::app_state().gpu,
             &combine_pass,
             "CombinePipeline",
@@ -1031,7 +1031,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             },
         )?;
 
-        let present_handle = self.render_graph.create_pipeline_for_render_pass(
+        self.render_graph.define_pipeline_for_renderpass(
             &app_state().gpu,
             &present_render_pass,
             "Present",
@@ -1180,25 +1180,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         });
 
         context.register_callback(&combine_pass, |_: &Gpu, ctx| {
-            let pipeline = ctx.render_graph.get_pipeline(&combine_handle).unwrap();
-            ctx.render_pass_command.bind_pipeline(&pipeline);
-            ctx.render_pass_command.bind_descriptor_sets(
-                PipelineBindPoint::GRAPHICS,
-                &pipeline,
-                0,
-                &[ctx.read_descriptor_set.unwrap()],
-            );
             ctx.render_pass_command.draw(4, 1, 0, 0);
         });
         context.register_callback(&present_render_pass, |_: &Gpu, ctx| {
-            let pipeline = ctx.render_graph.get_pipeline(&present_handle).unwrap();
-            ctx.render_pass_command.bind_pipeline(pipeline);
-            ctx.render_pass_command.bind_descriptor_sets(
-                PipelineBindPoint::GRAPHICS,
-                pipeline,
-                0,
-                &[ctx.read_descriptor_set.unwrap()],
-            );
             ctx.render_pass_command.draw(4, 1, 0, 0);
         });
 

@@ -1199,7 +1199,7 @@ pub struct RenderGraph {
     cached_graph_hash: u64,
     cached_graph: CompiledRenderGraph,
 
-    render_pass_pipelines: HashMap<PipelineHandle, Pipeline>,
+    render_pass_pipelines: HashMap<RenderPassHandle, Pipeline>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -1714,25 +1714,20 @@ impl RenderGraph {
             .ok_or(CompileError::ResourceNotFound(resource.clone()))
     }
 
-    pub(crate) fn get_pipeline(&self, pipeline_handle: &PipelineHandle) -> GraphResult<&Pipeline> {
+    pub(crate) fn get_pipeline(&self, pipeline_handle: &RenderPassHandle) -> Option<&Pipeline> {
         self.render_pass_pipelines
             .get(pipeline_handle)
-            .ok_or(CompileError::PipelineNotDefined(*pipeline_handle))
     }
 
-    pub(crate) fn create_pipeline_for_render_pass(
+    pub(crate) fn define_pipeline_for_renderpass(
         &mut self,
         gpu: &Gpu,
         pass_handle: &RenderPassHandle,
         pipeline_label: &'static str,
         pipeline_description: &RenderGraphPipelineDescription<'_>,
-    ) -> anyhow::Result<PipelineHandle> {
-        let handle = PipelineHandle {
-            label: pipeline_label,
-            owner: *pass_handle,
-        };
+    ) -> anyhow::Result<()> {
 
-        if !self.render_pass_pipelines.contains_key(&handle) {
+        if !self.render_pass_pipelines.contains_key(&pass_handle) {
             let mut allocator = self.resource_allocator.borrow_mut();
             let pass_info = &self.passes[pass_handle];
             let pass =
@@ -1755,10 +1750,10 @@ impl RenderGraph {
                 pipeline_label,
                 pass_handle.label
             );
-            self.render_pass_pipelines.insert(handle, pipeline);
+            self.render_pass_pipelines.insert(*pass_handle, pipeline);
         }
 
-        Ok(handle)
+        Ok(())
     }
 
     fn mark_resource_usages(&mut self, compiled: &CompiledRenderGraph) {
@@ -1988,7 +1983,7 @@ impl RenderGraphRunner for GpuRunner {
                         &format!("Begin Render Pass: {}", rp.label),
                         [0.3, 0.0, 0.0, 1.0],
                     );
-                    let render_pass_command =
+                    let mut render_pass_command =
                         command_buffer.begin_render_pass(&BeginRenderPassInfo {
                             framebuffer,
                             render_pass: pass,
@@ -1998,6 +1993,13 @@ impl RenderGraphRunner for GpuRunner {
                                 extent: info.extents,
                             },
                         });
+
+                    if let Some(pipeline) = graph.get_pipeline(rp) {
+                        render_pass_command.bind_pipeline(pipeline);
+                        if let Some(resource) = read_descriptor_set {
+                            render_pass_command.bind_descriptor_sets(PipelineBindPoint::GRAPHICS, pipeline, 0, &[resource.resource()])
+                        }
+                    }
                     let mut context = RenderPassContext {
                         render_graph: graph,
                         render_pass: &pass,
@@ -2005,6 +2007,7 @@ impl RenderGraphRunner for GpuRunner {
                         render_pass_command,
                         read_descriptor_set: read_descriptor_set.map(|r| r.resource()),
                     };
+                    
 
                     if let Some(cb) = cb {
                         cb(&ctx.gpu, &mut context);
