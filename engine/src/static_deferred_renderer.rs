@@ -40,7 +40,7 @@ impl From<&Light> for GpuLightInfo {
         let (direction, extras, ty) = match light.ty {
             LightType::Point => { (Default::default(), Default::default(), 0) }
             LightType::Directional { direction } => { 
-                (vector![direction.x, direction.y, direction.z, 0.0], 
+                (vector![-direction.x, -direction.y, direction.z, 0.0], 
                  Default::default(), 
                  1) 
             }
@@ -48,16 +48,16 @@ impl From<&Light> for GpuLightInfo {
                 direction,
                 inner_cone_degrees,
                 outer_cone_degrees } => {
-                (vector![direction.x, direction.y, direction.z, 0.0],
+                (vector![-direction.x, -direction.y, direction.z, 0.0],
                  vector![inner_cone_degrees, outer_cone_degrees, 0.0, 0.0],
                  2)
             }
             LightType::Rect { direction, width, height } => {
-                (vector![direction.x, direction.y, direction.z, 0.0], vector![width, height, 0.0, 0.0], 3)
+                (vector![-direction.x, -direction.y, direction.z, 0.0], vector![width, height, 0.0, 0.0], 3)
             }
         };
         Self {
-            position_radius: vector![light.position.x, light.position.y, light.position.z, light.radius],
+            position_radius: vector![-light.position.x, -light.position.y, light.position.z, light.radius],
             color: vector![light.color.x, light.color.y, light.color.z, 0.0],
             direction,
             extras,
