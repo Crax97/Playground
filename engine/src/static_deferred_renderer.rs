@@ -646,7 +646,7 @@ impl DeferredRenderingMaterialContext {
 
         let color_attachments = &[];
 
-        let descfription = PipelineDescription {
+        let binding_descriptions = PipelineDescription {
             global_bindings: &[
                 GlobalBinding {
                     set_index: 0,
@@ -748,7 +748,7 @@ impl DeferredRenderingMaterialContext {
         Pipeline::new(
             gpu,
             self.get_material_render_pass(MaterialDomain::DepthOnly),
-            &descfription,
+            &binding_descriptions,
         )
     }
 }
@@ -795,7 +795,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 &self.camera_buffer,
                 &[PerFrameData {
                     eye: Vector4::new(pov.location[0], pov.location[1], pov.location[2], 0.0),
-                    view: crate::utils::constants::MATRIX_COORDINATE_FLIP * pov.view(),
+                    view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * pov.view(),
                     projection,
                 }],
             )
