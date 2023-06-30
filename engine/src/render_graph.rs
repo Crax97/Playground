@@ -1624,6 +1624,7 @@ impl RenderGraph {
     }
 
     fn find_merge_candidates(&self, compiled: &mut CompiledRenderGraph) -> Vec<Vec<usize>> {
+        return vec![];
         let mut passes: Vec<_> = compiled.pass_sequence.iter().enumerate().collect();
 
         let mut merge_candidates = vec![];

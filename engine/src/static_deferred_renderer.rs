@@ -40,7 +40,7 @@ impl From<&Light> for GpuLightInfo {
         let (direction, extras, ty) = match light.ty {
             LightType::Point => { (Default::default(), Default::default(), 0) }
             LightType::Directional { direction } => { 
-                (vector![-direction.x, -direction.y, direction.z, 0.0], 
+                (vector![direction.x, direction.y, direction.z, 0.0], 
                  Default::default(), 
                  1) 
             }
@@ -48,16 +48,16 @@ impl From<&Light> for GpuLightInfo {
                 direction,
                 inner_cone_degrees,
                 outer_cone_degrees } => {
-                (vector![-direction.x, -direction.y, direction.z, 0.0],
+                (vector![direction.x, direction.y, direction.z, 0.0],
                  vector![inner_cone_degrees, outer_cone_degrees, 0.0, 0.0],
                  2)
             }
             LightType::Rect { direction, width, height } => {
-                (vector![-direction.x, -direction.y, direction.z, 0.0], vector![width, height, 0.0, 0.0], 3)
+                (vector![direction.x, direction.y, direction.z, 0.0], vector![width, height, 0.0, 0.0], 3)
             }
         };
         Self {
-            position_radius: vector![-light.position.x, -light.position.y, light.position.z, light.radius],
+            position_radius: vector![light.position.x, light.position.y, light.position.z, light.radius],
             color: vector![light.color.x, light.color.y, light.color.z, 0.0],
             direction,
             extras,
@@ -794,7 +794,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .write_buffer_data(
                 &self.camera_buffer,
                 &[PerFrameData {
-                    eye: Vector4::new(pov.forward[0], pov.forward[1], pov.forward[2], 0.0),
+                    eye: Vector4::new(pov.location[0], pov.location[1], pov.location[2], 0.0),
                     view: crate::utils::constants::MATRIX_COORDINATE_FLIP * pov.view(),
                     projection,
                 }],
@@ -958,6 +958,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 diffuse_target,
                 emissive_target,
                 pbr_target,
+                camera_buffer,
                 light_buffer
             ])
             .with_blend_state(BlendState {
@@ -1012,7 +1013,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     primitive_restart: false,
                     polygon_mode: gpu::PolygonMode::Fill,
                     cull_mode: gpu::CullMode::None,
-                    front_face: gpu::FrontFace::CounterClockWise,
+                    front_face: gpu::FrontFace::ClockWise,
                     depth_stencil_state: DepthStencilState {
                         depth_test_enable: false,
                         depth_write_enable: false,
@@ -1024,11 +1025,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                         max_depth_bounds: 1.0,
                     },
                     logic_op: None,
-                    push_constant_ranges: &[ash::vk::PushConstantRange {
-                        offset: 0,
-                        size: std::mem::size_of::<Vector4<f32>>() as _,
-                        stage_flags: ShaderStageFlags::ALL,
-                    }],
+                    push_constant_ranges: &[],
                     ..Default::default()
                 },
             },
@@ -1055,7 +1052,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     primitive_restart: false,
                     polygon_mode: gpu::PolygonMode::Fill,
                     cull_mode: gpu::CullMode::None,
-                    front_face: gpu::FrontFace::CounterClockWise,
+                    front_face: gpu::FrontFace::ClockWise,
                     depth_stencil_state: DepthStencilState {
                         depth_test_enable: false,
                         depth_write_enable: false,
@@ -1184,7 +1181,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         context.register_callback(&combine_pass, |_: &Gpu, ctx| {
             let pipeline = ctx.render_graph.get_pipeline(&combine_handle).unwrap();
-            ctx.render_pass_command.push_constant(&pipeline, &pov.location, 0);
             ctx.render_pass_command.bind_pipeline(&pipeline);
             ctx.render_pass_command.bind_descriptor_sets(
                 PipelineBindPoint::GRAPHICS,
