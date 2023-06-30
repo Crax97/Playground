@@ -1,5 +1,7 @@
 #version 460
 
+#include "definitions.glsl"
+
 struct PbrProperties {
     vec4 baseColor;
     
@@ -23,23 +25,13 @@ layout(location = 2) out vec4 outDiffuse;
 layout(location = 3) out vec4 outEmissive;
 layout(location = 4) out vec4 outPbr;
 
-struct FragmentOut {
-    vec3 Position;
-    vec3 Normal;
-    vec3 Tangent;
-    mat4 model;
-    mat3 TBN;
-    vec2 uv;
-    vec3 color;
-};
-
 layout(location = 0) in FragmentOut fragOut;
 
 void main() {
-    outPosition = vec4(fragOut.Position, 1.0);
+    outPosition = vec4(fragOut.position, 1.0);
 
-    vec3 T = normalize(vec3(fragOut.model * vec4(fragOut.Tangent, 0.0))); // * vec3(-1, -1, 1);
-    vec3 N = normalize(vec3(fragOut.model * vec4(fragOut.Normal, 0.0))) ; //* vec3(-1, -1, 1);
+    vec3 T = normalize(vec3(fragOut.model * vec4(fragOut.tangent, 0.0))); // * vec3(-1, -1, 1);
+    vec3 N = normalize(vec3(fragOut.model * vec4(fragOut.normal, 0.0))) ; //* vec3(-1, -1, 1);
     vec3 B = normalize(cross(N, T));
     mat3 TBN = mat3(T, B, N);
     vec3 sample_normal = texture(normalSampler, fragOut.uv).xyz;

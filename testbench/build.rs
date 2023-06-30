@@ -6,10 +6,10 @@ fn main() {
 
 fn recompile_all_shaders() {
     use shaderc::*;
-    let options = CompileOptions::new().expect("Failed to create compiler options");
-
+    
+    
     let compiler = shaderc::Compiler::new().expect("Failed to create compiler");
-
+    
     let out_dir = "..";
 
     let out_dir = std::path::Path::new(&out_dir);
@@ -20,6 +20,25 @@ fn recompile_all_shaders() {
     let _ = std::fs::create_dir(&out_shader_path);
     let shader_folder =
         std::fs::read_dir(input_shader_path).expect("failed to find input shaders folder");
+    let mut options = CompileOptions::new().expect("Failed to create compiler options");
+    options.set_include_callback(|incl, _, _, _| {
+        let file_path = input_shader_path.join(incl);
+        let absolute = file_path.canonicalize();
+        let absolute = match absolute {
+            Ok(s) => s,
+            Err(e) => {return Err(e.to_string());} 
+        };
+        let content = std::fs::read_to_string(&absolute);
+        let content = match content {
+            Ok(s) => s,
+            Err(e) => {return Err(e.to_string());}
+        };
+        
+        Ok(ResolvedInclude {
+            resolved_name: incl.to_string(),
+            content,
+        })
+    });
     for file in shader_folder {
         if let Ok(file) = file {
             let fty = file.file_type().expect("Could not get filetype");
@@ -39,6 +58,9 @@ fn recompile_all_shaders() {
 
             println!("Compiling {:?}", &path);
             let extension = path.extension().expect("Shader has no extension!");
+            if extension == "glsl" {
+                continue;
+            }
             let extension = match extension.to_str().unwrap() {
                 "vert" => ShaderKind::Vertex,
                 "frag" => ShaderKind::Fragment,
