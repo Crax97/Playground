@@ -10,11 +10,7 @@ use ash::vk::{
     ImageUsageFlags, ImageViewType, PresentModeKHR, SamplerAddressMode, SamplerCreateInfo,
 };
 
-use engine::{
-    AppState, Camera, DeferredRenderingPipeline, ImageResource, MaterialDescription,
-    MaterialDomain, Mesh, MeshCreateInfo, RenderingPipeline, SamplerResource, Scene,
-    ScenePrimitive, Texture, TextureImageView,
-};
+use engine::{AppState, Camera, DeferredRenderingPipeline, ImageResource, Light, LightType, MaterialDescription, MaterialDomain, Mesh, MeshCreateInfo, RenderingPipeline, SamplerResource, Scene, ScenePrimitive, Texture, TextureImageView};
 use gpu::{BufferCreateInfo, ImageCreateInfo, ImageViewCreateInfo, MemoryDomain, ToVk};
 use nalgebra::*;
 use resource_map::{ResourceHandle, ResourceMap};
@@ -406,7 +402,7 @@ impl App for GLTFViewer {
         )?;
         let black_texture = resource_map.add(black_texture);
 
-        let scene = Self::read_gltf(
+        let mut scene = Self::read_gltf(
             app_state,
             &mut scene_renderer,
             resource_map.clone(),
@@ -414,6 +410,9 @@ impl App for GLTFViewer {
             &black_texture,
             "gltf_models/bottle/glTF/WaterBottle.gltf",
         )?;
+        
+        add_scene_lights(&mut scene);
+        
         engine::app_state_mut()
             .swapchain
             .select_present_mode(PresentModeKHR::MAILBOX)?;
@@ -497,6 +496,25 @@ impl App for GLTFViewer {
         self.camera.forward = -direction;
         Ok(())
     }
+}
+
+fn add_scene_lights(scene: &mut Scene) {
+    scene.add_light(Light {
+        ty: LightType::Point,
+        position: vector![0.0, 10.0, 0.0],
+        radius: 100.0,
+        color: vector![1.0, 0.0, 0.0],
+        enabled: true,
+    });
+    scene.add_light(Light {
+        ty: LightType::Directional {
+            direction: vector![-0.45, -0.45, 0.0]
+        },
+        position: vector![100.0, 100.0, 0.0],
+        radius: 10000.0,
+        color: vector![1.0, 1.0, 1.0],
+        enabled: true,
+    });
 }
 
 fn main() -> anyhow::Result<()> {

@@ -45,13 +45,45 @@ pub struct ScenePrimitive {
     pub transform: Matrix4<f32>,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum LightType {
+    Point,
+    Directional { 
+        direction: Vector3<f32>,
+    },
+    Spotlight {
+        direction: Vector3<f32>,
+        inner_cone_degrees: f32, 
+        outer_cone_degrees: f32
+    },
+    Rect {
+        direction: Vector3<f32>,
+        width: f32,
+        height: f32,
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub struct Light {
+    pub ty: LightType,
+    pub position: Vector3<f32>,
+    pub radius: f32,
+    pub color: Vector3<f32>,
+    
+    pub enabled: bool,
+}
+
+#[derive(Clone, Copy, Eq, Ord, PartialOrd, PartialEq)]
+pub struct LightHandle (usize);
+
 pub struct Scene {
     pub primitives: Vec<ScenePrimitive>,
+    pub lights: Vec<Light>
 }
 
 impl Scene {
     pub fn new() -> Self {
-        Self { primitives: vec![] }
+        Self { primitives: vec![], lights: vec![] }
     }
 
     pub fn add(&mut self, primitive: ScenePrimitive) -> usize {
@@ -60,13 +92,29 @@ impl Scene {
         idx
     }
 
+    pub fn add_light(&mut self, light: Light) -> LightHandle {
+        let idx = self.lights.len();
+        self.lights.push(light);
+        LightHandle(idx)
+    }
+
     pub fn edit(&mut self, idx: usize) -> &mut ScenePrimitive {
         &mut self.primitives[idx]
     }
-
+    pub fn edit_light(&mut self, handle: &LightHandle) -> &mut Light {
+        &mut self.lights[handle.0]
+    }
+    
     pub fn all_primitives(&self) -> &[ScenePrimitive] {
         &self.primitives
     }
+    pub fn all_lights(&self) -> &[Light] {
+        &self.lights
+    }
+    pub fn all_enabled_lights(&self) -> impl Iterator<Item = &Light> {
+        self.lights.iter().filter(|l| l.enabled)
+    }
+    
     pub fn edit_all_primitives(&mut self) -> &mut [ScenePrimitive] {
         &mut self.primitives
     }

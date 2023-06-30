@@ -24,31 +24,49 @@ struct PerFrameData {
     projection: nalgebra::Matrix4<f32>,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-union LightType {
-    ty: u32,
-    span: [u32; 4],
-}
-
-impl LightType {
-    fn new(v: u32) -> Self {
-        Self {
-            ty: v
-        }
-    }
-}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct GpuLightInfo {
     position_radius: Vector4<f32>,
+    direction: Vector4<f32>,
     color: Vector4<f32>,
     extras: Vector4<f32>,
-    ty: LightType,
+    ty: [u32; 4],
 }
 
-use crate::{app_state, camera::Camera, material::{Material, MaterialContext, MaterialDescription, MaterialDomain}, FragmentState, GpuRunner, GraphRunContext, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderStage, RenderingPipeline, Scene, ScenePrimitive, Texture, BufferDescription, BufferType};
+impl From<&Light> for GpuLightInfo {
+    fn from(light: &Light) -> Self {
+        let (direction, extras, ty) = match light.ty {
+            LightType::Point => { (Default::default(), Default::default(), 0) }
+            LightType::Directional { direction } => { 
+                (vector![direction.x, direction.y, direction.z, 0.0], 
+                 Default::default(), 
+                 1) 
+            }
+            LightType::Spotlight {
+                direction,
+                inner_cone_degrees,
+                outer_cone_degrees } => {
+                (vector![direction.x, direction.y, direction.z, 0.0],
+                 vector![inner_cone_degrees, outer_cone_degrees, 0.0, 0.0],
+                 2)
+            }
+            LightType::Rect { direction, width, height } => {
+                (vector![direction.x, direction.y, direction.z, 0.0], vector![width, height, 0.0, 0.0], 3)
+            }
+        };
+        Self {
+            position_radius: vector![light.position.x, light.position.y, light.position.z, light.radius],
+            color: vector![light.color.x, light.color.y, light.color.z, 0.0],
+            direction,
+            extras,
+            ty: [ty, 0, 0, 0],
+        }
+    }
+}
+
+use crate::{app_state, camera::Camera, material::{Material, MaterialContext, MaterialDescription, MaterialDomain}, FragmentState, GpuRunner, GraphRunContext, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderStage, RenderingPipeline, Scene, ScenePrimitive, Texture, BufferDescription, BufferType, Light, LightType};
 
 use ash::vk::{
     AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
@@ -782,13 +800,17 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 }],
             )
             .unwrap();
-        let light_count: u32 = 4;
+        
+        let collected_active_lights : Vec<GpuLightInfo> = scene.all_enabled_lights()
+            .map(|l| { l.into() })
+            .collect();
+        
         super::app_state()
             .gpu
             .write_buffer_data_with_offset(
                 &self.light_buffer,
                 0,
-                &[light_count],
+                &[collected_active_lights.len() as u64],
             )
             .unwrap();
         super::app_state()
@@ -796,30 +818,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .write_buffer_data_with_offset(
                 &self.light_buffer,
                 size_of::<u32>() as u64 * 4,
-                &[GpuLightInfo {
-                    position_radius: vector![10.0, -20.0, 0.0, 100.0],
-                    color: vector![0.0, 1.0, 0.0, 1.0],
-                    extras: vector![0.0, 0.0, 0.0, 0.0],
-                    ty: LightType::new(0),
-                },
-                GpuLightInfo {
-                    position_radius: vector![-10.0, -20.0, 0.0, 50.0],
-                    color: vector![1.0, 0.0, 0.0, 1.0],
-                    extras: vector![0.0, 0.0, 0.0, 0.0],
-                    ty: LightType::new(1),
-                },
-                GpuLightInfo {
-                    position_radius: vector![0.0, -20.0, 20.0, 150.0],
-                    color: vector![0.0, 0.0, 1.0, 1.0],
-                    extras: vector![0.0, 0.0, 0.0, 0.0],
-                    ty: LightType::new(3),
-                },
-                GpuLightInfo {
-                    position_radius: vector![0.0, -20.0, 0.0, 150.0],
-                    color: vector![1.0, 1.0, 1.0, 1.0],
-                    extras: vector![0.0, 0.0, 0.0, 0.0],
-                    ty: LightType::new(3),
-                }],
+                &collected_active_lights,
             )
             .unwrap();
 

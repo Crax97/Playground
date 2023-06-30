@@ -2,6 +2,7 @@
 
 struct LightInfo {
     vec4 position_radius;
+    vec4 direction;
     vec4 color;
     vec4 extras;
     uint type;
