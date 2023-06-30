@@ -6,9 +6,8 @@ mod pipeline;
 mod swapchain;
 mod types;
 
-use std::collections::hash_map::DefaultHasher;
 use std::fmt::{Debug, Formatter};
-use std::hash::{Hash, Hasher};
+use std::hash::{Hash};
 use ash::vk::ImageLayout;
 pub use crate::gpu::*;
 pub use allocator::*;
@@ -63,17 +62,6 @@ pub enum DescriptorType<'a> {
     CombinedImageSampler(SamplerState<'a>),
 }
 
-impl<'a> PartialEq for DescriptorType<'a> {
-    fn eq(&self, other: &Self) -> bool {
-        let mut h1 = DefaultHasher::new();
-        let mut h2 = DefaultHasher::new();
-        self.hash(&mut h1);
-        self.hash(&mut h2);
-        
-        h1.finish() == h2.finish()
-    }
-}
-
 impl<'a> std::hash::Hash for DescriptorType<'a> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
@@ -95,7 +83,7 @@ pub enum ShaderStage {
     All,
 }
 
-#[derive(Clone, Hash, PartialEq, Debug)]
+#[derive(Clone, Hash, Debug)]
 pub struct DescriptorInfo<'a> {
     pub binding: u32,
     pub element_type: DescriptorType<'a>,

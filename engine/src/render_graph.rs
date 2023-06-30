@@ -359,7 +359,7 @@ impl GraphResource for GraphSampler {
 }
 
 impl<'a> CreateFrom<'a, NoDesc> for GraphSampler {
-    fn create(gpu: &Gpu, d: &'a NoDesc) -> anyhow::Result<Self> {
+    fn create(gpu: &Gpu, _: &'a NoDesc) -> anyhow::Result<Self> {
         let sam = gpu
             .create_sampler(&SamplerCreateInfo {
                 s_type: StructureType::SAMPLER_CREATE_INFO,
@@ -1928,7 +1928,7 @@ impl RenderGraphRunner for GpuRunner {
                         &mut resource_allocator.descriptors,
                     );
 
-                    let framebuffer_hash = compute_framebuffer_hash(info, &views);
+                    let framebuffer_hash = compute_framebuffer_hash(&views);
 
                     let pass = self.get_renderpass(
                         rp,
@@ -2042,7 +2042,6 @@ impl RenderGraphRunner for GpuRunner {
 }
 
 fn compute_framebuffer_hash(
-    info: &RenderPassInfo,
     views: &Vec<&GpuImageView>,
 ) -> FramebufferHandle {
     let framebuffer_hash = hash_image_views(views);
@@ -2132,7 +2131,7 @@ fn ensure_graph_allocated_samplers_exists(
             .external_shader_resources
             .contains_key(writes)
         {
-            let desc = match &graph.allocations[writes].ty {
+            match &graph.allocations[writes].ty {
                 AllocationType::Image(d)  => d.clone(),
                 AllocationType::Buffer { .. } => panic!("A buffer cannot have a sampler! Bug?")
             };

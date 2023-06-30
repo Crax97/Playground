@@ -8,8 +8,7 @@ use ash::{
     },
 };
 use gpu::{
-    BindingElement, BufferCreateInfo, BufferRange, DepthStencilState, DescriptorInfo,
-    DescriptorSetInfo, FragmentStageInfo, GlobalBinding, Gpu, GpuBuffer, GpuDescriptorSet,
+    BindingElement, BufferCreateInfo, DepthStencilState, FragmentStageInfo, GlobalBinding, Gpu, GpuBuffer, 
     GpuShaderModule, ImageFormat, MemoryDomain, Pipeline, PipelineDescription, Swapchain, ToVk,
     VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
@@ -66,11 +65,11 @@ impl From<&Light> for GpuLightInfo {
     }
 }
 
-use crate::{app_state, camera::Camera, material::{Material, MaterialContext, MaterialDescription, MaterialDomain}, FragmentState, GpuRunner, GraphRunContext, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderStage, RenderingPipeline, Scene, ScenePrimitive, Texture, BufferDescription, BufferType, Light, LightType};
+use crate::{app_state, camera::Camera, material::{Material, MaterialContext, MaterialDescription, MaterialDomain}, FragmentState, GpuRunner, GraphRunContext, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderStage, RenderingPipeline, Scene, ScenePrimitive, BufferDescription, BufferType, Light, LightType};
 
 use ash::vk::{
     AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
-    ColorComponentFlags, DependencyFlags, Format, ImageLayout, SampleCountFlags, SubpassDependency,
+    ColorComponentFlags, DependencyFlags, ImageLayout, SampleCountFlags, SubpassDependency,
     SubpassDescriptionFlags, SUBPASS_EXTERNAL,
 };
 use gpu::{

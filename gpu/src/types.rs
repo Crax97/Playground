@@ -188,7 +188,6 @@ impl GpuBuffer {
         assert!(offset < self.allocation.size);
         assert!(data_length + offset <= self.allocation.size);
         
-        let map_size = if offset == 0 {  vk::WHOLE_SIZE } else { self.allocation.size - offset };
         let address = unsafe {
             self.device
                 .map_memory(

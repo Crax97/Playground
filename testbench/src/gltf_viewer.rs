@@ -1,7 +1,6 @@
 mod app;
 mod utils;
 
-use std::f32::consts::PI;
 use std::rc::Rc;
 
 use app::{bootstrap, App};
