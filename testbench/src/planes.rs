@@ -8,7 +8,7 @@ use ash::vk::PresentModeKHR;
 
 use engine::{
     Camera, DeferredRenderingPipeline, MaterialDescription, MaterialDomain, Mesh, MeshCreateInfo,
-    RenderingPipeline, Scene, ScenePrimitive, Texture,
+    MeshPrimitive, MeshPrimitiveCreateInfo, RenderingPipeline, Scene, ScenePrimitive, Texture,
 };
 use nalgebra::*;
 use resource_map::ResourceMap;
@@ -74,37 +74,39 @@ impl App for PlanesApp {
 
         let mesh_data = MeshCreateInfo {
             label: Some("Quad mesh"),
-            indices: &[0, 1, 2, 2, 3, 0],
-            positions: &[
-                vector![-0.5, -0.5, 0.0],
-                vector![0.5, -0.5, 0.0],
-                vector![0.5, 0.5, 0.0],
-                vector![-0.5, 0.5, 0.0],
-            ],
-            colors: &[
-                vector![1.0, 0.0, 0.0],
-                vector![0.0, 1.0, 0.0],
-                vector![0.0, 0.0, 1.0],
-                vector![1.0, 1.0, 1.0],
-            ],
-            normals: &[
-                vector![0.0, 1.0, 0.0],
-                vector![0.0, 1.0, 0.0],
-                vector![0.0, 1.0, 0.0],
-                vector![0.0, 1.0, 0.0],
-            ],
-            tangents: &[
-                vector![0.0, 0.0, 1.0],
-                vector![0.0, 0.0, 1.0],
-                vector![0.0, 0.0, 1.0],
-                vector![0.0, 0.0, 1.0],
-            ],
-            uvs: &[
-                vector![1.0, 0.0],
-                vector![0.0, 0.0],
-                vector![0.0, 1.0],
-                vector![1.0, 1.0],
-            ],
+            primitives: &[MeshPrimitiveCreateInfo {
+                indices: vec![0, 1, 2, 2, 3, 0],
+                positions: vec![
+                    vector![-0.5, -0.5, 0.0],
+                    vector![0.5, -0.5, 0.0],
+                    vector![0.5, 0.5, 0.0],
+                    vector![-0.5, 0.5, 0.0],
+                ],
+                colors: vec![
+                    vector![1.0, 0.0, 0.0],
+                    vector![0.0, 1.0, 0.0],
+                    vector![0.0, 0.0, 1.0],
+                    vector![1.0, 1.0, 1.0],
+                ],
+                normals: vec![
+                    vector![0.0, 1.0, 0.0],
+                    vector![0.0, 1.0, 0.0],
+                    vector![0.0, 1.0, 0.0],
+                    vector![0.0, 1.0, 0.0],
+                ],
+                tangents: vec![
+                    vector![0.0, 0.0, 1.0],
+                    vector![0.0, 0.0, 1.0],
+                    vector![0.0, 0.0, 1.0],
+                    vector![0.0, 0.0, 1.0],
+                ],
+                uvs: vec![
+                    vector![1.0, 0.0],
+                    vector![0.0, 0.0],
+                    vector![0.0, 1.0],
+                    vector![1.0, 1.0],
+                ],
+            }],
         };
 
         let mesh = Mesh::new(&app_state.gpu, &mesh_data)?;
@@ -156,17 +158,17 @@ impl App for PlanesApp {
 
         scene.add(ScenePrimitive {
             mesh: mesh.clone(),
-            material: material.clone(),
+            materials: vec![material.clone()],
             transform: Matrix4::identity(),
         });
         scene.add(ScenePrimitive {
             mesh: mesh.clone(),
-            material: material.clone(),
+            materials: vec![material.clone()],
             transform: Matrix4::new_translation(&vector![0.0, 0.0, 1.0]),
         });
         scene.add(ScenePrimitive {
             mesh: mesh.clone(),
-            material: material.clone(),
+            materials: vec![material.clone()],
             transform: Matrix4::new_translation(&vector![0.0, 0.0, -1.0]),
         });
         Ok(Self {
