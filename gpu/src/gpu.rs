@@ -940,6 +940,8 @@ impl Gpu {
         memory_domain: MemoryDomain,
     ) -> VkResult<GpuBuffer> {
         let size = create_info.size as u64;
+        assert_ne!(size, 0, "Can't create a buffer with size 0!");
+        
         let family = self.state.queue_families.clone();
         let create_info_vk = vk::BufferCreateInfo {
             s_type: StructureType::BUFFER_CREATE_INFO,
