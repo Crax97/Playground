@@ -12,7 +12,23 @@
 				"kind": "build",
 				"isDefault": true
 			},
-			"label": "rust: cargo build"
+			"label": "build-debug"
+		},
+		{
+			"type": "cargo",
+			"command": "build",
+			"args": [
+				"--release"
+			],
+			"problemMatcher": [
+				"$rustc",
+				"$rust-panic"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": false
+			},
+			"label": "build-release"
 		}
 	]
 }
