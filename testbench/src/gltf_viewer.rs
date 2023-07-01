@@ -503,7 +503,7 @@ fn add_scene_lights(scene: &mut Scene) {
         position: vector![0.0, 10.0, 0.0],
         radius: 50.0,
         color: vector![1.0, 0.0, 0.0],
-        intensity: 3.0,
+        intensity: 1.0,
         enabled: true,
     });
     scene.add_light(Light {
@@ -513,7 +513,7 @@ fn add_scene_lights(scene: &mut Scene) {
         position: vector![100.0, 100.0, 0.0],
         radius: 10.0,
         color: vector![1.0, 1.0, 1.0],
-        intensity: 2.0,
+        intensity: 1.0,
         enabled: true,
     });
 }
