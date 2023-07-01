@@ -57,7 +57,7 @@ impl From<&Light> for GpuLightInfo {
         };
         Self {
             position_radius: vector![light.position.x, light.position.y, light.position.z, light.radius],
-            color: vector![light.color.x, light.color.y, light.color.z, 0.0],
+            color: vector![light.color.x, light.color.y, light.color.z, light.intensity],
             direction,
             extras,
             ty: [ty, 0, 0, 0],

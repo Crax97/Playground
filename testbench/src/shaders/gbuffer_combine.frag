@@ -86,7 +86,7 @@ vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, LightInfo light_
     float light_dist = length(light_dir);
     light_dir /= light_dist;
     float light_dist_scaled =  1.0 / ( max(light_dist / light_info.position_radius.w, 0.001));
-    vec3 light_radiance = light_info.color.rgb * light_dist_scaled;
+    vec3 light_radiance = light_info.color_intensity.rgb * light_dist_scaled * light_info.color_intensity.w;
     
     vec3 h = normalize(view_direction + light_dir);
     
