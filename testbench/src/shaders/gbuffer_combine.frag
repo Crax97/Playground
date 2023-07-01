@@ -32,7 +32,7 @@ struct FragmentInfo {
 
 vec3 get_light_direction(LightInfo info, FragmentInfo frag_info) {
     if (info.type == POINT_LIGHT) {
-        return info.position_radius.xyz - frag_info.position;
+        return frag_info.position - info.position_radius.xyz ;
     } else {
         return info.direction.xyz;
     }
@@ -82,7 +82,7 @@ float d_trowbridge_reitz_ggx(float n_dot_h, float rough)
 
 vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, LightInfo light_info) {
 
-    vec3 light_dir = -get_light_direction(light_info, frag_info);
+    vec3 light_dir = get_light_direction(light_info, frag_info);
     float light_dist = length(light_dir);
     light_dir /= light_dist;
     float light_dist_scaled =  1.0 / ( max(light_dist / light_info.position_radius.w, 0.001));

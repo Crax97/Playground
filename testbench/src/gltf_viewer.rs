@@ -270,7 +270,7 @@ impl GLTFViewer {
                 }
                 if let Some(iter) = reader.read_positions() {
                     for vert in iter {
-                        positions.push(vector![vert[0], -vert[1], vert[2]]);
+                        positions.push(vector![vert[0], vert[1], vert[2]]);
                     }
                 }
                 if let Some(iter) = reader.read_colors(0) {
@@ -280,12 +280,12 @@ impl GLTFViewer {
                 }
                 if let Some(iter) = reader.read_normals() {
                     for vec in iter {
-                        normals.push(vector![vec[0], -vec[1], vec[2]]);
+                        normals.push(vector![vec[0], vec[1], vec[2]]);
                     }
                 }
                 if let Some(iter) = reader.read_tangents() {
                     for vec in iter {
-                        tangents.push(vector![vec[0], -vec[1], vec[2]]);
+                        tangents.push(vector![vec[0], vec[1], vec[2]]);
                     }
                 }
                 if let Some(iter) = reader.read_tex_coords(0) {
@@ -475,7 +475,7 @@ impl App for GLTFViewer {
     fn update(&mut self, _app_state: &mut engine::AppState) -> anyhow::Result<()> {
         if self.rotation_movement > 0.0 {
             self.rot_y += self.movement.x;
-            self.rot_x += self.movement.y;
+            self.rot_x += -self.movement.y;
             self.rot_x = self.rot_x.clamp(-89.0, 89.0);
         } else {
             self.dist += self.movement.y * self.forward_movement * SPEED;
@@ -501,7 +501,7 @@ fn add_scene_lights(scene: &mut Scene) {
     scene.add_light(Light {
         ty: LightType::Point,
         position: vector![0.0, 10.0, 0.0],
-        radius: 15.0,
+        radius: 50.0,
         color: vector![1.0, 0.0, 0.0],
         intensity: 3.0,
         enabled: true,

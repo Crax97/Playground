@@ -480,9 +480,9 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
             Some(viewport) => viewport,
             None => Viewport {
                 x: 0 as f32,
-                y: height,
+                y: 0.0,
                 width: self.render_area.extent.width as f32,
-                height: -height,
+                height,
                 min_depth: 0.0,
                 max_depth: 1.0,
             },
