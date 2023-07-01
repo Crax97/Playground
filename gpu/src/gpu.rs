@@ -217,7 +217,6 @@ pub struct SelectedPhysicalDevice {
     pub device_features: PhysicalDeviceFeatures,
 }
 
-#[cfg(debug_assertions)]
 unsafe extern "system" fn on_message(
     message_severity: DebugUtilsMessageSeverityFlagsEXT,
     _message_types: DebugUtilsMessageTypeFlagsEXT,
@@ -323,7 +322,6 @@ impl Gpu {
             None
         };
 
-        #[cfg(debug_assertions)]
         let messenger = if let Some(utils) = &debug_utilities {
             Some(unsafe {
                 utils.create_debug_utils_messenger(
@@ -363,11 +361,7 @@ impl Gpu {
             features: supported_features,
             gpu_memory_allocator: Arc::new(RefCell::new(gpu_memory_allocator)),
             descriptor_set_allocator: Arc::new(RefCell::new(descriptor_set_allocator)),
-
-            #[cfg(debug_assertions)]
             messenger,
-            #[cfg(not(debug_assertions))]
-            messenger: None,
         });
 
         let thread_local_state = GpuThreadLocalState::new(state.clone())?;
@@ -1003,10 +997,6 @@ impl Gpu {
         label: Option<&str>,
         object: T,
     ) -> Result<(), vk::Result> {
-        if !cfg!(debug_assertions) {
-            return Ok(());
-        }
-
         match (label, &self.state.debug_utilities) {
             (Some(label), Some(debug)) => unsafe {
                 let c_label = CString::new(label).unwrap();

@@ -37,8 +37,8 @@ pub struct PlanesApp {
 }
 
 impl App for PlanesApp {
-    fn window_name() -> &'static str {
-        "planes"
+    fn window_name(&self, _app_state: &engine::AppState) -> String {
+        "planes".to_owned()
     }
 
     fn create(app_state: &engine::AppState) -> anyhow::Result<Self>

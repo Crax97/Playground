@@ -653,7 +653,7 @@ impl Pipeline {
                 s_type: StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
                 p_next: std::ptr::null(),
                 flags: PipelineCreateFlags::ALLOW_DERIVATIVES,
-                stage_count: 2,
+                stage_count: stages.len() as _,
                 p_stages: stages.as_ptr(),
                 p_vertex_input_state: &input_stage as *const PipelineVertexInputStateCreateInfo,
                 p_input_assembly_state: &assembly_state

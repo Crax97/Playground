@@ -3,7 +3,7 @@ use log::trace;
 use winit::{dpi::PhysicalSize, event::Event, event_loop::ControlFlow};
 
 pub trait App {
-    fn window_name() -> &'static str;
+    fn window_name(&self, app_state: &engine::AppState) -> String;
 
     fn create(app_state: &AppState) -> anyhow::Result<Self>
     where
@@ -45,6 +45,12 @@ pub fn app_loop<A: App + 'static>(
         }
         winit::event::Event::RedrawRequested(..) => {
             app_state_mut.begin_frame().unwrap();
+
+            app_state_mut
+                .swapchain
+                .window
+                .set_title(&app.window_name(&app_state_mut));
+
             app.update(app_state_mut)?;
             app.draw(app_state_mut)?;
             app_state_mut.end_frame().unwrap();
@@ -64,15 +70,15 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
             width: 1240,
             height: 720,
         })
-        .with_title(A::window_name())
+        .with_title("Winit App")
         .build(&event_loop)?;
 
-    engine::init(A::window_name(), window)?;
+    engine::init("Winit App", window)?;
 
     let app = Box::new(A::create(engine::app_state())?);
     let app = Box::leak(app);
 
-    trace!("Created app {}", A::window_name());
+    trace!("Created app");
 
     event_loop.run(move |event, _, control_flow| match app_loop(app, event) {
         Ok(flow) => {

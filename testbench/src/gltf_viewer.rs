@@ -9,7 +9,11 @@ use ash::vk::{
     ImageUsageFlags, ImageViewType, PresentModeKHR, SamplerAddressMode, SamplerCreateInfo,
 };
 
-use engine::{AppState, Camera, DeferredRenderingPipeline, ImageResource, Light, LightType, MaterialDescription, MaterialDomain, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo, RenderingPipeline, SamplerResource, Scene, ScenePrimitive, Texture, TextureImageView};
+use engine::{
+    AppState, Camera, DeferredRenderingPipeline, ImageResource, Light, LightType,
+    MaterialDescription, MaterialDomain, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo,
+    RenderingPipeline, SamplerResource, Scene, ScenePrimitive, Texture, TextureImageView,
+};
 use gpu::{BufferCreateInfo, ImageCreateInfo, ImageViewCreateInfo, MemoryDomain, ToVk};
 use nalgebra::*;
 use resource_map::{ResourceHandle, ResourceMap};
@@ -254,9 +258,8 @@ impl GLTFViewer {
         let mut meshes = vec![];
 
         for mesh in document.meshes() {
-
             let mut primitive_create_infos = vec![];
-            
+
             for prim in mesh.primitives() {
                 let mut indices = vec![];
                 let mut positions = vec![];
@@ -295,7 +298,7 @@ impl GLTFViewer {
                         uvs.push(vector![vec[0], vec[1]]);
                     }
                 }
-                primitive_create_infos.push( MeshPrimitiveCreateInfo {
+                primitive_create_infos.push(MeshPrimitiveCreateInfo {
                     positions,
                     indices,
                     colors,
@@ -309,7 +312,7 @@ impl GLTFViewer {
 
             let create_info = MeshCreateInfo {
                 label: Some(mesh.name().unwrap_or(&label)),
-                primitives: &primitive_create_infos
+                primitives: &primitive_create_infos,
             };
             let gpu_mesh = Mesh::new(&app_state.gpu, &create_info)?;
             meshes.push(resource_map.add(gpu_mesh));
@@ -338,8 +341,6 @@ impl GLTFViewer {
                         let material = allocated_materials[material_index].clone();
                         materials.push(material);
                     }
-                    let prim = mesh.primitives().next().unwrap();
-                    let mat = prim.material().index().unwrap_or(0);
                     engine_scene.add(ScenePrimitive {
                         mesh: meshes[mesh.index()].clone(),
                         materials,
@@ -354,8 +355,11 @@ impl GLTFViewer {
 }
 
 impl App for GLTFViewer {
-    fn window_name() -> &'static str {
-        "GLTF Viewer"
+    fn window_name(&self, app_state: &engine::AppState) -> String {
+        format!(
+            "GLTF Viewer - FPS {}",
+            1.0 / app_state.time().delta_frame().max(0.0000001)
+        )
     }
 
     fn create(app_state: &engine::AppState) -> anyhow::Result<Self>
