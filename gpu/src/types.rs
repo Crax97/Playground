@@ -184,10 +184,13 @@ impl Deref for GpuBuffer {
 impl GpuBuffer {
     pub fn write_data<I: Sized + Copy>(&self, offset: u64, data: &[I]) {
         let data_length = (std::mem::size_of::<I>() * data.len()) as u64;
-        assert!(data_length > 0, "Cannot write on a buffer with 0 data length!");
+        assert!(
+            data_length > 0,
+            "Cannot write on a buffer with 0 data length!"
+        );
         assert!(offset < self.allocation.size);
         assert!(data_length + offset <= self.allocation.size);
-        
+
         let address = unsafe {
             self.device
                 .map_memory(
@@ -198,7 +201,7 @@ impl GpuBuffer {
                 )
                 .expect("Failed to map memory!")
         };
-        let address = unsafe { address.add(offset as _ ) }  as *mut I;
+        let address = unsafe { address.add(offset as _) } as *mut I;
         let address = unsafe { std::slice::from_raw_parts_mut(address, data.len()) };
 
         address.copy_from_slice(data);

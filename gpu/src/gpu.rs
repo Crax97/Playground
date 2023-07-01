@@ -360,7 +360,7 @@ impl Gpu {
             #[cfg(debug_assertions)]
             messenger,
             #[cfg(not(debug_assertions))]
-            messenger: None
+            messenger: None,
         });
 
         let thread_local_state = GpuThreadLocalState::new(state.clone())?;
@@ -1031,8 +1031,12 @@ impl Gpu {
         self.write_buffer_data_with_offset(buffer, 0, data)
     }
 
-
-    pub fn write_buffer_data_with_offset<T: Copy>(&self, buffer: &GpuBuffer, offset: u64, data: &[T]) -> VkResult<()> {
+    pub fn write_buffer_data_with_offset<T: Copy>(
+        &self,
+        buffer: &GpuBuffer,
+        offset: u64,
+        data: &[T],
+    ) -> VkResult<()> {
         if data.len() == 0 {
             return Ok(());
         }

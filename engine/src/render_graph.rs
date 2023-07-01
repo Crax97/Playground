@@ -6,8 +6,22 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use ash::vk::{self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor, BufferUsageFlags, ClearDepthStencilValue, ClearValue, ColorComponentFlags, CompareOp, ComponentMapping, DependencyFlags, Extent2D, Filter, ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency, SubpassDescriptionFlags};
-use gpu::{BeginRenderPassInfo, BindingType, BlendState, BufferCreateInfo, BufferRange, CommandBuffer, DescriptorInfo, DescriptorSetInfo, FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, ImageFormat, ImageViewCreateInfo, MemoryDomain, Pipeline, RenderPass, RenderPassAttachment, RenderPassCommand, RenderPassDescription, SubpassDescription, Swapchain, ToVk, TransitionInfo};
+use ash::vk::{
+    self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor,
+    BlendOp, BorderColor, BufferUsageFlags, ClearDepthStencilValue, ClearValue,
+    ColorComponentFlags, CompareOp, ComponentMapping, DependencyFlags, Extent2D, Filter,
+    ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType, Offset2D,
+    PipelineBindPoint, PipelineStageFlags, Rect2D, SampleCountFlags, SamplerAddressMode,
+    SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency,
+    SubpassDescriptionFlags,
+};
+use gpu::{
+    BeginRenderPassInfo, BindingType, BlendState, BufferCreateInfo, BufferRange, CommandBuffer,
+    DescriptorInfo, DescriptorSetInfo, FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet,
+    GpuFramebuffer, GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, ImageFormat,
+    ImageViewCreateInfo, MemoryDomain, Pipeline, RenderPass, RenderPassAttachment,
+    RenderPassCommand, RenderPassDescription, SubpassDescription, Swapchain, ToVk, TransitionInfo,
+};
 
 use ash::vk::PushConstantRange;
 use gpu::{
@@ -27,17 +41,17 @@ use log::trace;
     2. create a CreationInfo struct, which holds the description D + additional stuff to create the resource
     3. implement AsRef<D> for CreationInfo
     4. implement GraphResource for GraphResT
-    5. implement CreateFrom<'a, CreationInfo> for GrapResT 
-    
+    5. implement CreateFrom<'a, CreationInfo> for GrapResT
+
     now you can add a ResourceAllocator<GraphResT, ID> to DefaultResourceAllocator
-    
+
     /// Note to self: Simplify this god damn mess, there HAS to be a simpler way to just create graph allocated resources
-    ///       while automating resource lifetime/etc...     
+    ///       while automating resource lifetime/etc...
 */
 
 pub trait CreateFrom<'a, D>
-    where
-        Self: Sized,
+where
+    Self: Sized,
 {
     fn create(gpu: &Gpu, desc: &'a D) -> anyhow::Result<Self>;
 }
@@ -45,7 +59,9 @@ pub trait CreateFrom<'a, D>
 pub trait GraphResource {
     type Inner;
     type Desc;
-    fn construct(inner: Self::Inner, desc: Self::Desc) -> Self where Self: Sized;
+    fn construct(inner: Self::Inner, desc: Self::Desc) -> Self
+    where
+        Self: Sized;
     fn matches_description(&self, new_desc: &Self::Desc) -> bool;
     fn resource(&self) -> &Self::Inner;
 }
@@ -83,10 +99,8 @@ pub struct FramebufferHandle {
     hash: u64,
 }
 
-pub struct ResourceAllocator<
-    R: Sized + GraphResource,
-    ID: Hash + Eq + PartialEq + Ord + PartialOrd,
-> {
+pub struct ResourceAllocator<R: Sized + GraphResource, ID: Hash + Eq + PartialEq + Ord + PartialOrd>
+{
     resources: HashMap<ID, LifetimeAllocation<R>>,
     lifetime: u64,
 }
@@ -102,10 +116,8 @@ impl<R: Sized + GraphResource, ID: Hash + Eq + PartialEq + Ord + PartialOrd + Cl
     }
 }
 
-impl<
-        R: Sized + GraphResource,
-        ID: Hash + Eq + PartialEq + Ord + PartialOrd + Clone + Debug,
-    > ResourceAllocator<R, ID>
+impl<R: Sized + GraphResource, ID: Hash + Eq + PartialEq + Ord + PartialOrd + Clone + Debug>
+    ResourceAllocator<R, ID>
 {
     fn get<'a, D: AsRef<R::Desc>>(
         &mut self,
@@ -136,7 +148,11 @@ impl<
     }
 
     fn get_unchecked(&self, id: &ID) -> &R {
-        assert!(self.resources.contains_key(id), "tried to get_unchecked non existent resource: {:?}", id);
+        assert!(
+            self.resources.contains_key(id),
+            "tried to get_unchecked non existent resource: {:?}",
+            id
+        );
         &self.resources[id].inner
     }
 
@@ -144,7 +160,7 @@ impl<
         &mut self,
         gpu: &Gpu,
         desc: &'a D,
-        id: &ID
+        id: &ID,
     ) -> anyhow::Result<()>
     where
         R: CreateFrom<'a, D>,
@@ -160,7 +176,7 @@ impl<
         &mut self,
         gpu: &Gpu,
         desc: &'a D,
-        id: &ID
+        id: &ID,
     ) -> anyhow::Result<()>
     where
         R: CreateFrom<'a, D>,
@@ -175,7 +191,7 @@ impl<
         &mut self,
         gpu: &Gpu,
         desc: &'a D,
-        id: &ID
+        id: &ID,
     ) -> anyhow::Result<()>
     where
         R: CreateFrom<'a, D>,
@@ -219,22 +235,17 @@ enum ExternalShaderResource<'a> {
 impl<'a> ExternalShaderResource<'a> {
     fn as_image_view(&self) -> &GpuImageView {
         match self {
-            ExternalShaderResource::ImageView(v) => {
-                *v
-            }
-            _ => panic!("This resource is not an image view!")   
+            ExternalShaderResource::ImageView(v) => *v,
+            _ => panic!("This resource is not an image view!"),
         }
     }
     fn as_buffer(&self) -> &GpuBuffer {
         match self {
-            ExternalShaderResource::Buffer(b) => {
-                *b
-            }
-            _ => panic!("This resource is not a buffer!")
+            ExternalShaderResource::Buffer(b) => *b,
+            _ => panic!("This resource is not a buffer!"),
         }
     }
 }
-
 
 #[derive(Default)]
 struct ExternalResources<'a> {
@@ -245,7 +256,9 @@ struct ExternalResources<'a> {
 
 impl<'a> ExternalResources<'a> {
     fn get_shader_resource(&self, resource_id: &ResourceId) -> &ExternalShaderResource {
-        self.external_shader_resources.get(resource_id).expect("Resource not found!")
+        self.external_shader_resources
+            .get(resource_id)
+            .expect("Resource not found!")
     }
 }
 
@@ -257,13 +270,15 @@ impl<'a> ExternalResources<'a> {
         view: &'a GpuImageView,
     ) {
         self.external_images.insert(*id, image);
-        self.external_shader_resources.insert(*id,  ExternalShaderResource::ImageView(view));
+        self.external_shader_resources
+            .insert(*id, ExternalShaderResource::ImageView(view));
     }
-    
+
     pub fn inject_external_buffer(&mut self, id: &ResourceId, buffer: &'a GpuBuffer) {
-        self.external_shader_resources.insert(*id, ExternalShaderResource::Buffer(buffer));
+        self.external_shader_resources
+            .insert(*id, ExternalShaderResource::Buffer(buffer));
     }
-    
+
     pub fn inject_external_renderpass(
         &mut self,
         handle: &RenderPassHandle,
@@ -271,12 +286,11 @@ impl<'a> ExternalResources<'a> {
     ) {
         self.external_render_passes.insert(*handle, render_pass);
     }
-
 }
 
 pub struct GraphImage {
     image: GpuImage,
-    desc: ImageDescription
+    desc: ImageDescription,
 }
 
 impl GraphResource for GraphImage {
@@ -287,11 +301,11 @@ impl GraphResource for GraphImage {
         &self.desc == new_desc
     }
 
-    fn construct(image: GpuImage, desc: Self::Desc) -> Self where Self: Sized {
-        Self {
-            image,
-            desc,
-        }
+    fn construct(image: GpuImage, desc: Self::Desc) -> Self
+    where
+        Self: Sized,
+    {
+        Self { image, desc }
     }
 
     fn resource(&self) -> &Self::Inner {
@@ -335,7 +349,7 @@ impl AsRef<NoDesc> for NoDesc {
 
 pub struct GraphSampler {
     image: GpuSampler,
-    desc: NoDesc
+    desc: NoDesc,
 }
 
 impl GraphResource for GraphSampler {
@@ -346,11 +360,11 @@ impl GraphResource for GraphSampler {
         &self.desc == new_desc
     }
 
-    fn construct(image: GpuSampler, desc: Self::Desc) -> Self where Self: Sized {
-        Self {
-            image,
-            desc,
-        }
+    fn construct(image: GpuSampler, desc: Self::Desc) -> Self
+    where
+        Self: Sized,
+    {
+        Self { image, desc }
     }
 
     fn resource(&self) -> &Self::Inner {
@@ -389,10 +403,9 @@ impl<'a> CreateFrom<'a, NoDesc> for GraphSampler {
     }
 }
 
-
 pub struct GraphImageView {
     image: GpuImageView,
-    desc: ImageDescription
+    desc: ImageDescription,
 }
 
 impl GraphResource for GraphImageView {
@@ -403,11 +416,11 @@ impl GraphResource for GraphImageView {
         &self.desc == new_desc
     }
 
-    fn construct(image: GpuImageView, desc: Self::Desc) -> Self where Self: Sized {
-        Self {
-            image,
-            desc,
-        }
+    fn construct(image: GpuImageView, desc: Self::Desc) -> Self
+    where
+        Self: Sized,
+    {
+        Self { image, desc }
     }
 
     fn resource(&self) -> &Self::Inner {
@@ -417,7 +430,7 @@ impl GraphResource for GraphImageView {
 
 pub struct GraphImageViewCreateInfo<'a> {
     desc: &'a ImageDescription,
-    image: &'a GpuImage
+    image: &'a GpuImage,
 }
 impl<'a> AsRef<ImageDescription> for GraphImageViewCreateInfo<'a> {
     fn as_ref(&self) -> &ImageDescription {
@@ -450,10 +463,9 @@ impl<'a> CreateFrom<'a, GraphImageViewCreateInfo<'_>> for GraphImageView {
     }
 }
 
-
 pub struct GraphBuffer {
     inner: GpuBuffer,
-    desc: BufferDescription
+    desc: BufferDescription,
 }
 
 impl AsRef<BufferDescription> for BufferDescription {
@@ -466,11 +478,11 @@ impl GraphResource for GraphBuffer {
     type Inner = GpuBuffer;
     type Desc = BufferDescription;
 
-    fn construct(inner: Self::Inner, desc: Self::Desc) -> Self where Self: Sized {
-        Self {
-            inner,
-            desc
-        }
+    fn construct(inner: Self::Inner, desc: Self::Desc) -> Self
+    where
+        Self: Sized,
+    {
+        Self { inner, desc }
     }
 
     fn matches_description(&self, new_desc: &Self::Desc) -> bool {
@@ -484,17 +496,20 @@ impl GraphResource for GraphBuffer {
 
 impl<'a> CreateFrom<'a, BufferDescription> for GraphBuffer {
     fn create(gpu: &Gpu, desc: &'a BufferDescription) -> anyhow::Result<Self> {
-        let buffer= gpu.create_buffer(&BufferCreateInfo {
-            label: None,
-            size: desc.length as _,
-            usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::STORAGE_BUFFER,
-        }, MemoryDomain::DeviceLocal)?;
-        Ok(GraphBuffer::construct(buffer, desc.clone() ))
+        let buffer = gpu.create_buffer(
+            &BufferCreateInfo {
+                label: None,
+                size: desc.length as _,
+                usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::STORAGE_BUFFER,
+            },
+            MemoryDomain::DeviceLocal,
+        )?;
+        Ok(GraphBuffer::construct(buffer, desc.clone()))
     }
 }
 struct RenderGraphPassCreateInfo<'a> {
     graph: &'a RenderGraph,
-    pass_info: &'a RenderPassInfo
+    pass_info: &'a RenderPassInfo,
 }
 
 impl<'a> AsRef<RenderPassInfo> for RenderGraphPassCreateInfo<'a> {
@@ -511,18 +526,18 @@ impl AsRef<ImageDescription> for ImageDescription {
 
 pub struct GraphPass {
     inner: RenderPass,
-    desc: RenderPassInfo
+    desc: RenderPassInfo,
 }
 
 impl GraphResource for GraphPass {
     type Inner = RenderPass;
     type Desc = RenderPassInfo;
 
-    fn construct(inner: Self::Inner, desc: Self::Desc) -> Self where Self: Sized {
-        Self {
-            inner,
-            desc
-        }
+    fn construct(inner: Self::Inner, desc: Self::Desc) -> Self
+    where
+        Self: Sized,
+    {
+        Self { inner, desc }
     }
 
     fn matches_description(&self, new_desc: &Self::Desc) -> bool {
@@ -544,10 +559,10 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
         for write in &create_info.pass_info.attachment_writes {
             let image_desc = &create_info.graph.allocations[&write];
             let image_desc = match &image_desc.ty {
-                AllocationType::Image(image_desc)  => {
-                    image_desc
-                },
-                AllocationType::Buffer { .. } => panic!("A buffer cannot be treated as a render target!")
+                AllocationType::Image(image_desc) => image_desc,
+                AllocationType::Buffer { .. } => {
+                    panic!("A buffer cannot be treated as a render target!")
+                }
             };
 
             let resource_usage = create_info.pass_info.resource_usage(write);
@@ -624,10 +639,10 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
         for read in &create_info.pass_info.attachment_reads {
             let image_desc = &create_info.graph.allocations[&read];
             let image_desc = match &image_desc.ty {
-                AllocationType::Image(image_desc)  => {
-                    image_desc
-                },
-                AllocationType::Buffer { .. } => panic!("A buffer cannot be treated as a render target!")
+                AllocationType::Image(image_desc) => image_desc,
+                AllocationType::Buffer { .. } => {
+                    panic!("A buffer cannot be treated as a render target!")
+                }
             };
             let resource_usage = create_info.pass_info.resource_usage(read);
             let attachment = RenderPassAttachment {
@@ -721,18 +736,18 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
 
 pub struct GraphFramebuffer {
     inner: GpuFramebuffer,
-    desc: FramebufferHandle
+    desc: FramebufferHandle,
 }
 
 impl GraphResource for GraphFramebuffer {
     type Inner = GpuFramebuffer;
     type Desc = FramebufferHandle;
 
-    fn construct(inner: Self::Inner, desc: Self::Desc) -> Self where Self: Sized {
-        Self {
-            inner,
-            desc
-        }
+    fn construct(inner: Self::Inner, desc: Self::Desc) -> Self
+    where
+        Self: Sized,
+    {
+        Self { inner, desc }
     }
 
     fn matches_description(&self, new_desc: &Self::Desc) -> bool {
@@ -758,10 +773,7 @@ impl<'a> AsRef<FramebufferHandle> for RenderGraphFramebufferCreateInfo<'a> {
 }
 
 impl<'a> CreateFrom<'a, RenderGraphFramebufferCreateInfo<'a>> for GraphFramebuffer {
-    fn create(
-        gpu: &Gpu,
-        desc: &'a RenderGraphFramebufferCreateInfo,
-    ) -> anyhow::Result<Self> {
+    fn create(gpu: &Gpu, desc: &'a RenderGraphFramebufferCreateInfo) -> anyhow::Result<Self> {
         let fb = gpu
             .create_framebuffer(&FramebufferCreateInfo {
                 render_pass: desc.render_pass,
@@ -770,25 +782,25 @@ impl<'a> CreateFrom<'a, RenderGraphFramebufferCreateInfo<'a>> for GraphFramebuff
                 height: desc.extents.height,
             })
             .expect("Failed to create framebuffer");
-        
+
         Ok(GraphFramebuffer::construct(fb, desc.framebuffer_hash))
     }
 }
 
 pub struct GraphDescriptorSet {
     inner: GpuDescriptorSet,
-    desc: u64
+    desc: u64,
 }
 
 impl GraphResource for GraphDescriptorSet {
     type Inner = GpuDescriptorSet;
     type Desc = u64;
 
-    fn construct(inner: Self::Inner, desc: Self::Desc) -> Self where Self: Sized {
-        Self {
-            inner,
-            desc
-        }
+    fn construct(inner: Self::Inner, desc: Self::Desc) -> Self
+    where
+        Self: Sized,
+    {
+        Self { inner, desc }
     }
 
     fn matches_description(&self, new_desc: &Self::Desc) -> bool {
@@ -812,10 +824,7 @@ impl<'a> AsRef<u64> for DescriptorSetCreateInfo<'a> {
 }
 
 impl<'a> CreateFrom<'a, DescriptorSetCreateInfo<'a>> for GraphDescriptorSet {
-    fn create(
-        gpu: &Gpu,
-        desc: &'a DescriptorSetCreateInfo,
-    ) -> anyhow::Result<Self> {
+    fn create(gpu: &Gpu, desc: &'a DescriptorSetCreateInfo) -> anyhow::Result<Self> {
         let ds = gpu
             .create_descriptor_set(&DescriptorSetInfo {
                 descriptors: desc.inputs,
@@ -830,7 +839,7 @@ type ImageViewAllocator = ResourceAllocator<GraphImageView, ResourceId>;
 type BufferAllocator = ResourceAllocator<GraphBuffer, ResourceId>;
 type RenderPassAllocator = ResourceAllocator<GraphPass, RenderPassHandle>;
 type SampleAllocator = ResourceAllocator<GraphSampler, ResourceId>;
-type FramebufferAllocator = ResourceAllocator<GraphFramebuffer,FramebufferHandle>;
+type FramebufferAllocator = ResourceAllocator<GraphFramebuffer, FramebufferHandle>;
 type DescriptorSetAllocator = ResourceAllocator<GraphDescriptorSet, u64>;
 pub struct DefaultResourceAllocator {
     images: ImageAllocator,
@@ -895,15 +904,15 @@ impl<'a, 'e> GraphRunContext<'a, 'e> {
         self.callbacks.register_callback(handle, callback)
     }
 
-
     pub fn set_clear_callback<F: Fn(&ResourceId) -> ash::vk::ClearValue + 'e>(
         &mut self,
         handle: &RenderPassHandle,
         callback: F,
     ) {
-        self.callbacks.set_clear_callback(handle, Box::new(callback));
+        self.callbacks
+            .set_clear_callback(handle, Box::new(callback));
     }
-    
+
     pub fn register_end_callback<F: FnMut(&Gpu, &mut EndContext) + 'e>(&mut self, callback: F) {
         self.callbacks.register_end_callback(callback)
     }
@@ -995,7 +1004,7 @@ impl From<BufferType> for BindingType {
     fn from(value: BufferType) -> Self {
         match value {
             BufferType::Storage => BindingType::Storage,
-            BufferType::Uniform => BindingType::Uniform
+            BufferType::Uniform => BindingType::Uniform,
         }
     }
 }
@@ -1003,13 +1012,13 @@ impl From<BufferType> for BindingType {
 #[derive(Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Copy, Hash)]
 pub struct BufferDescription {
     pub length: u64,
-    pub ty: BufferType
+    pub ty: BufferType,
 }
 
 #[derive(Hash, Copy, Clone)]
 pub enum AllocationType {
     Image(ImageDescription),
-    Buffer(BufferDescription)
+    Buffer(BufferDescription),
 }
 
 #[derive(Hash, Copy, Clone)]
@@ -1017,7 +1026,7 @@ pub struct ResourceInfo {
     pub label: &'static str,
     pub ty: AllocationType,
     pub external: bool,
-    
+
     defined_this_frame: bool,
 }
 
@@ -1088,12 +1097,8 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
         let resource = graph.get_resource_info(read)?;
         set_zero_bindings.push(BindingElement {
             binding_type: match resource.ty {
-                AllocationType::Image(_) => {
-                    gpu::BindingType::CombinedImageSampler
-                }
-                AllocationType::Buffer (d) => {
-                    d.ty.into()
-                }
+                AllocationType::Image(_) => gpu::BindingType::CombinedImageSampler,
+                AllocationType::Buffer(d) => d.ty.into(),
             },
             index: idx as _,
             stage: gpu::ShaderStage::VertexFragment,
@@ -1141,7 +1146,7 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
                     }
                 }
             }
-            AllocationType::Buffer {..} => {
+            AllocationType::Buffer { .. } => {
                 todo!("Add support for storage buffers")
             }
         }
@@ -1421,7 +1426,8 @@ impl CompiledRenderGraph {
 #[derive(Default)]
 struct Callbacks<'g> {
     callbacks: HashMap<RenderPassHandle, Box<dyn FnMut(&Gpu, &mut RenderPassContext) + 'g>>,
-    clear_color_cbs: HashMap<RenderPassHandle, Box<dyn Fn(&ResourceId) -> ash::vk::ClearValue + 'g>>,
+    clear_color_cbs:
+        HashMap<RenderPassHandle, Box<dyn Fn(&ResourceId) -> ash::vk::ClearValue + 'g>>,
     end_callback: Option<Box<dyn FnMut(&Gpu, &mut EndContext) + 'g>>,
 }
 
@@ -1479,7 +1485,12 @@ impl RenderGraph {
         Ok(id)
     }
 
-    pub fn use_buffer(&mut self, label: &'static str, description: &BufferDescription, external: bool) -> GraphResult<ResourceId>  {
+    pub fn use_buffer(
+        &mut self,
+        label: &'static str,
+        description: &BufferDescription,
+        external: bool,
+    ) -> GraphResult<ResourceId> {
         let id = self.create_unique_id(label)?;
 
         let allocation = ResourceInfo {
@@ -1491,7 +1502,7 @@ impl RenderGraph {
         self.allocations.insert(id, allocation);
         Ok(id)
     }
-    
+
     fn create_unique_id(&mut self, label: &'static str) -> GraphResult<ResourceId> {
         let id = ResourceId::make(label);
         if self
@@ -1528,7 +1539,11 @@ impl RenderGraph {
         })
     }
 
-    pub fn commit_render_pass(&mut self, mut pass: RenderPassInfo, label: &'static str) -> RenderPassHandle {
+    pub fn commit_render_pass(
+        &mut self,
+        mut pass: RenderPassInfo,
+        label: &'static str,
+    ) -> RenderPassHandle {
         pass.hash(&mut self.hasher);
         let handle = RenderPassHandle { label };
         pass.defined_this_frame = true;
@@ -1619,7 +1634,8 @@ impl RenderGraph {
 
     fn render_pass_is_defined_already(&self, label: &str) -> bool {
         self.passes
-            .iter().find(|(h, p)| h.label == label && p.defined_this_frame)
+            .iter()
+            .find(|(h, p)| h.label == label && p.defined_this_frame)
             .is_some()
     }
 
@@ -1715,8 +1731,7 @@ impl RenderGraph {
     }
 
     pub(crate) fn get_pipeline(&self, pipeline_handle: &RenderPassHandle) -> Option<&Pipeline> {
-        self.render_pass_pipelines
-            .get(pipeline_handle)
+        self.render_pass_pipelines.get(pipeline_handle)
     }
 
     pub(crate) fn define_pipeline_for_renderpass(
@@ -1726,17 +1741,18 @@ impl RenderGraph {
         pipeline_label: &'static str,
         pipeline_description: &RenderGraphPipelineDescription<'_>,
     ) -> anyhow::Result<()> {
-
         if !self.render_pass_pipelines.contains_key(&pass_handle) {
             let mut allocator = self.resource_allocator.borrow_mut();
             let pass_info = &self.passes[pass_handle];
-            let pass =
-                allocator
-                    .render_passes
-                    .get_explicit(gpu, 0, &RenderGraphPassCreateInfo{
-                        graph: self,
-                        pass_info,
-                    } ,pass_handle)?;
+            let pass = allocator.render_passes.get_explicit(
+                gpu,
+                0,
+                &RenderGraphPassCreateInfo {
+                    graph: self,
+                    pass_info,
+                },
+                pass_handle,
+            )?;
             let pipeline = create_pipeline_for_graph_renderpass(
                 self,
                 pass_info,
@@ -1824,8 +1840,8 @@ impl GpuRunner {
             Ok(ctx.external_resources.external_images[id])
         } else {
             let desc = match &graph.allocations[id].ty {
-                AllocationType::Image(d)  => d.clone(),
-                _ => panic!("Type is not an image!")
+                AllocationType::Image(d) => d.clone(),
+                _ => panic!("Type is not an image!"),
             };
             Ok(allocator.images.get(ctx, &desc, id)?.resource())
         }
@@ -1867,10 +1883,11 @@ impl GpuRunner {
                     );
                 }
             } else {
-                pass_allocator.ensure_resource_exists(ctx.gpu, &RenderGraphPassCreateInfo{
-                    graph,
-                    pass_info,
-                } ,rp)?;
+                pass_allocator.ensure_resource_exists(
+                    ctx.gpu,
+                    &RenderGraphPassCreateInfo { graph, pass_info },
+                    rp,
+                )?;
             };
         }
         Ok(())
@@ -1904,12 +1921,7 @@ impl RenderGraphRunner for GpuRunner {
                     )?;
                     let info = &graph.passes[rp];
 
-                    ensure_graph_allocated_resources_exist(
-                        ctx,
-                        info,
-                        &graph,
-                        resource_allocator,
-                    )?;
+                    ensure_graph_allocated_resources_exist(ctx, info, &graph, resource_allocator)?;
                     ensure_graph_allocated_samplers_exists(ctx, info, &graph, resource_allocator)?;
                     let views = resolve_framebuffer_image_views_unchecked(
                         info,
@@ -1935,17 +1947,19 @@ impl RenderGraphRunner for GpuRunner {
                         &ctx.external_resources,
                         &resource_allocator.render_passes,
                     );
-                    let framebuffer = resource_allocator.framebuffers.get(
-                        ctx,
-                        &RenderGraphFramebufferCreateInfo {
-                            
-                            render_pass: pass,
-                            render_targets: &views,
-                            extents: info.extents,
-                            framebuffer_hash: framebuffer_hash,
-                        },
-                        &framebuffer_hash,
-                    )?.resource();
+                    let framebuffer = resource_allocator
+                        .framebuffers
+                        .get(
+                            ctx,
+                            &RenderGraphFramebufferCreateInfo {
+                                render_pass: pass,
+                                render_targets: &views,
+                                extents: info.extents,
+                                framebuffer_hash: framebuffer_hash,
+                            },
+                            &framebuffer_hash,
+                        )?
+                        .resource();
 
                     let cb = ctx.callbacks.callbacks.get_mut(rp);
                     let clear = ctx.callbacks.clear_color_cbs.get(rp);
@@ -1974,7 +1988,9 @@ impl RenderGraphRunner for GpuRunner {
                                             },
                                         },
                                     },
-                                    AllocationType::Buffer {..} => panic!("Graph can't treat buffer as render target!")
+                                    AllocationType::Buffer { .. } => {
+                                        panic!("Graph can't treat buffer as render target!")
+                                    }
                                 }
                             }
                         })
@@ -1997,7 +2013,12 @@ impl RenderGraphRunner for GpuRunner {
                     if let Some(pipeline) = graph.get_pipeline(rp) {
                         render_pass_command.bind_pipeline(pipeline);
                         if let Some(resource) = read_descriptor_set {
-                            render_pass_command.bind_descriptor_sets(PipelineBindPoint::GRAPHICS, pipeline, 0, &[resource.resource()])
+                            render_pass_command.bind_descriptor_sets(
+                                PipelineBindPoint::GRAPHICS,
+                                pipeline,
+                                0,
+                                &[resource.resource()],
+                            )
                         }
                     }
                     let mut context = RenderPassContext {
@@ -2007,7 +2028,6 @@ impl RenderGraphRunner for GpuRunner {
                         render_pass_command,
                         read_descriptor_set: read_descriptor_set.map(|r| r.resource()),
                     };
-                    
 
                     if let Some(cb) = cb {
                         cb(&ctx.gpu, &mut context);
@@ -2041,9 +2061,7 @@ impl RenderGraphRunner for GpuRunner {
     }
 }
 
-fn compute_framebuffer_hash(
-    views: &Vec<&GpuImageView>,
-) -> FramebufferHandle {
+fn compute_framebuffer_hash(views: &Vec<&GpuImageView>) -> FramebufferHandle {
     let framebuffer_hash = hash_image_views(views);
     FramebufferHandle {
         hash: framebuffer_hash,
@@ -2072,13 +2090,15 @@ fn ensure_graph_allocated_resources_exist(
             .contains_key(writes)
         {
             match &graph.allocations[writes].ty {
-                AllocationType::Image(d)  => {
+                AllocationType::Image(d) => {
                     let image = resource_allocator.images.get(ctx, &d, writes)?.resource();
-                    resource_allocator
-                        .image_views
-                        .get(ctx, &GraphImageViewCreateInfo { desc: d, image }, writes)?;
-                },
-                AllocationType::Buffer {..} => panic!("Cannot treat buffer as write attachment!")
+                    resource_allocator.image_views.get(
+                        ctx,
+                        &GraphImageViewCreateInfo { desc: d, image },
+                        writes,
+                    )?;
+                }
+                AllocationType::Buffer { .. } => panic!("Cannot treat buffer as write attachment!"),
             };
         };
     }
@@ -2088,13 +2108,16 @@ fn ensure_graph_allocated_resources_exist(
             .external_shader_resources
             .contains_key(res)
         {
-             match &graph.allocations[res].ty {
-                AllocationType::Image(d)  => {
+            match &graph.allocations[res].ty {
+                AllocationType::Image(d) => {
                     let image = resource_allocator.images.get(ctx, &d, res)?.resource();
-                    resource_allocator.image_views
-                        .get(ctx, &GraphImageViewCreateInfo { desc: d, image }, res)?;
-                },
-                 AllocationType::Buffer {..} => panic!("Cannot treat buffer as read attachment!"),
+                    resource_allocator.image_views.get(
+                        ctx,
+                        &GraphImageViewCreateInfo { desc: d, image },
+                        res,
+                    )?;
+                }
+                AllocationType::Buffer { .. } => panic!("Cannot treat buffer as read attachment!"),
             };
         };
     }
@@ -2105,14 +2128,19 @@ fn ensure_graph_allocated_resources_exist(
             .contains_key(res)
         {
             match &graph.allocations[res].ty {
-                AllocationType::Image(d)  => {
+                AllocationType::Image(d) => {
                     let image = resource_allocator.images.get(ctx, &d, res)?.resource();
-                    resource_allocator.image_views
-                        .get(ctx, &GraphImageViewCreateInfo { desc: d, image }, res)?;
-                },
-                AllocationType::Buffer (desc) => {
-                    resource_allocator.buffers.ensure_resource_exists(ctx.gpu,  desc , res)?;
-                },
+                    resource_allocator.image_views.get(
+                        ctx,
+                        &GraphImageViewCreateInfo { desc: d, image },
+                        res,
+                    )?;
+                }
+                AllocationType::Buffer(desc) => {
+                    resource_allocator
+                        .buffers
+                        .ensure_resource_exists(ctx.gpu, desc, res)?;
+                }
             };
         };
     }
@@ -2132,8 +2160,8 @@ fn ensure_graph_allocated_samplers_exists(
             .contains_key(writes)
         {
             match &graph.allocations[writes].ty {
-                AllocationType::Image(d)  => d.clone(),
-                AllocationType::Buffer { .. } => panic!("A buffer cannot have a sampler! Bug?")
+                AllocationType::Image(d) => d.clone(),
+                AllocationType::Buffer { .. } => panic!("A buffer cannot have a sampler! Bug?"),
             };
             resource_allocator.samplers.get(ctx, &NoDesc, writes)?;
         };
@@ -2152,18 +2180,27 @@ where
 {
     let mut views = vec![];
     for writes in &info.attachment_writes {
-        let resource_info = graph.get_resource_info(writes).expect("Resource not found!");
-        
+        let resource_info = graph
+            .get_resource_info(writes)
+            .expect("Resource not found!");
+
         let view = if resource_info.external {
-            external_resources.get_shader_resource(writes).as_image_view()
+            external_resources
+                .get_shader_resource(writes)
+                .as_image_view()
         } else {
             image_views_allocator.get_unchecked(writes).resource()
         };
         views.push(view);
     }
     for reads in &info.attachment_reads {
-        let view = if external_resources.external_shader_resources.contains_key(reads) {
-            external_resources.get_shader_resource(reads).as_image_view()
+        let view = if external_resources
+            .external_shader_resources
+            .contains_key(reads)
+        {
+            external_resources
+                .get_shader_resource(reads)
+                .as_image_view()
         } else {
             image_views_allocator.get_unchecked(reads).resource()
         };
@@ -2188,7 +2225,7 @@ fn resolve_input_descriptor_set<'e, 'a, 'd>(
     let mut descriptors = vec![];
     for (idx, read) in info.shader_reads.iter().enumerate() {
         let resource_info = graph.get_resource_info(read).expect("No resource found");
-        
+
         match resource_info.ty {
             AllocationType::Image(_) => {
                 let view = if resource_info.external {
@@ -2207,7 +2244,7 @@ fn resolve_input_descriptor_set<'e, 'a, 'd>(
                     binding_stage: gpu::ShaderStage::VertexFragment,
                 })
             }
-            AllocationType::Buffer (desc) => {
+            AllocationType::Buffer(desc) => {
                 let buffer = if resource_info.external {
                     ctx.external_resources.external_shader_resources[read].as_buffer()
                 } else {
@@ -2225,13 +2262,11 @@ fn resolve_input_descriptor_set<'e, 'a, 'd>(
                         gpu::DescriptorType::UniformBuffer(range)
                     } else {
                         gpu::DescriptorType::StorageBuffer(range)
-                    }, 
+                    },
                     binding_stage: gpu::ShaderStage::VertexFragment,
                 })
             }
         }
-        
-       
     }
 
     let hash = hasher.finish();

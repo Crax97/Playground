@@ -6,13 +6,13 @@ mod pipeline;
 mod swapchain;
 mod types;
 
-use std::fmt::{Debug, Formatter};
-use std::hash::{Hash};
-use ash::vk::ImageLayout;
 pub use crate::gpu::*;
 pub use allocator::*;
+use ash::vk::ImageLayout;
 pub use command_buffer::*;
 pub use pipeline::*;
+use std::fmt::{Debug, Formatter};
+use std::hash::Hash;
 pub use swapchain::Swapchain;
 pub use types::*;
 

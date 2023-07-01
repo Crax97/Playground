@@ -8,11 +8,11 @@ use ash::{
     },
 };
 use gpu::{
-    BindingElement, BufferCreateInfo, DepthStencilState, FragmentStageInfo, GlobalBinding, Gpu, GpuBuffer, 
-    GpuShaderModule, ImageFormat, MemoryDomain, Pipeline, PipelineDescription, Swapchain, ToVk,
-    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
+    BindingElement, BufferCreateInfo, DepthStencilState, FragmentStageInfo, GlobalBinding, Gpu,
+    GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain, Pipeline, PipelineDescription,
+    Swapchain, ToVk, VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
-use nalgebra::{Matrix4, vector, Vector2, Vector3, Vector4};
+use nalgebra::{vector, Matrix4, Vector2, Vector3, Vector4};
 use resource_map::ResourceMap;
 
 #[repr(C)]
@@ -22,7 +22,6 @@ struct PerFrameData {
     view: nalgebra::Matrix4<f32>,
     projection: nalgebra::Matrix4<f32>,
 }
-
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -37,26 +36,38 @@ struct GpuLightInfo {
 impl From<&Light> for GpuLightInfo {
     fn from(light: &Light) -> Self {
         let (direction, extras, ty) = match light.ty {
-            LightType::Point => { (Default::default(), Default::default(), 0) }
-            LightType::Directional { direction } => { 
-                (vector![direction.x, direction.y, direction.z, 0.0], 
-                 Default::default(), 
-                 1) 
-            }
+            LightType::Point => (Default::default(), Default::default(), 0),
+            LightType::Directional { direction } => (
+                vector![direction.x, direction.y, direction.z, 0.0],
+                Default::default(),
+                1,
+            ),
             LightType::Spotlight {
                 direction,
                 inner_cone_degrees,
-                outer_cone_degrees } => {
-                (vector![direction.x, direction.y, direction.z, 0.0],
-                 vector![inner_cone_degrees, outer_cone_degrees, 0.0, 0.0],
-                 2)
-            }
-            LightType::Rect { direction, width, height } => {
-                (vector![direction.x, direction.y, direction.z, 0.0], vector![width, height, 0.0, 0.0], 3)
-            }
+                outer_cone_degrees,
+            } => (
+                vector![direction.x, direction.y, direction.z, 0.0],
+                vector![inner_cone_degrees, outer_cone_degrees, 0.0, 0.0],
+                2,
+            ),
+            LightType::Rect {
+                direction,
+                width,
+                height,
+            } => (
+                vector![direction.x, direction.y, direction.z, 0.0],
+                vector![width, height, 0.0, 0.0],
+                3,
+            ),
         };
         Self {
-            position_radius: vector![light.position.x, light.position.y, light.position.z, light.radius],
+            position_radius: vector![
+                light.position.x,
+                light.position.y,
+                light.position.z,
+                light.radius
+            ],
             color: vector![light.color.x, light.color.y, light.color.z, light.intensity],
             direction,
             extras,
@@ -65,7 +76,14 @@ impl From<&Light> for GpuLightInfo {
     }
 }
 
-use crate::{app_state, camera::Camera, material::{Material, MaterialContext, MaterialDescription, MaterialDomain}, FragmentState, GpuRunner, GraphRunContext, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderStage, RenderingPipeline, Scene, ScenePrimitive, BufferDescription, BufferType, Light, LightType};
+use crate::{
+    app_state,
+    camera::Camera,
+    material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
+    BufferDescription, BufferType, FragmentState, GpuRunner, GraphRunContext, Light, LightType,
+    ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderStage,
+    RenderingPipeline, Scene, ScenePrimitive,
+};
 
 use ash::vk::{
     AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
@@ -114,7 +132,9 @@ impl DeferredRenderingPipeline {
             let create_info = BufferCreateInfo {
                 label: Some("Light Buffer"),
                 size: std::mem::size_of::<GpuLightInfo>() * 1000,
-                usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::STORAGE_BUFFER | BufferUsageFlags::TRANSFER_DST,
+                usage: BufferUsageFlags::UNIFORM_BUFFER
+                    | BufferUsageFlags::STORAGE_BUFFER
+                    | BufferUsageFlags::TRANSFER_DST,
             };
             let buffer = gpu.create_buffer(
                 &create_info,
@@ -122,7 +142,7 @@ impl DeferredRenderingPipeline {
             )?;
             buffer
         };
-        
+
         let material_context = DeferredRenderingMaterialContext::new(gpu)?;
 
         let render_graph = RenderGraph::new();
@@ -799,11 +819,10 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 }],
             )
             .unwrap();
-        
-        let collected_active_lights : Vec<GpuLightInfo> = scene.all_enabled_lights()
-            .map(|l| { l.into() })
-            .collect();
-        
+
+        let collected_active_lights: Vec<GpuLightInfo> =
+            scene.all_enabled_lights().map(|l| l.into()).collect();
+
         super::app_state()
             .gpu
             .write_buffer_data_with_offset(
@@ -869,48 +888,50 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             samples: 1,
             present: true,
         };
-        
-        let camera_buffer = self
-            .render_graph
-            .use_buffer("camera-buffer", &BufferDescription { 
-                length: std::mem::size_of::<PerFrameData>() as u64, 
-                ty: BufferType::Uniform
-            }, 
-    true)?;
-        
-        let light_buffer = self
-            .render_graph
-            .use_buffer("light-buffer", &BufferDescription {
-                length: std::mem::size_of::<PerFrameData>() as u64,
-                ty: BufferType::Storage
-            },
-    true)?;
-        
-        let swapchain_image = self
-            .render_graph
-            .use_image("swapchain", &framebuffer_swapchain_desc, true)?;
-        let depth_target = self
-            .render_graph
-            .use_image("depth-buffer", &framebuffer_depth_desc, false)?;
-        let color_target = self
-            .render_graph
-            .use_image("color-buffer", &framebuffer_rgba_desc, false)?;
 
-        let position_target = self
-            .render_graph
-            .use_image("position-buffer", &framebuffer_vector_desc, false)?;
-        let normal_target = self
-            .render_graph
-            .use_image("normal_buffer", &framebuffer_rgba_desc, false)?;
-        let diffuse_target = self
-            .render_graph
-            .use_image("diffuse_buffer", &framebuffer_rgba_desc, false)?;
-        let emissive_target = self
-            .render_graph
-            .use_image("emissive_buffer", &framebuffer_rgba_desc, false)?;
-        let pbr_target = self
-            .render_graph
-            .use_image("pbr_buffer", &framebuffer_rgba_desc, false)?;
+        let camera_buffer = self.render_graph.use_buffer(
+            "camera-buffer",
+            &BufferDescription {
+                length: std::mem::size_of::<PerFrameData>() as u64,
+                ty: BufferType::Uniform,
+            },
+            true,
+        )?;
+
+        let light_buffer = self.render_graph.use_buffer(
+            "light-buffer",
+            &BufferDescription {
+                length: std::mem::size_of::<PerFrameData>() as u64,
+                ty: BufferType::Storage,
+            },
+            true,
+        )?;
+
+        let swapchain_image =
+            self.render_graph
+                .use_image("swapchain", &framebuffer_swapchain_desc, true)?;
+        let depth_target =
+            self.render_graph
+                .use_image("depth-buffer", &framebuffer_depth_desc, false)?;
+        let color_target =
+            self.render_graph
+                .use_image("color-buffer", &framebuffer_rgba_desc, false)?;
+
+        let position_target =
+            self.render_graph
+                .use_image("position-buffer", &framebuffer_vector_desc, false)?;
+        let normal_target =
+            self.render_graph
+                .use_image("normal_buffer", &framebuffer_rgba_desc, false)?;
+        let diffuse_target =
+            self.render_graph
+                .use_image("diffuse_buffer", &framebuffer_rgba_desc, false)?;
+        let emissive_target =
+            self.render_graph
+                .use_image("emissive_buffer", &framebuffer_rgba_desc, false)?;
+        let pbr_target =
+            self.render_graph
+                .use_image("pbr_buffer", &framebuffer_rgba_desc, false)?;
 
         self.render_graph.persist_resource(&swapchain_image);
 
@@ -958,7 +979,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 emissive_target,
                 pbr_target,
                 camera_buffer,
-                light_buffer
+                light_buffer,
             ])
             .with_blend_state(BlendState {
                 blend_enable: false,
@@ -1189,21 +1210,21 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             if handle == &normal_target {
                 ash::vk::ClearValue {
                     color: ash::vk::ClearColorValue {
-                        float32: [0.5, 0.5, 0.5, 1.0]
-                    }
+                        float32: [0.5, 0.5, 0.5, 1.0],
+                    },
                 }
             } else if handle == &depth_target {
                 ash::vk::ClearValue {
                     depth_stencil: ash::vk::ClearDepthStencilValue {
                         depth: 1.0,
                         stencil: 255,
-                    }
+                    },
                 }
             } else {
                 ash::vk::ClearValue {
                     color: ash::vk::ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 1.0]
-                    }
+                        float32: [0.0, 0.0, 0.0, 1.0],
+                    },
                 }
             }
         });

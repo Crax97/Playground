@@ -6,10 +6,9 @@ fn main() {
 
 fn recompile_all_shaders() {
     use shaderc::*;
-    
-    
+
     let compiler = shaderc::Compiler::new().expect("Failed to create compiler");
-    
+
     let out_dir = "..";
 
     let out_dir = std::path::Path::new(&out_dir);
@@ -26,14 +25,18 @@ fn recompile_all_shaders() {
         let absolute = file_path.canonicalize();
         let absolute = match absolute {
             Ok(s) => s,
-            Err(e) => {return Err(e.to_string());} 
+            Err(e) => {
+                return Err(e.to_string());
+            }
         };
         let content = std::fs::read_to_string(&absolute);
         let content = match content {
             Ok(s) => s,
-            Err(e) => {return Err(e.to_string());}
+            Err(e) => {
+                return Err(e.to_string());
+            }
         };
-        
+
         Ok(ResolvedInclude {
             resolved_name: incl.to_string(),
             content,

@@ -9,7 +9,11 @@ use ash::vk::{
     ImageUsageFlags, ImageViewType, PresentModeKHR, SamplerAddressMode, SamplerCreateInfo,
 };
 
-use engine::{AppState, Camera, DeferredRenderingPipeline, ImageResource, Light, LightType, MaterialDescription, MaterialDomain, Mesh, MeshCreateInfo, RenderingPipeline, SamplerResource, Scene, ScenePrimitive, Texture, TextureImageView};
+use engine::{
+    AppState, Camera, DeferredRenderingPipeline, ImageResource, Light, LightType,
+    MaterialDescription, MaterialDomain, Mesh, MeshCreateInfo, RenderingPipeline, SamplerResource,
+    Scene, ScenePrimitive, Texture, TextureImageView,
+};
 use gpu::{BufferCreateInfo, ImageCreateInfo, ImageViewCreateInfo, MemoryDomain, ToVk};
 use nalgebra::*;
 use resource_map::{ResourceHandle, ResourceMap};
@@ -156,7 +160,7 @@ impl GLTFViewer {
             let sam = app_state.gpu.create_sampler(&builder.build())?;
             allocated_samplers.push(resource_map.add(SamplerResource(sam)))
         }
-        
+
         if allocated_samplers.is_empty() {
             // add default sampler
             let builder = SamplerCreateInfo::builder()
@@ -314,16 +318,18 @@ impl GLTFViewer {
             for node in scene.nodes() {
                 let node_transform = node.transform();
                 let (pos, rot, scale) = node_transform.decomposed();
-                let rotation = UnitQuaternion::from_quaternion(Quaternion::new(rot[0],rot[1],rot[2],rot[3]));
-                let rot_matrix  = rotation.to_homogeneous();
-                
+                let rotation = UnitQuaternion::from_quaternion(Quaternion::new(
+                    rot[0], rot[1], rot[2], rot[3],
+                ));
+                let rot_matrix = rotation.to_homogeneous();
+
                 let transform = Matrix4::new_translation(&Vector3::from_row_slice(&pos))
                     * Matrix4::new_nonuniform_scaling(&Vector3::from_row_slice(&scale))
                     * rot_matrix;
-                
+
                 let determinant = transform.determinant();
                 println!("Det: {determinant}");
-                
+
                 if let Some(mesh) = node.mesh() {
                     let prim = mesh.primitives().next().unwrap();
                     let mat = prim.material().index().unwrap_or(0);
@@ -409,9 +415,9 @@ impl App for GLTFViewer {
             &black_texture,
             "gltf_models/bottle/glTF/WaterBottle.gltf",
         )?;
-        
+
         add_scene_lights(&mut scene);
-        
+
         engine::app_state_mut()
             .swapchain
             .select_present_mode(PresentModeKHR::MAILBOX)?;
@@ -428,7 +434,7 @@ impl App for GLTFViewer {
             scene_renderer,
             scene,
             white_texture,
-            black_texture
+            black_texture,
         })
     }
 
@@ -481,7 +487,7 @@ impl App for GLTFViewer {
             self.dist += self.movement.y * self.forward_movement * SPEED;
         }
 
-        let rotation = Rotation::from_euler_angles( 0.0, self.rot_y.to_radians(), 0.0);
+        let rotation = Rotation::from_euler_angles(0.0, self.rot_y.to_radians(), 0.0);
         let rotation = rotation * Rotation::from_euler_angles(0.0, 0.0, self.rot_x.to_radians());
         let new_forward = rotation.to_homogeneous();
         let new_forward = new_forward.column(0);
@@ -508,7 +514,7 @@ fn add_scene_lights(scene: &mut Scene) {
     });
     scene.add_light(Light {
         ty: LightType::Directional {
-            direction: vector![-0.45, -0.45, 0.0]
+            direction: vector![-0.45, -0.45, 0.0],
         },
         position: vector![100.0, 100.0, 0.0],
         radius: 10.0,

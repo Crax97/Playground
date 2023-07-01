@@ -48,19 +48,19 @@ pub struct ScenePrimitive {
 #[derive(Clone, Copy, PartialEq)]
 pub enum LightType {
     Point,
-    Directional { 
+    Directional {
         direction: Vector3<f32>,
     },
     Spotlight {
         direction: Vector3<f32>,
-        inner_cone_degrees: f32, 
-        outer_cone_degrees: f32
+        inner_cone_degrees: f32,
+        outer_cone_degrees: f32,
     },
     Rect {
         direction: Vector3<f32>,
         width: f32,
         height: f32,
-    }
+    },
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -70,21 +70,24 @@ pub struct Light {
     pub radius: f32,
     pub color: Vector3<f32>,
     pub intensity: f32,
-    
+
     pub enabled: bool,
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialOrd, PartialEq)]
-pub struct LightHandle (usize);
+pub struct LightHandle(usize);
 
 pub struct Scene {
     pub primitives: Vec<ScenePrimitive>,
-    pub lights: Vec<Light>
+    pub lights: Vec<Light>,
 }
 
 impl Scene {
     pub fn new() -> Self {
-        Self { primitives: vec![], lights: vec![] }
+        Self {
+            primitives: vec![],
+            lights: vec![],
+        }
     }
 
     pub fn add(&mut self, primitive: ScenePrimitive) -> usize {
@@ -105,7 +108,7 @@ impl Scene {
     pub fn edit_light(&mut self, handle: &LightHandle) -> &mut Light {
         &mut self.lights[handle.0]
     }
-    
+
     pub fn all_primitives(&self) -> &[ScenePrimitive] {
         &self.primitives
     }
@@ -115,7 +118,7 @@ impl Scene {
     pub fn all_enabled_lights(&self) -> impl Iterator<Item = &Light> {
         self.lights.iter().filter(|l| l.enabled)
     }
-    
+
     pub fn edit_all_primitives(&mut self) -> &mut [ScenePrimitive] {
         &mut self.primitives
     }
@@ -485,7 +488,8 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 format: gpu::ImageFormat::Depth,
                 samples: 1,
                 present: false,
-            }, false
+            },
+            false,
         )?;
         let color_buffer = self.render_graph.use_image(
             "color-buffer",
@@ -495,7 +499,8 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                 format: swapchain_format.into(),
                 samples: 1,
                 present: true,
-            }, true
+            },
+            true,
         )?;
         self.render_graph.persist_resource(&color_buffer);
 
