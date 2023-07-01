@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use ash::{
     extensions::ext::DebugUtils,
     prelude::*,
@@ -191,6 +191,9 @@ pub enum GpuError {
         Option<(u32, vk::QueueFamilyProperties)>,
         Option<(u32, vk::QueueFamilyProperties)>,
     ),
+
+    #[error("Invalid queue family")]
+    InvalidQueueFamilies(QueueFamilies),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -199,11 +202,12 @@ pub struct QueueFamily {
     pub count: u32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct QueueFamilies {
     pub graphics_family: QueueFamily,
     pub async_compute_family: QueueFamily,
     pub transfer_family: QueueFamily,
+    pub indices: Vec<u32>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -238,12 +242,14 @@ impl QueueFamilies {
         self.graphics_family.count > 0
             && self.async_compute_family.count > 0
             && self.transfer_family.count > 0
+            && self.graphics_family.index != self.async_compute_family.index
+            && self.graphics_family.index != self.transfer_family.index
     }
 }
 
 impl Gpu {
     pub fn new(configuration: GpuConfiguration) -> Result<Self> {
-        let entry = Entry::linked();
+        let entry = unsafe { Entry::load()? };
 
         let mut instance_extensions =
             ash_window::enumerate_required_extensions(configuration.window.raw_display_handle())?
@@ -275,6 +281,7 @@ impl Gpu {
         let queue_families = Self::select_queue_families_indices(&physical_device, &instance)?;
         if !queue_families.is_valid() {
             log::error!("Queue configurations are invalid!");
+            bail!(GpuError::InvalidQueueFamilies(queue_families.clone()));
         }
 
         Self::ensure_required_device_extensions_are_available(
@@ -496,6 +503,7 @@ impl Gpu {
                     index: t.0,
                     count: t.1.queue_count,
                 },
+                indices: vec![g.0, a.0, t.0],
             }),
             _ => Err(GpuError::NoQueueFamilyFound(
                 graphics_queue,
@@ -850,22 +858,17 @@ fn find_supported_features(
 
 fn create_staging_buffer(state: &Arc<GpuState>) -> VkResult<GpuBuffer> {
     let mb_64 = 1024 * 1024 * 64;
-    let family = state.queue_families.clone();
-    let create_info = vk::BufferCreateInfo {
+    let create_info: vk::BufferCreateInfo = vk::BufferCreateInfo {
         s_type: StructureType::BUFFER_CREATE_INFO,
         p_next: std::ptr::null(),
         flags: BufferCreateFlags::empty(),
         size: mb_64 as u64,
         usage: BufferUsageFlags::TRANSFER_SRC,
         sharing_mode: SharingMode::CONCURRENT,
-        queue_family_index_count: 3,
-        p_queue_family_indices: [
-            family.graphics_family.index,
-            family.async_compute_family.index,
-            family.transfer_family.index,
-        ]
-        .as_ptr(),
+        queue_family_index_count: state.queue_families.indices.len() as _,
+        p_queue_family_indices: state.queue_families.indices.as_ptr(),
     };
+
     let buffer = unsafe { state.logical_device.create_buffer(&create_info, None) }?;
     let memory_requirements =
         unsafe { state.logical_device.get_buffer_memory_requirements(buffer) };
@@ -941,8 +944,7 @@ impl Gpu {
     ) -> VkResult<GpuBuffer> {
         let size = create_info.size as u64;
         assert_ne!(size, 0, "Can't create a buffer with size 0!");
-        
-        let family = self.state.queue_families.clone();
+
         let create_info_vk = vk::BufferCreateInfo {
             s_type: StructureType::BUFFER_CREATE_INFO,
             p_next: std::ptr::null(),
@@ -955,13 +957,8 @@ impl Gpu {
                     BufferUsageFlags::TRANSFER_DST
                 },
             sharing_mode: SharingMode::CONCURRENT,
-            queue_family_index_count: 3,
-            p_queue_family_indices: [
-                family.graphics_family.index,
-                family.async_compute_family.index,
-                family.transfer_family.index,
-            ]
-            .as_ptr(),
+            queue_family_index_count: self.state.queue_families.indices.len() as _,
+            p_queue_family_indices: self.state.queue_families.indices.as_ptr(),
         };
         let buffer = unsafe {
             self.state
@@ -1130,9 +1127,9 @@ impl Gpu {
                     ImageTiling::OPTIMAL
                 },
                 usage: create_info.usage,
-                sharing_mode: SharingMode::EXCLUSIVE,
-                queue_family_index_count: 1,
-                p_queue_family_indices: addr_of!(self.state.queue_families.graphics_family.index),
+                sharing_mode: SharingMode::CONCURRENT,
+                queue_family_index_count: self.state.queue_families.indices.len() as _,
+                p_queue_family_indices: self.state.queue_families.indices.as_ptr(),
                 initial_layout: ImageLayout::UNDEFINED,
             };
             self.state.logical_device.create_image(&create_info, None)?
