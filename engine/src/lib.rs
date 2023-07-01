@@ -54,10 +54,12 @@ pub fn init(app_name: &str, window: winit::window::Window) -> anyhow::Result<()>
 
         static mut DATA: OnceCell<AppState> = once_cell::unsync::OnceCell::new();
 
+        let enable_debug_utilities = std::env::var("ENABLE_DEBUG_UTILITIES").is_ok();
+
         let gpu = Gpu::new(GpuConfiguration {
             app_name,
             engine_name: "Hello Engine",
-            enable_debug_utilities: if cfg!(debug_assertions) { true } else { false },
+            enable_debug_utilities,
             window: &window,
         })?;
 

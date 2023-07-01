@@ -5,3 +5,6 @@ members = [
     "resource_map",
     "testbench"
 ]
+
+[profile.release]
+debug = true

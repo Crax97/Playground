@@ -13,19 +13,21 @@
             "args": [],
             "cwd": "${workspaceFolder}",
             "env": {
-                "RUST_LOG": "info,trace,debug,warn,error"
+                "RUST_LOG": "info,trace,debug,warn,error",
+                "ENABLE_DEBUG_UTILITIES": "True",
             },
         },
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Launch GLTF Viewer",
+            "name": "Launch GLTF Viewer debug",
             "program": "${workspaceFolder}/target/debug/gltf_viewer.exe",
             "preLaunchTask": "build-debug",
             "args": [],
             "cwd": "${workspaceFolder}",
             "env": {
-                "RUST_LOG": "info,trace,debug,warn,error"
+                "RUST_LOG": "info,trace,debug,warn,error",
+                "ENABLE_DEBUG_UTILITIES": "True",
             },
         },
         {

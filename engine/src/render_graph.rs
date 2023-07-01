@@ -2056,7 +2056,6 @@ impl RenderGraphRunner for GpuRunner {
             fence: Some(&ctx.swapchain.in_flight_fence),
         })?;
 
-        crate::app_state().gpu.wait_device_idle()?;
         Ok(())
     }
 }
