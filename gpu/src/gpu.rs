@@ -1,6 +1,7 @@
 use std::{
     cell::RefCell,
-    ffi::{CStr, CString},
+    ffi::{c_void, CStr, CString},
+    path::Path,
     ptr::{addr_of, null},
     sync::Arc,
 };
@@ -22,9 +23,9 @@ use ash::{
         ImageSubresourceRange, ImageTiling, ImageType, ImageViewCreateFlags, ImageViewType,
         InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D,
         PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType,
-        PipelineStageFlags, Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo,
-        ShaderModuleCreateFlags, SharingMode, StructureType, SubmitInfo, WriteDescriptorSet,
-        API_VERSION_1_3,
+        PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo, PipelineStageFlags,
+        Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo, ShaderModuleCreateFlags,
+        SharingMode, StructureType, SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
     },
     *,
 };
@@ -82,6 +83,7 @@ pub struct GpuState {
     pub gpu_memory_allocator: Arc<RefCell<dyn GpuAllocator>>,
     pub descriptor_set_allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
     pub debug_utilities: Option<DebugUtils>,
+    pub(crate) pipeline_cache: PipelineCache,
     features: SupportedFeatures,
     messenger: Option<vk::DebugUtilsMessengerEXT>,
 }
@@ -90,6 +92,8 @@ impl Drop for GpuState {
     fn drop(&mut self) {
         if let (Some(messenger), Some(debug_utils)) = (&self.messenger, &self.debug_utilities) {
             unsafe {
+                self.logical_device
+                    .destroy_pipeline_cache(self.pipeline_cache, get_allocation_callbacks());
                 debug_utils
                     .destroy_debug_utils_messenger(messenger.clone(), get_allocation_callbacks())
             };
@@ -173,6 +177,7 @@ pub struct Gpu {
 pub struct GpuConfiguration<'a> {
     pub app_name: &'a str,
     pub engine_name: &'a str,
+    pub pipeline_cache_path: Option<&'a str>,
     pub enable_debug_utilities: bool,
     pub window: &'a Window,
 }
@@ -347,6 +352,9 @@ impl Gpu {
             None
         };
 
+        let pipeline_cache =
+            Self::create_pipeline_cache(&logical_device, configuration.pipeline_cache_path)?;
+
         let state = Arc::new(GpuState {
             entry,
             instance,
@@ -359,6 +367,7 @@ impl Gpu {
             queue_families,
             debug_utilities,
             features: supported_features,
+            pipeline_cache,
             gpu_memory_allocator: Arc::new(RefCell::new(gpu_memory_allocator)),
             descriptor_set_allocator: Arc::new(RefCell::new(descriptor_set_allocator)),
             messenger,
@@ -819,6 +828,39 @@ impl Gpu {
         let shader = GpuShaderModule::create(self.vk_logical_device(), &create_info)?;
 
         Ok(shader)
+    }
+
+    fn create_pipeline_cache(
+        logical_device: &Device,
+        filename: Option<&str>,
+    ) -> VkResult<PipelineCache> {
+        let mut data_ptr = std::ptr::null();
+        let mut len = 0;
+
+        if let Some(filename) = filename {
+            let file: std::result::Result<Vec<u8>, std::io::Error> = std::fs::read(filename);
+            match file {
+                Ok(data) => {
+                    len = data.len();
+                    data_ptr = data.as_ptr();
+                }
+                Err(e) => {
+                    println!("Failed to read pipeline cache because {}", e.to_string());
+                }
+            };
+        }
+        unsafe {
+            logical_device.create_pipeline_cache(
+                &PipelineCacheCreateInfo {
+                    s_type: StructureType::PIPELINE_CACHE_CREATE_INFO,
+                    p_next: std::ptr::null(),
+                    flags: PipelineCacheCreateFlags::empty(),
+                    initial_data_size: len as _,
+                    p_initial_data: data_ptr as *const c_void,
+                },
+                get_allocation_callbacks(),
+            )
+        }
     }
 }
 
@@ -1485,5 +1527,20 @@ impl Gpu {
             allocated_descriptor_set,
             self.state.descriptor_set_allocator.clone(),
         )
+    }
+
+    pub fn save_pipeline_cache(&self, path: &str) -> VkResult<()> {
+        let cache_data = unsafe {
+            self.vk_logical_device()
+                .get_pipeline_cache_data(self.state.pipeline_cache)
+        }?;
+
+        match std::fs::write(path, &cache_data) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                error!("Failed to write pipeline cache: {e}");
+                Err(vk::Result::ERROR_UNKNOWN)
+            }
+        }
     }
 }

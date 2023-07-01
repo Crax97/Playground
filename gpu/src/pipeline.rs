@@ -6,8 +6,8 @@ use ash::{
         self, AttachmentDescription, AttachmentDescriptionFlags, AttachmentReference,
         DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
         DescriptorSetLayoutCreateInfo, DescriptorType, DynamicState, GraphicsPipelineCreateInfo,
-        PipelineBindPoint, PipelineCache, PipelineColorBlendAttachmentState,
-        PipelineColorBlendStateCreateFlags, PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
+        PipelineBindPoint, PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
+        PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
         PipelineDepthStencilStateCreateFlags, PipelineDepthStencilStateCreateInfo,
         PipelineDynamicStateCreateFlags, PipelineDynamicStateCreateInfo,
         PipelineInputAssemblyStateCreateFlags, PipelineInputAssemblyStateCreateInfo,
@@ -677,7 +677,7 @@ impl Pipeline {
             let pipeline = gpu
                 .state
                 .logical_device
-                .create_graphics_pipelines(PipelineCache::null(), &create_infos, None)
+                .create_graphics_pipelines(gpu.state.pipeline_cache, &create_infos, None)
                 .unwrap();
 
             pipeline

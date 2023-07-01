@@ -56,7 +56,10 @@ pub fn app_loop<A: App + 'static>(
             app_state_mut.end_frame().unwrap();
         }
         winit::event::Event::RedrawEventsCleared => {}
-        winit::event::Event::LoopDestroyed => app_state_mut.gpu.wait_device_idle().unwrap(),
+        winit::event::Event::LoopDestroyed => {
+            app_state_mut.gpu.wait_device_idle().unwrap();
+            app_state_mut.gpu.save_pipeline_cache("pipeline_cache.pso");
+        }
     }
 
     Ok(ControlFlow::Poll)

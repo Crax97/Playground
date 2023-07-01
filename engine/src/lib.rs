@@ -61,6 +61,7 @@ pub fn init(app_name: &str, window: winit::window::Window) -> anyhow::Result<()>
             engine_name: "Hello Engine",
             enable_debug_utilities,
             window: &window,
+            pipeline_cache_path: Some("pipeline_cache.pso"),
         })?;
 
         let swapchain = gpu::Swapchain::new(&gpu, window)?;

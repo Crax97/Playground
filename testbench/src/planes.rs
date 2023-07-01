@@ -8,7 +8,7 @@ use ash::vk::PresentModeKHR;
 
 use engine::{
     Camera, DeferredRenderingPipeline, MaterialDescription, MaterialDomain, Mesh, MeshCreateInfo,
-    MeshPrimitive, MeshPrimitiveCreateInfo, RenderingPipeline, Scene, ScenePrimitive, Texture,
+    MeshPrimitiveCreateInfo, RenderingPipeline, Scene, ScenePrimitive, Texture,
 };
 use nalgebra::*;
 use resource_map::ResourceMap;
@@ -187,7 +187,7 @@ impl App for PlanesApp {
 
     fn input(
         &mut self,
-        app_state: &engine::AppState,
+        _app_state: &engine::AppState,
         event: winit::event::DeviceEvent,
     ) -> anyhow::Result<()> {
         match event {
