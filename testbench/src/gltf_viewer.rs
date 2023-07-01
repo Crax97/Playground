@@ -9,11 +9,7 @@ use ash::vk::{
     ImageUsageFlags, ImageViewType, PresentModeKHR, SamplerAddressMode, SamplerCreateInfo,
 };
 
-use engine::{
-    AppState, Camera, DeferredRenderingPipeline, ImageResource, Light, LightType,
-    MaterialDescription, MaterialDomain, Mesh, MeshCreateInfo, RenderingPipeline, SamplerResource,
-    Scene, ScenePrimitive, Texture, TextureImageView,
-};
+use engine::{AppState, Camera, DeferredRenderingPipeline, ImageResource, Light, LightType, MaterialDescription, MaterialDomain, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo, RenderingPipeline, SamplerResource, Scene, ScenePrimitive, Texture, TextureImageView};
 use gpu::{BufferCreateInfo, ImageCreateInfo, ImageViewCreateInfo, MemoryDomain, ToVk};
 use nalgebra::*;
 use resource_map::{ResourceHandle, ResourceMap};
@@ -258,14 +254,16 @@ impl GLTFViewer {
         let mut meshes = vec![];
 
         for mesh in document.meshes() {
-            let mut indices = vec![];
-            let mut positions = vec![];
-            let mut colors = vec![];
-            let mut normals = vec![];
-            let mut tangents = vec![];
-            let mut uvs = vec![];
 
+            let mut primitive_create_infos = vec![];
+            
             for prim in mesh.primitives() {
+                let mut indices = vec![];
+                let mut positions = vec![];
+                let mut colors = vec![];
+                let mut normals = vec![];
+                let mut tangents = vec![];
+                let mut uvs = vec![];
                 let reader = prim.reader(|buf| Some(&buffers[buf.index()]));
                 if let Some(iter) = reader.read_indices() {
                     for idx in iter.into_u32() {
@@ -297,18 +295,21 @@ impl GLTFViewer {
                         uvs.push(vector![vec[0], vec[1]]);
                     }
                 }
+                primitive_create_infos.push( MeshPrimitiveCreateInfo {
+                    positions,
+                    indices,
+                    colors,
+                    normals,
+                    tangents,
+                    uvs,
+                });
             }
 
             let label = format!("Mesh #{}", mesh.index());
 
             let create_info = MeshCreateInfo {
                 label: Some(mesh.name().unwrap_or(&label)),
-                positions: &positions,
-                indices: &indices,
-                colors: &colors,
-                normals: &normals,
-                tangents: &tangents,
-                uvs: &uvs,
+                primitives: &primitive_create_infos
             };
             let gpu_mesh = Mesh::new(&app_state.gpu, &create_info)?;
             meshes.push(resource_map.add(gpu_mesh));
@@ -331,11 +332,17 @@ impl GLTFViewer {
                 println!("Det: {determinant}");
 
                 if let Some(mesh) = node.mesh() {
+                    let mut materials = vec![];
+                    for prim in mesh.primitives() {
+                        let material_index = prim.material().index().unwrap_or(0);
+                        let material = allocated_materials[material_index].clone();
+                        materials.push(material);
+                    }
                     let prim = mesh.primitives().next().unwrap();
                     let mat = prim.material().index().unwrap_or(0);
                     engine_scene.add(ScenePrimitive {
                         mesh: meshes[mesh.index()].clone(),
-                        material: allocated_materials[mat].clone(),
+                        materials,
                         transform,
                     });
                 }
@@ -413,7 +420,7 @@ impl App for GLTFViewer {
             resource_map.clone(),
             &white_texture,
             &black_texture,
-            "gltf_models/bottle/glTF/WaterBottle.gltf",
+            "gltf_models/Sponza/glTF/Sponza.gltf",
         )?;
 
         add_scene_lights(&mut scene);

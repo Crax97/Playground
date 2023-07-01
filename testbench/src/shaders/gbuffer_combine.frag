@@ -30,7 +30,7 @@ struct FragmentInfo {
     float metalness;
 };
 
-vec3 get_light_direction(LightInfo info, FragmentInfo frag_info) {
+vec3 get_unnormalized_light_direction(LightInfo info, FragmentInfo frag_info) {
     if (info.type == DIRECTIONAL_LIGHT) {
         return info.direction.xyz;
     } else {
@@ -82,7 +82,7 @@ float d_trowbridge_reitz_ggx(float n_dot_h, float rough)
 
 vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, LightInfo light_info) {
 
-    vec3 light_dir = get_light_direction(light_info, frag_info);
+    vec3 light_dir = get_unnormalized_light_direction(light_info, frag_info);
     float l_dot_n = max(dot(light_dir, frag_info.normal), 0.0);
     float light_dist = length(light_dir);
     light_dir /= light_dist;
@@ -126,7 +126,7 @@ vec3 calculate_light_influence(FragmentInfo frag_info) {
         ck += cook_torrance(view, frag_info, light_data.lights[i]);
     }
     
-    return ck + 0.2 * frag_info.diffuse;
+    return ck + 0.5 * frag_info.diffuse;
 }
 
 vec3 rgb(int r, int g, int b) {

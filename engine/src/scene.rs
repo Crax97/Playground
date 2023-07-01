@@ -41,7 +41,7 @@ use gpu::{
 #[derive(Clone)]
 pub struct ScenePrimitive {
     pub mesh: ResourceHandle<Mesh>,
-    pub material: ResourceHandle<Material>,
+    pub materials: Vec<ResourceHandle<Material>>,
     pub transform: Matrix4<f32>,
 }
 
@@ -473,11 +473,13 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         let mut color_depth_hashmap: HashMap<&Pipeline, Vec<ScenePrimitive>> = HashMap::new();
 
         for primitive in scene.primitives.iter() {
-            let material = self.resource_map.get(&primitive.material);
-            color_depth_hashmap
-                .entry(&material.pipelines[&PipelineTarget::ColorAndDepth])
-                .or_default()
-                .push(primitive.clone());
+            for mat in &primitive.materials {
+                let material = self.resource_map.get(mat);
+                color_depth_hashmap
+                    .entry(&material.pipelines[&PipelineTarget::ColorAndDepth])
+                    .or_default()
+                    .push(primitive.clone());
+            }
         }
 
         let depth_buffer = self.render_graph.use_image(
@@ -534,35 +536,39 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                             [0.0, 0.3, 0.4, 1.0],
                         );
                         let mesh = self.resource_map.get(&primitive.mesh);
-                        let material = self.resource_map.get(&primitive.material);
 
-                        ctx.render_pass_command.bind_pipeline(&pipeline);
-                        ctx.render_pass_command.bind_descriptor_sets(
-                            PipelineBindPoint::GRAPHICS,
-                            &pipeline,
-                            1,
-                            &[&material.resources_descriptor_set],
-                        );
+                        for (idx, mesh_prim) in mesh.primitives.iter().enumerate() {
+                            let material = &primitive.materials[idx];
+                            let material = self.resource_map.get(material);
 
-                        ctx.render_pass_command.bind_index_buffer(
-                            &mesh.index_buffer,
-                            0,
-                            IndexType::UINT32,
-                        );
-                        ctx.render_pass_command.bind_vertex_buffer(
-                            0,
-                            &[
-                                &mesh.position_component,
-                                &mesh.color_component,
-                                &mesh.normal_component,
-                                &mesh.tangent_component,
-                                &mesh.uv_component,
-                            ],
-                            &[0, 0, 0, 0, 0],
-                        );
-                        ctx.render_pass_command
-                            .push_constant(&pipeline, &primitive.transform, 0);
-                        ctx.render_pass_command.draw_indexed(6, 1, 0, 0, 0);
+                            ctx.render_pass_command.bind_pipeline(&pipeline);
+                            ctx.render_pass_command.bind_descriptor_sets(
+                                PipelineBindPoint::GRAPHICS,
+                                &pipeline,
+                                1,
+                                &[&material.resources_descriptor_set],
+                            );
+
+                            ctx.render_pass_command.bind_index_buffer(
+                                &mesh_prim.index_buffer,
+                                0,
+                                IndexType::UINT32,
+                            );
+                            ctx.render_pass_command.bind_vertex_buffer(
+                                0,
+                                &[
+                                    &mesh_prim.position_component,
+                                    &mesh_prim.color_component,
+                                    &mesh_prim.normal_component,
+                                    &mesh_prim.tangent_component,
+                                    &mesh_prim.uv_component,
+                                ],
+                                &[0, 0, 0, 0, 0],
+                            );
+                            ctx.render_pass_command
+                                .push_constant(&pipeline, &primitive.transform, 0);
+                            ctx.render_pass_command.draw_indexed(mesh_prim.index_count, 1, 0, 0, 0);
+                        }
                         primitive_label.end();
                     }
                 }
