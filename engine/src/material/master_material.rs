@@ -45,7 +45,6 @@ pub struct MasterMaterialDescription<'a> {
 #[derive(Eq, PartialEq)]
 pub struct MasterMaterial {
     pub(crate) name: String,
-    pub(crate) global_set: GpuDescriptorSet,
     pub(crate) pipelines: HashMap<PipelineTarget, Pipeline>,
     pub(crate) texture_inputs: Vec<TextureInput>,
     pub(crate) material_parameters: HashMap<String, MaterialParameterOffsetSize>,
@@ -70,37 +69,15 @@ impl MasterMaterial {
         description: &MasterMaterialDescription,
         target_render_passes: &HashMap<PipelineTarget, RenderPass>,
     ) -> anyhow::Result<Self> {
-        let global_descriptor_set = Self::create_global_descriptor_set(gpu, description)?;
         let pipelines = Self::create_pipelines(gpu, description, target_render_passes)?;
         let parameter_block_size = size_of::<f32>() * 4 * description.material_parameters.len();
         Ok(MasterMaterial {
             name: description.name.to_owned(),
-            global_set: global_descriptor_set,
             pipelines,
             texture_inputs: description.texture_inputs.iter().cloned().collect(),
             material_parameters: description.material_parameters.clone(),
             parameter_block_size,
         })
-    }
-
-    fn create_global_descriptor_set(
-        gpu: &Gpu,
-        description: &MasterMaterialDescription<'_>,
-    ) -> anyhow::Result<GpuDescriptorSet> {
-        let descriptors: Vec<_> = description
-            .global_inputs
-            .iter()
-            .enumerate()
-            .map(|(i, d)| DescriptorInfo {
-                binding: i as _,
-                element_type: d.clone(),
-                binding_stage: gpu::ShaderStage::VertexFragment,
-            })
-            .collect();
-        let descriptor = gpu.create_descriptor_set(&DescriptorSetInfo {
-            descriptors: &descriptors,
-        })?;
-        Ok(descriptor)
     }
 
     fn create_pipelines(
