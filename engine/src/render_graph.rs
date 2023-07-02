@@ -879,18 +879,16 @@ impl DefaultResourceAllocator {
 pub struct GraphRunContext<'a, 'e> {
     gpu: &'a Gpu,
     current_iteration: u64,
-    swapchain: &'a mut Swapchain,
 
     callbacks: Callbacks<'e>,
     external_resources: ExternalResources<'e>,
 }
 
 impl<'a, 'e> GraphRunContext<'a, 'e> {
-    pub fn new(gpu: &'a Gpu, swapchain: &'a mut Swapchain, current_iteration: u64) -> Self {
+    pub fn new(gpu: &'a Gpu, current_iteration: u64) -> Self {
         Self {
             gpu,
             current_iteration,
-            swapchain,
             callbacks: Callbacks::default(),
             external_resources: ExternalResources::default(),
         }
@@ -2049,11 +2047,12 @@ impl RenderGraphRunner for GpuRunner {
             );
         }
         label.end();
+        let frame = ctx.gpu.get_current_swapchain_frame();
         command_buffer.submit(&gpu::CommandBufferSubmitInfo {
-            wait_semaphores: &[&ctx.swapchain.image_available_semaphore],
+            wait_semaphores: &[&frame.image_available_semaphore],
             wait_stages: &[PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
-            signal_semaphores: &[&ctx.swapchain.render_finished_semaphore],
-            fence: Some(&ctx.swapchain.in_flight_fence),
+            signal_semaphores: &[&frame.render_finished_semaphore],
+            fence: Some(&frame.in_flight_fence),
         })?;
 
         Ok(())

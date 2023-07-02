@@ -60,13 +60,11 @@ pub fn init(app_name: &str, window: winit::window::Window) -> anyhow::Result<()>
             app_name,
             engine_name: "Hello Engine",
             enable_debug_utilities,
-            window: &window,
+            window,
             pipeline_cache_path: Some("pipeline_cache.pso"),
         })?;
 
-        let swapchain = gpu::Swapchain::new(&gpu, window)?;
-
-        let app_state = AppState::new(gpu, swapchain);
+        let app_state = AppState::new(gpu);
         assert!(DATA.set(app_state).is_ok());
 
         STATE = GlobalState {

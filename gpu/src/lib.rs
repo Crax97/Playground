@@ -25,10 +25,11 @@ pub enum QueueType {
 }
 impl QueueType {
     fn get_vk_command_pool(&self, gpu: &Gpu) -> ash::vk::CommandPool {
+        let thread_local_state = &gpu.thread_local_states[gpu.swapchain.current_frame.get()];
         match self {
-            QueueType::Graphics => gpu.thread_local_state.graphics_command_pool,
-            QueueType::AsyncCompute => gpu.thread_local_state.compute_command_pool,
-            QueueType::Transfer => gpu.thread_local_state.transfer_command_pool,
+            QueueType::Graphics => thread_local_state.graphics_command_pool,
+            QueueType::AsyncCompute => thread_local_state.compute_command_pool,
+            QueueType::Transfer => thread_local_state.transfer_command_pool,
         }
     }
     fn get_vk_queue(&self, gpu: &Gpu) -> ash::vk::Queue {

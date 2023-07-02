@@ -167,7 +167,8 @@ impl App for PlanesApp {
         let mat_instance = resource_map.add(mat_instance);
 
         engine::app_state_mut()
-            .swapchain
+            .gpu
+            .swapchain_mut()
             .select_present_mode(PresentModeKHR::MAILBOX)?;
 
         let mut scene = Scene::new();
@@ -235,7 +236,7 @@ impl App for PlanesApp {
 
     fn draw(&mut self, app_state: &mut engine::AppState) -> anyhow::Result<()> {
         self.scene_renderer
-            .render(&self.camera, &self.scene, &mut app_state.swapchain)
+            .render(&self.camera, &self.scene, app_state.gpu.swapchain_mut())
             .unwrap();
 
         Ok(())

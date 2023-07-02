@@ -441,6 +441,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let swapchain_format = swapchain.present_format();
 
         let (image, view) = swapchain.acquire_next_image()?;
+        app_state().gpu.begin_frame()?;
 
         let mut draw_hashmap: HashMap<&MasterMaterial, Vec<ScenePrimitive>> = HashMap::new();
 
@@ -454,7 +455,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     .push(primitive.clone());
             }
         }
-
+        //#region render graph resources
         let framebuffer_rgba_desc = crate::ImageDescription {
             width: swapchain_extents.width,
             height: swapchain_extents.height,
@@ -685,11 +686,14 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             },
         )?;
 
+        //#endregion
+
         let mut context = GraphRunContext::new(
             &crate::app_state().gpu,
-            &mut crate::app_state_mut().swapchain,
             crate::app_state().time().frames_since_start(),
         );
+
+        //#region context setup
         context.register_callback(&dbuffer_pass, |_: &Gpu, ctx| {
             for (master, primitives) in draw_hashmap.iter() {
                 {
@@ -869,6 +873,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         context.inject_external_image(&swapchain_image, image, view);
         context.injext_external_buffer(&camera_buffer, &self.camera_buffer);
         context.injext_external_buffer(&light_buffer, &self.light_buffer);
+        //#endregion
         self.render_graph.run(context, &mut self.runner)?;
 
         Ok(())

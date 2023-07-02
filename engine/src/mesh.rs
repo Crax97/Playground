@@ -15,7 +15,7 @@ pub struct MeshPrimitiveCreateInfo {
 
 pub struct MeshCreateInfo<'a> {
     pub label: Option<&'a str>,
-    pub primitives: &'a [MeshPrimitiveCreateInfo]
+    pub primitives: &'a [MeshPrimitiveCreateInfo],
 }
 
 pub struct MeshPrimitive {
@@ -30,17 +30,21 @@ pub struct MeshPrimitive {
 }
 
 pub struct Mesh {
-    pub primitives: Vec<MeshPrimitive>
+    pub primitives: Vec<MeshPrimitive>,
 }
 
 impl Mesh {
     pub fn new(gpu: &Gpu, mesh_create_info: &MeshCreateInfo) -> VkResult<Self> {
-        let primitives : Vec<VkResult<MeshPrimitive>> = mesh_create_info.primitives.iter()
+        let primitives: Vec<VkResult<MeshPrimitive>> = mesh_create_info
+            .primitives
+            .iter()
             .enumerate()
-            .map(|(idx, create_info)|
-            {
-                let label = mesh_create_info.label.map(|s| s.to_owned())
-                    .unwrap_or_else(|| {"GPU Mesh".to_owned()}) + &format!(" - primitive {idx}");
+            .map(|(idx, create_info)| {
+                let label = mesh_create_info
+                    .label
+                    .map(|s| s.to_owned())
+                    .unwrap_or_else(|| "GPU Mesh".to_owned())
+                    + &format!(" - primitive {idx}");
                 let index_buffer = gpu.create_buffer(
                     &BufferCreateInfo {
                         label: Some(&(label.clone() + ": Index buffer")),
@@ -53,7 +57,8 @@ impl Mesh {
                 let position_component = gpu.create_buffer(
                     &BufferCreateInfo {
                         label: Some(&(label.clone() + ": Position buffer")),
-                        size: std::mem::size_of::<Vector3<f32>>() * create_info.positions.len().max(1),
+                        size: std::mem::size_of::<Vector3<f32>>()
+                            * create_info.positions.len().max(1),
                         usage: BufferUsageFlags::VERTEX_BUFFER,
                     },
                     MemoryDomain::DeviceLocal,
@@ -61,8 +66,9 @@ impl Mesh {
                 gpu.write_buffer_data(&position_component, &create_info.positions)?;
                 let color_component = gpu.create_buffer(
                     &BufferCreateInfo {
-                        label:  Some(&(label.clone() + ": Color buffer")),
-                        size: std::mem::size_of::<Vector3<f32>>() * create_info.positions.len().max(1),
+                        label: Some(&(label.clone() + ": Color buffer")),
+                        size: std::mem::size_of::<Vector3<f32>>()
+                            * create_info.positions.len().max(1),
                         usage: BufferUsageFlags::VERTEX_BUFFER,
                     },
                     MemoryDomain::DeviceLocal,
@@ -71,7 +77,8 @@ impl Mesh {
                 let normal_component = gpu.create_buffer(
                     &BufferCreateInfo {
                         label: Some(&(label.clone() + ": Normal buffer")),
-                        size: std::mem::size_of::<Vector3<f32>>() * create_info.normals.len().max(1),
+                        size: std::mem::size_of::<Vector3<f32>>()
+                            * create_info.normals.len().max(1),
                         usage: BufferUsageFlags::VERTEX_BUFFER,
                     },
                     MemoryDomain::DeviceLocal,
@@ -80,7 +87,8 @@ impl Mesh {
                 let tangent_component = gpu.create_buffer(
                     &BufferCreateInfo {
                         label: Some(&(label.clone() + ": Tangent buffer")),
-                        size: std::mem::size_of::<Vector3<f32>>() * create_info.tangents.len().max(1),
+                        size: std::mem::size_of::<Vector3<f32>>()
+                            * create_info.tangents.len().max(1),
                         usage: BufferUsageFlags::VERTEX_BUFFER,
                     },
                     MemoryDomain::DeviceLocal,
@@ -104,17 +112,20 @@ impl Mesh {
                     uv_component,
                     index_count: create_info.indices.len() as _,
                 })
-            }).collect();
+            })
+            .collect();
         let mut generated_primitives = vec![];
         generated_primitives.reserve(primitives.len());
         for prim in primitives {
             match prim {
                 Ok(prim) => generated_primitives.push(prim),
-                Err(e) => { return Err(e); }
+                Err(e) => {
+                    return Err(e);
+                }
             }
         }
         Ok(Self {
-            primitives: generated_primitives
+            primitives: generated_primitives,
         })
     }
 }

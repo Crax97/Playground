@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::{
     cell::RefCell,
     ffi::{c_void, CStr, CString},
@@ -35,9 +36,10 @@ use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 use winit::window::Window;
 
+use crate::swapchain::SwapchainFrame;
 use crate::{
     get_allocation_callbacks, GpuFramebuffer, GpuImageView, GpuShaderModule, ImageFormat,
-    ImageMemoryBarrier, PipelineBarrierInfo, QueueType, RenderPass, ToVk,
+    ImageMemoryBarrier, PipelineBarrierInfo, QueueType, RenderPass, Swapchain, ToVk,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -170,8 +172,9 @@ impl Drop for GpuThreadLocalState {
 
 pub struct Gpu {
     pub(super) state: Arc<GpuState>,
-    pub(super) thread_local_state: GpuThreadLocalState,
+    pub(super) thread_local_states: Vec<GpuThreadLocalState>,
     pub(super) staging_buffer: GpuBuffer,
+    pub(super) swapchain: Swapchain,
 }
 
 pub struct GpuConfiguration<'a> {
@@ -179,7 +182,7 @@ pub struct GpuConfiguration<'a> {
     pub engine_name: &'a str,
     pub pipeline_cache_path: Option<&'a str>,
     pub enable_debug_utilities: bool,
-    pub window: &'a Window,
+    pub window: Window,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -373,20 +376,34 @@ impl Gpu {
             messenger,
         });
 
-        let thread_local_state = GpuThreadLocalState::new(state.clone())?;
+        let swapchain = Swapchain::new(state.clone(), configuration.window)?;
+        let mut thread_local_states = vec![];
+        for _ in 0..Swapchain::MAX_FRAMES_IN_FLIGHT {
+            let state = GpuThreadLocalState::new(state.clone())?;
+            thread_local_states.push(state);
+        }
 
         let staging_buffer = create_staging_buffer(&state)?;
         Ok(Gpu {
             state,
-            thread_local_state,
+            thread_local_states,
             staging_buffer,
+            swapchain,
         })
     }
 
-    pub fn reset_state(&self) -> VkResult<()> {
+    pub fn acquire_next_image(&mut self) -> VkResult<(&GpuImage, &GpuImageView)> {
+        self.swapchain.acquire_next_image()
+    }
+
+    pub fn present(&mut self) -> VkResult<bool> {
+        self.swapchain.present()
+    }
+
+    pub fn begin_frame(&self) -> VkResult<()> {
         unsafe {
             self.vk_logical_device().reset_command_pool(
-                self.thread_local_state.graphics_command_pool,
+                self.thread_local_states[self.swapchain.current_frame.get()].graphics_command_pool,
                 CommandPoolResetFlags::empty(),
             )
         }
@@ -861,6 +878,18 @@ impl Gpu {
                 get_allocation_callbacks(),
             )
         }
+    }
+
+    pub fn get_current_swapchain_frame(&self) -> &SwapchainFrame {
+        self.swapchain.get_current_swapchain_frame()
+    }
+
+    pub fn swapchain(&mut self) -> &Swapchain {
+        &self.swapchain
+    }
+
+    pub fn swapchain_mut(&mut self) -> &mut Swapchain {
+        &mut self.swapchain
     }
 }
 

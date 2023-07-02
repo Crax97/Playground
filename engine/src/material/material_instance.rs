@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use ash::prelude::VkResult;
 use ash::vk::{self, BufferUsageFlags, ImageLayout};
 use gpu::{
@@ -6,6 +5,7 @@ use gpu::{
     GpuBuffer, GpuDescriptorSet, MemoryDomain,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
+use std::collections::HashMap;
 
 use crate::texture::Texture;
 
@@ -53,8 +53,13 @@ impl MaterialInstance {
         } else {
             None
         };
-        let user_descriptor_set =
-            Self::create_user_descriptor_set(gpu, resource_map, master_owner, description, &parameter_buffer)?;
+        let user_descriptor_set = Self::create_user_descriptor_set(
+            gpu,
+            resource_map,
+            master_owner,
+            description,
+            &parameter_buffer,
+        )?;
         Ok(MaterialInstance {
             name: description.name.to_owned(),
             owner,
@@ -66,11 +71,14 @@ impl MaterialInstance {
     }
 
     pub fn write_parameters<T: Sized + Copy>(&self, gpu: &Gpu, block: T) -> anyhow::Result<()> {
-        assert!(std::mem::size_of::<T>() <= self.parameter_block_size && self.parameter_buffer.is_some());
+        assert!(
+            std::mem::size_of::<T>() <= self.parameter_block_size
+                && self.parameter_buffer.is_some()
+        );
         gpu.write_buffer_data(self.parameter_buffer.as_ref().unwrap(), &[block])?;
         Ok(())
     }
-    
+
     fn create_user_descriptor_set(
         gpu: &Gpu,
         resource_map: &ResourceMap,
@@ -78,7 +86,8 @@ impl MaterialInstance {
         description: &MaterialInstanceDescription<'_>,
         param_buffer: &Option<GpuBuffer>,
     ) -> anyhow::Result<GpuDescriptorSet> {
-        let mut descriptors: Vec<_> = master.texture_inputs
+        let mut descriptors: Vec<_> = master
+            .texture_inputs
             .iter()
             .enumerate()
             .map(|(i, tex)| {

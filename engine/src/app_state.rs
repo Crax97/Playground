@@ -5,14 +5,12 @@ use crate::Time;
 
 pub struct AppState {
     pub gpu: Gpu,
-    pub swapchain: Swapchain,
     time: Time,
 }
 impl AppState {
-    pub fn new(gpu: Gpu, swapchain: Swapchain) -> Self {
+    pub fn new(gpu: Gpu) -> Self {
         Self {
             gpu,
-            swapchain,
             time: Time::new(),
         }
     }
@@ -23,8 +21,7 @@ impl AppState {
     }
 
     pub fn end_frame(&mut self) -> VkResult<()> {
-        let _ = self.swapchain.present();
-        self.gpu.reset_state()?;
+        self.gpu.present()?;
         self.time.end_frame();
         Ok(())
     }

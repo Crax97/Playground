@@ -30,7 +30,11 @@ pub fn app_loop<A: App + 'static>(
                 return Ok(ControlFlow::ExitWithCode(0));
             }
             winit::event::WindowEvent::Resized(_) => {
-                app_state_mut.swapchain.recreate_swapchain().unwrap();
+                app_state_mut
+                    .gpu
+                    .swapchain_mut()
+                    .recreate_swapchain()
+                    .unwrap();
             }
             _ => {}
         },
@@ -41,15 +45,18 @@ pub fn app_loop<A: App + 'static>(
         winit::event::Event::Suspended => {}
         winit::event::Event::Resumed => {}
         winit::event::Event::MainEventsCleared => {
-            app_state_mut.swapchain.window.request_redraw();
+            app_state_mut.gpu.swapchain_mut().window.request_redraw();
         }
         winit::event::Event::RedrawRequested(..) => {
             app_state_mut.begin_frame().unwrap();
 
+            let window_name = app.window_name(&app_state_mut);
+
             app_state_mut
-                .swapchain
+                .gpu
+                .swapchain_mut()
                 .window
-                .set_title(&app.window_name(&app_state_mut));
+                .set_title(&window_name);
 
             app.update(app_state_mut)?;
             app.draw(app_state_mut)?;
@@ -58,7 +65,9 @@ pub fn app_loop<A: App + 'static>(
         winit::event::Event::RedrawEventsCleared => {}
         winit::event::Event::LoopDestroyed => {
             app_state_mut.gpu.wait_device_idle().unwrap();
-            app_state_mut.gpu.save_pipeline_cache("pipeline_cache.pso");
+            app_state_mut
+                .gpu
+                .save_pipeline_cache("pipeline_cache.pso")?;
         }
     }
 

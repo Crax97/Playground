@@ -273,7 +273,7 @@ impl GLTFViewer {
             texture_inputs.insert("occlusion_texture".to_owned(), occlusion_texture.clone());
             texture_inputs.insert("emissive_texture".to_owned(), emissive_texture.clone());
             texture_inputs.insert("metallic_roughness".to_owned(), metallic_roughness.clone());
-            
+
             let material_instance = MaterialInstance::create_instance(
                 &app_state.gpu,
                 pbr_master.clone(),
@@ -283,18 +283,19 @@ impl GLTFViewer {
                     texture_inputs,
                 },
             )?;
-            let metallic = gltf_material
-                .pbr_metallic_roughness().metallic_factor();
-            let roughness = gltf_material
-                .pbr_metallic_roughness().roughness_factor();
-            let emissive = gltf_material
-                .emissive_factor();
-            material_instance.write_parameters(&app_state.gpu, PbrProperties {
-                base_color: Vector4::from_column_slice(&gltf_material
-                    .pbr_metallic_roughness().base_color_factor()),
-                metallic_roughness: vector![metallic, roughness, 0.0, 1.0],
-                emissive_color: vector![emissive[0], emissive[1], emissive[2], 1.0]
-            })?;
+            let metallic = gltf_material.pbr_metallic_roughness().metallic_factor();
+            let roughness = gltf_material.pbr_metallic_roughness().roughness_factor();
+            let emissive = gltf_material.emissive_factor();
+            material_instance.write_parameters(
+                &app_state.gpu,
+                PbrProperties {
+                    base_color: Vector4::from_column_slice(
+                        &gltf_material.pbr_metallic_roughness().base_color_factor(),
+                    ),
+                    metallic_roughness: vector![metallic, roughness, 0.0, 1.0],
+                    emissive_color: vector![emissive[0], emissive[1], emissive[2], 1.0],
+                },
+            )?;
             let material_instance = resource_map.add(material_instance);
             allocated_materials.push(material_instance);
         }
@@ -476,7 +477,8 @@ impl App for GLTFViewer {
         add_scene_lights(&mut scene);
 
         engine::app_state_mut()
-            .swapchain
+            .gpu
+            .swapchain_mut()
             .select_present_mode(PresentModeKHR::MAILBOX)?;
 
         Ok(Self {
@@ -529,7 +531,7 @@ impl App for GLTFViewer {
 
     fn draw(&mut self, app_state: &mut engine::AppState) -> anyhow::Result<()> {
         self.scene_renderer
-            .render(&self.camera, &self.scene, &mut app_state.swapchain)
+            .render(&self.camera, &self.scene, app_state.gpu.swapchain_mut())
             .unwrap();
 
         Ok(())
