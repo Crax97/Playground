@@ -4,12 +4,14 @@ mod utils;
 use std::{io::BufReader, rc::Rc};
 
 use app::{bootstrap, App};
-use ash::vk::PresentModeKHR;
+use ash::vk::{ImageLayout, PresentModeKHR};
 
 use engine::{
-    Camera, DeferredRenderingPipeline, MaterialDescription, MaterialDomain, Mesh, MeshCreateInfo,
-    MeshPrimitiveCreateInfo, RenderingPipeline, Scene, ScenePrimitive, Texture,
+    Camera, DeferredRenderingPipeline, MasterMaterialDescription, MaterialDescription,
+    MaterialDomain, MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo,
+    MeshPrimitiveCreateInfo, RenderingPipeline, Scene, ScenePrimitive, Texture, TextureInput,
 };
+use gpu::{DescriptorType, SamplerState, VertexStageInfo};
 use nalgebra::*;
 use resource_map::ResourceMap;
 use winit::event::ElementState;
@@ -129,7 +131,7 @@ impl App for PlanesApp {
         let texture_copy_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/texture_copy.spirv")?;
 
-        let scene_renderer = DeferredRenderingPipeline::new(
+        let mut scene_renderer = DeferredRenderingPipeline::new(
             &app_state.gpu,
             resource_map.clone(),
             screen_quad_module,
@@ -137,18 +139,32 @@ impl App for PlanesApp {
             texture_copy_module,
         )?;
 
-        let material = scene_renderer.get_context().create_material(
+        let master = scene_renderer.create_material(
             &app_state.gpu,
-            &resource_map,
             MaterialDescription {
+                name: "Simple",
                 domain: MaterialDomain::Surface,
-                uniform_buffers: vec![],
-                input_textures: vec![texture.clone()],
                 fragment_module: &fragment_module,
                 vertex_module: &vertex_module,
+                texture_inputs: &[TextureInput {
+                    name: "texSampler".to_owned(),
+                    format: gpu::ImageFormat::Rgba8,
+                }],
+                material_parameters: Default::default(),
             },
         )?;
-        let material = resource_map.add(material);
+
+        let material = resource_map.add(master);
+        let mat_instance = MaterialInstance::create_instance(
+            &app_state.gpu,
+            material,
+            &resource_map,
+            &MaterialInstanceDescription {
+                name: "simple inst",
+                texture_inputs: &[&texture],
+            },
+        )?;
+        let mat_instance = resource_map.add(mat_instance);
 
         engine::app_state_mut()
             .swapchain
@@ -158,17 +174,17 @@ impl App for PlanesApp {
 
         scene.add(ScenePrimitive {
             mesh: mesh.clone(),
-            materials: vec![material.clone()],
+            materials: vec![mat_instance.clone()],
             transform: Matrix4::identity(),
         });
         scene.add(ScenePrimitive {
             mesh: mesh.clone(),
-            materials: vec![material.clone()],
+            materials: vec![mat_instance.clone()],
             transform: Matrix4::new_translation(&vector![0.0, 0.0, 1.0]),
         });
         scene.add(ScenePrimitive {
             mesh: mesh.clone(),
-            materials: vec![material.clone()],
+            materials: vec![mat_instance.clone()],
             transform: Matrix4::new_translation(&vector![0.0, 0.0, -1.0]),
         });
         Ok(Self {

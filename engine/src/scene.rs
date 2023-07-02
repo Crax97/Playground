@@ -1,20 +1,7 @@
-use std::{collections::HashMap, mem::size_of, rc::Rc};
-
-use ash::{
-    prelude::VkResult,
-    vk::{
-        self, BufferUsageFlags, CompareOp, IndexType, PipelineBindPoint, PipelineStageFlags,
-        PushConstantRange, ShaderStageFlags, StencilOpState,
-    },
-};
-use gpu::{
-    BindingElement, BufferCreateInfo, BufferRange, DepthStencilState, DescriptorInfo,
-    DescriptorSetInfo, FragmentStageInfo, GlobalBinding, Gpu, GpuBuffer, GpuDescriptorSet,
-    MemoryDomain, Pipeline, PipelineDescription, Swapchain, VertexAttributeDescription,
-    VertexBindingDescription, VertexStageInfo,
-};
-use nalgebra::{Matrix4, Vector2, Vector3};
-use resource_map::{ResourceHandle, ResourceMap};
+use ash::prelude::VkResult;
+use gpu::{Gpu, Swapchain};
+use nalgebra::{Matrix4, Vector3};
+use resource_map::ResourceHandle;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -23,25 +10,12 @@ struct PerFrameData {
     projection: nalgebra::Matrix4<f32>,
 }
 
-use crate::{
-    camera::Camera,
-    material::{Material, MaterialContext, MaterialDescription, MaterialDomain},
-    mesh::Mesh,
-    GpuRunner, GraphRunContext, PipelineTarget, RenderGraph,
-};
+use crate::{mesh::Mesh, Camera, MasterMaterial, MaterialDescription, MaterialInstance};
 
-use ash::vk::{
-    AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
-    ColorComponentFlags, DependencyFlags, Format, ImageLayout, SampleCountFlags, SubpassDependency,
-    SubpassDescriptionFlags, SUBPASS_EXTERNAL,
-};
-use gpu::{
-    BlendState, RenderPass, RenderPassAttachment, RenderPassDescription, SubpassDescription,
-};
 #[derive(Clone)]
 pub struct ScenePrimitive {
     pub mesh: ResourceHandle<Mesh>,
-    pub materials: Vec<ResourceHandle<Material>>,
+    pub materials: Vec<ResourceHandle<MaterialInstance>>,
     pub transform: Matrix4<f32>,
 }
 
@@ -123,7 +97,6 @@ impl Scene {
         &mut self.primitives
     }
 }
-
 pub trait RenderingPipeline {
     fn render(
         &mut self,
@@ -132,9 +105,14 @@ pub trait RenderingPipeline {
         swapchain: &mut Swapchain,
     ) -> anyhow::Result<()>;
 
-    fn get_context(&self) -> &dyn MaterialContext;
+    fn create_material(
+        &mut self,
+        gpu: &Gpu,
+        material_description: MaterialDescription,
+    ) -> anyhow::Result<MasterMaterial>;
 }
 
+/*
 pub struct ForwardRenderingPipeline {
     resource_map: Rc<ResourceMap>,
 
@@ -565,9 +543,13 @@ impl RenderingPipeline for ForwardRenderingPipeline {
                                 ],
                                 &[0, 0, 0, 0, 0],
                             );
+                            ctx.render_pass_command.push_constant(
+                                &pipeline,
+                                &primitive.transform,
+                                0,
+                            );
                             ctx.render_pass_command
-                                .push_constant(&pipeline, &primitive.transform, 0);
-                            ctx.render_pass_command.draw_indexed(mesh_prim.index_count, 1, 0, 0, 0);
+                                .draw_indexed(mesh_prim.index_count, 1, 0, 0, 0);
                         }
                         primitive_label.end();
                     }
@@ -590,3 +572,4 @@ impl RenderingPipeline for ForwardRenderingPipeline {
         &self.material_context
     }
 }
+ */

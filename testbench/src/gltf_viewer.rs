@@ -1,7 +1,7 @@
 mod app;
 mod utils;
 
-use std::rc::Rc;
+use std::{collections::HashMap, mem::size_of, rc::Rc};
 
 use app::{bootstrap, App};
 use ash::vk::{
@@ -11,8 +11,9 @@ use ash::vk::{
 
 use engine::{
     AppState, Camera, DeferredRenderingPipeline, ImageResource, Light, LightType,
-    MaterialDescription, MaterialDomain, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo,
-    RenderingPipeline, SamplerResource, Scene, ScenePrimitive, Texture, TextureImageView,
+    MaterialDescription, MaterialDomain, MaterialInstance, MaterialInstanceDescription,
+    MaterialParameterOffsetSize, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo, RenderingPipeline,
+    SamplerResource, Scene, ScenePrimitive, Texture, TextureImageView, TextureInput,
 };
 use gpu::{BufferCreateInfo, ImageCreateInfo, ImageViewCreateInfo, MemoryDomain, ToVk};
 use nalgebra::*;
@@ -67,6 +68,62 @@ impl GLTFViewer {
             &app_state.gpu,
             "./shaders/metallic_roughness_pbr.spirv",
         )?;
+
+        let mut params = HashMap::new();
+        params.insert(
+            "base_color".to_owned(),
+            MaterialParameterOffsetSize {
+                offset: 0,
+                size: size_of::<Vector4<f32>>(),
+            },
+        );
+        params.insert(
+            "metallic_roughness".to_owned(),
+            MaterialParameterOffsetSize {
+                offset: size_of::<Vector4<f32>>(),
+                size: size_of::<Vector4<f32>>(),
+            },
+        );
+        params.insert(
+            "emissive_color".to_owned(),
+            MaterialParameterOffsetSize {
+                offset: size_of::<Vector4<f32>>() * 2,
+                size: size_of::<Vector4<f32>>(),
+            },
+        );
+        let pbr_master = scene_renderer.create_material(
+            &app_state.gpu,
+            MaterialDescription {
+                name: "Simple",
+                domain: MaterialDomain::Surface,
+                fragment_module: &fragment_module,
+                vertex_module: &vertex_module,
+                texture_inputs: &[
+                    TextureInput {
+                        name: "base_texture".to_owned(),
+                        format: gpu::ImageFormat::Rgba8,
+                    },
+                    TextureInput {
+                        name: "normal_texture".to_owned(),
+                        format: gpu::ImageFormat::Rgba8,
+                    },
+                    TextureInput {
+                        name: "occlusion_texture".to_owned(),
+                        format: gpu::ImageFormat::Rgba8,
+                    },
+                    TextureInput {
+                        name: "emissive_texture".to_owned(),
+                        format: gpu::ImageFormat::Rgba8,
+                    },
+                    TextureInput {
+                        name: "metallic_roughness".to_owned(),
+                        format: gpu::ImageFormat::Rgba8,
+                    },
+                ],
+                material_parameters: params,
+            },
+        )?;
+        let pbr_master = resource_map.add(pbr_master);
 
         let mut allocated_images = vec![];
         let mut allocated_image_views = vec![];
@@ -210,47 +267,36 @@ impl GLTFViewer {
                 white.clone()
             };
 
-            let params = {
-                let buf = app_state.gpu.create_buffer(
-                    &BufferCreateInfo {
-                        label: Some("Pbr Properties"),
-                        size: std::mem::size_of::<PbrProperties>(),
-                        usage: BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM_BUFFER,
-                    },
-                    MemoryDomain::DeviceLocal,
-                )?;
-
-                let gltf_props = gltf_material.pbr_metallic_roughness();
-                let mut props = PbrProperties::default();
-                let emissive = gltf_material.emissive_factor();
-                props.base_color = Vector4::from_row_slice(&gltf_props.base_color_factor());
-                props.metallic_roughness.x = gltf_props.metallic_factor();
-                props.metallic_roughness.y = gltf_props.roughness_factor();
-                props.emissive_color = vector![emissive[0], emissive[1], emissive[2], 1.0];
-
-                app_state.gpu.write_buffer_data(&buf, &[props])?;
-                buf
-            };
-
-            let material = scene_renderer.get_context().create_material(
+            let mut texture_inputs = HashMap::new();
+            texture_inputs.insert("base_texture".to_owned(), base_texture.clone());
+            texture_inputs.insert("normal_texture".to_owned(), normal_texture.clone());
+            texture_inputs.insert("occlusion_texture".to_owned(), occlusion_texture.clone());
+            texture_inputs.insert("emissive_texture".to_owned(), emissive_texture.clone());
+            texture_inputs.insert("metallic_roughness".to_owned(), metallic_roughness.clone());
+            
+            let material_instance = MaterialInstance::create_instance(
                 &app_state.gpu,
+                pbr_master.clone(),
                 &resource_map,
-                MaterialDescription {
-                    domain: MaterialDomain::Surface,
-                    uniform_buffers: vec![params],
-                    input_textures: vec![
-                        base_texture,
-                        normal_texture,
-                        occlusion_texture,
-                        emissive_texture,
-                        metallic_roughness,
-                    ],
-                    fragment_module: &fragment_module,
-                    vertex_module: &vertex_module,
+                &MaterialInstanceDescription {
+                    name: "MateInstance xd",
+                    texture_inputs,
                 },
             )?;
-            let material = resource_map.add(material);
-            allocated_materials.push(material);
+            let metallic = gltf_material
+                .pbr_metallic_roughness().metallic_factor();
+            let roughness = gltf_material
+                .pbr_metallic_roughness().roughness_factor();
+            let emissive = gltf_material
+                .emissive_factor();
+            material_instance.write_parameters(&app_state.gpu, PbrProperties {
+                base_color: Vector4::from_column_slice(&gltf_material
+                    .pbr_metallic_roughness().base_color_factor()),
+                metallic_roughness: vector![metallic, roughness, 0.0, 1.0],
+                emissive_color: vector![emissive[0], emissive[1], emissive[2], 1.0]
+            })?;
+            let material_instance = resource_map.add(material_instance);
+            allocated_materials.push(material_instance);
         }
 
         let mut engine_scene = Scene::new();

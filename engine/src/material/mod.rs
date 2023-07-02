@@ -1,16 +1,37 @@
-mod material;
+mod master_material;
+mod material_instance;
+
+use std::collections::HashMap;
 
 use ash::prelude::VkResult;
-use gpu::{Gpu, GpuBuffer, GpuShaderModule, RenderPass};
-pub use material::*;
-use resource_map::{ResourceHandle, ResourceMap};
+use gpu::{Gpu, GpuShaderModule, ImageFormat};
+pub use material_instance::*;
 
-use crate::texture::Texture;
+pub use master_material::*;
+pub use material_instance::*;
+
+#[derive(Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub enum MaterialDomain {
+    Surface,
+}
+
+#[derive(Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub struct MaterialParameterOffsetSize {
+    pub offset: usize,
+    pub size: usize,
+}
+
+#[derive(Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub struct TextureInput {
+    pub name: String,
+    pub format: ImageFormat,
+}
 
 pub struct MaterialDescription<'a> {
+    pub name: &'a str,
     pub domain: MaterialDomain,
-    pub uniform_buffers: Vec<GpuBuffer>,
-    pub input_textures: Vec<ResourceHandle<Texture>>,
+    pub texture_inputs: &'a [TextureInput],
+    pub material_parameters: HashMap<String, MaterialParameterOffsetSize>,
     pub fragment_module: &'a GpuShaderModule,
     pub vertex_module: &'a GpuShaderModule,
 }
@@ -19,12 +40,8 @@ pub struct MaterialDescription<'a> {
     A Material Context is is a structure used to determine details about a material, e.g which renderpasses should be
     used to render a primitive using the material.
 */
-pub trait MaterialContext {
-    fn create_material(
-        &self,
-        gpu: &Gpu,
-        resource_map: &ResourceMap,
-        material_description: MaterialDescription,
-    ) -> VkResult<Material>;
-    fn get_material_render_pass(&self, domain: MaterialDomain) -> &RenderPass;
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
+pub enum PipelineTarget {
+    ColorAndDepth,
+    DepthOnly,
 }

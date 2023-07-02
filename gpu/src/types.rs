@@ -333,6 +333,15 @@ pub struct GpuDescriptorSet {
     pub(super) allocation: DescriptorSetAllocation,
     pub(super) allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
 }
+
+impl PartialEq for GpuDescriptorSet {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl Eq for GpuDescriptorSet {}
+
 impl GpuDescriptorSet {
     pub fn create(
         allocation: DescriptorSetAllocation,
