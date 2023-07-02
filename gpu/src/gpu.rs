@@ -884,7 +884,7 @@ impl Gpu {
         self.swapchain.get_current_swapchain_frame()
     }
 
-    pub fn swapchain(&mut self) -> &Swapchain {
+    pub fn swapchain(&self) -> &Swapchain {
         &self.swapchain
     }
 

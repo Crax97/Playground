@@ -29,7 +29,7 @@ pub struct MaterialParameter {
 pub struct MasterMaterialDescription<'a> {
     pub name: &'a str,
     pub domain: MaterialDomain,
-    pub global_inputs: &'a [DescriptorType<'a>],
+    pub global_inputs: &'a [BindingType],
     pub texture_inputs: &'a [TextureInput],
     pub material_parameters: HashMap<String, MaterialParameterOffsetSize>,
     pub vertex_info: &'a VertexStageInfo<'a>,
@@ -91,12 +91,7 @@ impl MasterMaterial {
             .iter()
             .enumerate()
             .map(|(i, d)| BindingElement {
-                binding_type: match d {
-                    DescriptorType::UniformBuffer(_) => BindingType::Uniform,
-                    DescriptorType::StorageBuffer(_) => BindingType::Storage,
-                    DescriptorType::Sampler(_) => BindingType::Sampler,
-                    DescriptorType::CombinedImageSampler(_) => BindingType::CombinedImageSampler,
-                },
+                binding_type: *d,
                 index: i as _,
                 stage: gpu::ShaderStage::VertexFragment,
             })

@@ -7,10 +7,7 @@ use ash::{
         PushConstantRange, ShaderStageFlags, StencilOpState,
     },
 };
-use gpu::{
-    BufferCreateInfo, BufferRange, DepthStencilState, DescriptorType, FragmentStageInfo, Gpu,
-    GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain, Swapchain, ToVk, VertexStageInfo,
-};
+use gpu::{BindingElement, BindingType, BufferCreateInfo, BufferRange, DepthStencilState, DescriptorType, FragmentStageInfo, Gpu, GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain, Swapchain, ToVk, VertexStageInfo};
 use nalgebra::{vector, Matrix4, Vector4};
 use resource_map::ResourceMap;
 
@@ -93,11 +90,14 @@ use gpu::{
     BlendState, RenderPass, RenderPassAttachment, RenderPassDescription, SubpassDescription,
 };
 
-pub struct DeferredRenderingPipeline {
-    resource_map: Rc<ResourceMap>,
-
+struct FrameBuffers {
     camera_buffer: GpuBuffer,
     light_buffer: GpuBuffer,
+}
+
+pub struct DeferredRenderingPipeline {
+    resource_map: Rc<ResourceMap>,
+    frame_buffers: Vec<FrameBuffers>,
     material_context: DeferredRenderingMaterialContext,
     render_graph: RenderGraph,
     screen_quad: GpuShaderModule,
@@ -115,48 +115,56 @@ impl DeferredRenderingPipeline {
         gbuffer_combine: GpuShaderModule,
         texture_copy: GpuShaderModule,
     ) -> anyhow::Result<Self> {
-        let camera_buffer = {
-            let create_info = BufferCreateInfo {
-                label: Some("Deferred Renderer - Camera buffer"),
-                size: std::mem::size_of::<PerFrameData>(),
-                usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
+    
+        let mut frame_buffers = vec![];
+        for _ in 0..Swapchain::MAX_FRAMES_IN_FLIGHT {
+            let camera_buffer = {
+                let create_info = BufferCreateInfo {
+                    label: Some("Deferred Renderer - Camera buffer"),
+                    size: std::mem::size_of::<PerFrameData>(),
+                    usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
+                };
+                let buffer = gpu.create_buffer(
+                    &create_info,
+                    MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
+                )?;
+                buffer
             };
-            let buffer = gpu.create_buffer(
-                &create_info,
-                MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
-            )?;
-            buffer
-        };
-        let light_buffer = {
-            let create_info = BufferCreateInfo {
-                label: Some("Light Buffer"),
-                size: std::mem::size_of::<GpuLightInfo>() * 1000,
-                usage: BufferUsageFlags::UNIFORM_BUFFER
-                    | BufferUsageFlags::STORAGE_BUFFER
-                    | BufferUsageFlags::TRANSFER_DST,
+            let light_buffer = {
+                let create_info = BufferCreateInfo {
+                    label: Some("Light Buffer"),
+                    size: std::mem::size_of::<GpuLightInfo>() * 1000,
+                    usage: BufferUsageFlags::UNIFORM_BUFFER
+                        | BufferUsageFlags::STORAGE_BUFFER
+                        | BufferUsageFlags::TRANSFER_DST,
+                };
+                let buffer = gpu.create_buffer(
+                    &create_info,
+                    MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
+                )?;
+                buffer
             };
-            let buffer = gpu.create_buffer(
-                &create_info,
-                MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
-            )?;
-            buffer
-        };
+            frame_buffers.push(FrameBuffers { camera_buffer, light_buffer })
+        }
 
         let material_context = DeferredRenderingMaterialContext::new(gpu)?;
 
         let render_graph = RenderGraph::new();
 
         Ok(Self {
-            camera_buffer,
-            light_buffer,
             resource_map,
             material_context,
             render_graph,
             screen_quad,
             gbuffer_combine,
             texture_copy,
+            frame_buffers,
             runner: GpuRunner::new(),
         })
+    }
+    
+    fn current_frame_buffers(&self, gpu: &Gpu) -> &FrameBuffers {
+        &self.frame_buffers[gpu.swapchain().current_frame.get()]
     }
 }
 
@@ -405,10 +413,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         swapchain: &mut Swapchain,
     ) -> anyhow::Result<()> {
         let projection = pov.projection();
+
+        let current_buffers = &self.frame_buffers[swapchain.current_frame.get()];
         super::app_state()
             .gpu
             .write_buffer_data(
-                &self.camera_buffer,
+                &current_buffers.camera_buffer,
                 &[PerFrameData {
                     eye: Vector4::new(pov.location[0], pov.location[1], pov.location[2], 0.0),
                     view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * pov.view(),
@@ -423,7 +433,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         super::app_state()
             .gpu
             .write_buffer_data_with_offset(
-                &self.light_buffer,
+                &current_buffers.light_buffer,
                 0,
                 &[collected_active_lights.len() as u64],
             )
@@ -431,7 +441,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         super::app_state()
             .gpu
             .write_buffer_data_with_offset(
-                &self.light_buffer,
+                &current_buffers.light_buffer,
                 size_of::<u32>() as u64 * 4,
                 &collected_active_lights,
             )
@@ -869,10 +879,10 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 .get(&PipelineTarget::DepthOnly)
                 .unwrap(),
         );
-
+        
         context.inject_external_image(&swapchain_image, image, view);
-        context.injext_external_buffer(&camera_buffer, &self.camera_buffer);
-        context.injext_external_buffer(&light_buffer, &self.light_buffer);
+        context.injext_external_buffer(&camera_buffer, &current_buffers.camera_buffer);
+        context.injext_external_buffer(&light_buffer, &current_buffers.light_buffer);
         //#endregion
         self.render_graph.run(context, &mut self.runner)?;
 
@@ -994,11 +1004,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let master_description = MasterMaterialDescription {
             name: material_description.name,
             domain: MaterialDomain::Surface,
-            global_inputs: &[DescriptorType::UniformBuffer(BufferRange {
-                handle: &self.camera_buffer,
-                offset: 0,
-                size: vk::WHOLE_SIZE,
-            })],
+            global_inputs: &[BindingType::Uniform],
             texture_inputs: material_description.texture_inputs,
             material_parameters: material_description.material_parameters,
             vertex_info: &VertexStageInfo {

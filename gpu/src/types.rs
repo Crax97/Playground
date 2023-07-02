@@ -356,7 +356,6 @@ impl GpuDescriptorSet {
 }
 impl Drop for GpuDescriptorSet {
     fn drop(&mut self) {
-        println!("Dropped descriptor set!");
         self.allocator
             .borrow_mut()
             .deallocate(&self.allocation)
