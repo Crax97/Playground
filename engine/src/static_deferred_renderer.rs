@@ -239,6 +239,30 @@ impl DeferredRenderingPipeline {
             }
         }
     }
+
+    fn generate_draw_calls<'r, 's>(resource_map: &'r ResourceMap, scene: &'s Scene) 
+        -> HashMap<&'s MasterMaterial, Vec<DrawCall<'s>>>
+        where 'r: 's {
+        let mut draw_hashmap: HashMap<&MasterMaterial, Vec<DrawCall>> = HashMap::new();
+
+        for primitive in scene.primitives.iter() {
+            let mesh = resource_map.get(&primitive.mesh);
+            for (idx, mesh_prim) in mesh.primitives.iter().enumerate() {
+                let material_handle = primitive.materials[idx].clone();
+                let material = resource_map.get(&material_handle);
+                let master = resource_map.get(&material.owner);
+                draw_hashmap
+                    .entry(master)
+                    .or_default()
+                    .push(DrawCall {
+                        prim: &mesh_prim,
+                        transform: primitive.transform,
+                        material: material_handle,
+                    });
+            }
+        }
+        draw_hashmap
+    }
 }
 
 pub struct DeferredRenderingMaterialContext {
@@ -526,24 +550,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let (image, view) = swapchain.acquire_next_image()?;
         app_state().gpu.begin_frame()?;
 
-        let mut draw_hashmap: HashMap<&MasterMaterial, Vec<DrawCall>> = HashMap::new();
-
-        for primitive in scene.primitives.iter() {
-            let mesh = self.resource_map.get(&primitive.mesh);
-            for (idx, mesh_prim)  in mesh.primitives.iter().enumerate() {
-                let material_handle = primitive.materials[idx].clone();
-                let material = self.resource_map.get(&material_handle);
-                let master = self.resource_map.get(&material.owner);
-                draw_hashmap
-                    .entry(master)
-                    .or_default()
-                    .push(DrawCall {
-                        prim: &mesh_prim,
-                        transform: primitive.transform,
-                        material: material_handle,
-                    });
-            }
-        }
+        let draw_hashmap = Self::generate_draw_calls(&self.resource_map, scene);
         
         //#region render graph resources
         let framebuffer_rgba_desc = crate::ImageDescription {
