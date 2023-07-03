@@ -356,7 +356,6 @@ impl GLTFViewer {
             }
 
             let label = format!("Mesh #{}", mesh.index());
-
             let create_info = MeshCreateInfo {
                 label: Some(mesh.name().unwrap_or(&label)),
                 primitives: &primitive_create_infos,
@@ -379,8 +378,6 @@ impl GLTFViewer {
                     * rot_matrix;
 
                 let determinant = transform.determinant();
-                println!("Det: {determinant}");
-
                 if let Some(mesh) = node.mesh() {
                     let mut materials = vec![];
                     for prim in mesh.primitives() {
@@ -396,7 +393,7 @@ impl GLTFViewer {
                 }
             }
         }
-
+        
         Ok(engine_scene)
     }
 }

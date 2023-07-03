@@ -13,7 +13,7 @@ use gpu::{
     VertexStageInfo,
 };
 use nalgebra::{vector, Matrix4, Vector4};
-use resource_map::ResourceMap;
+use resource_map::{ResourceHandle, ResourceMap};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -76,14 +76,7 @@ impl From<&Light> for GpuLightInfo {
     }
 }
 
-use crate::{
-    app_state,
-    camera::Camera,
-    material::{MasterMaterial, MasterMaterialDescription, MaterialDomain},
-    BufferDescription, BufferType, FragmentState, GpuRunner, GraphRunContext, Light, LightType,
-    MaterialDescription, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription,
-    RenderPassContext, RenderStage, RenderingPipeline, Scene, ScenePrimitive,
-};
+use crate::{app_state, camera::Camera, material::{MasterMaterial, MasterMaterialDescription, MaterialDomain}, BufferDescription, BufferType, FragmentState, GpuRunner, GraphRunContext, Light, LightType, MaterialDescription, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage, RenderingPipeline, Scene, ScenePrimitive, MeshPrimitive, MaterialInstance};
 
 use ash::vk::{
     AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
@@ -97,6 +90,12 @@ use gpu::{
 struct FrameBuffers {
     camera_buffer: GpuBuffer,
     light_buffer: GpuBuffer,
+}
+
+struct DrawCall<'a> {
+    prim: &'a MeshPrimitive,
+    transform: Matrix4<f32>,
+    material: ResourceHandle<MaterialInstance>
 }
 
 pub struct DeferredRenderingPipeline {
@@ -176,37 +175,31 @@ impl DeferredRenderingPipeline {
     fn main_render_loop(
         resource_map: &ResourceMap,
         pipeline_target: PipelineTarget,
-        draw_hashmap: &HashMap<&MasterMaterial, Vec<ScenePrimitive>>,
+        draw_hashmap: &HashMap<&MasterMaterial, Vec<DrawCall>>,
         ctx: &mut RenderPassContext,
     ) {
         let mut total_primitives_rendered = 0;
-        for (master, primitives) in draw_hashmap.iter() {
+        for (master, material_draw_calls) in draw_hashmap.iter() {
             {
                 let pipeline = master
                     .get_pipeline(pipeline_target)
                     .expect("failed to fetch pipeline {pipeline_target:?}");
+                ctx.render_pass_command.bind_pipeline(pipeline);
                 ctx.render_pass_command.bind_descriptor_sets(
                     PipelineBindPoint::GRAPHICS,
                     pipeline,
                     0,
                     &[&ctx.read_descriptor_set.expect("No descriptor set???")],
                 );
-                for (idx, primitive) in primitives.iter().enumerate() {
-                    let primitive_label = ctx.render_pass_command.begin_debug_region(
-                        &format!("Rendering mesh {}", idx),
-                        [0.0, 0.3, 0.4, 1.0],
-                    );
-                    let mesh = resource_map.get(&primitive.mesh);
-
-                    ctx.render_pass_command.bind_pipeline(pipeline);
-
-                    for (prim_idx, mesh_prim) in mesh.primitives.iter().enumerate() {
-                        let material = &primitive.materials[prim_idx];
+                
+                for (idx, draw_call) in material_draw_calls.iter().enumerate() {
+                        
+                        let material = &draw_call.material;
                         let material = resource_map.get(material);
                         let primitive_label = ctx.render_pass_command.begin_debug_region(
                             &format!(
-                                "{}:{} - {}, total primitives rendered {total_primitives_rendered}",
-                                idx, prim_idx, material.name
+                                "{} - {}, total primitives rendered {total_primitives_rendered}",
+                                material.name, idx
                             ),
                             [0.0, 0.3, 0.4, 1.0],
                         );
@@ -217,30 +210,28 @@ impl DeferredRenderingPipeline {
                             &[&material.user_descriptor_set],
                         );
                         ctx.render_pass_command.bind_index_buffer(
-                            &mesh_prim.index_buffer,
+                            &draw_call.prim.index_buffer,
                             0,
                             IndexType::UINT32,
                         );
                         ctx.render_pass_command.bind_vertex_buffer(
                             0,
                             &[
-                                &mesh_prim.position_component,
-                                &mesh_prim.color_component,
-                                &mesh_prim.normal_component,
-                                &mesh_prim.tangent_component,
-                                &mesh_prim.uv_component,
+                                &draw_call.prim.position_component,
+                                &draw_call.prim.color_component,
+                                &draw_call.prim.normal_component,
+                                &draw_call.prim.tangent_component,
+                                &draw_call.prim.uv_component,
                             ],
                             &[0, 0, 0, 0, 0],
                         );
                         ctx.render_pass_command
-                            .push_constant(&pipeline, &primitive.transform, 0);
+                            .push_constant(&pipeline, &draw_call.transform, 0);
                         ctx.render_pass_command
-                            .draw_indexed(mesh_prim.index_count, 1, 0, 0, 0);
+                            .draw_indexed(draw_call.prim.index_count, 1, 0, 0, 0);
 
                         primitive_label.end();
                         total_primitives_rendered += 1;
-                    }
-                    primitive_label.end();
                 }
                 ctx.render_pass_command.insert_debug_label(
                     &format!("Total primtives drawn this frame: {total_primitives_rendered}"),
@@ -535,18 +526,25 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let (image, view) = swapchain.acquire_next_image()?;
         app_state().gpu.begin_frame()?;
 
-        let mut draw_hashmap: HashMap<&MasterMaterial, Vec<ScenePrimitive>> = HashMap::new();
+        let mut draw_hashmap: HashMap<&MasterMaterial, Vec<DrawCall>> = HashMap::new();
 
         for primitive in scene.primitives.iter() {
-            for material in &primitive.materials {
-                let material = self.resource_map.get(material);
+            let mesh = self.resource_map.get(&primitive.mesh);
+            for (idx, mesh_prim)  in mesh.primitives.iter().enumerate() {
+                let material_handle = primitive.materials[idx].clone();
+                let material = self.resource_map.get(&material_handle);
                 let master = self.resource_map.get(&material.owner);
                 draw_hashmap
                     .entry(master)
                     .or_default()
-                    .push(primitive.clone());
+                    .push(DrawCall {
+                        prim: &mesh_prim,
+                        transform: primitive.transform,
+                        material: material_handle,
+                    });
             }
         }
+        
         //#region render graph resources
         let framebuffer_rgba_desc = crate::ImageDescription {
             width: swapchain_extents.width,
