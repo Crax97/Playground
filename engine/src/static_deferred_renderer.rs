@@ -238,9 +238,13 @@ impl DeferredRenderingPipeline {
                             .draw_indexed(mesh_prim.index_count, 1, 0, 0, 0);
 
                         primitive_label.end();
+                        total_primitives_rendered += 1;
                     }
                     primitive_label.end();
                 }
+                ctx.render_pass_command.insert_debug_label(
+                    &format!("Total primtives drawn this frame: {total_primitives_rendered}"),
+                    [0.0, 0.3, 0.4, 1.0]);
             }
         }
     }
