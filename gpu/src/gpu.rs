@@ -49,7 +49,7 @@ use super::{
     MemoryDomain,
 };
 
-const KHRONOS_VALIDATION_LAYER: &'static str = "VK_LAYER_KHRONOS_validation";
+const KHRONOS_VALIDATION_LAYER: &str = "VK_LAYER_KHRONOS_validation";
 
 pub struct GpuDescription {
     name: String,
@@ -94,8 +94,7 @@ impl Drop for GpuState {
             unsafe {
                 self.logical_device
                     .destroy_pipeline_cache(self.pipeline_cache, get_allocation_callbacks());
-                debug_utils
-                    .destroy_debug_utils_messenger(messenger.clone(), get_allocation_callbacks())
+                debug_utils.destroy_debug_utils_messenger(*messenger, get_allocation_callbacks())
             };
         }
     }
@@ -286,7 +285,7 @@ impl Gpu {
         let queue_families = Self::select_queue_families_indices(&physical_device, &instance)?;
         if !queue_families.is_valid() {
             log::error!("Queue configurations are invalid!");
-            bail!(GpuError::InvalidQueueFamilies(queue_families.clone()));
+            bail!(GpuError::InvalidQueueFamilies(queue_families));
         }
 
         Self::ensure_required_device_extensions_are_available(

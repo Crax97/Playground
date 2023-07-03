@@ -1,3 +1,4 @@
+use anymap::AnyMap;
 use std::{
     cell::RefCell,
     marker::PhantomData,
@@ -17,8 +18,17 @@ pub(crate) struct ResourceId {
 }
 
 pub struct ResourceMapState {
-    types_map: anymap::AnyMap,
+    types_map: AnyMap,
     resources: usize,
+}
+
+impl Default for ResourceMapState {
+    fn default() -> Self {
+        Self {
+            types_map: AnyMap::new(),
+            resources: 0,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -147,8 +157,7 @@ impl ResourceMap {
 
     fn get_arena<R: Resource + 'static>(&self) -> &mut Arena<R> {
         let map: *mut ResourceMapState = self.map.as_ptr();
-        let map =
-            unsafe { std::mem::transmute::<*mut ResourceMapState, &mut ResourceMapState>(map) };
+        let map = unsafe { map.as_mut().expect("Failed to dereference map pointer") };
 
         if !map.types_map.contains::<Arena<R>>() {
             map.types_map.insert(Arena::<R>::new());

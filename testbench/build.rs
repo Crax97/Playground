@@ -43,45 +43,41 @@ fn recompile_all_shaders() {
         })
     });
     for file in shader_folder.flatten() {
-        if let Ok(file) = file {
-            let fty = file.file_type().expect("Could not get filetype");
-            if fty.is_dir() {
-                continue;
-            }
-            let path = file.path();
-            let path = std::path::Path::new(&path);
-            let name = path
-                .file_stem()
-                .expect("Failed to get file name")
-                .to_string_lossy();
-            let new_name = name + ".spirv";
-            let new_name = out_shader_path
-                .join(std::path::Path::new(&new_name.to_string()))
-                .to_owned();
+        let fty = file.file_type().expect("Could not get filetype");
+        if fty.is_dir() {
+            continue;
+        }
+        let path = file.path();
+        let path = std::path::Path::new(&path);
+        let name = path
+            .file_stem()
+            .expect("Failed to get file name")
+            .to_string_lossy();
+        let new_name = name.clone() + ".spirv";
+        let new_name = out_shader_path
+            .join(std::path::Path::new(&new_name.to_string()))
+            .to_owned();
 
-            println!("Compiling {:?}", &path);
-            let extension = path.extension().expect("Shader has no extension!");
-            if extension == "glsl" {
-                continue;
-            }
-            let extension = match extension.to_str().unwrap() {
-                "vert" => ShaderKind::Vertex,
-                "frag" => ShaderKind::Fragment,
-                "compute" => ShaderKind::Compute,
-                _ => panic!("Invalid shader extension!"),
-            };
+        println!("Compiling {:?}", &path);
+        let extension = path.extension().expect("Shader has no extension!");
+        if extension == "glsl" {
+            continue;
+        }
+        let extension = match extension.to_str().unwrap() {
+            "vert" => ShaderKind::Vertex,
+            "frag" => ShaderKind::Fragment,
+            "compute" => ShaderKind::Compute,
+            _ => panic!("Invalid shader extension!"),
+        };
 
-            let source = std::fs::read_to_string(path).expect("Failed to read input file");
+        let source = std::fs::read_to_string(path).expect("Failed to read input file");
 
-            let compiled =
-                compiler.compile_into_spirv(&source, extension, &name, "main", Some(&options));
+        let compiled =
+            compiler.compile_into_spirv(&source, extension, &name, "main", Some(&options));
 
-            match compiled {
-                Ok(new) => std::fs::write(new_name, new.as_binary_u8()).unwrap(),
-                Err(e) => panic!("Failed to compile shader {}! Error: {}", name, e),
-            }
-        } else {
-            println!("Failed to open shader folder!");
+        match compiled {
+            Ok(new) => std::fs::write(new_name, new.as_binary_u8()).unwrap(),
+            Err(e) => panic!("Failed to compile shader {}! Error: {}", name, e),
         }
     }
 }
