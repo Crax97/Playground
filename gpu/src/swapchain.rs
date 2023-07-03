@@ -72,7 +72,7 @@ impl SwapchainFrame {
         )?;
 
         let image_available_semaphore = GPUSemaphore::create(
-            device.clone(),
+            device,
             &SemaphoreCreateInfo {
                 s_type: StructureType::SEMAPHORE_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -207,7 +207,7 @@ impl Swapchain {
                 return Ok(unsafe {
                     (
                         &self.current_swapchain_images[image_idx],
-                        image_view.assume_init_ref().clone(),
+                        image_view.assume_init_ref(),
                     )
                 });
             } else {
@@ -244,14 +244,14 @@ impl Swapchain {
         Ok(true)
     }
 
-    fn pick_swapchain_format(supported_formats: &Vec<SurfaceFormatKHR>) -> SurfaceFormatKHR {
+    fn pick_swapchain_format(supported_formats: &[SurfaceFormatKHR]) -> SurfaceFormatKHR {
         for format in supported_formats.iter() {
             if format.format == Format::R8G8B8A8_UNORM {
-                return format.clone();
+                return *format;
             }
         }
 
-        return supported_formats[0].clone();
+        supported_formats[0]
     }
 
     pub fn recreate_swapchain(&mut self) -> VkResult<()> {
@@ -405,7 +405,7 @@ impl Swapchain {
             .map(|i| {
                 GpuImage::wrap(
                     self.state.logical_device.clone(),
-                    i.clone(),
+                    *i,
                     self.extents(),
                     self.present_format().into(),
                 )

@@ -409,7 +409,7 @@ impl Gpu {
     fn create_instance(
         entry: &Entry,
         configuration: &GpuConfiguration,
-        instance_extensions: &Vec<String>,
+        instance_extensions: &[String],
     ) -> VkResult<Instance> {
         let vk_layer_khronos_validation = CString::new(KHRONOS_VALIDATION_LAYER).unwrap();
         let vk_layer_khronos_validation = vk_layer_khronos_validation.as_ptr();
@@ -532,7 +532,7 @@ impl Gpu {
 
     fn create_device(
         configuration: &GpuConfiguration,
-        device_extensions: &Vec<String>,
+        device_extensions: &[String],
         instance: &Instance,
         selected_device: SelectedPhysicalDevice,
         queue_indices: &QueueFamilies,
@@ -565,8 +565,10 @@ impl Gpu {
             make_queue_create_info(queue_indices.transfer_family.index),
         ];
 
-        let mut device_features = PhysicalDeviceFeatures::default();
-        device_features.sampler_anisotropy = vk::TRUE;
+        let device_features = PhysicalDeviceFeatures {
+            sampler_anisotropy: vk::TRUE,
+            ..Default::default()
+        };
 
         let create_info = DeviceCreateInfo {
             s_type: StructureType::DEVICE_CREATE_INFO,
@@ -608,10 +610,7 @@ impl Gpu {
         for requested_extension in requested_extensions {
             let required_c_name =
                 unsafe { CString::from_vec_unchecked(requested_extension.clone().into_bytes()) };
-            if all_extensions_c_names
-                .find(|name| *name == required_c_name.as_c_str())
-                .is_none()
-            {
+            if !all_extensions_c_names.any(|name| name == required_c_name.as_c_str()) {
                 error!("Instance extension {:?} is not supported", required_c_name);
             }
         }
@@ -650,10 +649,7 @@ impl Gpu {
             let required_c_name =
                 unsafe { CString::from_vec_unchecked(requested_extension.clone().into_bytes()) };
 
-            if all_extensions_c_names
-                .find(|name| *name == required_c_name.as_c_str())
-                .is_none()
-            {
+            if !all_extensions_c_names.any(|name| name == required_c_name.as_c_str()) {
                 error!("Device extension {:?} is not supported", required_c_name);
             }
         }
@@ -771,7 +767,7 @@ impl Gpu {
             write_descriptor_sets.push(WriteDescriptorSet {
                 s_type: StructureType::WRITE_DESCRIPTOR_SET,
                 p_next: null(),
-                dst_set: descriptor_set.clone(),
+                dst_set: *descriptor_set,
                 dst_binding: *bind,
                 dst_array_element: 0,
                 descriptor_count: 1,
@@ -785,7 +781,7 @@ impl Gpu {
             write_descriptor_sets.push(WriteDescriptorSet {
                 s_type: StructureType::WRITE_DESCRIPTOR_SET,
                 p_next: null(),
-                dst_set: descriptor_set.clone(),
+                dst_set: *descriptor_set,
                 dst_binding: *bind,
                 dst_array_element: 0,
                 descriptor_count: 1,
@@ -823,11 +819,12 @@ impl Gpu {
         &self,
         create_info: &ShaderModuleCreateInfo,
     ) -> VkResult<GpuShaderModule> {
-        let code = bytemuck::cast_slice(&create_info.code);
+        let code = bytemuck::cast_slice(create_info.code);
         let p_code = code.as_ptr();
 
-        assert!(
-            p_code as u32 % 4 == 0,
+        assert_eq!(
+            p_code as u32 % 4,
+            0,
             "Pointers to shader modules code must be 4 byte aligned"
         );
 
@@ -859,7 +856,7 @@ impl Gpu {
                     data_ptr = data.as_ptr();
                 }
                 Err(e) => {
-                    println!("Failed to read pipeline cache because {}", e.to_string());
+                    println!("Failed to read pipeline cache because {}", e);
                 }
             };
         }
@@ -1065,8 +1062,8 @@ impl Gpu {
         label: Option<&str>,
         object: T,
     ) -> Result<(), vk::Result> {
-        match (label, &self.state.debug_utilities) {
-            (Some(label), Some(debug)) => unsafe {
+        if let (Some(label), Some(debug)) = (label, &self.state.debug_utilities) {
+            unsafe {
                 let c_label = CString::new(label).unwrap();
                 debug.set_debug_utils_object_name(
                     self.vk_logical_device().handle(),
@@ -1078,8 +1075,7 @@ impl Gpu {
                         p_object_name: c_label.as_ptr(),
                     },
                 )?
-            },
-            _ => {}
+            }
         };
         Ok(())
     }
@@ -1094,7 +1090,7 @@ impl Gpu {
         offset: u64,
         data: &[T],
     ) -> VkResult<()> {
-        if data.len() == 0 {
+        if data.is_empty() {
             return Ok(());
         }
 
@@ -1106,7 +1102,7 @@ impl Gpu {
                 &self.staging_buffer,
                 buffer,
                 offset,
-                data.len() * std::mem::size_of::<T>(),
+                std::mem::size_of_val(data),
             )?;
         }
         Ok(())
@@ -1561,7 +1557,7 @@ impl Gpu {
                 .get_pipeline_cache_data(self.state.pipeline_cache)
         }?;
 
-        match std::fs::write(path, &cache_data) {
+        match std::fs::write(path, cache_data) {
             Ok(_) => Ok(()),
             Err(e) => {
                 error!("Failed to write pipeline cache: {e}");

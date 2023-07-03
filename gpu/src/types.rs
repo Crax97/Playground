@@ -183,7 +183,7 @@ impl Deref for GpuBuffer {
 
 impl GpuBuffer {
     pub fn write_data<I: Sized + Copy>(&self, offset: u64, data: &[I]) {
-        let data_length = (std::mem::size_of::<I>() * data.len()) as u64;
+        let data_length = std::mem::size_of_val(data) as u64;
         assert!(
             data_length > 0,
             "Cannot write on a buffer with 0 data length!"
@@ -278,20 +278,18 @@ impl GpuImage {
 }
 impl Drop for GpuImage {
     fn drop(&mut self) {
-        match (&self.allocator, &self.allocation) {
-            (Some(allocator), Some(allocation)) => {
-                allocator.borrow_mut().deallocate(&self.device, &allocation);
-                unsafe {
-                    self.device
-                        .destroy_image(self.inner, self::get_allocation_callbacks());
-                }
+        if let (Some(allocator), Some(allocation)) = (&self.allocator, &self.allocation) {
+            allocator.borrow_mut().deallocate(&self.device, allocation);
+            unsafe {
+                self.device
+                    .destroy_image(self.inner, self::get_allocation_callbacks());
             }
-            _ => {
-                // this is a wrapped image
-            }
-        };
+        } else {
+            // this is a wrapped image
+        }
     }
 }
+
 impl Deref for GpuImage {
     type Target = vk::Image;
     fn deref(&self) -> &Self::Target {

@@ -167,7 +167,7 @@ impl<'g> CommandBuffer<'g> {
         &'p mut self,
         info: &BeginRenderPassInfo<'p>,
     ) -> RenderPassCommand<'p, 'g> {
-        RenderPassCommand::<'p, 'g>::new(self, &info)
+        RenderPassCommand::<'p, 'g>::new(self, info)
     }
 
     pub fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo) {
@@ -272,7 +272,7 @@ impl<'g> CommandBuffer<'g> {
     }
 
     pub fn inner(&self) -> vk::CommandBuffer {
-        self.inner_command_buffer.clone()
+        self.inner_command_buffer
     }
 }
 
@@ -338,16 +338,9 @@ impl Drop for ScopedDebugLabel {
 impl<'g> CommandBuffer<'g> {
     pub fn begin_debug_region(&self, label: &str, color: [f32; 4]) -> ScopedDebugLabel {
         ScopedDebugLabel {
-            inner: if let Some(debug_utils) = &self.gpu.state.debug_utilities {
-                Some(ScopedDebugLabelInner::new(
-                    label,
-                    color,
-                    debug_utils.clone(),
-                    self.inner(),
-                ))
-            } else {
-                None
-            },
+            inner: self.gpu.state.debug_utilities.as_ref().map(|debug_utils| {
+                ScopedDebugLabelInner::new(label, color, debug_utils.clone(), self.inner())
+            }),
         }
     }
 
@@ -539,7 +532,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
     pub fn push_constant<T: Copy + Sized>(&self, pipeline: &Pipeline, data: &T, offset: u32) {
         let device = self.command_buffer.gpu.vk_logical_device();
         unsafe {
-            let ptr: *const u8 = std::mem::transmute(data);
+            let ptr: *const u8 = data as *const T as *const u8;
             let slice = std::slice::from_raw_parts(ptr, std::mem::size_of::<T>());
             device.cmd_push_constants(
                 self.command_buffer.inner_command_buffer,
@@ -554,7 +547,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
 
 impl<'c, 'g> AsRef<CommandBuffer<'g>> for RenderPassCommand<'c, 'g> {
     fn as_ref(&self) -> &CommandBuffer<'g> {
-        &self.command_buffer
+        self.command_buffer
     }
 }
 
@@ -562,7 +555,7 @@ impl<'c, 'g> Deref for RenderPassCommand<'c, 'g> {
     type Target = CommandBuffer<'g>;
 
     fn deref(&self) -> &Self::Target {
-        &self.command_buffer
+        self.command_buffer
     }
 }
 

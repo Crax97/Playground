@@ -73,16 +73,12 @@ pub struct PasstroughAllocator {
 impl PasstroughAllocator {
     fn find_memory_type(&self, type_filter: u32, memory_domain: MemoryDomain) -> Option<u32> {
         let mem_properties = memory_domain.into();
-        for i in 0..self.memory_properties.memory_type_count {
-            if (type_filter & (1 << i)) > 0
+        (0..self.memory_properties.memory_type_count).find(|&i| {
+            (type_filter & (1 << i)) > 0
                 && self.memory_properties.memory_types[i as usize]
                     .property_flags
                     .intersects(mem_properties)
-            {
-                return Some(i);
-            }
-        }
-        None
+        })
     }
 }
 

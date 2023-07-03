@@ -286,7 +286,7 @@ impl<'a> RenderPassDescription<'a> {
 }
 
 fn p_or_null<T>(slice: &[T]) -> *const T {
-    if slice.len() > 0 {
+    if !slice.is_empty() {
         slice.as_ptr()
     } else {
         std::ptr::null()
@@ -508,10 +508,8 @@ impl Pipeline {
                 push_constant_range_count: pipeline_description.push_constant_ranges.len() as _,
                 p_push_constant_ranges: pipeline_description.push_constant_ranges.as_ptr(),
             };
-            let pipeline_layout = gpu
-                .vk_logical_device()
-                .create_pipeline_layout(&layout_infos, None)?;
-            pipeline_layout
+            gpu.vk_logical_device()
+                .create_pipeline_layout(&layout_infos, None)?
         };
 
         let pipeline = unsafe {
@@ -674,14 +672,18 @@ impl Pipeline {
                 base_pipeline_index: 0,
             }];
 
-            let pipeline = gpu
-                .state
-                .logical_device
-                .create_graphics_pipelines(gpu.state.pipeline_cache, &create_infos, None)
-                .unwrap();
-
-            pipeline
-        }[0];
+            let pipelines = gpu.state.logical_device.create_graphics_pipelines(
+                gpu.state.pipeline_cache,
+                &create_infos,
+                None,
+            );
+            match pipelines {
+                Ok(pipelines) => pipelines[0],
+                Err((_, e)) => {
+                    return Err(e);
+                }
+            }
+        };
 
         Ok(Self {
             pipeline,

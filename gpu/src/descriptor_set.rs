@@ -39,7 +39,7 @@ pub struct PooledDescriptorSetAllocator {
 }
 impl PooledDescriptorSetAllocator {
     fn get_last_allocated_descriptor_pool(&self) -> DescriptorPool {
-        self.usable_descriptor_pools.last().unwrap().clone()
+        *self.usable_descriptor_pools.last().unwrap()
     }
 
     fn allocate_new_descriptor_pool(&mut self) -> VkResult<()> {
@@ -92,10 +92,10 @@ impl PooledDescriptorSetAllocator {
         let hash = hasher.finish();
 
         if let Some(layout) = self.hashed_layouts.get(&hash) {
-            Ok(layout.clone())
+            Ok(*layout)
         } else {
             let new_layout = self.construct_descriptor_set_layout(info)?;
-            self.hashed_layouts.insert(hash, new_layout.clone());
+            self.hashed_layouts.insert(hash, new_layout);
             trace!(
                 "Created a new descriptor set layout! There are {} layouts allocated",
                 self.hashed_layouts.len()
@@ -219,8 +219,7 @@ impl Drop for PooledDescriptorSetAllocator {
     fn drop(&mut self) {
         for layout in self.hashed_layouts.values() {
             unsafe {
-                self.device
-                    .destroy_descriptor_set_layout(layout.clone(), None);
+                self.device.destroy_descriptor_set_layout(*layout, None);
                 trace!(
                     "Destroyed a descriptor set layout! There are {} layouts allocated",
                     self.hashed_layouts.len()

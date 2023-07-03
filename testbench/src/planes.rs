@@ -2,7 +2,7 @@ mod app;
 mod utils;
 
 use std::collections::HashMap;
-use std::{io::BufReader, rc::Rc};
+use std::io::BufReader;
 
 use app::{bootstrap, App};
 use ash::vk::PresentModeKHR;
@@ -26,7 +26,7 @@ const SPEED: f32 = 0.1;
 const ROTATION_SPEED: f32 = 3.0;
 const MIN_DELTA: f32 = 1.0;
 pub struct PlanesApp {
-    resource_map: Rc<ResourceMap>,
+    resource_map: ResourceMap,
     camera: Camera,
     forward_movement: f32,
     rotation_movement: f32,
@@ -47,7 +47,7 @@ impl App for PlanesApp {
     where
         Self: Sized,
     {
-        let mut resource_map = Rc::new(ResourceMap::new());
+        let mut resource_map = ResourceMap::new();
 
         let camera = Camera {
             location: point![2.0, 2.0, 2.0],
@@ -116,7 +116,7 @@ impl App for PlanesApp {
 
         let texture = Texture::new_with_data(
             &app_state.gpu,
-            &resource_map,
+            &mut resource_map,
             cpu_image.width(),
             cpu_image.height(),
             &cpu_image,
@@ -133,7 +133,6 @@ impl App for PlanesApp {
 
         let mut scene_renderer = DeferredRenderingPipeline::new(
             &app_state.gpu,
-            resource_map.clone(),
             screen_quad_module,
             gbuffer_combine_module,
             texture_copy_module,
@@ -238,7 +237,12 @@ impl App for PlanesApp {
 
     fn draw(&mut self, app_state: &mut engine::AppState) -> anyhow::Result<()> {
         self.scene_renderer
-            .render(&self.camera, &self.scene, app_state.gpu.swapchain_mut())
+            .render(
+                &self.camera,
+                &self.scene,
+                app_state.gpu.swapchain_mut(),
+                &self.resource_map,
+            )
             .unwrap();
 
         Ok(())
