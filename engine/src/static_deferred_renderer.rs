@@ -7,7 +7,11 @@ use ash::{
         PushConstantRange, ShaderStageFlags, StencilOpState,
     },
 };
-use gpu::{BindingElement, BindingType, BufferCreateInfo, BufferRange, DepthStencilState, DescriptorType, FragmentStageInfo, Gpu, GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain, Swapchain, ToVk, VertexStageInfo};
+use gpu::{
+    BindingElement, BindingType, BufferCreateInfo, BufferRange, DepthStencilState, DescriptorType,
+    FragmentStageInfo, Gpu, GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain, Swapchain, ToVk,
+    VertexStageInfo,
+};
 use nalgebra::{vector, Matrix4, Vector4};
 use resource_map::ResourceMap;
 
@@ -78,7 +82,7 @@ use crate::{
     material::{MasterMaterial, MasterMaterialDescription, MaterialDomain},
     BufferDescription, BufferType, FragmentState, GpuRunner, GraphRunContext, Light, LightType,
     MaterialDescription, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription,
-    RenderStage, RenderingPipeline, Scene, ScenePrimitive,
+    RenderPassContext, RenderStage, RenderingPipeline, Scene, ScenePrimitive,
 };
 
 use ash::vk::{
@@ -115,7 +119,6 @@ impl DeferredRenderingPipeline {
         gbuffer_combine: GpuShaderModule,
         texture_copy: GpuShaderModule,
     ) -> anyhow::Result<Self> {
-    
         let mut frame_buffers = vec![];
         for _ in 0..Swapchain::MAX_FRAMES_IN_FLIGHT {
             let camera_buffer = {
@@ -144,7 +147,10 @@ impl DeferredRenderingPipeline {
                 )?;
                 buffer
             };
-            frame_buffers.push(FrameBuffers { camera_buffer, light_buffer })
+            frame_buffers.push(FrameBuffers {
+                camera_buffer,
+                light_buffer,
+            })
         }
 
         let material_context = DeferredRenderingMaterialContext::new(gpu)?;
@@ -162,9 +168,81 @@ impl DeferredRenderingPipeline {
             runner: GpuRunner::new(),
         })
     }
-    
+
     fn current_frame_buffers(&self, gpu: &Gpu) -> &FrameBuffers {
         &self.frame_buffers[gpu.swapchain().current_frame.get()]
+    }
+
+    fn main_render_loop(
+        resource_map: &ResourceMap,
+        pipeline_target: PipelineTarget,
+        draw_hashmap: &HashMap<&MasterMaterial, Vec<ScenePrimitive>>,
+        ctx: &mut RenderPassContext,
+    ) {
+        let mut total_primitives_rendered = 0;
+        for (master, primitives) in draw_hashmap.iter() {
+            {
+                let pipeline = master
+                    .get_pipeline(pipeline_target)
+                    .expect("failed to fetch pipeline {pipeline_target:?}");
+                ctx.render_pass_command.bind_descriptor_sets(
+                    PipelineBindPoint::GRAPHICS,
+                    pipeline,
+                    0,
+                    &[&ctx.read_descriptor_set.expect("No descriptor set???")],
+                );
+                for (idx, primitive) in primitives.iter().enumerate() {
+                    let primitive_label = ctx.render_pass_command.begin_debug_region(
+                        &format!("Rendering mesh {}", idx),
+                        [0.0, 0.3, 0.4, 1.0],
+                    );
+                    let mesh = resource_map.get(&primitive.mesh);
+
+                    ctx.render_pass_command.bind_pipeline(pipeline);
+
+                    for (prim_idx, mesh_prim) in mesh.primitives.iter().enumerate() {
+                        let material = &primitive.materials[prim_idx];
+                        let material = resource_map.get(material);
+                        let primitive_label = ctx.render_pass_command.begin_debug_region(
+                            &format!(
+                                "{}:{} - {}, total primitives rendered {total_primitives_rendered}",
+                                idx, prim_idx, material.name
+                            ),
+                            [0.0, 0.3, 0.4, 1.0],
+                        );
+                        ctx.render_pass_command.bind_descriptor_sets(
+                            PipelineBindPoint::GRAPHICS,
+                            pipeline,
+                            1,
+                            &[&material.user_descriptor_set],
+                        );
+                        ctx.render_pass_command.bind_index_buffer(
+                            &mesh_prim.index_buffer,
+                            0,
+                            IndexType::UINT32,
+                        );
+                        ctx.render_pass_command.bind_vertex_buffer(
+                            0,
+                            &[
+                                &mesh_prim.position_component,
+                                &mesh_prim.color_component,
+                                &mesh_prim.normal_component,
+                                &mesh_prim.tangent_component,
+                                &mesh_prim.uv_component,
+                            ],
+                            &[0, 0, 0, 0, 0],
+                        );
+                        ctx.render_pass_command
+                            .push_constant(&pipeline, &primitive.transform, 0);
+                        ctx.render_pass_command
+                            .draw_indexed(mesh_prim.index_count, 1, 0, 0, 0);
+
+                        primitive_label.end();
+                    }
+                    primitive_label.end();
+                }
+            }
+        }
     }
 }
 
@@ -705,134 +783,20 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         //#region context setup
         context.register_callback(&dbuffer_pass, |_: &Gpu, ctx| {
-            for (master, primitives) in draw_hashmap.iter() {
-                {
-                    let pipeline = master
-                        .get_pipeline(PipelineTarget::DepthOnly)
-                        .expect("Failed to fetch depth-only pipeline");
-                    ctx.render_pass_command.bind_descriptor_sets(
-                        PipelineBindPoint::GRAPHICS,
-                        pipeline,
-                        0,
-                        &[&ctx.read_descriptor_set.expect("No descriptor set???")],
-                    );
-                    for (idx, primitive) in primitives.iter().enumerate() {
-                        let primitive_label = ctx.render_pass_command.begin_debug_region(
-                            &format!("Rendering mesh {}", idx),
-                            [0.0, 0.3, 0.4, 1.0],
-                        );
-                        let mesh = self.resource_map.get(&primitive.mesh);
-
-                        ctx.render_pass_command.bind_pipeline(pipeline);
-
-                        for (prim_idx, mesh_prim) in mesh.primitives.iter().enumerate() {
-                            let primitive_label = ctx.render_pass_command.begin_debug_region(
-                                &format!("Rendering mesh {} primitive {}", idx, prim_idx),
-                                [0.0, 0.3, 0.4, 1.0],
-                            );
-                            let material = &primitive.materials[prim_idx];
-                            let material = self.resource_map.get(material);
-                            ctx.render_pass_command.bind_descriptor_sets(
-                                PipelineBindPoint::GRAPHICS,
-                                pipeline,
-                                1,
-                                &[&material.user_descriptor_set],
-                            );
-                            ctx.render_pass_command.bind_index_buffer(
-                                &mesh_prim.index_buffer,
-                                0,
-                                IndexType::UINT32,
-                            );
-                            ctx.render_pass_command.bind_vertex_buffer(
-                                0,
-                                &[
-                                    &mesh_prim.position_component,
-                                    &mesh_prim.color_component,
-                                    &mesh_prim.normal_component,
-                                    &mesh_prim.tangent_component,
-                                    &mesh_prim.uv_component,
-                                ],
-                                &[0, 0, 0, 0, 0],
-                            );
-                            ctx.render_pass_command.push_constant(
-                                &pipeline,
-                                &primitive.transform,
-                                0,
-                            );
-                            ctx.render_pass_command
-                                .draw_indexed(mesh_prim.index_count, 1, 0, 0, 0);
-
-                            primitive_label.end();
-                        }
-                        primitive_label.end();
-                    }
-                }
-            }
+            Self::main_render_loop(
+                &self.resource_map,
+                PipelineTarget::DepthOnly,
+                &draw_hashmap,
+                ctx,
+            );
         });
         context.register_callback(&gbuffer_pass, |_: &Gpu, ctx| {
-            for (master, primitives) in draw_hashmap.iter() {
-                {
-                    let pipeline = master
-                        .get_pipeline(PipelineTarget::ColorAndDepth)
-                        .expect("Failed to fetch color-and-depth pipeline");
-                    ctx.render_pass_command.bind_descriptor_sets(
-                        PipelineBindPoint::GRAPHICS,
-                        pipeline,
-                        0,
-                        &[&ctx.read_descriptor_set.expect("No descriptor set???")],
-                    );
-                    for (idx, primitive) in primitives.iter().enumerate() {
-                        let primitive_label = ctx.render_pass_command.begin_debug_region(
-                            &format!("Rendering mesh {}", idx),
-                            [0.0, 0.3, 0.4, 1.0],
-                        );
-                        let mesh = self.resource_map.get(&primitive.mesh);
-
-                        ctx.render_pass_command.bind_pipeline(pipeline);
-
-                        for (prim_idx, mesh_prim) in mesh.primitives.iter().enumerate() {
-                            let primitive_label = ctx.render_pass_command.begin_debug_region(
-                                &format!("Rendering mesh {} primitive {}", idx, prim_idx),
-                                [0.0, 0.3, 0.4, 1.0],
-                            );
-                            let material = &primitive.materials[prim_idx];
-                            let material = self.resource_map.get(material);
-                            ctx.render_pass_command.bind_descriptor_sets(
-                                PipelineBindPoint::GRAPHICS,
-                                pipeline,
-                                1,
-                                &[&material.user_descriptor_set],
-                            );
-                            ctx.render_pass_command.bind_index_buffer(
-                                &mesh_prim.index_buffer,
-                                0,
-                                IndexType::UINT32,
-                            );
-                            ctx.render_pass_command.bind_vertex_buffer(
-                                0,
-                                &[
-                                    &mesh_prim.position_component,
-                                    &mesh_prim.color_component,
-                                    &mesh_prim.normal_component,
-                                    &mesh_prim.tangent_component,
-                                    &mesh_prim.uv_component,
-                                ],
-                                &[0, 0, 0, 0, 0],
-                            );
-                            ctx.render_pass_command.push_constant(
-                                &pipeline,
-                                &primitive.transform,
-                                0,
-                            );
-                            ctx.render_pass_command
-                                .draw_indexed(mesh_prim.index_count, 1, 0, 0, 0);
-
-                            primitive_label.end();
-                        }
-                        primitive_label.end();
-                    }
-                }
-            }
+            Self::main_render_loop(
+                &self.resource_map,
+                PipelineTarget::ColorAndDepth,
+                &draw_hashmap,
+                ctx,
+            );
         });
 
         context.register_callback(&combine_pass, |_: &Gpu, ctx| {
@@ -879,7 +843,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 .get(&PipelineTarget::DepthOnly)
                 .unwrap(),
         );
-        
+
         context.inject_external_image(&swapchain_image, image, view);
         context.injext_external_buffer(&camera_buffer, &current_buffers.camera_buffer);
         context.injext_external_buffer(&light_buffer, &current_buffers.light_buffer);
