@@ -1,10 +1,5 @@
-use anymap::AnyMap;
-use std::{
-    cell::RefCell,
-    marker::PhantomData,
-    rc::Rc,
-    sync::{Arc, Weak},
-};
+use std::fmt::Formatter;
+use std::{cell::RefCell, marker::PhantomData, rc::Rc};
 use thunderdome::{Arena, Index};
 
 pub trait Resource {
@@ -17,23 +12,16 @@ pub(crate) struct ResourceId {
     pub(crate) id: Index,
 }
 
-pub struct ResourceMapState {
-    types_map: AnyMap,
-    resources: usize,
+pub struct ResourceMap {
+    map: RefCell<anymap::AnyMap>,
 }
 
-impl Default for ResourceMapState {
+impl Default for ResourceMap {
     fn default() -> Self {
         Self {
-            types_map: AnyMap::new(),
-            resources: 0,
+            map: RefCell::new(anymap::AnyMap::new()),
         }
     }
-}
-
-#[derive(Default)]
-pub struct ResourceMap {
-    map: Arc<RefCell<ResourceMapState>>,
 }
 
 pub struct ResourceHandle<R>
@@ -44,7 +32,13 @@ where
     pub(crate) id: ResourceId,
     pub(crate) reference_counter: Rc<RefCell<u32>>,
 
-    resource_map: Weak<RefCell<ResourceMapState>>,
+    owner_arena: Rc<RefCell<Arena<R>>>,
+}
+
+impl<R: Resource + 'static> std::fmt::Debug for ResourceHandle<R> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.id.id.fmt(f)
+    }
 }
 
 impl<R: Resource + 'static> ResourceHandle<R> {
@@ -81,7 +75,7 @@ impl<R: Resource + 'static> Clone for ResourceHandle<R> {
             _marker: self._marker,
             id: self.id,
             reference_counter: self.reference_counter.clone(),
-            resource_map: self.resource_map.clone(),
+            owner_arena: self.owner_arena.clone(),
         }
     }
 }
@@ -90,39 +84,49 @@ impl<R: Resource + 'static> Drop for ResourceHandle<R> {
     fn drop(&mut self) {
         let ref_count = self.dec_ref_count();
         if ref_count == 0 {
-            if let Some(map) = self.resource_map.upgrade() {
-                let mut map = map.borrow_mut();
-                map.resources -= 1;
-                let arena = map.types_map.get_mut::<Arena<R>>().unwrap();
-                arena.remove(self.id.id).expect("Failed to remove resource");
-            }
-            // else the map has been dropped before the ids
+            let arena = self.owner_arena.clone();
+            arena
+                .borrow_mut()
+                .remove(self.id.id)
+                .expect("Failed to remove resource");
         }
     }
 }
 
 impl ResourceMap {
     pub fn new() -> Self {
-        let state = ResourceMapState {
-            types_map: anymap::AnyMap::new(),
-            resources: 0,
-        };
-
-        Self {
-            map: Arc::new(RefCell::new(state)),
-        }
+        Self::default()
     }
 
-    pub fn add<R: Resource + 'static>(&self, resource: R) -> ResourceHandle<R> {
-        self.map.borrow_mut().resources += 1;
-        let store = self.get_arena::<R>();
-        let id = store.insert(resource);
+    pub fn add<R: Resource + 'static>(&mut self, resource: R) -> ResourceHandle<R> {
+        let handle = self.get_arena_mut::<R>();
+        let id = handle.insert(resource);
         ResourceHandle {
             _marker: PhantomData,
             id: ResourceId { id },
             reference_counter: Rc::new(RefCell::new(1)),
-            resource_map: Arc::downgrade(&self.map),
+            owner_arena: self.get_arena_handle::<R>(),
         }
+    }
+
+    fn get_arena_handle<R: Resource + 'static>(&self) -> Rc<RefCell<Arena<R>>> {
+        self.map
+            .borrow_mut()
+            .entry::<Rc<RefCell<Arena<R>>>>()
+            .or_insert_with(|| Rc::new(RefCell::new(Arena::new())))
+            .clone()
+    }
+
+    fn get_arena<R: Resource + 'static>(&self) -> &Arena<R> {
+        let handle = self.get_arena_handle::<R>();
+        let ptr = handle.as_ptr();
+        unsafe { &*ptr }
+    }
+
+    fn get_arena_mut<R: Resource + 'static>(&mut self) -> &mut Arena<R> {
+        let handle = self.get_arena_handle::<R>();
+        let ptr = handle.as_ptr();
+        unsafe { &mut *ptr }
     }
 
     pub fn get<R: Resource + 'static>(&self, id: &ResourceHandle<R>) -> &R {
@@ -134,42 +138,28 @@ impl ResourceMap {
     }
 
     pub fn try_get<R: Resource + 'static>(&self, id: &ResourceHandle<R>) -> Option<&R> {
-        let arena_ref = self.get_arena();
-        arena_ref.get(id.id.id)
+        let arena_handle = self.get_arena();
+        arena_handle.get(id.id.id)
     }
 
     pub fn try_get_mut<R: Resource + 'static>(&mut self, id: &ResourceHandle<R>) -> Option<&mut R> {
-        let arena_ref = self.get_arena();
-        arena_ref.get_mut(id.id.id)
-    }
-
-    pub fn len_total(&self) -> usize {
-        self.map.borrow().resources
+        let arena_handle = self.get_arena_mut();
+        arena_handle.get_mut(id.id.id)
     }
 
     pub fn len<R: Resource + 'static>(&self) -> usize {
-        self.get_arena::<R>().len()
+        self.get_arena_handle::<R>().borrow().len()
     }
 
     pub fn is_empty<R: Resource + 'static>(&self) -> bool {
-        self.get_arena::<R>().is_empty()
-    }
-
-    fn get_arena<R: Resource + 'static>(&self) -> &mut Arena<R> {
-        let map: *mut ResourceMapState = self.map.as_ptr();
-        let map = unsafe { map.as_mut().expect("Failed to dereference map pointer") };
-
-        if !map.types_map.contains::<Arena<R>>() {
-            map.types_map.insert(Arena::<R>::new());
-        }
-
-        map.types_map.get_mut::<Arena<R>>().unwrap()
+        self.get_arena_handle::<R>().borrow().is_empty()
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::{Resource, ResourceMap};
+    use crate::ResourceHandle;
 
     struct TestResource {
         val: u32,
@@ -192,15 +182,15 @@ mod test {
 
     #[test]
     fn test_get() {
-        let map: ResourceMap = ResourceMap::new();
-        let id: super::ResourceHandle<TestResource> = map.add(TestResource { val: 10 });
+        let mut map: ResourceMap = ResourceMap::new();
+        let id: ResourceHandle<TestResource> = map.add(TestResource { val: 10 });
 
         assert_eq!(map.get(&id).val, 10);
     }
 
     #[test]
     fn test_drop() {
-        let map = ResourceMap::new();
+        let mut map = ResourceMap::new();
         let id_2 = map.add(TestResource { val: 14 });
         let id_3 = map.add(TestResource2 { val2: 142 });
         {
@@ -220,7 +210,7 @@ mod test {
     #[test]
     fn test_shuffle_memory() {
         let (mut map, id_2) = {
-            let map = ResourceMap::new();
+            let mut map = ResourceMap::new();
             let id_2 = map.add(TestResource { val: 14 });
             (map, id_2)
         };
@@ -245,12 +235,50 @@ mod test {
 
     #[test]
     fn test_other_map() {
-        let map_1 = ResourceMap::new();
+        let mut map_1 = ResourceMap::new();
         let id_1 = map_1.add(TestResource { val: 1 });
         drop(map_1);
 
         let map_2 = ResourceMap::new();
         let value = map_2.try_get(&id_1);
         assert!(value.is_none());
+    }
+
+    #[test]
+    fn nested_resources() {
+        struct B;
+        impl Resource for B {
+            fn get_description(&self) -> &str {
+                "B"
+            }
+        }
+
+        struct A {
+            handle_1: ResourceHandle<B>,
+            handle_2: ResourceHandle<B>,
+        }
+        impl Resource for A {
+            fn get_description(&self) -> &str {
+                "A"
+            }
+        }
+
+        let mut map = ResourceMap::new();
+        let h1 = map.add(B);
+        let h2 = map.add(B);
+
+        let ha = map.add(A {
+            handle_1: h1.clone(),
+            handle_2: h2.clone(),
+        });
+
+        assert_eq!(map.get(&ha).handle_1, h1);
+        assert_eq!(map.get(&ha).handle_2, h2);
+
+        drop(ha);
+        drop(h1);
+        drop(h2);
+        assert!(map.get_arena::<A>().is_empty());
+        assert!(map.get_arena::<B>().is_empty());
     }
 }
