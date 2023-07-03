@@ -479,7 +479,7 @@ impl App for GLTFViewer {
         engine::app_state_mut()
             .gpu
             .swapchain_mut()
-            .select_present_mode(PresentModeKHR::MAILBOX)?;
+            .select_present_mode(PresentModeKHR::IMMEDIATE)?;
 
         Ok(Self {
             resource_map,
