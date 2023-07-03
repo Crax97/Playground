@@ -96,7 +96,7 @@ impl Mesh {
                 gpu.write_buffer_data(&tangent_component, &create_info.tangents)?;
                 let uv_component = gpu.create_buffer(
                     &BufferCreateInfo {
-                        label: Some(&(label.clone() + ": TexCoord[0] buffer")),
+                        label: Some(&(label + ": TexCoord[0] buffer")),
                         size: std::mem::size_of::<Vector2<f32>>() * create_info.uvs.len().max(1),
                         usage: BufferUsageFlags::VERTEX_BUFFER,
                     },

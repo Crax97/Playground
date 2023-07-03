@@ -50,7 +50,7 @@ pub fn app_loop<A: App + 'static>(
         winit::event::Event::RedrawRequested(..) => {
             app_state_mut.begin_frame().unwrap();
 
-            let window_name = app.window_name(&app_state_mut);
+            let window_name = app.window_name(app_state_mut);
 
             app_state_mut
                 .gpu

@@ -185,8 +185,8 @@ impl App for PlanesApp {
             transform: Matrix4::new_translation(&vector![0.0, 0.0, 1.0]),
         });
         scene.add(ScenePrimitive {
-            mesh: mesh.clone(),
-            materials: vec![mat_instance.clone()],
+            mesh,
+            materials: vec![mat_instance],
             transform: Matrix4::new_translation(&vector![0.0, 0.0, -1.0]),
         });
         Ok(Self {
@@ -227,7 +227,7 @@ impl App for PlanesApp {
                     * delta.0.signum() as f32
                     * ROTATION_SPEED;
                 self.movement.y = (delta.1.abs() as f32 - MIN_DELTA).max(0.0)
-                    * delta.1.signum() as f32 as f32
+                    * delta.1.signum() as f32
                     * ROTATION_SPEED;
             }
             _ => {}

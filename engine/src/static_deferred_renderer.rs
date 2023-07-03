@@ -130,11 +130,10 @@ impl DeferredRenderingPipeline {
                     size: std::mem::size_of::<PerFrameData>(),
                     usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
                 };
-                let buffer = gpu.create_buffer(
+                gpu.create_buffer(
                     &create_info,
                     MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
-                )?;
-                buffer
+                )?
             };
             let light_buffer = {
                 let create_info = BufferCreateInfo {
@@ -144,11 +143,10 @@ impl DeferredRenderingPipeline {
                         | BufferUsageFlags::STORAGE_BUFFER
                         | BufferUsageFlags::TRANSFER_DST,
                 };
-                let buffer = gpu.create_buffer(
+                gpu.create_buffer(
                     &create_info,
                     MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
-                )?;
-                buffer
+                )?
             };
             frame_buffers.push(FrameBuffers {
                 camera_buffer,
@@ -188,7 +186,7 @@ impl DeferredRenderingPipeline {
                     PipelineBindPoint::GRAPHICS,
                     pipeline,
                     0,
-                    &[&ctx.read_descriptor_set.expect("No descriptor set???")],
+                    &[ctx.read_descriptor_set.expect("No descriptor set???")],
                 );
 
                 for (idx, draw_call) in material_draw_calls.iter().enumerate() {
@@ -224,7 +222,7 @@ impl DeferredRenderingPipeline {
                         &[0, 0, 0, 0, 0],
                     );
                     ctx.render_pass_command
-                        .push_constant(&pipeline, &draw_call.transform, 0);
+                        .push_constant(pipeline, &draw_call.transform, 0);
                     ctx.render_pass_command
                         .draw_indexed(draw_call.prim.index_count, 1, 0, 0, 0);
 
@@ -255,7 +253,7 @@ impl DeferredRenderingPipeline {
                 let material = resource_map.get(&material_handle);
                 let master = resource_map.get(&material.owner);
                 draw_hashmap.entry(master).or_default().push(DrawCall {
-                    prim: &mesh_prim,
+                    prim: mesh_prim,
                     transform: primitive.transform,
                     material: material_handle,
                 });
@@ -274,7 +272,7 @@ impl DeferredRenderingMaterialContext {
         let mut render_passes: HashMap<PipelineTarget, RenderPass> = HashMap::new();
 
         let depth_only_render_pass = RenderPass::new(
-            &gpu,
+            gpu,
             &RenderPassDescription {
                 attachments: &[RenderPassAttachment {
                     format: ImageFormat::Depth.to_vk(),
@@ -448,7 +446,7 @@ impl DeferredRenderingMaterialContext {
             },
         ];
         let surface_render_pass = RenderPass::new(
-            &gpu,
+            gpu,
             &RenderPassDescription {
                 attachments,
                 subpasses: &[SubpassDescription {
@@ -740,7 +738,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     },
                     logic_op: None,
                     push_constant_ranges: &[],
-                    ..Default::default()
                 },
             },
         )?;
@@ -779,7 +776,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     },
                     logic_op: None,
                     push_constant_ranges: &[],
-                    ..Default::default()
                 },
             },
         )?;

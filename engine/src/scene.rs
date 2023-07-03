@@ -50,6 +50,7 @@ pub struct Light {
 #[derive(Clone, Copy, Eq, Ord, PartialOrd, PartialEq)]
 pub struct LightHandle(usize);
 
+#[derive(Default)]
 pub struct Scene {
     pub primitives: Vec<ScenePrimitive>,
     pub lights: Vec<Light>,

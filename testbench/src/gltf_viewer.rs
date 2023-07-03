@@ -277,7 +277,7 @@ impl GLTFViewer {
             let material_instance = MaterialInstance::create_instance(
                 &app_state.gpu,
                 pbr_master.clone(),
-                &resource_map,
+                resource_map,
                 &MaterialInstanceDescription {
                     name: "MateInstance xd",
                     texture_inputs,
@@ -516,7 +516,7 @@ impl App for GLTFViewer {
                     * delta.0.signum() as f32
                     * ROTATION_SPEED;
                 self.movement.y = (delta.1.abs() as f32 - MIN_DELTA).max(0.0)
-                    * delta.1.signum() as f32 as f32
+                    * delta.1.signum() as f32
                     * ROTATION_SPEED;
             }
             _ => {}

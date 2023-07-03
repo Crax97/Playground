@@ -41,7 +41,7 @@ impl MaterialInstance {
     ) -> anyhow::Result<MaterialInstance> {
         let master_owner = resource_map.get(&owner);
 
-        let parameter_buffer = if master_owner.material_parameters.len() > 0 {
+        let parameter_buffer = if !master_owner.material_parameters.is_empty() {
             Some(gpu.create_buffer(
                 &BufferCreateInfo {
                     label: Some(&format!("{} - Parameter buffer", description.name)),

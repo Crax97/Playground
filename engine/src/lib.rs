@@ -48,7 +48,7 @@ static mut STATE: GlobalState = GlobalState::UNINIT;
 pub fn init(app_name: &str, window: winit::window::Window) -> anyhow::Result<()> {
     unsafe {
         assert!(
-            STATE.app == std::ptr::null_mut(),
+            STATE.app.is_null(),
             "Application can only be initialized once!"
         );
 
@@ -77,11 +77,12 @@ pub fn init(app_name: &str, window: winit::window::Window) -> anyhow::Result<()>
 pub fn app_state() -> &'static AppState {
     unsafe {
         assert!(
-            STATE.app != std::ptr::null_mut(),
+            !STATE.app.is_null(),
             "Application has not been initialized!"
         );
-        assert!(
-            std::thread::current().id() == STATE.creator_id.unwrap(),
+        assert_eq!(
+            std::thread::current().id(),
+            STATE.creator_id.unwrap(),
             "Tried to access app state from a thread that is not the main thread!"
         );
         &*STATE.app
@@ -91,11 +92,12 @@ pub fn app_state() -> &'static AppState {
 pub fn app_state_mut() -> &'static mut AppState {
     unsafe {
         assert!(
-            STATE.app != std::ptr::null_mut(),
+            !STATE.app.is_null(),
             "Application has not been initialized!"
         );
-        assert!(
-            std::thread::current().id() == STATE.creator_id.unwrap(),
+        assert_eq!(
+            std::thread::current().id(),
+            STATE.creator_id.unwrap(),
             "Tried to access app state from a thread that is not the main thread!"
         );
         &mut *STATE.app

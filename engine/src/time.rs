@@ -12,7 +12,7 @@ impl Time {
     pub(crate) fn new() -> Self {
         let now = Instant::now();
         Self {
-            app_start: now.clone(),
+            app_start: now,
             last_frame: now,
             delta: 0.0,
             since_app_start: 0.0,

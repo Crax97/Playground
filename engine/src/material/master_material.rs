@@ -73,7 +73,7 @@ impl MasterMaterial {
         Ok(MasterMaterial {
             name: description.name.to_owned(),
             pipelines,
-            texture_inputs: description.texture_inputs.iter().cloned().collect(),
+            texture_inputs: description.texture_inputs.to_vec(),
             material_parameters: description.material_parameters.clone(),
             parameter_block_size,
         })
@@ -105,7 +105,7 @@ impl MasterMaterial {
                 stage: gpu::ShaderStage::VertexFragment,
             })
             .collect();
-        if description.material_parameters.len() > 0 {
+        if !description.material_parameters.is_empty() {
             user_elements.push(BindingElement {
                 binding_type: BindingType::Uniform,
                 index: user_elements.len() as _,
@@ -129,9 +129,9 @@ impl MasterMaterial {
                         },
                     ],
                     vertex_inputs: Self::get_inputs_for_material_domain(&description.domain),
-                    vertex_stage: Some(description.vertex_info.clone()),
+                    vertex_stage: Some(*description.vertex_info),
                     fragment_stage: match target {
-                        PipelineTarget::ColorAndDepth => Some(description.fragment_info.clone()),
+                        PipelineTarget::ColorAndDepth => Some(*description.fragment_info),
                         PipelineTarget::DepthOnly => None,
                     },
                     input_topology: gpu::PrimitiveTopology::TriangleList,
@@ -174,7 +174,7 @@ impl MasterMaterial {
     fn get_inputs_for_material_domain(
         domain: &MaterialDomain,
     ) -> &'static [gpu::VertexBindingDescription<'static>] {
-        static SURFACE_INPUTS: &'static [VertexBindingDescription] = &[
+        static SURFACE_INPUTS: &[VertexBindingDescription] = &[
             VertexBindingDescription {
                 binding: 0,
                 input_rate: gpu::InputRate::PerVertex,
