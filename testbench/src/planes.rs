@@ -2,6 +2,7 @@ mod app;
 mod utils;
 
 use std::{io::BufReader, rc::Rc};
+use std::collections::HashMap;
 
 use app::{bootstrap, App};
 use ash::vk::{ImageLayout, PresentModeKHR};
@@ -153,7 +154,9 @@ impl App for PlanesApp {
                 material_parameters: Default::default(),
             },
         )?;
-
+        
+        let mut texture_inputs = HashMap::new();
+        texture_inputs.insert("texSampler".to_owned(), texture);
         let material = resource_map.add(master);
         let mat_instance = MaterialInstance::create_instance(
             &app_state.gpu,
@@ -161,7 +164,7 @@ impl App for PlanesApp {
             &resource_map,
             &MaterialInstanceDescription {
                 name: "simple inst",
-                texture_inputs: &[&texture],
+                texture_inputs,
             },
         )?;
         let mat_instance = resource_map.add(mat_instance);
