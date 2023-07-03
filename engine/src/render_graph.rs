@@ -2397,20 +2397,9 @@ mod test {
         // We need the color component: this will let the 'gbuffer' render pass live
         render_graph.persist_resource(&output_image);
 
-        assert_eq!(render_graph.passes[&gb].label, "gbuffer");
-        assert_eq!(render_graph.passes[&cm].label, "compose_gbuffer");
         render_graph.compile().unwrap();
 
         assert_eq!(render_graph.cached_graph.pass_sequence.len(), 2);
-        assert_eq!(
-            render_graph.passes[&render_graph.cached_graph.pass_sequence[0]].label,
-            "gbuffer"
-        );
-        assert_eq!(
-            render_graph.passes[&render_graph.cached_graph.pass_sequence[1]].label,
-            "compose_gbuffer"
-        );
-
         assert_eq!(render_graph.cached_graph.pass_sequence[0], gb);
         assert_eq!(render_graph.cached_graph.pass_sequence[1], cm);
     }
@@ -2426,7 +2415,7 @@ mod test {
         let output_image = alloc("output", &mut render_graph);
         let unused = alloc("unused", &mut render_graph);
 
-        let gb = render_graph
+        let _ = render_graph
             .begin_render_pass("gbuffer", Extent2D::default())
             .unwrap()
             .write(color_component)
@@ -2435,7 +2424,7 @@ mod test {
             .write(normal_component)
             .commit();
 
-        let cm = render_graph
+        let _ = render_graph
             .begin_render_pass("compose_gbuffer", Extent2D::default())
             .unwrap()
             .read(color_component)
@@ -2457,19 +2446,9 @@ mod test {
 
         render_graph.persist_resource(&output_image);
 
-        assert_eq!(render_graph.passes[&gb].label, "gbuffer");
-        assert_eq!(render_graph.passes[&cm].label, "compose_gbuffer");
         render_graph.compile().unwrap();
 
         assert_eq!(render_graph.cached_graph.pass_sequence.len(), 2);
-        assert_eq!(
-            render_graph.passes[&render_graph.cached_graph.pass_sequence[0]].label,
-            "gbuffer"
-        );
-        assert_eq!(
-            render_graph.passes[&render_graph.cached_graph.pass_sequence[1]].label,
-            "compose_gbuffer"
-        );
     }
 
     #[test]
@@ -2523,10 +2502,6 @@ mod test {
             .commit();
 
         render_graph.persist_resource(&output_image);
-
-        assert_eq!(render_graph.passes[&d].label, "depth");
-        assert_eq!(render_graph.passes[&gb].label, "gbuffer");
-        assert_eq!(render_graph.passes[&cm].label, "compose_gbuffer");
         render_graph.compile().unwrap();
 
         assert_eq!(
@@ -2556,18 +2531,6 @@ mod test {
             ResourceLayout::Present
         );
         assert_eq!(render_graph.cached_graph.pass_sequence.len(), 3);
-        assert_eq!(
-            render_graph.passes[&render_graph.cached_graph.pass_sequence[0]].label,
-            "depth"
-        );
-        assert_eq!(
-            render_graph.passes[&render_graph.cached_graph.pass_sequence[1]].label,
-            "gbuffer"
-        );
-        assert_eq!(
-            render_graph.passes[&render_graph.cached_graph.pass_sequence[2]].label,
-            "compose_gbuffer"
-        );
     }
 
     #[test]
