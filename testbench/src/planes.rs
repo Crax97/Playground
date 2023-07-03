@@ -1,18 +1,17 @@
 mod app;
 mod utils;
 
-use std::{io::BufReader, rc::Rc};
 use std::collections::HashMap;
+use std::{io::BufReader, rc::Rc};
 
 use app::{bootstrap, App};
-use ash::vk::{ImageLayout, PresentModeKHR};
+use ash::vk::PresentModeKHR;
 
 use engine::{
-    Camera, DeferredRenderingPipeline, MasterMaterialDescription, MaterialDescription,
-    MaterialDomain, MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo,
-    MeshPrimitiveCreateInfo, RenderingPipeline, Scene, ScenePrimitive, Texture, TextureInput,
+    Camera, DeferredRenderingPipeline, MaterialDescription, MaterialDomain, MaterialInstance,
+    MaterialInstanceDescription, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo, RenderingPipeline,
+    Scene, ScenePrimitive, Texture, TextureInput,
 };
-use gpu::{DescriptorType, SamplerState, VertexStageInfo};
 use nalgebra::*;
 use resource_map::ResourceMap;
 use winit::event::ElementState;
@@ -154,7 +153,7 @@ impl App for PlanesApp {
                 material_parameters: Default::default(),
             },
         )?;
-        
+
         let mut texture_inputs = HashMap::new();
         texture_inputs.insert("texSampler".to_owned(), texture);
         let material = resource_map.add(master);

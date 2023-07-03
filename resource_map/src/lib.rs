@@ -21,6 +21,7 @@ pub struct ResourceMapState {
     resources: usize,
 }
 
+#[derive(Default)]
 pub struct ResourceMap {
     map: Arc<RefCell<ResourceMapState>>,
 }
@@ -39,13 +40,13 @@ where
 impl<R: Resource + 'static> ResourceHandle<R> {
     fn inc_ref_count(&self) -> u32 {
         let mut counter = self.reference_counter.borrow_mut();
-        *counter = *counter + 1;
+        *counter += 1;
         *counter
     }
 
     fn dec_ref_count(&self) -> u32 {
         let mut counter = self.reference_counter.borrow_mut();
-        *counter = *counter - 1;
+        *counter -= 1;
         *counter
     }
 }
@@ -68,7 +69,7 @@ impl<R: Resource + 'static> Clone for ResourceHandle<R> {
         self.inc_ref_count();
         Self {
             _marker: self._marker,
-            id: self.id.clone(),
+            id: self.id,
             reference_counter: self.reference_counter.clone(),
             resource_map: self.resource_map.clone(),
         }
@@ -138,6 +139,10 @@ impl ResourceMap {
 
     pub fn len<R: Resource + 'static>(&self) -> usize {
         self.get_arena::<R>().len()
+    }
+
+    pub fn is_empty<R: Resource + 'static>(&self) -> bool {
+        self.get_arena::<R>().is_empty()
     }
 
     fn get_arena<R: Resource + 'static>(&self) -> &mut Arena<R> {

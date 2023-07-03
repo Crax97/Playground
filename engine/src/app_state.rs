@@ -1,5 +1,5 @@
 use ash::prelude::VkResult;
-use gpu::{Gpu, Swapchain};
+use gpu::Gpu;
 
 use crate::Time;
 

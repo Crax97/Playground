@@ -1,11 +1,10 @@
 use std::{collections::HashMap, hash::Hash, mem::size_of, num::NonZeroU32};
 
-use ash::vk::{self, CompareOp, PushConstantRange, StencilOp};
+use ash::vk::{self, CompareOp, PushConstantRange};
 use gpu::{
-    BindingElement, BindingType, CullMode, DepthStencilState, DescriptorInfo, DescriptorSetInfo,
-    DescriptorType, FragmentStageInfo, FrontFace, GlobalBinding, Gpu, GpuDescriptorSet, LogicOp,
-    Pipeline, PipelineDescription, PolygonMode, RenderPass, VertexAttributeDescription,
-    VertexBindingDescription, VertexStageInfo,
+    BindingElement, BindingType, CullMode, DepthStencilState, FragmentStageInfo, FrontFace,
+    GlobalBinding, Gpu, LogicOp, Pipeline, PipelineDescription, PolygonMode, RenderPass,
+    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
 use nalgebra::{Vector2, Vector3};
 use resource_map::Resource;

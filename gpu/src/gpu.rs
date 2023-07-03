@@ -1,8 +1,6 @@
-use std::rc::Rc;
 use std::{
     cell::RefCell,
     ffi::{c_void, CStr, CString},
-    path::Path,
     ptr::{addr_of, null},
     sync::Arc,
 };

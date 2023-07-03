@@ -3,8 +3,7 @@ mod material_instance;
 
 use std::collections::HashMap;
 
-use ash::prelude::VkResult;
-use gpu::{Gpu, GpuShaderModule, ImageFormat};
+use gpu::{GpuShaderModule, ImageFormat};
 pub use material_instance::*;
 
 pub use master_material::*;

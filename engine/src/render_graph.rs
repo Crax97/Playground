@@ -20,7 +20,7 @@ use gpu::{
     DescriptorInfo, DescriptorSetInfo, FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet,
     GpuFramebuffer, GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, ImageFormat,
     ImageViewCreateInfo, MemoryDomain, Pipeline, RenderPass, RenderPassAttachment,
-    RenderPassCommand, RenderPassDescription, SubpassDescription, Swapchain, ToVk, TransitionInfo,
+    RenderPassCommand, RenderPassDescription, SubpassDescription, ToVk, TransitionInfo,
 };
 
 use ash::vk::PushConstantRange;
@@ -1637,8 +1637,9 @@ impl RenderGraph {
             .is_some()
     }
 
-    fn find_merge_candidates(&self, compiled: &mut CompiledRenderGraph) -> Vec<Vec<usize>> {
+    fn find_merge_candidates(&self, _compiled: &mut CompiledRenderGraph) -> Vec<Vec<usize>> {
         return vec![];
+        /*
         let mut passes: Vec<_> = compiled.pass_sequence.iter().enumerate().collect();
 
         let mut merge_candidates = vec![];
@@ -1668,6 +1669,7 @@ impl RenderGraph {
         }
 
         merge_candidates
+        */
     }
 
     fn find_optimal_execution_order(

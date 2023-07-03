@@ -1,12 +1,12 @@
 mod app;
 mod utils;
 
-use std::{collections::HashMap, mem::size_of, rc::Rc};
+use std::{collections::HashMap, mem::size_of};
 
 use app::{bootstrap, App};
 use ash::vk::{
-    BufferUsageFlags, ComponentMapping, Filter, ImageAspectFlags, ImageSubresourceRange,
-    ImageUsageFlags, ImageViewType, PresentModeKHR, SamplerAddressMode, SamplerCreateInfo,
+    ComponentMapping, Filter, ImageAspectFlags, ImageSubresourceRange, ImageUsageFlags,
+    ImageViewType, PresentModeKHR, SamplerAddressMode, SamplerCreateInfo,
 };
 
 use engine::{
@@ -15,7 +15,7 @@ use engine::{
     MaterialParameterOffsetSize, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo, RenderingPipeline,
     SamplerResource, Scene, ScenePrimitive, Texture, TextureImageView, TextureInput,
 };
-use gpu::{BufferCreateInfo, ImageCreateInfo, ImageViewCreateInfo, MemoryDomain, ToVk};
+use gpu::{ImageCreateInfo, ImageViewCreateInfo, MemoryDomain, ToVk};
 use nalgebra::*;
 use resource_map::{ResourceHandle, ResourceMap};
 use winit::event::ElementState;
@@ -39,7 +39,7 @@ pub struct PbrProperties {
 }
 
 pub struct GLTFViewer {
-    resource_map: Rc<ResourceMap>,
+    resource_map: ResourceMap,
     camera: Camera,
     forward_movement: f32,
     rotation_movement: f32,
@@ -57,7 +57,7 @@ impl GLTFViewer {
     fn read_gltf(
         app_state: &AppState,
         scene_renderer: &mut dyn RenderingPipeline,
-        resource_map: Rc<ResourceMap>,
+        resource_map: &mut ResourceMap,
         white: &ResourceHandle<Texture>,
         black: &ResourceHandle<Texture>,
         path: &str,
@@ -377,7 +377,6 @@ impl GLTFViewer {
                     * Matrix4::new_nonuniform_scaling(&Vector3::from_row_slice(&scale))
                     * rot_matrix;
 
-                let determinant = transform.determinant();
                 if let Some(mesh) = node.mesh() {
                     let mut materials = vec![];
                     for prim in mesh.primitives() {
@@ -393,24 +392,24 @@ impl GLTFViewer {
                 }
             }
         }
-        
+
         Ok(engine_scene)
     }
 }
 
 impl App for GLTFViewer {
-    fn window_name(&self, app_state: &engine::AppState) -> String {
+    fn window_name(&self, app_state: &AppState) -> String {
         format!(
             "GLTF Viewer - FPS {}",
             1.0 / app_state.time().delta_frame().max(0.0000001)
         )
     }
 
-    fn create(app_state: &engine::AppState) -> anyhow::Result<Self>
+    fn create(app_state: &AppState) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
-        let resource_map = Rc::new(ResourceMap::new());
+        let mut resource_map = ResourceMap::new();
 
         let camera = Camera {
             location: point![2.0, 2.0, 2.0],
@@ -437,7 +436,6 @@ impl App for GLTFViewer {
 
         let mut scene_renderer = DeferredRenderingPipeline::new(
             &app_state.gpu,
-            resource_map.clone(),
             screen_quad_module,
             gbuffer_combine_module,
             texture_copy_module,
@@ -445,7 +443,7 @@ impl App for GLTFViewer {
 
         let white_texture = Texture::new_with_data(
             &app_state.gpu,
-            &resource_map,
+            &mut resource_map,
             1,
             1,
             &[255, 255, 255, 255],
@@ -454,7 +452,7 @@ impl App for GLTFViewer {
         let white_texture = resource_map.add(white_texture);
         let black_texture = Texture::new_with_data(
             &app_state.gpu,
-            &resource_map,
+            &mut resource_map,
             1,
             1,
             &[0, 0, 0, 255],
@@ -465,7 +463,7 @@ impl App for GLTFViewer {
         let mut scene = Self::read_gltf(
             app_state,
             &mut scene_renderer,
-            resource_map.clone(),
+            &mut resource_map,
             &white_texture,
             &black_texture,
             "gltf_models/Sponza/glTF/Sponza.gltf",
@@ -496,7 +494,7 @@ impl App for GLTFViewer {
 
     fn input(
         &mut self,
-        _app_state: &engine::AppState,
+        _app_state: &AppState,
         event: winit::event::DeviceEvent,
     ) -> anyhow::Result<()> {
         match event {
@@ -526,15 +524,7 @@ impl App for GLTFViewer {
         Ok(())
     }
 
-    fn draw(&mut self, app_state: &mut engine::AppState) -> anyhow::Result<()> {
-        self.scene_renderer
-            .render(&self.camera, &self.scene, app_state.gpu.swapchain_mut())
-            .unwrap();
-
-        Ok(())
-    }
-
-    fn update(&mut self, _app_state: &mut engine::AppState) -> anyhow::Result<()> {
+    fn update(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
         if self.rotation_movement > 0.0 {
             self.rot_y += self.movement.x;
             self.rot_x += -self.movement.y;
@@ -555,6 +545,19 @@ impl App for GLTFViewer {
 
         let direction = vector![new_forward[0], new_forward[1], new_forward[2]];
         self.camera.forward = -direction;
+        Ok(())
+    }
+
+    fn draw(&mut self, app_state: &mut AppState) -> anyhow::Result<()> {
+        self.scene_renderer
+            .render(
+                &self.camera,
+                &self.scene,
+                app_state.gpu.swapchain_mut(),
+                &self.resource_map,
+            )
+            .unwrap();
+
         Ok(())
     }
 }

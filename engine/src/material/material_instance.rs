@@ -1,4 +1,3 @@
-use ash::prelude::VkResult;
 use ash::vk::{self, BufferUsageFlags, ImageLayout};
 use gpu::{
     BufferCreateInfo, BufferRange, DescriptorInfo, DescriptorSetInfo, DescriptorType, Gpu,
@@ -22,6 +21,7 @@ pub struct MaterialInstance {
     pub(crate) owner: ResourceHandle<MasterMaterial>,
     pub(crate) parameter_buffer: Option<GpuBuffer>,
     pub(crate) user_descriptor_set: GpuDescriptorSet,
+    #[allow(dead_code)]
     pub(crate) current_inputs: HashMap<String, ResourceHandle<Texture>>,
     pub(crate) parameter_block_size: usize,
 }

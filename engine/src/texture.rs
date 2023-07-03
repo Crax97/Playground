@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use ash::{
     prelude::VkResult,
     vk::{
@@ -101,7 +99,7 @@ impl Texture {
 
     pub fn new_empty(
         gpu: &Gpu,
-        resource_map: &Rc<ResourceMap>,
+        resource_map: &mut ResourceMap,
         width: u32,
         height: u32,
         label: Option<&str>,
@@ -118,7 +116,7 @@ impl Texture {
     }
     pub fn new_with_data(
         gpu: &Gpu,
-        resource_map: &Rc<ResourceMap>,
+        resource_map: &mut ResourceMap,
         width: u32,
         height: u32,
         data: &[u8],

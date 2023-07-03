@@ -42,7 +42,7 @@ fn recompile_all_shaders() {
             content,
         })
     });
-    for file in shader_folder {
+    for file in shader_folder.flatten() {
         if let Ok(file) = file {
             let fty = file.file_type().expect("Could not get filetype");
             if fty.is_dir() {
@@ -54,7 +54,7 @@ fn recompile_all_shaders() {
                 .file_stem()
                 .expect("Failed to get file name")
                 .to_string_lossy();
-            let new_name = name.to_owned() + ".spirv";
+            let new_name = name + ".spirv";
             let new_name = out_shader_path
                 .join(std::path::Path::new(&new_name.to_string()))
                 .to_owned();
@@ -78,12 +78,10 @@ fn recompile_all_shaders() {
 
             match compiled {
                 Ok(new) => std::fs::write(new_name, new.as_binary_u8()).unwrap(),
-                Err(e) => panic!(
-                    "Failed to compile shader {}! Error: {}",
-                    name,
-                    e.to_string()
-                ),
+                Err(e) => panic!("Failed to compile shader {}! Error: {}", name, e),
             }
+        } else {
+            println!("Failed to open shader folder!");
         }
     }
 }

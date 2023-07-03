@@ -1,7 +1,6 @@
-use ash::prelude::VkResult;
 use gpu::{Gpu, Swapchain};
 use nalgebra::{Matrix4, Vector3};
-use resource_map::ResourceHandle;
+use resource_map::{ResourceHandle, ResourceMap};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -103,6 +102,7 @@ pub trait RenderingPipeline {
         pov: &Camera,
         scene: &Scene,
         swapchain: &mut Swapchain,
+        resource_map: &ResourceMap,
     ) -> anyhow::Result<()>;
 
     fn create_material(

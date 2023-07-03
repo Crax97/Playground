@@ -7,8 +7,8 @@ use ash::{
     vk::{
         self, ComponentMapping, ComponentSwizzle, CompositeAlphaFlagsKHR, Extent2D,
         FenceCreateFlags, FenceCreateInfo, Format, ImageAspectFlags, ImageSubresourceRange,
-        ImageUsageFlags, ImageViewCreateFlags, ImageViewCreateInfo, ImageViewType, PresentInfoKHR,
-        PresentModeKHR, SemaphoreCreateFlags, SemaphoreCreateInfo, SharingMode, StructureType,
+        ImageUsageFlags, ImageViewCreateFlags, ImageViewType, PresentInfoKHR, PresentModeKHR,
+        SemaphoreCreateFlags, SemaphoreCreateInfo, SharingMode, StructureType,
         SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR, SwapchainCreateFlagsKHR,
         SwapchainCreateInfoKHR, SwapchainKHR,
     },
@@ -20,7 +20,7 @@ use winit::window::Window;
 
 use crate::{GpuImage, GpuImageView};
 
-use super::{GPUFence, GPUSemaphore, Gpu, GpuState};
+use super::{GPUFence, GPUSemaphore, GpuState};
 
 mod util {
     use ash::vk::{PresentModeKHR, SurfaceFormatKHR};
