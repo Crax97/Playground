@@ -32,6 +32,12 @@ pub struct GltfLoader {
 
 pub struct GltfLoadOptions {}
 
+struct LoadedTextures {
+    white: ResourceHandle<Texture>,
+    black: ResourceHandle<Texture>,
+    all_textures: Vec<ResourceHandle<Texture>>,
+}
+
 impl GltfLoader {
     pub fn load<P: AsRef<Path>, R: RenderingPipeline>(
         path: P,
@@ -40,26 +46,16 @@ impl GltfLoader {
         resource_map: &mut ResourceMap,
         _options: GltfLoadOptions,
     ) -> anyhow::Result<Self> {
-        let pbr_master = Self::create_master_pbr_material(&gpu, scene_renderer, resource_map)?;
         let (document, buffers, mut images) = gltf::import(path)?;
 
+        let pbr_master = Self::create_master_pbr_material(gpu, scene_renderer, resource_map)?;
         let image_views = Self::load_images(gpu, resource_map, &mut images)?;
         let samplers = Self::load_samplers(gpu, resource_map, &document)?;
-
-        let (white, black, textures) =
-            Self::load_textures(gpu, resource_map, image_views, samplers, &document)?;
-
-        let allocated_materials = Self::load_materials(
-            gpu,
-            resource_map,
-            pbr_master,
-            textures,
-            black,
-            white,
-            &document,
-        )?;
-
+        let textures = Self::load_textures(gpu, resource_map, image_views, samplers, &document)?;
+        let allocated_materials =
+            Self::load_materials(gpu, resource_map, pbr_master, textures, &document)?;
         let meshes = Self::load_meshes(gpu, resource_map, &document, &buffers)?;
+
         let engine_scene = Self::build_engine_scene(document, allocated_materials, meshes);
 
         Ok(Self { engine_scene })
@@ -296,19 +292,15 @@ impl GltfLoader {
         allocated_image_views: Vec<ResourceHandle<TextureImageView>>,
         allocated_samplers: Vec<ResourceHandle<SamplerResource>>,
         document: &Document,
-    ) -> anyhow::Result<(
-        ResourceHandle<Texture>,
-        ResourceHandle<Texture>,
-        Vec<ResourceHandle<Texture>>,
-    )> {
-        let mut allocated_textures = vec![];
+    ) -> anyhow::Result<LoadedTextures> {
+        let mut all_textures = vec![];
         for texture in document.textures() {
-            allocated_textures.push(resource_map.add(Texture {
+            all_textures.push(resource_map.add(Texture {
                 sampler: allocated_samplers[texture.sampler().index().unwrap_or(0)].clone(),
                 image_view: allocated_image_views[texture.source().index()].clone(),
             }))
         }
-        let white_texture = Texture::new_with_data(
+        let white = Texture::new_with_data(
             gpu,
             resource_map,
             1,
@@ -316,8 +308,8 @@ impl GltfLoader {
             &[255, 255, 255, 255],
             Some("White texture"),
         )?;
-        let white_texture = resource_map.add(white_texture);
-        let black_texture = Texture::new_with_data(
+        let white = resource_map.add(white);
+        let black = Texture::new_with_data(
             gpu,
             resource_map,
             1,
@@ -325,9 +317,13 @@ impl GltfLoader {
             &[0, 0, 0, 255],
             Some("Black texture"),
         )?;
-        let black_texture = resource_map.add(black_texture);
+        let black = resource_map.add(black);
 
-        Ok((white_texture, black_texture, allocated_textures))
+        Ok(LoadedTextures {
+            white,
+            black,
+            all_textures,
+        })
     }
 
     fn load_samplers(
@@ -396,41 +392,44 @@ impl GltfLoader {
         gpu: &Gpu,
         resource_map: &mut ResourceMap,
         pbr_master: ResourceHandle<MasterMaterial>,
-        allocated_textures: Vec<ResourceHandle<Texture>>,
-        black_texture: ResourceHandle<Texture>,
-        white_texture: ResourceHandle<Texture>,
+        textures: LoadedTextures,
         document: &Document,
     ) -> anyhow::Result<Vec<ResourceHandle<MaterialInstance>>> {
+        let LoadedTextures {
+            white,
+            black,
+            all_textures,
+        } = textures;
         let mut allocated_materials = vec![];
         for gltf_material in document.materials() {
             let base_texture =
                 if let Some(base) = gltf_material.pbr_metallic_roughness().base_color_texture() {
-                    allocated_textures[base.texture().index()].clone()
+                    all_textures[base.texture().index()].clone()
                 } else {
-                    white_texture.clone()
+                    white.clone()
                 };
             let normal_texture = if let Some(base) = gltf_material.normal_texture() {
-                allocated_textures[base.texture().index()].clone()
+                all_textures[base.texture().index()].clone()
             } else {
-                white_texture.clone()
+                white.clone()
             };
             let occlusion_texture = if let Some(base) = gltf_material.occlusion_texture() {
-                allocated_textures[base.texture().index()].clone()
+                all_textures[base.texture().index()].clone()
             } else {
-                white_texture.clone()
+                white.clone()
             };
             let emissive_texture = if let Some(base) = gltf_material.emissive_texture() {
-                allocated_textures[base.texture().index()].clone()
+                all_textures[base.texture().index()].clone()
             } else {
-                black_texture.clone()
+                black.clone()
             };
             let metallic_roughness = if let Some(base) = gltf_material
                 .pbr_metallic_roughness()
                 .metallic_roughness_texture()
             {
-                allocated_textures[base.texture().index()].clone()
+                all_textures[base.texture().index()].clone()
             } else {
-                white_texture.clone()
+                white.clone()
             };
 
             let mut texture_inputs = HashMap::new();
