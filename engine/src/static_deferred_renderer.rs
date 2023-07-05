@@ -611,13 +611,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let draw_hashmap = Self::generate_draw_calls(resource_map, scene);
 
         //#region render graph resources
-        let framebuffer_srgba_desc = crate::ImageDescription {
-            width: swapchain_extents.width,
-            height: swapchain_extents.height,
-            format: ImageFormat::SRgba8,
-            samples: 1,
-            present: false,
-        };
         let framebuffer_rgba_desc = crate::ImageDescription {
             width: swapchain_extents.width,
             height: swapchain_extents.height,
@@ -673,7 +666,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 .use_image("depth-buffer", &framebuffer_depth_desc, false)?;
         let color_target =
             self.render_graph
-                .use_image("color-buffer", &framebuffer_srgba_desc, false)?;
+                .use_image("color-buffer", &framebuffer_vector_desc, false)?;
 
         let position_target =
             self.render_graph
