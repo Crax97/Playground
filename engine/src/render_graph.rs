@@ -10,7 +10,7 @@ use ash::vk::{
     self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor,
     BlendOp, BorderColor, BufferUsageFlags, ClearDepthStencilValue, ClearValue,
     ColorComponentFlags, CompareOp, ComponentMapping, DependencyFlags, Extent2D, Filter,
-    ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType, Offset2D,
+    ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType, Offset2D,
     PipelineBindPoint, PipelineStageFlags, Rect2D, SampleCountFlags, SamplerAddressMode,
     SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency,
     SubpassDescriptionFlags,
@@ -322,12 +322,8 @@ impl<'a> CreateFrom<'a, ImageDescription> for GraphImage {
                     width: desc.width,
                     height: desc.height,
                     format: desc.format.to_vk(),
-                    usage: match desc.format {
-                        ImageFormat::Rgba8 | ImageFormat::Rgb8 | ImageFormat::RgbaFloat => {
-                            ImageUsageFlags::COLOR_ATTACHMENT
-                        }
-                        ImageFormat::Depth => ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                    } | ImageUsageFlags::INPUT_ATTACHMENT
+                    usage: desc.format.default_usage_flags()
+                        | ImageUsageFlags::INPUT_ATTACHMENT
                         | ImageUsageFlags::SAMPLED,
                 },
                 MemoryDomain::DeviceLocal,
@@ -446,12 +442,7 @@ impl<'a> CreateFrom<'a, GraphImageViewCreateInfo<'_>> for GraphImageView {
                 format: desc.desc.format.to_vk(),
                 components: ComponentMapping::default(),
                 subresource_range: ImageSubresourceRange {
-                    aspect_mask: match desc.desc.format {
-                        ImageFormat::Rgba8 | ImageFormat::Rgb8 | ImageFormat::RgbaFloat => {
-                            ImageAspectFlags::COLOR
-                        }
-                        ImageFormat::Depth => ImageAspectFlags::DEPTH,
-                    },
+                    aspect_mask: desc.desc.format.aspect_mask(),
                     base_mip_level: 0,
                     level_count: 1,
                     base_array_layer: 0,
@@ -570,12 +561,9 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
             let final_layout = match resource_usage.output {
                 ResourceLayout::Unknown => ImageLayout::GENERAL,
                 ResourceLayout::ShaderRead => ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                ResourceLayout::AttachmentRead => match image_desc.format {
-                    ImageFormat::Rgba8 | ImageFormat::Rgb8 | ImageFormat::RgbaFloat => {
-                        ImageLayout::READ_ONLY_OPTIMAL
-                    }
-                    ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                },
+                ResourceLayout::AttachmentRead => {
+                    image_desc.format.preferred_attachment_read_layout()
+                }
                 ResourceLayout::Present => ImageLayout::PRESENT_SRC_KHR,
                 _ => unreachable!(),
             };
@@ -595,13 +583,12 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: match resource_usage.input {
                     ResourceLayout::Unknown => ImageLayout::UNDEFINED,
-                    ResourceLayout::ShaderWrite => todo!(),
-                    ResourceLayout::AttachmentWrite => match image_desc.format {
-                        ImageFormat::Rgba8 | ImageFormat::Rgb8 | ImageFormat::RgbaFloat => {
-                            ImageLayout::COLOR_ATTACHMENT_OPTIMAL
-                        }
-                        ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                    },
+                    ResourceLayout::ShaderWrite => {
+                        image_desc.format.preferred_shader_write_layout()
+                    }
+                    ResourceLayout::AttachmentWrite => {
+                        image_desc.format.preferred_attachment_write_layout()
+                    }
                     _ => unreachable!(),
                 },
                 final_layout,
@@ -622,18 +609,18 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
             };
             all_attachments.push(attachment);
 
-            match image_desc.format {
-                ImageFormat::Rgba8 | ImageFormat::Rgb8 | ImageFormat::RgbaFloat => {
-                    color_attachments.push(AttachmentReference {
-                        attachment: index as _,
-                        layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                    })
-                }
-                ImageFormat::Depth => depth_attachments.push(AttachmentReference {
+            if image_desc.format.is_color() {
+                color_attachments.push(AttachmentReference {
+                    attachment: index as _,
+                    layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                });
+            } else {
+                depth_attachments.push(AttachmentReference {
                     attachment: index as _,
                     layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                }),
+                });
             }
+
             index += 1;
         }
         for read in &create_info.pass_info.attachment_reads {
@@ -654,24 +641,20 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: match resource_usage.input {
                     ResourceLayout::Unknown => ImageLayout::UNDEFINED,
-                    ResourceLayout::ShaderWrite => todo!(),
-                    ResourceLayout::AttachmentWrite => match image_desc.format {
-                        ImageFormat::Rgba8 | ImageFormat::Rgb8 | ImageFormat::RgbaFloat => {
-                            ImageLayout::COLOR_ATTACHMENT_OPTIMAL
-                        }
-                        ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                    },
+                    ResourceLayout::ShaderWrite => {
+                        image_desc.format.preferred_shader_write_layout()
+                    }
+                    ResourceLayout::AttachmentWrite => {
+                        image_desc.format.preferred_attachment_write_layout()
+                    }
                     _ => unreachable!(),
                 },
                 final_layout: match resource_usage.output {
                     ResourceLayout::Unknown => ImageLayout::GENERAL,
                     ResourceLayout::ShaderRead => ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                    ResourceLayout::AttachmentRead => match image_desc.format {
-                        ImageFormat::Rgba8 | ImageFormat::Rgb8 | ImageFormat::RgbaFloat => {
-                            ImageLayout::READ_ONLY_OPTIMAL
-                        }
-                        ImageFormat::Depth => ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                    },
+                    ResourceLayout::AttachmentRead => {
+                        image_desc.format.preferred_attachment_read_layout()
+                    }
                     ResourceLayout::Present => ImageLayout::PRESENT_SRC_KHR,
                     _ => unreachable!(),
                 },
@@ -692,17 +675,16 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
             };
             all_attachments.push(attachment);
 
-            match image_desc.format {
-                ImageFormat::Rgba8 | ImageFormat::Rgb8 | ImageFormat::RgbaFloat => {
-                    color_attachments.push(AttachmentReference {
-                        attachment: index as _,
-                        layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                    })
-                }
-                ImageFormat::Depth => depth_attachments.push(AttachmentReference {
+            if image_desc.format.is_color() {
+                color_attachments.push(AttachmentReference {
                     attachment: index as _,
-                    layout: ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                }),
+                    layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                });
+            } else {
+                depth_attachments.push(AttachmentReference {
+                    attachment: index as _,
+                    layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                });
             }
             index += 1;
         }
@@ -1115,27 +1097,24 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
                     64 => SampleCountFlags::TYPE_64,
                     _ => panic!("Invalid sample count! {}", desc.samples),
                 };
-                match &desc.format {
-                    gpu::ImageFormat::Rgba8 | ImageFormat::Rgb8 | gpu::ImageFormat::RgbaFloat => {
-                        color_attachments.push(RenderPassAttachment {
-                            format,
-                            samples,
-                            load_op: AttachmentLoadOp::DONT_CARE,
-                            store_op: AttachmentStoreOp::STORE,
-                            stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                            stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                            initial_layout: ImageLayout::UNDEFINED,
-                            final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                            blend_state: if let Some(state) = pass_info.blend_state {
-                                state
-                            } else {
-                                BlendState::default()
-                            },
-                        })
-                    }
-                    gpu::ImageFormat::Depth => {
-                        depth_stencil_attachments.push(DepthStencilAttachment {})
-                    }
+                if desc.format.is_color() {
+                    color_attachments.push(RenderPassAttachment {
+                        format,
+                        samples,
+                        load_op: AttachmentLoadOp::DONT_CARE,
+                        store_op: AttachmentStoreOp::STORE,
+                        stencil_load_op: AttachmentLoadOp::DONT_CARE,
+                        stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                        initial_layout: ImageLayout::UNDEFINED,
+                        final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                        blend_state: if let Some(state) = pass_info.blend_state {
+                            state
+                        } else {
+                            BlendState::default()
+                        },
+                    });
+                } else {
+                    depth_stencil_attachments.push(DepthStencilAttachment {});
                 }
             }
             AllocationType::Buffer { .. } => {
@@ -1981,21 +1960,22 @@ impl RenderGraphRunner for GpuRunner {
                         } else {
                             let res_info = &graph.allocations[rd];
                             match &res_info.ty {
-                                AllocationType::Image(desc) => match desc.format {
-                                    ImageFormat::Rgba8
-                                    | ImageFormat::Rgb8
-                                    | ImageFormat::RgbaFloat => ClearValue {
-                                        color: vk::ClearColorValue {
-                                            float32: [0.0, 0.0, 0.0, 0.0],
-                                        },
-                                    },
-                                    ImageFormat::Depth => ClearValue {
-                                        depth_stencil: ClearDepthStencilValue {
-                                            depth: 1.0,
-                                            stencil: 255,
-                                        },
-                                    },
-                                },
+                                AllocationType::Image(desc) => {
+                                    if desc.format.is_color() {
+                                        ClearValue {
+                                            color: vk::ClearColorValue {
+                                                float32: [0.0, 0.0, 0.0, 0.0],
+                                            },
+                                        }
+                                    } else {
+                                        ClearValue {
+                                            depth_stencil: ClearDepthStencilValue {
+                                                depth: 1.0,
+                                                stencil: 255,
+                                            },
+                                        }
+                                    }
+                                }
                                 AllocationType::Buffer { .. } => {
                                     panic!("Graph can't treat buffer as render target!")
                                 }

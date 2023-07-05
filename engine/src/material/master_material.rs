@@ -8,7 +8,6 @@ use gpu::{
 };
 use nalgebra::{Vector2, Vector3};
 use resource_map::Resource;
-use winit::event::VirtualKeyCode::U;
 
 use crate::{MaterialDomain, MaterialParameterOffsetSize, PipelineTarget, TextureInput};
 

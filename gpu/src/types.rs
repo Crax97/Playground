@@ -1,6 +1,7 @@
 use std::{cell::RefCell, ops::Deref, sync::Arc};
 
 use super::{allocator::GpuAllocator, gpu::Gpu};
+use ash::vk::{ImageAspectFlags, ImageLayout, ImageUsageFlags};
 use ash::{
     prelude::*,
     vk::{
@@ -28,9 +29,81 @@ pub trait ToVk {
 #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ImageFormat {
     Rgba8,
+    SRgba8,
     Rgb8,
     RgbaFloat,
     Depth,
+}
+
+impl ImageFormat {
+    pub fn is_color(&self) -> bool {
+        match self {
+            ImageFormat::Rgba8
+            | ImageFormat::SRgba8
+            | ImageFormat::Rgb8
+            | ImageFormat::RgbaFloat => true,
+            ImageFormat::Depth => false,
+        }
+    }
+
+    pub fn is_depth(&self) -> bool {
+        ImageFormat::Depth == *self
+    }
+    pub fn default_usage_flags(&self) -> ImageUsageFlags {
+        if self.is_color() {
+            ImageUsageFlags::COLOR_ATTACHMENT
+        } else if self.is_depth() {
+            ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+        } else {
+            unreachable!()
+        }
+    }
+    pub fn aspect_mask(&self) -> ImageAspectFlags {
+        if self.is_color() {
+            ImageAspectFlags::COLOR
+        } else if self.is_depth() {
+            ImageAspectFlags::DEPTH
+        } else {
+            unreachable!()
+        }
+    }
+    pub fn preferred_attachment_read_layout(&self) -> ImageLayout {
+        if self.is_color() {
+            ImageLayout::SHADER_READ_ONLY_OPTIMAL
+        } else if self.is_depth() {
+            ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL
+        } else {
+            unreachable!()
+        }
+    }
+    pub fn preferred_attachment_write_layout(&self) -> ImageLayout {
+        if self.is_color() {
+            ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+        } else if self.is_depth() {
+            ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+        } else {
+            unreachable!()
+        }
+    }
+
+    pub fn preferred_shader_read_layout(&self) -> vk::ImageLayout {
+        if self.is_color() {
+            ImageLayout::SHADER_READ_ONLY_OPTIMAL
+        } else if self.is_depth() {
+            ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL
+        } else {
+            unreachable!()
+        }
+    }
+    pub fn preferred_shader_write_layout(&self) -> ImageLayout {
+        if self.is_color() {
+            ImageLayout::SHADER_READ_ONLY_OPTIMAL
+        } else if self.is_depth() {
+            ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+        } else {
+            unreachable!()
+        }
+    }
 }
 
 impl ToVk for ImageFormat {
@@ -38,6 +111,7 @@ impl ToVk for ImageFormat {
     fn to_vk(&self) -> Self::Inner {
         match self {
             ImageFormat::Rgba8 => vk::Format::R8G8B8A8_UNORM,
+            ImageFormat::SRgba8 => vk::Format::R8G8B8A8_SRGB,
             ImageFormat::Rgb8 => vk::Format::R8G8B8_UNORM,
             ImageFormat::RgbaFloat => vk::Format::R32G32B32A32_SFLOAT,
             ImageFormat::Depth => vk::Format::D32_SFLOAT,
@@ -49,6 +123,7 @@ impl From<&vk::Format> for ImageFormat {
     fn from(value: &vk::Format) -> Self {
         match *value {
             vk::Format::R8G8B8A8_UNORM => ImageFormat::Rgba8,
+            vk::Format::R8G8B8A8_SRGB => ImageFormat::SRgba8,
             vk::Format::R8G8B8_UNORM => ImageFormat::Rgb8,
             vk::Format::D32_SFLOAT => ImageFormat::Depth,
             vk::Format::R32G32B32A32_SFLOAT => ImageFormat::RgbaFloat,
