@@ -246,7 +246,7 @@ impl Swapchain {
 
     fn pick_swapchain_format(supported_formats: &[SurfaceFormatKHR]) -> SurfaceFormatKHR {
         for format in supported_formats.iter() {
-            if format.format == Format::R8G8B8A8_UNORM {
+            if format.format == Format::R8G8B8A8_SRGB {
                 return *format;
             }
         }
