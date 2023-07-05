@@ -8,6 +8,7 @@ use gpu::{
 };
 use nalgebra::{Vector2, Vector3};
 use resource_map::Resource;
+use winit::event::VirtualKeyCode::U;
 
 use crate::{MaterialDomain, MaterialParameterOffsetSize, PipelineTarget, TextureInput};
 
@@ -84,7 +85,6 @@ impl MasterMaterial {
         description: &MasterMaterialDescription<'_>,
         target_render_passes: &HashMap<PipelineTarget, RenderPass>,
     ) -> anyhow::Result<HashMap<PipelineTarget, Pipeline>> {
-        let mut pipelines = HashMap::new();
         let global_elements: Vec<_> = description
             .global_inputs
             .iter()
@@ -113,62 +113,22 @@ impl MasterMaterial {
             })
         }
 
-        for (target, render_pass) in target_render_passes {
-            let pipeline = Pipeline::new(
+        match description.domain {
+            MaterialDomain::Surface => Self::create_surface_pipelines(
                 gpu,
-                render_pass,
-                &PipelineDescription {
-                    global_bindings: &[
-                        GlobalBinding {
-                            set_index: 0,
-                            elements: &global_elements,
-                        },
-                        GlobalBinding {
-                            set_index: 1,
-                            elements: &user_elements,
-                        },
-                    ],
-                    vertex_inputs: Self::get_inputs_for_material_domain(&description.domain),
-                    vertex_stage: Some(*description.vertex_info),
-                    fragment_stage: match target {
-                        PipelineTarget::ColorAndDepth => Some(*description.fragment_info),
-                        PipelineTarget::DepthOnly => None,
-                    },
-                    input_topology: gpu::PrimitiveTopology::TriangleList,
-                    primitive_restart: description.primitive_restart,
-                    polygon_mode: description.polygon_mode,
-                    cull_mode: description.cull_mode,
-                    front_face: description.front_face,
-                    depth_stencil_state: match target {
-                        PipelineTarget::ColorAndDepth => DepthStencilState {
-                            depth_test_enable: true,
-                            depth_write_enable: false,
-                            depth_compare_op: CompareOp::EQUAL,
-                            stencil_test_enable: false,
-                            front: vk::StencilOpState::default(),
-                            back: vk::StencilOpState::default(),
-                            min_depth_bounds: 0.0,
-                            max_depth_bounds: 1.0,
-                        },
-                        PipelineTarget::DepthOnly => DepthStencilState {
-                            depth_test_enable: true,
-                            depth_write_enable: true,
-                            depth_compare_op: CompareOp::LESS,
-                            stencil_test_enable: false,
-                            front: vk::StencilOpState::default(),
-                            back: vk::StencilOpState::default(),
-                            min_depth_bounds: 0.0,
-                            max_depth_bounds: 1.0,
-                        },
-                    },
-                    logic_op: description.logic_op,
-                    push_constant_ranges: description.push_constant_ranges,
-                },
-            )?;
-            pipelines.insert(*target, pipeline);
+                description,
+                target_render_passes,
+                global_elements,
+                user_elements,
+            ),
+            MaterialDomain::PostProcess => Self::create_post_process_pipeline(
+                gpu,
+                description,
+                target_render_passes,
+                global_elements,
+                user_elements,
+            ),
         }
-
-        Ok(pipelines)
     }
 
     fn get_inputs_for_material_domain(
@@ -226,12 +186,139 @@ impl MasterMaterial {
                 }],
             },
         ];
+        static PP_INPUTS: &[VertexBindingDescription] = &[
+            // No inputs: the vertex shaders outputs vertices directly
+        ];
         match domain {
             MaterialDomain::Surface => SURFACE_INPUTS,
+            MaterialDomain::PostProcess => PP_INPUTS,
         }
     }
 
     pub(crate) fn get_pipeline(&self, target: PipelineTarget) -> Option<&Pipeline> {
         self.pipelines.get(&target)
+    }
+
+    fn create_surface_pipelines(
+        gpu: &Gpu,
+        description: &MasterMaterialDescription,
+        target_render_passes: &HashMap<PipelineTarget, RenderPass>,
+        global_elements: Vec<BindingElement>,
+        user_elements: Vec<BindingElement>,
+    ) -> anyhow::Result<HashMap<PipelineTarget, Pipeline>> {
+        let mut pipelines = HashMap::new();
+        for target in [PipelineTarget::ColorAndDepth, PipelineTarget::DepthOnly] {
+            let render_pass = target_render_passes
+                .get(&target)
+                .expect("Render pass not defined");
+            let pipeline = Pipeline::new(
+                gpu,
+                render_pass,
+                &PipelineDescription {
+                    global_bindings: &[
+                        GlobalBinding {
+                            set_index: 0,
+                            elements: &global_elements,
+                        },
+                        GlobalBinding {
+                            set_index: 1,
+                            elements: &user_elements,
+                        },
+                    ],
+                    vertex_inputs: Self::get_inputs_for_material_domain(&description.domain),
+                    vertex_stage: Some(*description.vertex_info),
+                    fragment_stage: match target {
+                        PipelineTarget::ColorAndDepth | PipelineTarget::PostProcess => {
+                            Some(*description.fragment_info)
+                        }
+                        PipelineTarget::DepthOnly => None,
+                    },
+                    input_topology: gpu::PrimitiveTopology::TriangleList,
+                    primitive_restart: description.primitive_restart,
+                    polygon_mode: description.polygon_mode,
+                    cull_mode: description.cull_mode,
+                    front_face: description.front_face,
+                    depth_stencil_state: match target {
+                        PipelineTarget::ColorAndDepth | PipelineTarget::PostProcess => {
+                            DepthStencilState {
+                                depth_test_enable: true,
+                                depth_write_enable: false,
+                                depth_compare_op: CompareOp::EQUAL,
+                                stencil_test_enable: false,
+                                front: vk::StencilOpState::default(),
+                                back: vk::StencilOpState::default(),
+                                min_depth_bounds: 0.0,
+                                max_depth_bounds: 1.0,
+                            }
+                        }
+                        PipelineTarget::DepthOnly => DepthStencilState {
+                            depth_test_enable: true,
+                            depth_write_enable: true,
+                            depth_compare_op: CompareOp::LESS,
+                            stencil_test_enable: false,
+                            front: vk::StencilOpState::default(),
+                            back: vk::StencilOpState::default(),
+                            min_depth_bounds: 0.0,
+                            max_depth_bounds: 1.0,
+                        },
+                    },
+                    logic_op: description.logic_op,
+                    push_constant_ranges: description.push_constant_ranges,
+                },
+            )?;
+            pipelines.insert(target, pipeline);
+        }
+
+        Ok(pipelines)
+    }
+    fn create_post_process_pipeline(
+        gpu: &Gpu,
+        description: &MasterMaterialDescription,
+        target_render_passes: &HashMap<PipelineTarget, RenderPass>,
+        global_elements: Vec<BindingElement>,
+        user_elements: Vec<BindingElement>,
+    ) -> anyhow::Result<HashMap<PipelineTarget, Pipeline>> {
+        let mut pipelines = HashMap::new();
+        let pipeline = Pipeline::new(
+            gpu,
+            target_render_passes
+                .get(&PipelineTarget::PostProcess)
+                .expect("Post Process render pass not defined"),
+            &PipelineDescription {
+                global_bindings: &[
+                    GlobalBinding {
+                        set_index: 0,
+                        elements: &global_elements,
+                    },
+                    GlobalBinding {
+                        set_index: 1,
+                        elements: &user_elements,
+                    },
+                ],
+                vertex_inputs: Self::get_inputs_for_material_domain(&description.domain),
+                vertex_stage: Some(*description.vertex_info),
+                fragment_stage: Some(*description.fragment_info),
+                input_topology: gpu::PrimitiveTopology::TriangleList,
+                primitive_restart: description.primitive_restart,
+                polygon_mode: description.polygon_mode,
+                cull_mode: description.cull_mode,
+                front_face: description.front_face,
+                depth_stencil_state: DepthStencilState {
+                    depth_test_enable: true,
+                    depth_write_enable: false,
+                    depth_compare_op: CompareOp::EQUAL,
+                    stencil_test_enable: false,
+                    front: vk::StencilOpState::default(),
+                    back: vk::StencilOpState::default(),
+                    min_depth_bounds: 0.0,
+                    max_depth_bounds: 1.0,
+                },
+                logic_op: description.logic_op,
+                push_constant_ranges: description.push_constant_ranges,
+            },
+        )?;
+        pipelines.insert(PipelineTarget::PostProcess, pipeline);
+
+        Ok(pipelines)
     }
 }

@@ -39,10 +39,7 @@ pub struct GLTFViewer {
 
 impl App for GLTFViewer {
     fn window_name(&self, app_state: &AppState) -> String {
-        format!(
-            "GLTF Viewer - FPS {}",
-            1.0 / app_state.time().delta_frame().max(0.0000001)
-        )
+        format!("GLTF Viewer - FPS {}", 1.0 / app_state.time().delta_frame())
     }
 
     fn create(app_state: &AppState) -> anyhow::Result<Self>

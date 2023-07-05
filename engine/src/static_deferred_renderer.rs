@@ -78,10 +78,11 @@ impl From<&Light> for GpuLightInfo {
 use crate::{
     app_state,
     camera::Camera,
-    material::{MasterMaterial, MasterMaterialDescription, MaterialDomain},
+    material::{MasterMaterial, MasterMaterialDescription},
     BufferDescription, BufferType, FragmentState, GpuRunner, GraphRunContext, Light, LightType,
-    MaterialDescription, MaterialInstance, MeshPrimitive, ModuleInfo, PipelineTarget, RenderGraph,
-    RenderGraphPipelineDescription, RenderPassContext, RenderStage, RenderingPipeline, Scene,
+    MaterialDescription, MaterialDomain, MaterialInstance, MeshPrimitive, ModuleInfo,
+    PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage,
+    RenderingPipeline, Scene,
 };
 
 use ash::vk::{
@@ -317,7 +318,17 @@ impl DeferredRenderingMaterialContext {
                 }],
             },
         )?;
-        let attachments = &[
+        let surface_render_pass = Self::make_surface_color_depth_pass(gpu)?;
+        let post_process_render_pass = Self::make_post_process_pass(gpu)?;
+        render_passes.insert(PipelineTarget::DepthOnly, depth_only_render_pass);
+        render_passes.insert(PipelineTarget::ColorAndDepth, surface_render_pass);
+        render_passes.insert(PipelineTarget::PostProcess, post_process_render_pass);
+
+        Ok(Self { render_passes })
+    }
+
+    fn make_surface_color_depth_pass(gpu: &Gpu) -> VkResult<RenderPass> {
+        let surface_attachments = &[
             // Position
             RenderPassAttachment {
                 format: ImageFormat::RgbaFloat.to_vk(),
@@ -448,7 +459,7 @@ impl DeferredRenderingMaterialContext {
         let surface_render_pass = RenderPass::new(
             gpu,
             &RenderPassDescription {
-                attachments,
+                attachments: surface_attachments,
                 subpasses: &[SubpassDescription {
                     flags: SubpassDescriptionFlags::empty(),
                     pipeline_bind_point: PipelineBindPoint::GRAPHICS,
@@ -493,10 +504,58 @@ impl DeferredRenderingMaterialContext {
                 }],
             },
         )?;
-        render_passes.insert(PipelineTarget::DepthOnly, depth_only_render_pass);
-        render_passes.insert(PipelineTarget::ColorAndDepth, surface_render_pass);
+        Ok(surface_render_pass)
+    }
 
-        Ok(Self { render_passes })
+    fn make_post_process_pass(gpu: &Gpu) -> VkResult<RenderPass> {
+        let post_process_attachments = &[RenderPassAttachment {
+            format: ImageFormat::Rgba8.to_vk(),
+            samples: SampleCountFlags::TYPE_1,
+            load_op: AttachmentLoadOp::CLEAR,
+            store_op: AttachmentStoreOp::STORE,
+            stencil_load_op: AttachmentLoadOp::DONT_CARE,
+            stencil_store_op: AttachmentStoreOp::DONT_CARE,
+            initial_layout: ImageLayout::UNDEFINED,
+            final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            blend_state: BlendState {
+                blend_enable: true,
+                src_color_blend_factor: BlendFactor::ONE,
+                dst_color_blend_factor: BlendFactor::ZERO,
+                color_blend_op: BlendOp::ADD,
+                src_alpha_blend_factor: BlendFactor::ONE,
+                dst_alpha_blend_factor: BlendFactor::ZERO,
+                alpha_blend_op: BlendOp::ADD,
+                color_write_mask: ColorComponentFlags::RGBA,
+            },
+        }];
+        let post_process_render_pass = RenderPass::new(
+            gpu,
+            &RenderPassDescription {
+                attachments: post_process_attachments,
+                subpasses: &[SubpassDescription {
+                    flags: SubpassDescriptionFlags::empty(),
+                    pipeline_bind_point: PipelineBindPoint::GRAPHICS,
+                    input_attachments: &[],
+                    color_attachments: &[AttachmentReference {
+                        attachment: 0,
+                        layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                    }],
+                    resolve_attachments: &[],
+                    depth_stencil_attachment: &[],
+                    preserve_attachments: &[],
+                }],
+                dependencies: &[SubpassDependency {
+                    src_subpass: SUBPASS_EXTERNAL,
+                    dst_subpass: 0,
+                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    src_access_mask: AccessFlags::empty(),
+                    dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                    dependency_flags: DependencyFlags::empty(),
+                }],
+            },
+        )?;
+        Ok(post_process_render_pass)
     }
 }
 
@@ -968,8 +1027,17 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         ];
         let master_description = MasterMaterialDescription {
             name: material_description.name,
-            domain: MaterialDomain::Surface,
-            global_inputs: &[BindingType::Uniform],
+            domain: material_description.domain,
+            global_inputs: match material_description.domain {
+                MaterialDomain::Surface => &[BindingType::Uniform],
+                MaterialDomain::PostProcess => &[
+                    BindingType::Uniform,              // Camera buffer
+                    BindingType::CombinedImageSampler, // Previous post process result/ Initial scene color,
+                    BindingType::CombinedImageSampler, // Scene position,
+                    BindingType::CombinedImageSampler, // Scene diffuse,
+                    BindingType::CombinedImageSampler, // Scene normal,
+                ],
+            },
             texture_inputs: material_description.texture_inputs,
             material_parameters: material_description.material_parameters,
             vertex_info: &VertexStageInfo {
