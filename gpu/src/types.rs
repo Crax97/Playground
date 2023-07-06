@@ -29,6 +29,7 @@ pub trait ToVk {
 #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ImageFormat {
     Rgba8,
+    Bgra8,
     SRgba8,
     Rgb8,
     RgbaFloat,
@@ -39,6 +40,7 @@ impl ImageFormat {
     pub fn is_color(&self) -> bool {
         match self {
             ImageFormat::Rgba8
+            | ImageFormat::Bgra8
             | ImageFormat::SRgba8
             | ImageFormat::Rgb8
             | ImageFormat::RgbaFloat => true,
@@ -115,6 +117,7 @@ impl ToVk for ImageFormat {
             ImageFormat::Rgb8 => vk::Format::R8G8B8_UNORM,
             ImageFormat::RgbaFloat => vk::Format::R32G32B32A32_SFLOAT,
             ImageFormat::Depth => vk::Format::D32_SFLOAT,
+            ImageFormat::Bgra8 => vk::Format::B8G8R8A8_UNORM,
         }
     }
 }
@@ -127,6 +130,7 @@ impl From<&vk::Format> for ImageFormat {
             vk::Format::R8G8B8_UNORM => ImageFormat::Rgb8,
             vk::Format::D32_SFLOAT => ImageFormat::Depth,
             vk::Format::R32G32B32A32_SFLOAT => ImageFormat::RgbaFloat,
+            vk::Format::B8G8R8A8_UNORM => ImageFormat::Bgra8,
             _ => panic!("ImageFormat::from(vk::Format): cannot convert {:?} to ImageFormat, most likely a bug: report it", value)
         }
     }
