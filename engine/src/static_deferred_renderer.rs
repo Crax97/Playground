@@ -112,6 +112,7 @@ pub struct DeferredRenderingPipeline {
     screen_quad: GpuShaderModule,
     texture_copy: GpuShaderModule,
     gbuffer_combine: GpuShaderModule,
+    tonemap_fs: GpuShaderModule,
 
     runner: GpuRunner,
 }
@@ -122,6 +123,7 @@ impl DeferredRenderingPipeline {
         screen_quad: GpuShaderModule,
         gbuffer_combine: GpuShaderModule,
         texture_copy: GpuShaderModule,
+        tonemap_fs: GpuShaderModule,
     ) -> anyhow::Result<Self> {
         let mut frame_buffers = vec![];
         for _ in 0..Swapchain::MAX_FRAMES_IN_FLIGHT {
@@ -166,6 +168,7 @@ impl DeferredRenderingPipeline {
             gbuffer_combine,
             texture_copy,
             frame_buffers,
+            tonemap_fs,
             runner: GpuRunner::new(),
         })
     }
@@ -611,6 +614,13 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let draw_hashmap = Self::generate_draw_calls(resource_map, scene);
 
         //#region render graph resources
+        let framebuffer_srgba_desc = crate::ImageDescription {
+            width: swapchain_extents.width,
+            height: swapchain_extents.height,
+            format: ImageFormat::SRgba8,
+            samples: 1,
+            present: false,
+        };
         let framebuffer_rgba_desc = crate::ImageDescription {
             width: swapchain_extents.width,
             height: swapchain_extents.height,
@@ -667,6 +677,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let color_target =
             self.render_graph
                 .use_image("color-buffer", &framebuffer_vector_desc, false)?;
+        let tonemap_output =
+            self.render_graph
+                .use_image("tonemap-buffer", &framebuffer_srgba_desc, false)?;
 
         let position_target =
             self.render_graph
@@ -744,10 +757,27 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             })
             .commit();
 
+        let tonemap_pass = self
+            .render_graph
+            .begin_render_pass("Tonemapping", swapchain_extents)?
+            .shader_reads(&[color_target])
+            .writes_attachments(&[tonemap_output])
+            .with_blend_state(BlendState {
+                blend_enable: false,
+                src_color_blend_factor: BlendFactor::ONE,
+                dst_color_blend_factor: BlendFactor::ZERO,
+                color_blend_op: BlendOp::ADD,
+                src_alpha_blend_factor: BlendFactor::ONE,
+                dst_alpha_blend_factor: BlendFactor::ZERO,
+                alpha_blend_op: BlendOp::ADD,
+                color_write_mask: ColorComponentFlags::RGBA,
+            })
+            .commit();
+
         let present_render_pass = self
             .render_graph
             .begin_render_pass("Present", swapchain_extents)?
-            .shader_reads(&[color_target])
+            .shader_reads(&[tonemap_output])
             .writes_attachments(&[swapchain_image])
             .with_blend_state(BlendState {
                 blend_enable: false,
@@ -776,6 +806,44 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     },
                     fragment: ModuleInfo {
                         module: &self.gbuffer_combine,
+                        entry_point: "main",
+                    },
+                },
+                fragment_state: FragmentState {
+                    input_topology: gpu::PrimitiveTopology::TriangleStrip,
+                    primitive_restart: false,
+                    polygon_mode: gpu::PolygonMode::Fill,
+                    cull_mode: gpu::CullMode::None,
+                    front_face: gpu::FrontFace::ClockWise,
+                    depth_stencil_state: DepthStencilState {
+                        depth_test_enable: false,
+                        depth_write_enable: false,
+                        depth_compare_op: CompareOp::ALWAYS,
+                        stencil_test_enable: false,
+                        front: StencilOpState::default(),
+                        back: StencilOpState::default(),
+                        min_depth_bounds: 0.0,
+                        max_depth_bounds: 1.0,
+                    },
+                    logic_op: None,
+                    push_constant_ranges: &[],
+                },
+            },
+        )?;
+
+        self.render_graph.define_pipeline_for_renderpass(
+            &crate::app_state().gpu,
+            &tonemap_pass,
+            "TonemapPipeline",
+            &RenderGraphPipelineDescription {
+                vertex_inputs: &[],
+                stage: RenderStage::Graphics {
+                    vertex: ModuleInfo {
+                        module: &self.screen_quad,
+                        entry_point: "main",
+                    },
+                    fragment: ModuleInfo {
+                        module: &self.tonemap_fs,
                         entry_point: "main",
                     },
                 },
@@ -860,6 +928,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         });
 
         context.register_callback(&combine_pass, |_: &Gpu, ctx| {
+            ctx.render_pass_command.draw(4, 1, 0, 0);
+        });
+        context.register_callback(&tonemap_pass, |_: &Gpu, ctx| {
             ctx.render_pass_command.draw(4, 1, 0, 0);
         });
         context.register_callback(&present_render_pass, |_: &Gpu, ctx| {
