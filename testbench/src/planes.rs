@@ -130,12 +130,15 @@ impl App for PlanesApp {
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/gbuffer_combine.spirv")?;
         let texture_copy_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/texture_copy.spirv")?;
+        let tonemap_module =
+            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/tonemap.spirv")?;
 
         let mut scene_renderer = DeferredRenderingPipeline::new(
             &app_state.gpu,
             screen_quad_module,
             gbuffer_combine_module,
             texture_copy_module,
+            tonemap_module,
         )?;
 
         let master = scene_renderer.create_material(
