@@ -774,6 +774,23 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             })
             .commit();
 
+        //let fxaa_pass = self
+        //    .render_graph
+        //    .begin_render_pass("fxaa", swapchain_extents)?
+        //    .shader_reads(&[color_target])
+        //    .writes_attachments(&[tonemap_output])
+        //    .with_blend_state(BlendState {
+        //        blend_enable: false,
+        //        src_color_blend_factor: BlendFactor::ONE,
+        //        dst_color_blend_factor: BlendFactor::ZERO,
+        //        color_blend_op: BlendOp::ADD,
+        //        src_alpha_blend_factor: BlendFactor::ONE,
+        //        dst_alpha_blend_factor: BlendFactor::ZERO,
+        //        alpha_blend_op: BlendOp::ADD,
+        //        color_write_mask: ColorComponentFlags::RGBA,
+        //    })
+        //    .commit();
+
         let present_render_pass = self
             .render_graph
             .begin_render_pass("Present", swapchain_extents)?
