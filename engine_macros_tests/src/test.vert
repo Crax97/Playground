@@ -1,6 +1,6 @@
 #version 460 core
 
-#include "./incl.ini"
+#include "./src/incl.in"
 
 struct VsOutput {
     vec3 pos;

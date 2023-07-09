@@ -1,7 +1,8 @@
 extern crate proc_macro;
-use std::{path::PathBuf, str::FromStr};
+use std::path::PathBuf;
 
 use proc_macro::TokenStream;
+use quote::quote;
 use shaderc::{ResolvedInclude, ShaderKind};
 use syn::{parse::Parse, parse_macro_input, ExprLit, Lit, Token};
 
@@ -177,10 +178,10 @@ impl Parse for GlslInfo {
 }
 
 fn compile_shader(info: GlslInfo) -> anyhow::Result<Vec<u32>> {
+    let crate_path = crate_path()?;
     let shader_content = match info.content {
         GlslSource::Path(p) => {
-            let crate_path = crate_path()?;
-            let path = get_source_file_path(p, crate_path)?;
+            let path = get_source_file_path(p, &crate_path)?;
             std::fs::read_to_string(path.clone()).map_err(|err| {
                 eprintln!("Failed to open path {path:?}: {err}");
                 err
@@ -191,20 +192,22 @@ fn compile_shader(info: GlslInfo) -> anyhow::Result<Vec<u32>> {
 
     let compiler = shaderc::Compiler::new().unwrap();
     let mut options = shaderc::CompileOptions::new().unwrap();
-    options.set_include_callback(|incl, _, file, _| {
-        let file_path = std::path::Path::new(file);
-        let file_path = file_path.parent().unwrap_or(&std::path::Path::new("."));
+    options.set_include_callback(|incl, _, _, _| {
+        let file_path = std::path::Path::new(incl);
+        let file_path = crate_path.join(&file_path);
         let absolute = file_path.canonicalize();
         let absolute = match absolute {
             Ok(s) => s,
             Err(e) => {
+                eprintln!("Failed to canonicalize path {file_path:?}");
                 return Err(e.to_string());
             }
         };
-        let content = std::fs::read_to_string(absolute);
+        let content = std::fs::read_to_string(absolute.clone());
         let content = match content {
             Ok(s) => s,
             Err(e) => {
+                eprintln!("Failed to find include file {absolute:?}");
                 return Err(e.to_string());
             }
         };
@@ -229,7 +232,7 @@ fn compile_shader(info: GlslInfo) -> anyhow::Result<Vec<u32>> {
     Ok(spirv.as_binary().to_vec())
 }
 
-fn get_source_file_path(path: String, crate_path: PathBuf) -> Result<PathBuf, anyhow::Error> {
+fn get_source_file_path(path: String, crate_path: &PathBuf) -> Result<PathBuf, anyhow::Error> {
     let path = std::path::Path::new(&path);
     let path = crate_path.join(std::path::Path::new(&path));
     let path = path.canonicalize().map_err(|e| {
@@ -254,19 +257,13 @@ pub fn glsl(input: TokenStream) -> TokenStream {
         Err(e) => panic!("{}", e.to_string()),
     };
 
-    let literal_string = make_spirv_bytecode_string(spirv_bytecode);
-
-    TokenStream::from_str(&literal_string).expect("Failed to create literal spirv string")
+    make_spirv_bytecode_slice(spirv_bytecode)
 }
 
-fn make_spirv_bytecode_string(spirv_bytecode: Vec<u32>) -> String {
-    let mut literal_string = String::new();
-    literal_string += "&[";
-    for val in spirv_bytecode {
-        literal_string += &val.to_string();
-        literal_string += "u32";
-        literal_string += ",";
-    }
-    literal_string += "]";
-    literal_string
+fn make_spirv_bytecode_slice(spirv_bytecode: Vec<u32>) -> TokenStream {
+    let data_iter = spirv_bytecode.iter();
+    let tokens = quote! {
+        &[#(#data_iter,)*]
+    };
+    TokenStream::from(tokens)
 }
