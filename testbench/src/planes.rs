@@ -14,7 +14,7 @@ use engine::{
 };
 use nalgebra::*;
 use resource_map::ResourceMap;
-use winit::event::ElementState;
+use winit::{event::ElementState, event_loop::EventLoop};
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct VertexData {
@@ -43,7 +43,7 @@ impl App for PlanesApp {
         "planes".to_owned()
     }
 
-    fn create(app_state: &engine::AppState) -> anyhow::Result<Self>
+    fn create(app_state: &engine::AppState, _: &EventLoop<()>) -> anyhow::Result<Self>
     where
         Self: Sized,
     {

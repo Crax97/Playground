@@ -4,6 +4,9 @@ mod utils;
 
 use app::{bootstrap, App};
 use ash::vk::PresentModeKHR;
+use egui::{FontDefinitions, Style};
+use egui_winit_ash_integration::Integration;
+use utils::EguiVkAllocator;
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::{
@@ -11,7 +14,7 @@ use engine::{
 };
 use nalgebra::*;
 use resource_map::ResourceMap;
-use winit::event::ElementState;
+use winit::{event::ElementState, event_loop::EventLoop};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -35,6 +38,8 @@ pub struct GLTFViewer {
     movement: Vector3<f32>,
     scene_renderer: DeferredRenderingPipeline,
     gltf_loader: GltfLoader,
+
+    egui_integration: egui_winit_ash_integration::Integration<EguiVkAllocator>,
 }
 
 impl App for GLTFViewer {
@@ -42,7 +47,7 @@ impl App for GLTFViewer {
         format!("GLTF Viewer - FPS {}", 1.0 / app_state.time().delta_frame())
     }
 
-    fn create(app_state: &AppState) -> anyhow::Result<Self>
+    fn create(app_state: &AppState, event_loop: &EventLoop<()>) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
@@ -96,6 +101,26 @@ impl App for GLTFViewer {
             .swapchain_mut()
             .select_present_mode(PresentModeKHR::IMMEDIATE)?;
 
+        let window_size = engine::app_state().gpu.swapchain().window.inner_size();
+        let scale_factor = engine::app_state().gpu.swapchain().window.scale_factor();
+
+        let allocator = EguiVkAllocator(engine::app_state().gpu.allocator());
+        let egui_integration = Integration::new(
+            event_loop,
+            window_size.width,
+            window_size.height,
+            scale_factor,
+            FontDefinitions::default(),
+            Style::default(),
+            engine::app_state().gpu.vk_logical_device(),
+            allocator,
+            app_state.gpu.queue_families().graphics_family.index,
+            app_state.gpu.graphics_queue(),
+            app_state.gpu.swapchain().swapchain_extension.clone(),
+            app_state.gpu.swapchain().current_swapchain.clone(),
+            engine::app_state().gpu.swapchain().present_format,
+        );
+
         Ok(Self {
             resource_map,
             camera,
@@ -107,6 +132,7 @@ impl App for GLTFViewer {
             movement,
             scene_renderer,
             gltf_loader,
+            egui_integration,
         })
     }
 

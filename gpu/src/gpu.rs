@@ -20,7 +20,7 @@ use ash::{
         Extent2D, Extent3D, Fence, FormatFeatureFlags, FramebufferCreateFlags, Handle,
         ImageAspectFlags, ImageCreateFlags, ImageLayout, ImageSubresourceLayers,
         ImageSubresourceRange, ImageTiling, ImageType, ImageViewCreateFlags, ImageViewType,
-        InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, MemoryMapFlags,
+        InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, 
         Offset3D, PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties,
         PhysicalDeviceType, PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo,
         PipelineStageFlags, Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo,
@@ -658,16 +658,24 @@ impl Gpu {
         Ok(())
     }
 
-    pub(crate) fn vk_logical_device(&self) -> Device {
+    pub fn vk_logical_device(&self) -> Device {
         self.state.logical_device.clone()
     }
 
-    pub(crate) fn graphics_queue_family_index(&self) -> u32 {
+    pub fn queue_families(&self) -> QueueFamilies {
+        self.state.queue_families.clone()
+    }
+
+    pub fn graphics_queue_family_index(&self) -> u32 {
         self.state.queue_families.graphics_family.index
     }
 
-    pub(crate) fn graphics_queue(&self) -> Queue {
+    pub fn graphics_queue(&self) -> Queue {
         self.state.graphics_queue
+    }
+
+    pub fn state(&self) -> &GpuState {
+        &self.state
     }
 
     fn log_physical_device_memory(physical_device: &SelectedPhysicalDevice, instance: Instance) {
@@ -939,26 +947,17 @@ fn create_staging_buffer(state: &Arc<GpuState>) -> VkResult<GpuBuffer> {
     let allocation = state
         .gpu_memory_allocator
         .borrow_mut()
-        .allocate(&state.logical_device, allocation_requirements)?;
+        .allocate(allocation_requirements)?;
     unsafe {
         state
             .logical_device
             .bind_buffer_memory(buffer, allocation.device_memory, 0)
     }?;
 
-    let persistent_ptr = Some(unsafe {
-        state.logical_device.map_memory(
-            allocation.device_memory,
-            allocation.offset,
-            vk::WHOLE_SIZE,
-            MemoryMapFlags::empty(),
-        )?
-    });
     let buffer = GpuBuffer::create(
         state.logical_device.clone(),
         buffer,
         MemoryDomain::HostVisible,
-        persistent_ptr,
         allocation,
         state.gpu_memory_allocator.clone(),
     )?;
@@ -1050,26 +1049,12 @@ impl Gpu {
             .state
             .gpu_memory_allocator
             .borrow_mut()
-            .allocate(&self.state.logical_device, allocation_requirements)?;
+            .allocate(allocation_requirements)?;
         unsafe {
             self.state
                 .logical_device
                 .bind_buffer_memory(buffer, allocation.device_memory, 0)
         }?;
-
-        let mut persistent_ptr = None;
-        if memory_domain.contains(MemoryDomain::HostVisible)
-            && create_info.usage.contains(BufferUsageFlags::UNIFORM_BUFFER)
-        {
-            persistent_ptr = Some(unsafe {
-                self.vk_logical_device().map_memory(
-                    allocation.device_memory,
-                    allocation.offset,
-                    vk::WHOLE_SIZE,
-                    MemoryMapFlags::empty(),
-                )?
-            });
-        }
 
         self.set_object_debug_name(create_info.label, buffer)?;
 
@@ -1077,7 +1062,6 @@ impl Gpu {
             self.vk_logical_device(),
             buffer,
             memory_domain,
-            persistent_ptr,
             allocation,
             self.state.gpu_memory_allocator.clone(),
         )
@@ -1227,7 +1211,7 @@ impl Gpu {
             .state
             .gpu_memory_allocator
             .borrow_mut()
-            .allocate(&self.state.logical_device, allocation_requirements)?;
+            .allocate(allocation_requirements)?;
         unsafe {
             self.state
                 .logical_device

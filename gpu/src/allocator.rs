@@ -1,6 +1,9 @@
+use std::ffi::c_void;
+use std::ptr::NonNull;
+
 use ash::vk::{
-    MemoryAllocateInfo, MemoryPropertyFlags, PhysicalDevice, PhysicalDeviceMemoryProperties,
-    StructureType,
+    MemoryAllocateInfo, MemoryMapFlags, MemoryPropertyFlags, PhysicalDevice,
+    PhysicalDeviceMemoryProperties, StructureType,
 };
 use ash::{
     prelude::VkResult,
@@ -47,9 +50,10 @@ pub struct AllocationRequirements {
 
 #[derive(Eq, Ord, PartialOrd, PartialEq)]
 pub struct MemoryAllocation {
-    pub(crate) device_memory: DeviceMemory,
-    pub(crate) offset: u64,
-    pub(crate) size: u64,
+    pub device_memory: DeviceMemory,
+    pub offset: u64,
+    pub size: u64,
+    pub persistent_ptr: Option<NonNull<c_void>>,
 }
 
 pub trait GpuAllocator {
@@ -59,15 +63,15 @@ pub trait GpuAllocator {
 
     fn allocate(
         &mut self,
-        device: &Device,
         allocation_requirements: AllocationRequirements,
     ) -> VkResult<MemoryAllocation>;
 
-    fn deallocate(&mut self, device: &Device, allocation: &MemoryAllocation);
+    fn deallocate(&mut self, allocation: &MemoryAllocation);
 }
 
 pub struct PasstroughAllocator {
     memory_properties: PhysicalDeviceMemoryProperties,
+    device: Device,
     num_allocations: u32,
 }
 impl PasstroughAllocator {
@@ -83,7 +87,7 @@ impl PasstroughAllocator {
 }
 
 impl GpuAllocator for PasstroughAllocator {
-    fn new(instance: &Instance, physical_device: PhysicalDevice, _: &Device) -> VkResult<Self>
+    fn new(instance: &Instance, physical_device: PhysicalDevice, device: &Device) -> VkResult<Self>
     where
         Self: Sized,
     {
@@ -92,12 +96,12 @@ impl GpuAllocator for PasstroughAllocator {
         Ok(Self {
             memory_properties,
             num_allocations: 0,
+            device: device.clone(),
         })
     }
 
     fn allocate(
         &mut self,
-        device: &Device,
         allocation_requirements: AllocationRequirements,
     ) -> VkResult<MemoryAllocation> {
         let memory_type_index = self.find_memory_type(
@@ -115,7 +119,7 @@ impl GpuAllocator for PasstroughAllocator {
             allocation_size: allocation_requirements.memory_requirements.size,
             memory_type_index,
         };
-        let device_memory = unsafe { device.allocate_memory(&allocate_info, None) }?;
+        let device_memory = unsafe { self.device.allocate_memory(&allocate_info, None) }?;
         self.num_allocations += 1;
         trace!(
             "PasstroughAllocator: Allocated {} bytes, there are {} allocations",
@@ -123,16 +127,36 @@ impl GpuAllocator for PasstroughAllocator {
             self.num_allocations
         );
 
+        let persistent_ptr = if allocation_requirements
+            .memory_domain
+            .contains(MemoryDomain::HostVisible)
+        {
+            NonNull::new(unsafe {
+                self.device.map_memory(
+                    device_memory,
+                    0,
+                    allocation_requirements.memory_requirements.size,
+                    MemoryMapFlags::empty(),
+                )?
+            })
+        } else {
+            None
+        };
+
         Ok(MemoryAllocation {
             device_memory,
             offset: 0,
             size: allocate_info.allocation_size,
+            persistent_ptr,
         })
     }
 
-    fn deallocate(&mut self, device: &Device, allocation: &MemoryAllocation) {
+    fn deallocate(&mut self, allocation: &MemoryAllocation) {
         unsafe {
-            device.free_memory(allocation.device_memory, None);
+            if allocation.persistent_ptr.is_some() {
+                self.device.unmap_memory(allocation.device_memory);
+            }
+            self.device.free_memory(allocation.device_memory, None);
         }
         self.num_allocations -= 1;
         trace!(

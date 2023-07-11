@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 ash = { version = "0.37", features = ["linked"] }
 anyhow = "1.0.70"
-winit = "0.28.3"
+winit = "0.27.5"
 nalgebra = "0.32.2"
 raw-window-handle = "0.5.2"
 thiserror = "1.0"

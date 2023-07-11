@@ -10,7 +10,7 @@ ash = { version = "0.37.*", features = ["linked"] }
 bitflags = "2.2.*"
 log = "0.4.*"
 raw-window-handle = "0.5.*"
-winit = "0.28.*"
+winit = "0.27.5"
 ash-window = "0.12.*"
 anyhow = "1.0.*"
 thiserror = "1.0.*"

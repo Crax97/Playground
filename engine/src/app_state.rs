@@ -5,7 +5,7 @@ use crate::Time;
 
 pub struct AppState {
     pub gpu: Gpu,
-    time: Time,
+    pub time: Time,
 }
 impl AppState {
     pub fn new(gpu: Gpu) -> Self {

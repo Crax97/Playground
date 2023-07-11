@@ -1,11 +1,15 @@
 use engine::AppState;
 use log::trace;
-use winit::{dpi::PhysicalSize, event::Event, event_loop::ControlFlow};
+use winit::{
+    dpi::PhysicalSize,
+    event::Event,
+    event_loop::{ControlFlow, EventLoop},
+};
 
 pub trait App {
     fn window_name(&self, app_state: &engine::AppState) -> String;
 
-    fn create(app_state: &AppState) -> anyhow::Result<Self>
+    fn create(app_state: &AppState, event_loop: &EventLoop<()>) -> anyhow::Result<Self>
     where
         Self: Sized;
 
@@ -87,7 +91,7 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
 
     engine::init("Winit App", window)?;
 
-    let app = Box::new(A::create(engine::app_state())?);
+    let app = Box::new(A::create(engine::app_state(), &event_loop)?);
     let app = Box::leak(app);
 
     trace!("Created app");

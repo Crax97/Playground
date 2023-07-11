@@ -1,4 +1,3 @@
-use std::ffi::c_void;
 use std::{cell::RefCell, ops::Deref, sync::Arc};
 
 use super::{allocator::GpuAllocator, gpu::Gpu};
@@ -7,8 +6,7 @@ use ash::{
     prelude::*,
     vk::{
         self, AllocationCallbacks, Buffer, Extent2D, FenceCreateInfo, MappedMemoryRange,
-        MemoryMapFlags, SamplerCreateInfo, SemaphoreCreateInfo, ShaderModuleCreateInfo,
-        StructureType,
+        SamplerCreateInfo, SemaphoreCreateInfo, ShaderModuleCreateInfo, StructureType,
     },
 };
 
@@ -225,7 +223,6 @@ pub struct GpuBuffer {
     pub(super) memory_domain: MemoryDomain,
     pub(super) allocation: MemoryAllocation,
     pub(super) allocator: Arc<RefCell<dyn GpuAllocator>>,
-    pub(super) persistent_ptr: Option<*mut c_void>,
 }
 
 impl GpuBuffer {
@@ -233,7 +230,6 @@ impl GpuBuffer {
         device: ash::Device,
         buffer: Buffer,
         memory_domain: MemoryDomain,
-        persistent_ptr: Option<*mut c_void>,
         allocation: MemoryAllocation,
         allocator: Arc<RefCell<dyn GpuAllocator>>,
     ) -> VkResult<Self> {
@@ -241,7 +237,6 @@ impl GpuBuffer {
             device,
             inner: buffer,
             memory_domain,
-            persistent_ptr,
             allocation,
             allocator,
         })
@@ -249,13 +244,7 @@ impl GpuBuffer {
 }
 impl Drop for GpuBuffer {
     fn drop(&mut self) {
-        if self.persistent_ptr.is_some() {
-            unsafe { self.device.unmap_memory(self.allocation.device_memory) };
-        }
-
-        self.allocator
-            .borrow_mut()
-            .deallocate(&self.device, &self.allocation);
+        self.allocator.borrow_mut().deallocate(&self.allocation);
         unsafe {
             ash::Device::destroy_buffer(&self.device, self.inner, self::get_allocation_callbacks());
         }
@@ -279,25 +268,15 @@ impl GpuBuffer {
         assert!(data_length + offset <= self.allocation.size);
 
         let address = unsafe {
-            self.persistent_ptr
+            self.allocation
+                .persistent_ptr
                 .expect("Tried to write to a buffer without a persistent ptr!")
+                .as_ptr()
                 .add(offset as _)
         } as *mut I;
         let address = unsafe { std::slice::from_raw_parts_mut(address, data.len()) };
 
         address.copy_from_slice(data);
-
-        unsafe {
-            self.device
-                .flush_mapped_memory_ranges(&[MappedMemoryRange {
-                    s_type: StructureType::MAPPED_MEMORY_RANGE,
-                    p_next: std::ptr::null(),
-                    memory: self.allocation.device_memory,
-                    offset: 0,
-                    size: vk::WHOLE_SIZE,
-                }])
-                .expect("Failed to flush memory ranges")
-        };
     }
 }
 
@@ -358,7 +337,7 @@ impl GpuImage {
 impl Drop for GpuImage {
     fn drop(&mut self) {
         if let (Some(allocator), Some(allocation)) = (&self.allocator, &self.allocation) {
-            allocator.borrow_mut().deallocate(&self.device, allocation);
+            allocator.borrow_mut().deallocate(allocation);
             unsafe {
                 self.device
                     .destroy_image(self.inner, self::get_allocation_callbacks());
