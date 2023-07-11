@@ -175,7 +175,6 @@ impl App for GLTFViewer {
                 &self.resource_map,
             )
             .unwrap();
-
         Ok(())
     }
 }

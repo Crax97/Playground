@@ -20,11 +20,12 @@ use ash::{
         Extent2D, Extent3D, Fence, FormatFeatureFlags, FramebufferCreateFlags, Handle,
         ImageAspectFlags, ImageCreateFlags, ImageLayout, ImageSubresourceLayers,
         ImageSubresourceRange, ImageTiling, ImageType, ImageViewCreateFlags, ImageViewType,
-        InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D,
-        PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType,
-        PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo, PipelineStageFlags,
-        Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo, ShaderModuleCreateFlags,
-        SharingMode, StructureType, SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
+        InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, MemoryMapFlags,
+        Offset3D, PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties,
+        PhysicalDeviceType, PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo,
+        PipelineStageFlags, Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo,
+        ShaderModuleCreateFlags, SharingMode, StructureType, SubmitInfo, WriteDescriptorSet,
+        API_VERSION_1_3,
     },
     *,
 };
@@ -944,10 +945,20 @@ fn create_staging_buffer(state: &Arc<GpuState>) -> VkResult<GpuBuffer> {
             .logical_device
             .bind_buffer_memory(buffer, allocation.device_memory, 0)
     }?;
+
+    let persistent_ptr = Some(unsafe {
+        state.logical_device.map_memory(
+            allocation.device_memory,
+            allocation.offset,
+            vk::WHOLE_SIZE,
+            MemoryMapFlags::empty(),
+        )?
+    });
     let buffer = GpuBuffer::create(
         state.logical_device.clone(),
         buffer,
         MemoryDomain::HostVisible,
+        persistent_ptr,
         allocation,
         state.gpu_memory_allocator.clone(),
     )?;
@@ -1046,12 +1057,27 @@ impl Gpu {
                 .bind_buffer_memory(buffer, allocation.device_memory, 0)
         }?;
 
+        let mut persistent_ptr = None;
+        if memory_domain.contains(MemoryDomain::HostVisible)
+            && create_info.usage.contains(BufferUsageFlags::UNIFORM_BUFFER)
+        {
+            persistent_ptr = Some(unsafe {
+                self.vk_logical_device().map_memory(
+                    allocation.device_memory,
+                    allocation.offset,
+                    vk::WHOLE_SIZE,
+                    MemoryMapFlags::empty(),
+                )?
+            });
+        }
+
         self.set_object_debug_name(create_info.label, buffer)?;
 
         GpuBuffer::create(
             self.vk_logical_device(),
             buffer,
             memory_domain,
+            persistent_ptr,
             allocation,
             self.state.gpu_memory_allocator.clone(),
         )

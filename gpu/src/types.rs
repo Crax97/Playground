@@ -1,3 +1,4 @@
+use std::ffi::c_void;
 use std::{cell::RefCell, ops::Deref, sync::Arc};
 
 use super::{allocator::GpuAllocator, gpu::Gpu};
@@ -224,6 +225,7 @@ pub struct GpuBuffer {
     pub(super) memory_domain: MemoryDomain,
     pub(super) allocation: MemoryAllocation,
     pub(super) allocator: Arc<RefCell<dyn GpuAllocator>>,
+    pub(super) persistent_ptr: Option<*mut c_void>,
 }
 
 impl GpuBuffer {
@@ -231,6 +233,7 @@ impl GpuBuffer {
         device: ash::Device,
         buffer: Buffer,
         memory_domain: MemoryDomain,
+        persistent_ptr: Option<*mut c_void>,
         allocation: MemoryAllocation,
         allocator: Arc<RefCell<dyn GpuAllocator>>,
     ) -> VkResult<Self> {
@@ -238,6 +241,7 @@ impl GpuBuffer {
             device,
             inner: buffer,
             memory_domain,
+            persistent_ptr,
             allocation,
             allocator,
         })
@@ -245,6 +249,10 @@ impl GpuBuffer {
 }
 impl Drop for GpuBuffer {
     fn drop(&mut self) {
+        if self.persistent_ptr.is_some() {
+            unsafe { self.device.unmap_memory(self.allocation.device_memory) };
+        }
+
         self.allocator
             .borrow_mut()
             .deallocate(&self.device, &self.allocation);
@@ -271,16 +279,10 @@ impl GpuBuffer {
         assert!(data_length + offset <= self.allocation.size);
 
         let address = unsafe {
-            self.device
-                .map_memory(
-                    self.allocation.device_memory,
-                    self.allocation.offset,
-                    vk::WHOLE_SIZE,
-                    MemoryMapFlags::empty(),
-                )
-                .expect("Failed to map memory!")
-        };
-        let address = unsafe { address.add(offset as _) } as *mut I;
+            self.persistent_ptr
+                .expect("Tried to write to a buffer without a persistent ptr!")
+                .add(offset as _)
+        } as *mut I;
         let address = unsafe { std::slice::from_raw_parts_mut(address, data.len()) };
 
         address.copy_from_slice(data);
@@ -296,8 +298,6 @@ impl GpuBuffer {
                 }])
                 .expect("Failed to flush memory ranges")
         };
-
-        unsafe { self.device.unmap_memory(self.allocation.device_memory) };
     }
 }
 
