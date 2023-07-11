@@ -1591,4 +1591,8 @@ impl Gpu {
             }
         }
     }
+
+    pub fn allocator(&self) -> Arc<RefCell<dyn GpuAllocator>> {
+        self.state.gpu_memory_allocator.clone()
+    }
 }
