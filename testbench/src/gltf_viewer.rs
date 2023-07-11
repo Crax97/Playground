@@ -6,7 +6,7 @@ use app::{bootstrap, App};
 use ash::vk::{PipelineStageFlags, PresentModeKHR};
 use egui::{FontDefinitions, Style};
 use egui_winit_ash_integration::Integration;
-use gpu::CommandBuffer;
+use gpu::{CommandBuffer, CommandBufferSubmitInfo};
 use utils::EguiVkAllocator;
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
@@ -207,6 +207,13 @@ impl App for GLTFViewer {
             swapchain_image_view,
             &self.resource_map,
         )?;
+        let frame = app_state.gpu.get_current_swapchain_frame();
+        command_buffer.submit(&CommandBufferSubmitInfo {
+            wait_semaphores: &[&frame.image_available_semaphore],
+            wait_stages: &[PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
+            signal_semaphores: &[&frame.render_finished_semaphore],
+            fence: Some(&frame.in_flight_fence),
+        })?;
         Ok(())
     }
 }
