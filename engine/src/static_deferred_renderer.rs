@@ -4,14 +4,15 @@ use std::{collections::HashMap, mem::size_of};
 use ash::{
     prelude::VkResult,
     vk::{
-        BufferUsageFlags, CompareOp, IndexType, PipelineBindPoint, PipelineStageFlags,
-        PushConstantRange, ShaderModuleCreateFlags, ShaderStageFlags, StencilOpState,
+        BufferUsageFlags, CompareOp, Extent2D, Format, IndexType, PipelineBindPoint,
+        PipelineStageFlags, PushConstantRange, ShaderModuleCreateFlags, ShaderStageFlags,
+        StencilOpState,
     },
 };
 use gpu::{
-    BindingType, BufferCreateInfo, DepthStencilState, FragmentStageInfo, Gpu, GpuBuffer,
-    GpuShaderModule, ImageFormat, MemoryDomain, ShaderModuleCreateInfo, Swapchain, ToVk,
-    VertexStageInfo,
+    BindingType, BufferCreateInfo, DepthStencilState, FragmentStageInfo, Gpu, GpuBuffer, GpuImage,
+    GpuImageView, GpuShaderModule, ImageFormat, MemoryDomain, ShaderModuleCreateInfo, Swapchain,
+    ToVk, VertexStageInfo,
 };
 use nalgebra::{vector, Matrix4, Vector2, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -157,6 +158,8 @@ pub struct DeferredRenderingPipeline {
     runner: GpuRunner,
     fxaa_vs: GpuShaderModule,
     fxaa_fs: GpuShaderModule,
+    in_flight_frame: usize,
+    max_frames_in_flight: usize,
 }
 
 impl DeferredRenderingPipeline {
@@ -224,6 +227,8 @@ impl DeferredRenderingPipeline {
             fxaa_fs,
             fxaa_settings: Default::default(),
             runner: GpuRunner::new(),
+            in_flight_frame: 0,
+            max_frames_in_flight: Swapchain::MAX_FRAMES_IN_FLIGHT,
         })
     }
 
@@ -631,12 +636,18 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         &mut self,
         pov: &Camera,
         scene: &Scene,
-        swapchain: &mut Swapchain,
+        swapchain_extents: Extent2D,
+        swapchain_format: Format,
+        swapchain_gpu_image: &GpuImage,
+        swapchain_gpu_image_view: &GpuImageView,
         resource_map: &ResourceMap,
     ) -> anyhow::Result<()> {
         let projection = pov.projection();
 
-        let current_buffers = &self.frame_buffers[swapchain.current_frame.get()];
+        let current_buffers = &self.frame_buffers[self.in_flight_frame];
+
+        self.in_flight_frame = (1 + self.in_flight_frame) % self.max_frames_in_flight;
+
         super::app_state()
             .gpu
             .write_buffer_data(
@@ -669,10 +680,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             )
             .unwrap();
 
-        let swapchain_extents = swapchain.extents();
-        let swapchain_format = swapchain.present_format();
-
-        let (image, view) = swapchain.acquire_next_image()?;
         app_state().gpu.begin_frame()?;
 
         let draw_hashmap = Self::generate_draw_calls(resource_map, scene);
@@ -1113,7 +1120,11 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 .unwrap(),
         );
 
-        context.inject_external_image(&swapchain_image, image, view);
+        context.inject_external_image(
+            &swapchain_image,
+            swapchain_gpu_image,
+            swapchain_gpu_image_view,
+        );
         context.injext_external_buffer(&camera_buffer, &current_buffers.camera_buffer);
         context.injext_external_buffer(&light_buffer, &current_buffers.light_buffer);
         //#endregion

@@ -6,6 +6,7 @@ use app::{bootstrap, App};
 use ash::vk::PresentModeKHR;
 use egui::{FontDefinitions, Style};
 use egui_winit_ash_integration::Integration;
+use gpu::CommandBuffer;
 use utils::EguiVkAllocator;
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};

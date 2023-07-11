@@ -1,4 +1,5 @@
-use gpu::{Gpu, Swapchain};
+use ash::vk::{Extent2D, Format};
+use gpu::{Gpu, GpuImage, GpuImageView, Swapchain};
 use nalgebra::{Matrix4, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
 
@@ -102,7 +103,10 @@ pub trait RenderingPipeline {
         &mut self,
         pov: &Camera,
         scene: &Scene,
-        swapchain: &mut Swapchain,
+        swapchain_extents: Extent2D,
+        swapchain_format: Format,
+        swapchain_image: &GpuImage,
+        swapchain_image_view: &GpuImageView,
         resource_map: &ResourceMap,
     ) -> anyhow::Result<()>;
 

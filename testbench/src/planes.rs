@@ -239,11 +239,18 @@ impl App for PlanesApp {
     }
 
     fn draw(&mut self, app_state: &mut engine::AppState) -> anyhow::Result<()> {
+        let swapchain_format = app_state.gpu.swapchain().present_format();
+        let swapchain_extents = app_state.gpu.swapchain().extents();
+        let (swapchain_image, swapchain_image_view) =
+            app_state.gpu.swapchain_mut().acquire_next_image()?;
         self.scene_renderer
             .render(
                 &self.camera,
                 &self.scene,
-                app_state.gpu.swapchain_mut(),
+                swapchain_extents,
+                swapchain_format,
+                swapchain_image,
+                swapchain_image_view,
                 &self.resource_map,
             )
             .unwrap();
