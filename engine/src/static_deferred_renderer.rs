@@ -979,7 +979,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     },
                     logic_op: None,
                     push_constant_ranges: &[PushConstantRange {
-                        stage_flags: ShaderStageFlags::ALL_GRAPHICS,
+                        stage_flags: ShaderStageFlags::ALL,
                         offset: 0,
                         size: std::mem::size_of::<FxaaShaderParams>() as _,
                     }],
