@@ -1,18 +1,56 @@
+use engine_macros::glsl;
 use std::{collections::HashMap, mem::size_of};
 
 use ash::{
     prelude::VkResult,
     vk::{
         BufferUsageFlags, CompareOp, IndexType, PipelineBindPoint, PipelineStageFlags,
-        PushConstantRange, ShaderStageFlags, StencilOpState,
+        PushConstantRange, ShaderModuleCreateFlags, ShaderStageFlags, StencilOpState,
     },
 };
 use gpu::{
     BindingType, BufferCreateInfo, DepthStencilState, FragmentStageInfo, Gpu, GpuBuffer,
-    GpuShaderModule, ImageFormat, MemoryDomain, Swapchain, ToVk, VertexStageInfo,
+    GpuShaderModule, ImageFormat, MemoryDomain, ShaderModuleCreateInfo, Swapchain, ToVk,
+    VertexStageInfo,
 };
-use nalgebra::{vector, Matrix4, Vector4};
+use nalgebra::{vector, Matrix4, Vector2, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
+
+const FXAA_FS: &[u32] = glsl!(
+    kind = fragment,
+    path = "src/shaders/fxaa_fs.frag",
+    entry_point = "main"
+);
+
+const FXAA_VS: &[u32] = glsl!(
+    kind = vertex,
+    path = "src/shaders/fxaa_vs.vert",
+    entry_point = "main"
+);
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct FxaaShaderParams {
+    rcp_frame: Vector2<f32>,
+    fxaa_quality_subpix: f32,
+    fxaa_quality_edge_threshold: f32,
+    fxaa_quality_edge_threshold_min: f32,
+}
+
+pub struct FxaaSettings {
+    pub fxaa_quality_subpix: f32,
+    pub fxaa_quality_edge_threshold: f32,
+    pub fxaa_quality_edge_threshold_min: f32,
+}
+
+impl Default for FxaaSettings {
+    fn default() -> Self {
+        Self {
+            fxaa_quality_subpix: 0.75,
+            fxaa_quality_edge_threshold: 0.166,
+            fxaa_quality_edge_threshold_min: 0.0833,
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -114,7 +152,11 @@ pub struct DeferredRenderingPipeline {
     gbuffer_combine: GpuShaderModule,
     tonemap_fs: GpuShaderModule,
 
+    fxaa_settings: FxaaSettings,
+
     runner: GpuRunner,
+    fxaa_vs: GpuShaderModule,
+    fxaa_fs: GpuShaderModule,
 }
 
 impl DeferredRenderingPipeline {
@@ -161,6 +203,15 @@ impl DeferredRenderingPipeline {
 
         let render_graph = RenderGraph::new();
 
+        let fxaa_vs = gpu.create_shader_module(&ShaderModuleCreateInfo {
+            flags: ShaderModuleCreateFlags::empty(),
+            code: bytemuck::cast_slice(FXAA_VS),
+        })?;
+        let fxaa_fs = gpu.create_shader_module(&ShaderModuleCreateInfo {
+            flags: ShaderModuleCreateFlags::empty(),
+            code: bytemuck::cast_slice(FXAA_FS),
+        })?;
+
         Ok(Self {
             material_context,
             render_graph,
@@ -169,8 +220,21 @@ impl DeferredRenderingPipeline {
             texture_copy,
             frame_buffers,
             tonemap_fs,
+            fxaa_vs,
+            fxaa_fs,
+            fxaa_settings: Default::default(),
             runner: GpuRunner::new(),
         })
+    }
+
+    pub fn fxaa_settings(&self) -> &FxaaSettings {
+        &self.fxaa_settings
+    }
+    pub fn fxaa_settings_mut(&mut self) -> &mut FxaaSettings {
+        &mut self.fxaa_settings
+    }
+    pub fn set_fxaa_settings_mut(&mut self, settings: FxaaSettings) {
+        self.fxaa_settings = settings;
     }
 
     fn main_render_loop(
@@ -614,13 +678,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let draw_hashmap = Self::generate_draw_calls(resource_map, scene);
 
         //#region render graph resources
-        let framebuffer_srgba_desc = crate::ImageDescription {
-            width: swapchain_extents.width,
-            height: swapchain_extents.height,
-            format: ImageFormat::SRgba8,
-            samples: 1,
-            present: false,
-        };
         let framebuffer_rgba_desc = crate::ImageDescription {
             width: swapchain_extents.width,
             height: swapchain_extents.height,
@@ -679,7 +736,10 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 .use_image("color-buffer", &framebuffer_vector_desc, false)?;
         let tonemap_output =
             self.render_graph
-                .use_image("tonemap-buffer", &framebuffer_srgba_desc, false)?;
+                .use_image("tonemap-buffer", &framebuffer_rgba_desc, false)?;
+        let fxaa_output =
+            self.render_graph
+                .use_image("fxaa-buffer", &framebuffer_rgba_desc, false)?;
 
         let position_target =
             self.render_graph
@@ -773,28 +833,27 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 color_write_mask: ColorComponentFlags::RGBA,
             })
             .commit();
-
-        //let fxaa_pass = self
-        //    .render_graph
-        //    .begin_render_pass("fxaa", swapchain_extents)?
-        //    .shader_reads(&[color_target])
-        //    .writes_attachments(&[tonemap_output])
-        //    .with_blend_state(BlendState {
-        //        blend_enable: false,
-        //        src_color_blend_factor: BlendFactor::ONE,
-        //        dst_color_blend_factor: BlendFactor::ZERO,
-        //        color_blend_op: BlendOp::ADD,
-        //        src_alpha_blend_factor: BlendFactor::ONE,
-        //        dst_alpha_blend_factor: BlendFactor::ZERO,
-        //        alpha_blend_op: BlendOp::ADD,
-        //        color_write_mask: ColorComponentFlags::RGBA,
-        //    })
-        //    .commit();
+        let fxaa_pass = self
+            .render_graph
+            .begin_render_pass("Fxaa", swapchain_extents)?
+            .shader_reads(&[tonemap_output])
+            .writes_attachments(&[fxaa_output])
+            .with_blend_state(BlendState {
+                blend_enable: false,
+                src_color_blend_factor: BlendFactor::ONE,
+                dst_color_blend_factor: BlendFactor::ZERO,
+                color_blend_op: BlendOp::ADD,
+                src_alpha_blend_factor: BlendFactor::ONE,
+                dst_alpha_blend_factor: BlendFactor::ZERO,
+                alpha_blend_op: BlendOp::ADD,
+                color_write_mask: ColorComponentFlags::RGBA,
+            })
+            .commit();
 
         let present_render_pass = self
             .render_graph
             .begin_render_pass("Present", swapchain_extents)?
-            .shader_reads(&[tonemap_output])
+            .shader_reads(&[fxaa_output])
             .writes_attachments(&[swapchain_image])
             .with_blend_state(BlendState {
                 blend_enable: false,
@@ -887,6 +946,47 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         )?;
 
         self.render_graph.define_pipeline_for_renderpass(
+            &crate::app_state().gpu,
+            &fxaa_pass,
+            "FxaaPipeline",
+            &RenderGraphPipelineDescription {
+                vertex_inputs: &[],
+                stage: RenderStage::Graphics {
+                    vertex: ModuleInfo {
+                        module: &self.fxaa_vs,
+                        entry_point: "main",
+                    },
+                    fragment: ModuleInfo {
+                        module: &self.fxaa_fs,
+                        entry_point: "main",
+                    },
+                },
+                fragment_state: FragmentState {
+                    input_topology: gpu::PrimitiveTopology::TriangleList,
+                    primitive_restart: false,
+                    polygon_mode: gpu::PolygonMode::Fill,
+                    cull_mode: gpu::CullMode::None,
+                    front_face: gpu::FrontFace::ClockWise,
+                    depth_stencil_state: DepthStencilState {
+                        depth_test_enable: false,
+                        depth_write_enable: false,
+                        depth_compare_op: CompareOp::ALWAYS,
+                        stencil_test_enable: false,
+                        front: StencilOpState::default(),
+                        back: StencilOpState::default(),
+                        min_depth_bounds: 0.0,
+                        max_depth_bounds: 1.0,
+                    },
+                    logic_op: None,
+                    push_constant_ranges: &[PushConstantRange {
+                        stage_flags: ShaderStageFlags::ALL_GRAPHICS,
+                        offset: 0,
+                        size: std::mem::size_of::<FxaaShaderParams>() as _,
+                    }],
+                },
+            },
+        )?;
+        self.render_graph.define_pipeline_for_renderpass(
             &app_state().gpu,
             &present_render_pass,
             "Present",
@@ -949,6 +1049,27 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         });
         context.register_callback(&tonemap_pass, |_: &Gpu, ctx| {
             ctx.render_pass_command.draw(4, 1, 0, 0);
+        });
+        context.register_callback(&fxaa_pass, |_: &Gpu, ctx| {
+            let rcp_frame = vector![
+                swapchain_extents.width as f32,
+                swapchain_extents.height as f32
+            ];
+            let rcp_frame = vector![1.0 / rcp_frame.x, 1.0 / rcp_frame.y];
+
+            let params = FxaaShaderParams {
+                rcp_frame,
+                fxaa_quality_subpix: self.fxaa_settings.fxaa_quality_subpix,
+                fxaa_quality_edge_threshold: self.fxaa_settings.fxaa_quality_edge_threshold,
+                fxaa_quality_edge_threshold_min: self.fxaa_settings.fxaa_quality_edge_threshold_min,
+            };
+
+            ctx.render_pass_command.push_constant(
+                ctx.pipeline.expect("No FXAA pipeline"),
+                &params,
+                0,
+            );
+            ctx.render_pass_command.draw(3, 1, 0, 0);
         });
         context.register_callback(&present_render_pass, |_: &Gpu, ctx| {
             ctx.render_pass_command.draw(4, 1, 0, 0);

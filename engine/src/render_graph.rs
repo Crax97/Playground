@@ -1376,6 +1376,7 @@ pub struct RenderPassContext<'p, 'g> {
     pub render_pass_command: RenderPassCommand<'p, 'g>,
     pub framebuffer: &'p GpuFramebuffer,
     pub read_descriptor_set: Option<&'p GpuDescriptorSet>,
+    pub pipeline: Option<&'p Pipeline>,
 }
 pub struct EndContext<'p, 'g> {
     pub command_buffer: &'p mut CommandBuffer<'g>,
@@ -1998,7 +1999,8 @@ impl RenderGraphRunner for GpuRunner {
                         },
                     });
 
-                if let Some(pipeline) = graph.get_pipeline(rp) {
+                let pipeline = graph.get_pipeline(rp);
+                if let Some(pipeline) = pipeline {
                     render_pass_command.bind_pipeline(pipeline);
                     if let Some(resource) = read_descriptor_set {
                         render_pass_command.bind_descriptor_sets(
@@ -2014,6 +2016,7 @@ impl RenderGraphRunner for GpuRunner {
                     render_pass: pass,
                     framebuffer,
                     render_pass_command,
+                    pipeline,
                     read_descriptor_set: read_descriptor_set.map(|r| r.resource()),
                 };
 
