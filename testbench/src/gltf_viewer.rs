@@ -3,7 +3,7 @@ mod gltf_loader;
 mod utils;
 
 use app::{bootstrap, App};
-use ash::vk::PresentModeKHR;
+use ash::vk::{PipelineStageFlags, PresentModeKHR};
 use egui::{FontDefinitions, Style};
 use egui_winit_ash_integration::Integration;
 use gpu::CommandBuffer;
@@ -194,14 +194,19 @@ impl App for GLTFViewer {
     }
 
     fn draw(&mut self, app_state: &mut AppState) -> anyhow::Result<()> {
-        self.scene_renderer
-            .render(
-                &self.camera,
-                self.gltf_loader.scene(),
-                app_state.gpu.swapchain_mut(),
-                &self.resource_map,
-            )
-            .unwrap();
+        let swapchain_format = app_state.gpu.swapchain().present_format();
+        let swapchain_extents = app_state.gpu.swapchain().extents();
+        let (swapchain_image, swapchain_image_view) =
+            app_state.gpu.swapchain_mut().acquire_next_image()?;
+        let command_buffer = self.scene_renderer.render(
+            &self.camera,
+            &self.gltf_loader.scene(),
+            swapchain_extents,
+            swapchain_format,
+            swapchain_image,
+            swapchain_image_view,
+            &self.resource_map,
+        )?;
         Ok(())
     }
 }

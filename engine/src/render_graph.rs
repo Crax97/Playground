@@ -870,13 +870,19 @@ pub struct GraphRunContext<'a, 'e> {
 
     callbacks: Callbacks<'e>,
     external_resources: ExternalResources<'e>,
+    command_buffer: &'e mut CommandBuffer<'a>,
 }
 
 impl<'a, 'e> GraphRunContext<'a, 'e> {
-    pub fn new(gpu: &'a Gpu, current_iteration: u64) -> Self {
+    pub fn new(
+        gpu: &'a Gpu,
+        command_buffer: &'e mut CommandBuffer<'a>,
+        current_iteration: u64,
+    ) -> Self {
         Self {
             gpu,
             current_iteration,
+            command_buffer,
             callbacks: Callbacks::default(),
             external_resources: ExternalResources::default(),
         }
@@ -1893,9 +1899,7 @@ impl RenderGraphRunner for GpuRunner {
         self.resource_states.clear();
         resource_allocator.update(ctx.current_iteration);
 
-        let mut command_buffer = CommandBuffer::new(ctx.gpu, gpu::QueueType::Graphics)?;
-
-        let label = command_buffer.begin_debug_region(
+        let label = ctx.command_buffer.begin_debug_region(
             &format!("Rendering frame {}", ctx.current_iteration),
             [0.0, 0.3, 0.0, 1.0],
         );
@@ -1984,12 +1988,12 @@ impl RenderGraphRunner for GpuRunner {
                         }
                     })
                     .collect();
-                let render_pass_label = command_buffer.begin_debug_region(
+                let render_pass_label = ctx.command_buffer.begin_debug_region(
                     &format!("Begin Render Pass: {}", rp.label),
                     [0.3, 0.0, 0.0, 1.0],
                 );
                 let mut render_pass_command =
-                    command_buffer.begin_render_pass(&BeginRenderPassInfo {
+                    ctx.command_buffer.begin_render_pass(&BeginRenderPassInfo {
                         framebuffer,
                         render_pass: pass,
                         clear_color_values: &clear_color_values,
@@ -2030,19 +2034,11 @@ impl RenderGraphRunner for GpuRunner {
             end_cb(
                 ctx.gpu,
                 &mut EndContext {
-                    command_buffer: &mut command_buffer,
+                    command_buffer: &mut ctx.command_buffer,
                 },
             );
         }
         label.end();
-        let frame = ctx.gpu.get_current_swapchain_frame();
-        command_buffer.submit(&gpu::CommandBufferSubmitInfo {
-            wait_semaphores: &[&frame.image_available_semaphore],
-            wait_stages: &[PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
-            signal_semaphores: &[&frame.render_finished_semaphore],
-            fence: Some(&frame.in_flight_fence),
-        })?;
-
         Ok(())
     }
 }

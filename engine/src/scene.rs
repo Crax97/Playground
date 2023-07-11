@@ -1,5 +1,5 @@
 use ash::vk::{Extent2D, Format};
-use gpu::{Gpu, GpuImage, GpuImageView, Swapchain};
+use gpu::{CommandBuffer, Gpu, GpuImage, GpuImageView, Swapchain};
 use nalgebra::{Matrix4, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
 
@@ -108,7 +108,7 @@ pub trait RenderingPipeline {
         swapchain_image: &GpuImage,
         swapchain_image_view: &GpuImageView,
         resource_map: &ResourceMap,
-    ) -> anyhow::Result<()>;
+    ) -> anyhow::Result<CommandBuffer>;
 
     fn create_material(
         &mut self,

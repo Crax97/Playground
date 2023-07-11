@@ -10,9 +10,9 @@ use ash::{
     },
 };
 use gpu::{
-    BindingType, BufferCreateInfo, DepthStencilState, FragmentStageInfo, Gpu, GpuBuffer, GpuImage,
-    GpuImageView, GpuShaderModule, ImageFormat, MemoryDomain, ShaderModuleCreateInfo, Swapchain,
-    ToVk, VertexStageInfo,
+    BindingType, BufferCreateInfo, CommandBuffer, DepthStencilState, FragmentStageInfo, Gpu,
+    GpuBuffer, GpuImage, GpuImageView, GpuShaderModule, ImageFormat, MemoryDomain,
+    ShaderModuleCreateInfo, Swapchain, ToVk, VertexStageInfo,
 };
 use nalgebra::{vector, Matrix4, Vector2, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -641,7 +641,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         swapchain_gpu_image: &GpuImage,
         swapchain_gpu_image_view: &GpuImageView,
         resource_map: &ResourceMap,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<CommandBuffer> {
         let projection = pov.projection();
 
         let current_buffers = &self.frame_buffers[self.in_flight_frame];
@@ -1033,8 +1033,11 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         //#endregion
 
+        let mut graphics_command_buffer =
+            CommandBuffer::new(&crate::app_state().gpu, gpu::QueueType::Graphics)?;
         let mut context = GraphRunContext::new(
             &crate::app_state().gpu,
+            &mut graphics_command_buffer,
             crate::app_state().time().frames_since_start(),
         );
 
@@ -1130,7 +1133,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         //#endregion
         self.render_graph.run(context, &mut self.runner)?;
 
-        Ok(())
+        Ok(graphics_command_buffer)
     }
 
     fn create_material(
