@@ -172,10 +172,10 @@ impl Drop for GpuThreadLocalState {
 }
 
 pub struct Gpu {
-    pub(super) state: Arc<GpuState>,
-    pub(super) thread_local_states: Vec<GpuThreadLocalState>,
-    pub(super) staging_buffer: GpuBuffer,
-    pub(super) swapchain: Swapchain,
+    pub(crate) state: Arc<GpuState>,
+    pub(crate) thread_local_states: Vec<GpuThreadLocalState>,
+    pub(crate) staging_buffer: GpuBuffer,
+    pub(crate) swapchain: Swapchain,
 }
 
 pub struct GpuConfiguration<'a> {

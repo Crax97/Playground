@@ -15,13 +15,7 @@ use ash::vk::{
     SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency,
     SubpassDescriptionFlags,
 };
-use gpu::{
-    BeginRenderPassInfo, BindingType, BlendState, BufferCreateInfo, BufferRange, CommandBuffer,
-    DescriptorInfo, DescriptorSetInfo, FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet,
-    GpuFramebuffer, GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, ImageFormat,
-    ImageViewCreateInfo, MemoryDomain, Pipeline, RenderPass, RenderPassAttachment,
-    RenderPassCommand, RenderPassDescription, SubpassDescription, ToVk, TransitionInfo,
-};
+use gpu::{BeginRenderPassInfo, BindingType, BlendState, BufferCreateInfo, BufferRange, ColorAttachment, ColorLoadOp, CommandBuffer, DepthAttachment, DepthLoadOp, DescriptorInfo, DescriptorSetInfo, FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, ImageFormat, ImageViewCreateInfo, MemoryDomain, Pipeline, RenderPass, RenderPassAttachment, RenderPassCommand, RenderPassDescription, StencilAttachment, StencilLoadOp, SubpassDescription, ToVk, TransitionInfo};
 
 use ash::vk::PushConstantRange;
 use gpu::{
@@ -1372,9 +1366,7 @@ pub enum GraphOperation {
 
 pub struct RenderPassContext<'p, 'g> {
     pub render_graph: &'p RenderGraph,
-    pub render_pass: &'p RenderPass,
     pub render_pass_command: RenderPassCommand<'p, 'g>,
-    pub framebuffer: &'p GpuFramebuffer,
     pub read_descriptor_set: Option<&'p GpuDescriptorSet>,
     pub pipeline: Option<&'p Pipeline>,
 }
@@ -1911,13 +1903,13 @@ impl RenderGraphRunner for GpuRunner {
 
                 ensure_graph_allocated_resources_exist(ctx, info, graph, resource_allocator)?;
                 ensure_graph_allocated_samplers_exists(ctx, info, graph, resource_allocator)?;
-                let views = resolve_framebuffer_image_views_unchecked(
+                let (color_views, depth_view, stencil_view) = resolve_render_image_views_unchecked(
                     info,
                     graph,
                     &ctx.external_resources,
                     &resource_allocator.image_views,
                 );
-
+                
                 let read_descriptor_set = resolve_input_descriptor_set(
                     ctx,
                     graph,
@@ -1927,27 +1919,6 @@ impl RenderGraphRunner for GpuRunner {
                     &resource_allocator.samplers,
                     &mut resource_allocator.descriptors,
                 );
-
-                let framebuffer_hash = compute_framebuffer_hash(&views);
-
-                let pass = self.get_renderpass(
-                    rp,
-                    &ctx.external_resources,
-                    &resource_allocator.render_passes,
-                );
-                let framebuffer = resource_allocator
-                    .framebuffers
-                    .get(
-                        ctx,
-                        &RenderGraphFramebufferCreateInfo {
-                            render_pass: pass,
-                            render_targets: &views,
-                            extents: info.extents,
-                            framebuffer_hash,
-                        },
-                        &framebuffer_hash,
-                    )?
-                    .resource();
 
                 let cb = ctx.callbacks.callbacks.get_mut(rp);
                 let clear = ctx.callbacks.clear_color_cbs.get(rp);
@@ -1984,15 +1955,16 @@ impl RenderGraphRunner for GpuRunner {
                         }
                     })
                     .collect();
+
                 let render_pass_label = command_buffer.begin_debug_region(
                     &format!("Begin Render Pass: {}", rp.label),
                     [0.3, 0.0, 0.0, 1.0],
                 );
                 let mut render_pass_command =
                     command_buffer.begin_render_pass(&BeginRenderPassInfo {
-                        framebuffer,
-                        render_pass: pass,
-                        clear_color_values: &clear_color_values,
+                        color_attachments: &color_views,
+                        depth_attachment: depth_view,
+                        stencil_attachment: stencil_view,
                         render_area: Rect2D {
                             offset: Offset2D::default(),
                             extent: info.extents,
@@ -2013,8 +1985,6 @@ impl RenderGraphRunner for GpuRunner {
                 }
                 let mut context = RenderPassContext {
                     render_graph: graph,
-                    render_pass: pass,
-                    framebuffer,
                     render_pass_command,
                     pipeline,
                     read_descriptor_set: read_descriptor_set.map(|r| r.resource()),
@@ -2045,6 +2015,24 @@ impl RenderGraphRunner for GpuRunner {
 
         Ok(())
     }
+}
+
+fn separate_image_views(views: Vec<&GpuImageView>) -> (Vec<&GpuImageView>, Option<&GpuImageView>, Option<&GpuImageView>) {
+    let mut color_attachments = vec![];
+    let mut depth_attachment = None;
+    let mut stencil_attachment = None;
+
+    for view in views {
+        if view.format().is_color() {
+            color_attachments.push(view)
+        } else if view.format().is_depth() {
+            depth_attachment = Some(view)
+        } else {
+            stencil_attachment = Some(view)
+        }
+    }
+    
+    (color_attachments, depth_attachment, stencil_attachment)
 }
 
 fn compute_framebuffer_hash(views: &Vec<&GpuImageView>) -> FramebufferHandle {
@@ -2155,16 +2143,18 @@ fn ensure_graph_allocated_samplers_exists(
     Ok(())
 }
 
-fn resolve_framebuffer_image_views_unchecked<'e, 'a>(
+fn resolve_render_image_views_unchecked<'e, 'a>(
     info: &RenderPassInfo,
     graph: &RenderGraph,
     external_resources: &'e ExternalResources<'e>,
     image_views_allocator: &'a ImageViewAllocator,
-) -> Vec<&'e GpuImageView>
+) -> (Vec<ColorAttachment<'e>>, Option<DepthAttachment<'e>>, Option<StencilAttachment<'e>>)
 where
     'a: 'e,
 {
-    let mut views = vec![];
+    let mut colors = vec![];
+    let mut depth = None;
+    let mut stencil = None;
     for writes in &info.attachment_writes {
         let resource_info = graph
             .get_resource_info(writes)
@@ -2177,7 +2167,29 @@ where
         } else {
             image_views_allocator.get_unchecked(writes).resource()
         };
-        views.push(view);
+        
+        if view.format().is_color() {
+            colors.push(ColorAttachment {
+                image_view: view,
+                load_op: ColorLoadOp::DontCare,
+                store_op: gpu::AttachmentStoreOp::Store,
+                initial_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            });
+        } else if view.format().is_depth() {
+            depth = Some(DepthAttachment {
+                image_view: view,
+                load_op: DepthLoadOp::DontCare,
+                store_op: gpu::AttachmentStoreOp::Store,
+                final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            });
+        } else {
+            stencil = Some(StencilAttachment {
+                image_view: view,
+                load_op: StencilLoadOp::DontCare,
+                store_op: gpu::AttachmentStoreOp::Store,
+                final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            });
+        }
     }
     for reads in &info.attachment_reads {
         let view = if external_resources
@@ -2190,9 +2202,31 @@ where
         } else {
             image_views_allocator.get_unchecked(reads).resource()
         };
-        views.push(view);
+
+        if view.format().is_color() {
+            colors.push(ColorAttachment {
+                image_view: view,
+                load_op: ColorLoadOp::Load,
+                store_op: gpu::AttachmentStoreOp::Store,
+                initial_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            });
+        } else if view.format().is_depth() {
+            depth = Some(DepthAttachment {
+                image_view: view,
+                load_op: DepthLoadOp::Load,
+                store_op: gpu::AttachmentStoreOp::Store,
+                final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            });
+        } else {
+            stencil = Some(StencilAttachment {
+                image_view: view,
+                load_op: StencilLoadOp::Load,
+                store_op: gpu::AttachmentStoreOp::Store,
+                final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            });
+        }
     }
-    views
+    (colors, depth, stencil)
 }
 
 fn resolve_input_descriptor_set<'a>(
