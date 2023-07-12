@@ -6,7 +6,7 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use ash::vk::{self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor, BufferUsageFlags, ClearDepthStencilValue, ClearValue, ColorComponentFlags, CompareOp, ComponentMapping, DependencyFlags, Extent2D, Filter, ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency, SubpassDescriptionFlags};
+use ash::vk::{self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor, BufferUsageFlags, ColorComponentFlags, CompareOp, ComponentMapping, DependencyFlags, Extent2D, Filter, ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency, SubpassDescriptionFlags};
 use gpu::{BeginRenderPassInfo, BindingType, BlendState, BufferCreateInfo, BufferRange, ColorAttachment, ColorLoadOp, CommandBuffer, DepthAttachment, DepthLoadOp, DescriptorInfo, DescriptorSetInfo, FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, ImageFormat, ImageMemoryBarrier, ImageViewCreateInfo, MemoryDomain, Pipeline, PipelineBarrierInfo, RenderPass, RenderPassAttachment, RenderPassCommand, RenderPassDescription, StencilAttachment, StencilLoadOp, SubpassDescription, ToVk, TransitionInfo};
 
 use ash::vk::PushConstantRange;
@@ -876,15 +876,6 @@ impl<'a, 'e> GraphRunContext<'a, 'e> {
         self.callbacks.register_callback(handle, callback)
     }
 
-    pub fn set_clear_callback<F: Fn(&ResourceId) -> ash::vk::ClearValue + 'e>(
-        &mut self,
-        handle: &RenderPassHandle,
-        callback: F,
-    ) {
-        self.callbacks
-            .set_clear_callback(handle, Box::new(callback));
-    }
-
     pub fn register_end_callback<F: FnMut(&Gpu, &mut EndContext) + 'e>(&mut self, callback: F) {
         self.callbacks.register_end_callback(callback)
     }
@@ -945,6 +936,49 @@ impl ResourceId {
     }
 }
 
+#[derive(Default, Copy, Clone, PartialEq, Debug)]
+pub enum ClearValue {
+    #[default]
+    DontCare,
+    Color([f32; 4]),
+    Depth(f32),
+    Stencil(u8),
+}
+
+impl std::hash::Hash for ClearValue {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state)
+    }
+}
+
+impl Eq for ClearValue {
+    
+}
+
+impl ClearValue {
+    pub(crate) fn color_op(&self) -> ColorLoadOp {
+        match self {
+            ClearValue::DontCare => ColorLoadOp::DontCare,
+            ClearValue::Color(c) => ColorLoadOp::Clear(*c),
+            _ => unreachable!()
+        }
+    }
+    pub(crate) fn depth_op(&self) -> DepthLoadOp {
+        match self {
+            ClearValue::DontCare => DepthLoadOp::DontCare,
+            ClearValue::Depth(d) => DepthLoadOp::Clear(*d),
+            _ => unreachable!()
+        }
+    }
+    pub(crate) fn stencil_op(&self) -> StencilLoadOp {
+        match self {
+            ClearValue::DontCare => StencilLoadOp::DontCare,
+            ClearValue::Stencil(s) => StencilLoadOp::Clear(*s),
+            _ => unreachable!()
+        }
+    }
+}
+
 #[derive(Hash, Copy, Clone, PartialEq, Eq)]
 pub struct ImageDescription {
     pub width: u32,
@@ -952,6 +986,7 @@ pub struct ImageDescription {
     pub format: ImageFormat,
     pub samples: u32,
     pub present: bool,
+    pub clear_value: ClearValue
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Copy, Hash)]
@@ -1379,13 +1414,11 @@ impl CompiledRenderGraph {
 }
 
 type RenderCallback<'g> = Box<dyn FnMut(&Gpu, &mut RenderPassContext) + 'g>;
-type ClearColorCallback<'g> = Box<dyn Fn(&ResourceId) -> ash::vk::ClearValue + 'g>;
 type EndCallback<'g> = Box<dyn FnMut(&Gpu, &mut EndContext) + 'g>;
 
 #[derive(Default)]
 struct Callbacks<'g> {
     callbacks: HashMap<RenderPassHandle, RenderCallback<'g>>,
-    clear_color_cbs: HashMap<RenderPassHandle, ClearColorCallback<'g>>,
     end_callback: Option<EndCallback<'g>>,
 }
 
@@ -1397,13 +1430,7 @@ impl<'g> Callbacks<'g> {
     ) {
         self.callbacks.insert(*handle, Box::new(callback));
     }
-    pub fn set_clear_callback<F: Fn(&ResourceId) -> ash::vk::ClearValue + 'g>(
-        &mut self,
-        handle: &RenderPassHandle,
-        callback: F,
-    ) {
-        self.clear_color_cbs.insert(*handle, Box::new(callback));
-    }
+    
     pub fn register_end_callback<F: FnMut(&Gpu, &mut EndContext) + 'g>(&mut self, callback: F) {
         self.end_callback = Some(Box::new(callback));
     }
@@ -1871,7 +1898,7 @@ impl RenderGraphRunner for GpuRunner {
 
                         self.resource_states.insert(*read, new_layout);
 
-                        let image = Self::get_image_unchecked(&ctx, read, &resource_allocator);
+                        let image = Self::get_image_unchecked(ctx, read, resource_allocator);
                         if image_desc.format.is_color() {
                             color_transitions.push(ImageMemoryBarrier {
                                 src_access_mask: old_layout.access_mask,
@@ -1969,7 +1996,7 @@ impl RenderGraphRunner for GpuRunner {
                         };
                         self.resource_states.insert(*read, new_layout);
 
-                        let image = Self::get_image_unchecked(&ctx, read, &resource_allocator);
+                        let image = Self::get_image_unchecked(ctx, read, resource_allocator);
                         if image_desc.format.is_color() {
                             color_transitions.push(ImageMemoryBarrier {
                                 src_access_mask: old_layout.access_mask,
@@ -2066,7 +2093,7 @@ impl RenderGraphRunner for GpuRunner {
                         };
                         self.resource_states.insert(*read, new_layout);
 
-                        let image = Self::get_image_unchecked(&ctx, read, &resource_allocator);
+                        let image = Self::get_image_unchecked(ctx, read, resource_allocator);
                         if image_desc.format.is_color() {
                             color_transitions.push(ImageMemoryBarrier {
                                 src_access_mask: old_layout.access_mask,
@@ -2143,41 +2170,7 @@ impl RenderGraphRunner for GpuRunner {
                 );
 
                 let cb = ctx.callbacks.callbacks.get_mut(rp);
-                let clear = ctx.callbacks.clear_color_cbs.get(rp);
-                let clear_color_values: Vec<_> = info
-                    .attachment_writes
-                    .iter()
-                    .chain(info.attachment_reads.iter())
-                    .map(|rd| {
-                        if let Some(func) = clear {
-                            func(rd)
-                        } else {
-                            let res_info = &graph.allocations[rd];
-                            match &res_info.ty {
-                                AllocationType::Image(desc) => {
-                                    if desc.format.is_color() {
-                                        ClearValue {
-                                            color: vk::ClearColorValue {
-                                                float32: [0.0, 0.0, 0.0, 0.0],
-                                            },
-                                        }
-                                    } else {
-                                        ClearValue {
-                                            depth_stencil: ClearDepthStencilValue {
-                                                depth: 1.0,
-                                                stencil: 255,
-                                            },
-                                        }
-                                    }
-                                }
-                                AllocationType::Buffer { .. } => {
-                                    panic!("Graph can't treat buffer as render target!")
-                                }
-                            }
-                        }
-                    })
-                    .collect();
-
+                
                 let render_pass_label = command_buffer.begin_debug_region(
                     &format!("Begin Render Pass: {}", rp.label),
                     [0.3, 0.0, 0.0, 1.0],
@@ -2359,24 +2352,26 @@ where
             image_views_allocator.get_unchecked(writes).resource()
         };
         
+        let image_desc = if let AllocationType::Image(d) = resource_info.ty { d } else {continue};
+        
         if view.format().is_color() {
             colors.push(ColorAttachment {
                 image_view: view,
-                load_op: ColorLoadOp::Clear([0.0, 0.0, 0.0, 0.0]),
+                load_op: image_desc.clear_value.color_op(),
                 store_op: gpu::AttachmentStoreOp::Store,
                 initial_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             });
         } else if view.format().is_depth() {
             depth = Some(DepthAttachment {
                 image_view: view,
-                load_op: DepthLoadOp::Clear(1.0),
+                load_op: image_desc.clear_value.depth_op(),
                 store_op: gpu::AttachmentStoreOp::Store,
                 initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             });
         } else {
             stencil = Some(StencilAttachment {
                 image_view: view,
-                load_op: StencilLoadOp::DontCare,
+                load_op: image_desc.clear_value.stencil_op(),
                 store_op: gpu::AttachmentStoreOp::Store,
                 initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             });
@@ -2499,6 +2494,7 @@ mod test {
     use ash::vk::Extent2D;
 
     use crate::{CompileError, ResourceId, ResourceLayout};
+    use crate::ClearValue::{Color, DontCare};
 
     use super::{ImageDescription, RenderGraph};
 
@@ -2509,6 +2505,7 @@ mod test {
             format: gpu::ImageFormat::Rgba8,
             samples: 1,
             present: false,
+            clear_value: Color([0.0, 0.0, 0.0, 0.0]),
         };
 
         rg.use_image(name, &description, false).unwrap()
@@ -2548,6 +2545,7 @@ mod test {
                 format: gpu::ImageFormat::Rgba8,
                 samples: 1,
                 present: false,
+                clear_value: DontCare,
             };
 
             render_graph.use_image("color1", &description, false)

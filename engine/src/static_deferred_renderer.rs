@@ -113,15 +113,7 @@ impl From<&Light> for GpuLightInfo {
     }
 }
 
-use crate::{
-    app_state,
-    camera::Camera,
-    material::{MasterMaterial, MasterMaterialDescription},
-    BufferDescription, BufferType, FragmentState, GpuRunner, GraphRunContext, Light, LightType,
-    MaterialDescription, MaterialDomain, MaterialInstance, MeshPrimitive, ModuleInfo,
-    PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage,
-    RenderingPipeline, Scene,
-};
+use crate::{app_state, camera::Camera, material::{MasterMaterial, MasterMaterialDescription}, BufferDescription, BufferType, FragmentState, GpuRunner, GraphRunContext, Light, LightType, MaterialDescription, MaterialDomain, MaterialInstance, MeshPrimitive, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage, RenderingPipeline, Scene, ClearValue};
 
 use ash::vk::{
     AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
@@ -684,6 +676,15 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             format: ImageFormat::Rgba8,
             samples: 1,
             present: false,
+            clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0])
+        };
+        let framebuffer_normal_desc = crate::ImageDescription {
+            width: swapchain_extents.width,
+            height: swapchain_extents.height,
+            format: ImageFormat::Rgba8,
+            samples: 1,
+            present: false,
+            clear_value: ClearValue::Color([0.5, 0.5, 0.5, 1.0])
         };
         let framebuffer_vector_desc = crate::ImageDescription {
             width: swapchain_extents.width,
@@ -691,6 +692,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             format: ImageFormat::RgbaFloat,
             samples: 1,
             present: false,
+            clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0])
         };
         let framebuffer_depth_desc = crate::ImageDescription {
             width: swapchain_extents.width,
@@ -698,6 +700,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             format: ImageFormat::Depth,
             samples: 1,
             present: false,
+            clear_value: ClearValue::Depth(1.0)
         };
         let framebuffer_swapchain_desc = crate::ImageDescription {
             width: swapchain_extents.width,
@@ -705,6 +708,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             format: swapchain_format.into(),
             samples: 1,
             present: true,
+            clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0])
         };
 
         let camera_buffer = self.render_graph.use_buffer(
@@ -746,7 +750,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 .use_image("position-buffer", &framebuffer_vector_desc, false)?;
         let normal_target =
             self.render_graph
-                .use_image("normal_buffer", &framebuffer_rgba_desc, false)?;
+                .use_image("normal_buffer", &framebuffer_normal_desc, false)?;
         let diffuse_target =
             self.render_graph
                 .use_image("diffuse_buffer", &framebuffer_rgba_desc, false)?;
@@ -1073,29 +1077,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         });
         context.register_callback(&present_render_pass, |_: &Gpu, ctx| {
             ctx.render_pass_command.draw(4, 1, 0, 0);
-        });
-
-        context.set_clear_callback(&gbuffer_pass, |handle| {
-            if handle == &normal_target {
-                ash::vk::ClearValue {
-                    color: ash::vk::ClearColorValue {
-                        float32: [0.5, 0.5, 0.5, 1.0],
-                    },
-                }
-            } else if handle == &depth_target {
-                ash::vk::ClearValue {
-                    depth_stencil: ash::vk::ClearDepthStencilValue {
-                        depth: 1.0,
-                        stencil: 255,
-                    },
-                }
-            } else {
-                ash::vk::ClearValue {
-                    color: ash::vk::ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 1.0],
-                    },
-                }
-            }
         });
 
         context.inject_external_renderpass(
