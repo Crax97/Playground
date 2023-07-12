@@ -4,6 +4,7 @@ use std::{
     ptr::{addr_of, null},
     sync::Arc,
 };
+use std::ptr::addr_of_mut;
 
 use anyhow::{bail, Result};
 use ash::{
@@ -29,6 +30,7 @@ use ash::{
     *,
 };
 use ash::extensions::khr::DynamicRendering;
+use ash::vk::{PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR};
 
 use log::{error, trace, warn};
 use raw_window_handle::HasRawDisplayHandle;
@@ -274,7 +276,7 @@ impl Gpu {
         trace!("Created instance");
 
         let device_extensions = vec!["VK_KHR_swapchain".into(),
-                                     "VK_KHR_dynamic_rendering".into()];
+                                                "VK_KHR_dynamic_rendering".into(),];
 
         let physical_device = Self::select_discrete_physical_device(&instance)?;
         trace!("Created physical device");
@@ -573,12 +575,25 @@ impl Gpu {
 
         let device_features = PhysicalDeviceFeatures {
             sampler_anisotropy: vk::TRUE,
+            
             ..Default::default()
         };
 
+        let mut dynamic_state_features = PhysicalDeviceDynamicRenderingFeaturesKHR {
+            p_next: std::ptr::null_mut(),
+            s_type: StructureType::PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
+            dynamic_rendering: vk::TRUE,
+        };
+        
+        let device_features_2 = PhysicalDeviceFeatures2KHR {
+            p_next: addr_of_mut!(dynamic_state_features).cast(),
+            s_type: StructureType::PHYSICAL_DEVICE_FEATURES_2_KHR,
+            features: device_features,
+        };
+ 
         let create_info = DeviceCreateInfo {
             s_type: StructureType::DEVICE_CREATE_INFO,
-            p_next: null(),
+            p_next: addr_of!(device_features_2).cast(),
             flags: DeviceCreateFlags::empty(),
             queue_create_info_count: 3,
             p_queue_create_infos: queue_create_infos.as_ptr(),
@@ -594,7 +609,7 @@ impl Gpu {
             },
             enabled_extension_count: c_ptr_device_extensions.len() as u32,
             pp_enabled_extension_names: c_ptr_device_extensions.as_ptr(),
-            p_enabled_features: addr_of!(device_features),
+            p_enabled_features: std::ptr::null(),
         };
 
         unsafe { instance.create_device(selected_device.physical_device, &create_info, None) }

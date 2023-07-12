@@ -1,5 +1,7 @@
+use std::ptr::addr_of;
 use std::{ffi::CString, sync::Arc};
 
+use ash::vk::{Format, PipelineRenderingCreateInfoKHR};
 use ash::{
     prelude::VkResult,
     vk::{
@@ -23,6 +25,8 @@ use ash::{
         VertexInputBindingDescription,
     },
 };
+
+use crate::{ImageFormat, ToVk};
 
 use super::{Gpu, GpuShaderModule, GpuState, ShaderStage};
 
@@ -452,7 +456,6 @@ impl std::hash::Hash for Pipeline {
 impl Pipeline {
     pub fn new(
         gpu: &Gpu,
-        target_render_pass: &RenderPass,
         pipeline_description: &PipelineDescription,
     ) -> VkResult<Self> {
         let descriptor_set_layouts = pipeline_description.create_descriptor_set_layouts(gpu)?;
@@ -647,9 +650,31 @@ impl Pipeline {
                     as *const DynamicState,
             };
 
+            let color_attachment = pipeline_description
+                .fragment_stage
+                .map(|frag| (frag.color_attachments.iter().map(|c| c.format).collect()))
+                .unwrap_or(vec![]);
+
+            let rendering_ext_info = PipelineRenderingCreateInfoKHR {
+                s_type: StructureType::PIPELINE_RENDERING_CREATE_INFO_KHR,
+                p_next: std::ptr::null(),
+                view_mask: 0,
+                color_attachment_count: color_attachment.len() as _,
+                p_color_attachment_formats: color_attachment.as_ptr(),
+                depth_attachment_format: if pipeline_description
+                    .depth_stencil_state
+                    .depth_test_enable
+                {
+                    ImageFormat::Depth.to_vk()
+                } else {
+                    Format::UNDEFINED
+                },
+                stencil_attachment_format: Format::UNDEFINED,
+            };
+
             let create_infos = [GraphicsPipelineCreateInfo {
                 s_type: StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
-                p_next: std::ptr::null(),
+                p_next: addr_of!(rendering_ext_info).cast(),
                 flags: PipelineCreateFlags::ALLOW_DERIVATIVES,
                 stage_count: stages.len() as _,
                 p_stages: stages.as_ptr(),
@@ -666,7 +691,7 @@ impl Pipeline {
                 p_color_blend_state: &color_blend as *const PipelineColorBlendStateCreateInfo,
                 p_dynamic_state: &dynamic_state as *const PipelineDynamicStateCreateInfo,
                 layout: pipeline_layout,
-                render_pass: target_render_pass.inner,
+                render_pass: vk::RenderPass::null(),
                 subpass: 0,
                 base_pipeline_handle: vk::Pipeline::null(),
                 base_pipeline_index: 0,

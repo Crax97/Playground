@@ -212,7 +212,6 @@ impl MasterMaterial {
                 .expect("Render pass not defined");
             let pipeline = Pipeline::new(
                 gpu,
-                render_pass,
                 &PipelineDescription {
                     global_bindings: &[
                         GlobalBinding {
@@ -280,9 +279,6 @@ impl MasterMaterial {
         let mut pipelines = HashMap::new();
         let pipeline = Pipeline::new(
             gpu,
-            target_render_passes
-                .get(&PipelineTarget::PostProcess)
-                .expect("Post Process render pass not defined"),
             &PipelineDescription {
                 global_bindings: &[
                     GlobalBinding {

@@ -1162,7 +1162,7 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
         push_constant_ranges: description.fragment_state.push_constant_ranges,
     };
 
-    Ok(Pipeline::new(gpu, vk_renderpass, &description)?)
+    Ok(Pipeline::new(gpu, &description)?)
 }
 
 pub struct RenderGraph {
