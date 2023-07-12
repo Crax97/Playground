@@ -98,15 +98,20 @@ impl Scene {
         &mut self.primitives
     }
 }
+
+pub struct Backbuffer<'a> {
+    pub size: Extent2D,
+    pub format: Format,
+    pub image: &'a GpuImage,
+    pub image_view: &'a GpuImageView,
+}
+
 pub trait RenderingPipeline {
     fn render(
         &mut self,
         pov: &Camera,
         scene: &Scene,
-        swapchain_extents: Extent2D,
-        swapchain_format: Format,
-        swapchain_image: &GpuImage,
-        swapchain_image_view: &GpuImageView,
+        backbuffer: Backbuffer,
         resource_map: &ResourceMap,
     ) -> anyhow::Result<CommandBuffer>;
 

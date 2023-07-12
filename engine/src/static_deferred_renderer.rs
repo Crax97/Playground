@@ -4,14 +4,14 @@ use std::{collections::HashMap, mem::size_of};
 use ash::{
     prelude::VkResult,
     vk::{
-        BufferUsageFlags, CompareOp, Extent2D, Format, IndexType, PipelineBindPoint,
+        BufferUsageFlags, CompareOp, IndexType, PipelineBindPoint,
         PipelineStageFlags, PushConstantRange, ShaderModuleCreateFlags, ShaderStageFlags,
         StencilOpState,
     },
 };
 use gpu::{
     BindingType, BufferCreateInfo, CommandBuffer, DepthStencilState, FragmentStageInfo, Gpu,
-    GpuBuffer, GpuImage, GpuImageView, GpuShaderModule, ImageFormat, MemoryDomain,
+    GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain,
     ShaderModuleCreateInfo, Swapchain, ToVk, VertexStageInfo,
 };
 use nalgebra::{vector, Matrix4, Vector2, Vector4};
@@ -114,15 +114,7 @@ impl From<&Light> for GpuLightInfo {
     }
 }
 
-use crate::{
-    app_state,
-    camera::Camera,
-    material::{MasterMaterial, MasterMaterialDescription},
-    BufferDescription, BufferType, ClearValue, FragmentState, GpuRunner, GraphRunContext, Light,
-    LightType, MaterialDescription, MaterialDomain, MaterialInstance, MeshPrimitive, ModuleInfo,
-    PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage,
-    RenderingPipeline, Scene,
-};
+use crate::{app_state, camera::Camera, material::{MasterMaterial, MasterMaterialDescription}, BufferDescription, BufferType, ClearValue, FragmentState, GpuRunner, GraphRunContext, Light, LightType, MaterialDescription, MaterialDomain, MaterialInstance, MeshPrimitive, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage, RenderingPipeline, Scene, Backbuffer};
 
 use ash::vk::{
     AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
@@ -636,10 +628,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         &mut self,
         pov: &Camera,
         scene: &Scene,
-        swapchain_extents: Extent2D,
-        swapchain_format: Format,
-        swapchain_gpu_image: &GpuImage,
-        swapchain_gpu_image_view: &GpuImageView,
+        backbuffer: Backbuffer,
         resource_map: &ResourceMap,
     ) -> anyhow::Result<CommandBuffer> {
         let projection = pov.projection();
@@ -686,41 +675,41 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         //#region render graph resources
         let framebuffer_rgba_desc = crate::ImageDescription {
-            width: swapchain_extents.width,
-            height: swapchain_extents.height,
+            width: backbuffer.size.width,
+            height: backbuffer.size.height,
             format: ImageFormat::Rgba8,
             samples: 1,
             present: false,
             clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
         };
         let framebuffer_normal_desc = crate::ImageDescription {
-            width: swapchain_extents.width,
-            height: swapchain_extents.height,
+            width: backbuffer.size.width,
+            height: backbuffer.size.height,
             format: ImageFormat::Rgba8,
             samples: 1,
             present: false,
             clear_value: ClearValue::Color([0.5, 0.5, 0.5, 1.0]),
         };
         let framebuffer_vector_desc = crate::ImageDescription {
-            width: swapchain_extents.width,
-            height: swapchain_extents.height,
+            width: backbuffer.size.width,
+            height: backbuffer.size.height,
             format: ImageFormat::RgbaFloat,
             samples: 1,
             present: false,
             clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
         };
         let framebuffer_depth_desc = crate::ImageDescription {
-            width: swapchain_extents.width,
-            height: swapchain_extents.height,
+            width: backbuffer.size.width,
+            height: backbuffer.size.height,
             format: ImageFormat::Depth,
             samples: 1,
             present: false,
             clear_value: ClearValue::Depth(1.0),
         };
         let framebuffer_swapchain_desc = crate::ImageDescription {
-            width: swapchain_extents.width,
-            height: swapchain_extents.height,
-            format: swapchain_format.into(),
+            width: backbuffer.size.width,
+            height: backbuffer.size.height,
+            format: backbuffer.format.into(),
             samples: 1,
             present: false,
             clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
@@ -780,7 +769,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let dbuffer_pass = self
             .render_graph
-            .begin_render_pass("EarlyZPass", swapchain_extents)?
+            .begin_render_pass("EarlyZPass", backbuffer.size)?
             .writes_attachments(&[depth_target])
             .shader_reads(&[camera_buffer])
             .mark_external()
@@ -788,7 +777,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let gbuffer_pass = self
             .render_graph
-            .begin_render_pass("GBuffer", swapchain_extents)?
+            .begin_render_pass("GBuffer", backbuffer.size)?
             .writes_attachments(&[
                 position_target,
                 normal_target,
@@ -813,7 +802,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let combine_pass = self
             .render_graph
-            .begin_render_pass("GBufferCombine", swapchain_extents)?
+            .begin_render_pass("GBufferCombine", backbuffer.size)?
             .writes_attachments(&[color_target])
             .shader_reads(&[
                 position_target,
@@ -838,7 +827,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let tonemap_pass = self
             .render_graph
-            .begin_render_pass("Tonemapping", swapchain_extents)?
+            .begin_render_pass("Tonemapping", backbuffer.size)?
             .shader_reads(&[color_target])
             .writes_attachments(&[tonemap_output])
             .with_blend_state(BlendState {
@@ -854,7 +843,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .commit();
         let fxaa_pass = self
             .render_graph
-            .begin_render_pass("Fxaa", swapchain_extents)?
+            .begin_render_pass("Fxaa", backbuffer.size)?
             .shader_reads(&[tonemap_output])
             .writes_attachments(&[fxaa_output])
             .with_blend_state(BlendState {
@@ -871,7 +860,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let present_render_pass = self
             .render_graph
-            .begin_render_pass("Present", swapchain_extents)?
+            .begin_render_pass("Present", backbuffer.size)?
             .shader_reads(&[fxaa_output])
             .writes_attachments(&[swapchain_image])
             .with_blend_state(BlendState {
@@ -1074,8 +1063,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         });
         context.register_callback(&fxaa_pass, |_: &Gpu, ctx| {
             let rcp_frame = vector![
-                swapchain_extents.width as f32,
-                swapchain_extents.height as f32
+                backbuffer.size.width as f32,
+                backbuffer.size.height as f32
             ];
             let rcp_frame = vector![1.0 / rcp_frame.x, 1.0 / rcp_frame.y];
 
@@ -1114,8 +1103,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         context.inject_external_image(
             &swapchain_image,
-            swapchain_gpu_image,
-            swapchain_gpu_image_view,
+            backbuffer.image,
+            backbuffer.image_view,
         );
         context.injext_external_buffer(&camera_buffer, &current_buffers.camera_buffer);
         context.injext_external_buffer(&light_buffer, &current_buffers.light_buffer);

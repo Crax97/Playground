@@ -17,10 +17,7 @@ use imgui_rs_vulkan_renderer::{DynamicRendering as ImguiDynamicRendering, *};
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
-use engine::{
-    AppState, Camera, DeferredRenderingPipeline, FxaaSettings, Light, LightType, RenderingPipeline,
-    Scene,
-};
+use engine::{AppState, Backbuffer, Camera, DeferredRenderingPipeline, FxaaSettings, Light, LightType, RenderingPipeline, Scene};
 use nalgebra::*;
 use resource_map::ResourceMap;
 use winit::event::{ElementState, Event};
@@ -259,10 +256,12 @@ impl App for GLTFViewer {
         let mut command_buffer = self.scene_renderer.render(
             &self.camera,
             self.gltf_loader.scene(),
-            swapchain_extents,
-            swapchain_format,
-            swapchain_image,
-            swapchain_image_view,
+            Backbuffer {
+                size: swapchain_extents,
+                format: swapchain_format,
+                image: swapchain_image,
+                image_view: swapchain_image_view,
+            },
             &self.resource_map,
         )?;
         self.imgui

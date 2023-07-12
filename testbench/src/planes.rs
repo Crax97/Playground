@@ -7,11 +7,7 @@ use std::io::BufReader;
 use app::{bootstrap, App};
 use ash::vk::PresentModeKHR;
 
-use engine::{
-    Camera, DeferredRenderingPipeline, MaterialDescription, MaterialDomain, MaterialInstance,
-    MaterialInstanceDescription, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo, RenderingPipeline,
-    Scene, ScenePrimitive, Texture, TextureInput,
-};
+use engine::{Backbuffer, Camera, DeferredRenderingPipeline, MaterialDescription, MaterialDomain, MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo, RenderingPipeline, Scene, ScenePrimitive, Texture, TextureInput};
 use nalgebra::*;
 use resource_map::ResourceMap;
 use winit::{event::ElementState, event_loop::EventLoop};
@@ -247,10 +243,12 @@ impl App for PlanesApp {
             .render(
                 &self.camera,
                 &self.scene,
-                swapchain_extents,
-                swapchain_format,
-                swapchain_image,
-                swapchain_image_view,
+                Backbuffer {
+                    size: swapchain_extents,
+                    format: swapchain_format,
+                    image: swapchain_image,
+                    image_view: swapchain_image_view,
+                },
                 &self.resource_map,
             )
             .unwrap();
