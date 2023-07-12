@@ -1273,8 +1273,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         MasterMaterial::new(
             gpu,
-            &master_description,
-            &self.material_context.render_passes,
+            &master_description
         )
     }
 }

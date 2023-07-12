@@ -3,7 +3,7 @@ use std::{collections::HashMap, hash::Hash, mem::size_of, num::NonZeroU32};
 use ash::vk::{self, CompareOp, PushConstantRange};
 use gpu::{
     BindingElement, BindingType, CullMode, DepthStencilState, FragmentStageInfo, FrontFace,
-    GlobalBinding, Gpu, LogicOp, Pipeline, PipelineDescription, PolygonMode, RenderPass,
+    GlobalBinding, Gpu, LogicOp, Pipeline, PipelineDescription, PolygonMode, 
     VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
 use nalgebra::{Vector2, Vector3};
@@ -66,9 +66,8 @@ impl MasterMaterial {
     pub fn new(
         gpu: &Gpu,
         description: &MasterMaterialDescription,
-        target_render_passes: &HashMap<PipelineTarget, RenderPass>,
     ) -> anyhow::Result<Self> {
-        let pipelines = Self::create_pipelines(gpu, description, target_render_passes)?;
+        let pipelines = Self::create_pipelines(gpu, description)?;
         let parameter_block_size = size_of::<f32>() * 4 * description.material_parameters.len();
         Ok(MasterMaterial {
             name: description.name.to_owned(),
@@ -82,7 +81,6 @@ impl MasterMaterial {
     fn create_pipelines(
         gpu: &Gpu,
         description: &MasterMaterialDescription<'_>,
-        target_render_passes: &HashMap<PipelineTarget, RenderPass>,
     ) -> anyhow::Result<HashMap<PipelineTarget, Pipeline>> {
         let global_elements: Vec<_> = description
             .global_inputs
@@ -116,14 +114,12 @@ impl MasterMaterial {
             MaterialDomain::Surface => Self::create_surface_pipelines(
                 gpu,
                 description,
-                target_render_passes,
                 global_elements,
                 user_elements,
             ),
             MaterialDomain::PostProcess => Self::create_post_process_pipeline(
                 gpu,
                 description,
-                target_render_passes,
                 global_elements,
                 user_elements,
             ),
@@ -201,15 +197,11 @@ impl MasterMaterial {
     fn create_surface_pipelines(
         gpu: &Gpu,
         description: &MasterMaterialDescription,
-        target_render_passes: &HashMap<PipelineTarget, RenderPass>,
         global_elements: Vec<BindingElement>,
         user_elements: Vec<BindingElement>,
     ) -> anyhow::Result<HashMap<PipelineTarget, Pipeline>> {
         let mut pipelines = HashMap::new();
         for target in [PipelineTarget::ColorAndDepth, PipelineTarget::DepthOnly] {
-            let render_pass = target_render_passes
-                .get(&target)
-                .expect("Render pass not defined");
             let pipeline = Pipeline::new(
                 gpu,
                 &PipelineDescription {
@@ -272,7 +264,6 @@ impl MasterMaterial {
     fn create_post_process_pipeline(
         gpu: &Gpu,
         description: &MasterMaterialDescription,
-        target_render_passes: &HashMap<PipelineTarget, RenderPass>,
         global_elements: Vec<BindingElement>,
         user_elements: Vec<BindingElement>,
     ) -> anyhow::Result<HashMap<PipelineTarget, Pipeline>> {

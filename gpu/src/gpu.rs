@@ -662,7 +662,7 @@ impl Gpu {
         let all_extensions = unsafe {
             instance.enumerate_device_extension_properties(physical_device.physical_device)
         }?;
-        let mut all_supported_extensions : Vec<_> = all_extensions
+        let all_supported_extensions : Vec<_> = all_extensions
             .iter()
             .map(|ext| 
                 unsafe { CStr::from_ptr(ext.extension_name.as_ptr()) }.to_str()

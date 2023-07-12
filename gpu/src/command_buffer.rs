@@ -2,20 +2,18 @@ use core::panic;
 use std::{ffi::CString, ops::Deref};
 
 use ash::{extensions::ext::DebugUtils, prelude::VkResult, RawPtr, vk::{
-    self, ClearValue, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
+    self, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
     CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags, IndexType, Offset2D,
-    PipelineBindPoint, PipelineStageFlags, Rect2D, RenderPassBeginInfo, ShaderStageFlags,
-    StructureType, SubmitInfo, SubpassContents, Viewport,
-    ClearDepthStencilValue,
-    ClearColorValue,
+    PipelineBindPoint, PipelineStageFlags, Rect2D, ShaderStageFlags,
+    StructureType, SubmitInfo, Viewport,
+    ClearDepthStencilValue
 }};
-use ash::vk::{AttachmentLoadOp, ImageLayout, RenderingAttachmentInfoKHR, RenderingFlags, RenderingInfoKHR, ResolveModeFlags};
+use ash::vk::{ImageLayout, RenderingAttachmentInfoKHR, RenderingFlags, RenderingInfoKHR, ResolveModeFlags};
 
 use crate::{GPUFence, GPUSemaphore, GpuImage, ToVk, GpuImageView};
-use crate::DepthLoadOp::Clear;
 
 use super::{
-    pipeline::RenderPass, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, Pipeline, QueueType,
+    Gpu, GpuBuffer, GpuDescriptorSet, Pipeline, QueueType,
 };
 
 #[derive(Default)]
@@ -484,7 +482,6 @@ pub struct BeginRenderPassInfo<'a> {
 
 impl<'c, 'g> RenderPassCommand<'c, 'g> {
     fn new(command_buffer: &'c mut CommandBuffer<'g>, info: &BeginRenderPassInfo<'c>) -> Self {
-        let device = command_buffer.gpu.vk_logical_device();
         let color_attachments: Vec<_> = info.color_attachments.iter().map(|attch| {
            RenderingAttachmentInfoKHR {
                s_type: StructureType::RENDERING_ATTACHMENT_INFO,
@@ -505,8 +502,8 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
            } 
         }).collect();
 
-        let depth_attachment = if let Some(attch) = info.depth_attachment {
-            Some(RenderingAttachmentInfoKHR {
+        let depth_attachment = info.depth_attachment.map(|attch| {
+            RenderingAttachmentInfoKHR {
                 s_type: StructureType::RENDERING_ATTACHMENT_INFO,
                 p_next: std::ptr::null(),
                 image_view: attch.image_view.inner,
@@ -524,11 +521,11 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                         }}}
                     _ => ash::vk::ClearValue::default()
                 }
-            })
-        } else { None };
+            }
+        });
 
-        let stencil_attachment = if let Some(attch) = info.stencil_attachment {
-            Some(RenderingAttachmentInfoKHR {
+        let stencil_attachment = info.stencil_attachment.map(|attch| {
+            RenderingAttachmentInfoKHR {
                 s_type: StructureType::RENDERING_ATTACHMENT_INFO,
                 p_next: std::ptr::null(),
                 image_view: attch.image_view.inner,
@@ -546,8 +543,8 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                         }}}
                     _ => ash::vk::ClearValue::default()
                 }
-            })
-        } else { None };
+            }
+        });
         
         let create_info = RenderingInfoKHR {
             s_type: StructureType::RENDERING_INFO_KHR,

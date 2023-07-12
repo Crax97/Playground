@@ -9,7 +9,7 @@ use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::{AppState, Camera, DeferredRenderingPipeline, FxaaSettings, Light, LightType, RenderingPipeline, Scene};
 use nalgebra::*;
 use resource_map::ResourceMap;
-use winit::{event::ElementState, event_loop::EventLoop};
+use winit::event::ElementState;
 use winit::event::VirtualKeyCode;
 
 #[repr(C)]
