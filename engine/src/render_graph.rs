@@ -2251,11 +2251,7 @@ impl RenderGraphRunner for GpuRunner {
                         &format!("Begin Render Pass: {}", rp.label),
                         [0.3, 0.0, 0.0, 1.0],
                     );
-
-                    let color_views: Vec<_> = color_views.iter().map(|(_, v)| *v).collect();
-                    let depth_view = depth_view.map(|(_, v)| v);
-                    let stencil_view = stencil_view.map(|(_, v)| v);
-
+                    
                     let mut render_pass_command =
                         command_buffer.begin_render_pass(&BeginRenderPassInfo {
                             color_attachments: &color_views,
@@ -2463,9 +2459,9 @@ fn resolve_render_image_views_unchecked<'e, 'a>(
     graph: &RenderGraph,
     external_resources: &'e ExternalResources<'e>,
     image_views_allocator: &'a ImageViewAllocator,
-) -> (Vec<(ResourceId, ColorAttachment<'e>)>, 
-      Option<(ResourceId, DepthAttachment<'e>)>, 
-      Option<(ResourceId, StencilAttachment<'e>)>)
+) -> (Vec<ColorAttachment<'e>>, 
+      Option<DepthAttachment<'e>>, 
+      Option<StencilAttachment<'e>>)
 where
     'a: 'e,
 {
@@ -2486,26 +2482,26 @@ where
         };
         
         if view.format().is_color() {
-            colors.push((*writes, ColorAttachment {
+            colors.push(ColorAttachment {
                 image_view: view,
-                load_op: ColorLoadOp::DontCare,
+                load_op: ColorLoadOp::Clear([0.0, 0.0, 0.0, 0.0]),
                 store_op: gpu::AttachmentStoreOp::Store,
                 initial_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            }));
+            });
         } else if view.format().is_depth() {
-            depth = Some((*writes, DepthAttachment {
+            depth = Some(DepthAttachment {
                 image_view: view,
-                load_op: DepthLoadOp::DontCare,
+                load_op: DepthLoadOp::Clear(1.0),
                 store_op: gpu::AttachmentStoreOp::Store,
                 initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            }));
+            });
         } else {
-            stencil = Some((*writes, StencilAttachment {
+            stencil = Some(StencilAttachment {
                 image_view: view,
                 load_op: StencilLoadOp::DontCare,
                 store_op: gpu::AttachmentStoreOp::Store,
                 initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            }));
+            });
         }
     }
     for reads in &info.attachment_reads {
@@ -2521,26 +2517,26 @@ where
         };
 
         if view.format().is_color() {
-            colors.push((*reads, ColorAttachment {
+            colors.push( ColorAttachment {
                 image_view: view,
                 load_op: ColorLoadOp::Load,
                 store_op: gpu::AttachmentStoreOp::Store,
                 initial_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            }));
+            });
         } else if view.format().is_depth() {
-            depth = Some((*reads, DepthAttachment {
+            depth = Some(DepthAttachment {
                 image_view: view,
                 load_op: DepthLoadOp::Load,
                 store_op: gpu::AttachmentStoreOp::Store,
                 initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            }));
+            });
         } else {
-            stencil = Some((*reads, StencilAttachment {
+            stencil = Some( StencilAttachment {
                 image_view: view,
                 load_op: StencilLoadOp::Load,
                 store_op: gpu::AttachmentStoreOp::Store,
                 initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            }));
+            });
         }
     }
     (colors, depth, stencil)
