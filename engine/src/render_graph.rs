@@ -6,16 +6,8 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use ash::vk::{
-    self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor,
-    BlendOp, BorderColor, BufferUsageFlags, ClearDepthStencilValue, ClearValue,
-    ColorComponentFlags, CompareOp, ComponentMapping, DependencyFlags, Extent2D, Filter,
-    ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType, Offset2D,
-    PipelineBindPoint, PipelineStageFlags, Rect2D, SampleCountFlags, SamplerAddressMode,
-    SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency,
-    SubpassDescriptionFlags,
-};
-use gpu::{BeginRenderPassInfo, BindingType, BlendState, BufferCreateInfo, BufferRange, ColorAttachment, ColorLoadOp, CommandBuffer, DepthAttachment, DepthLoadOp, DescriptorInfo, DescriptorSetInfo, FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, ImageFormat, ImageViewCreateInfo, MemoryDomain, Pipeline, RenderPass, RenderPassAttachment, RenderPassCommand, RenderPassDescription, StencilAttachment, StencilLoadOp, SubpassDescription, ToVk, TransitionInfo};
+use ash::vk::{self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor, BufferUsageFlags, ClearDepthStencilValue, ClearValue, ColorComponentFlags, CompareOp, ComponentMapping, DependencyFlags, Extent2D, Filter, ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency, SubpassDescriptionFlags};
+use gpu::{BeginRenderPassInfo, BindingType, BlendState, BufferCreateInfo, BufferRange, ColorAttachment, ColorLoadOp, CommandBuffer, DepthAttachment, DepthLoadOp, DescriptorInfo, DescriptorSetInfo, FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, ImageFormat, ImageMemoryBarrier, ImageViewCreateInfo, MemoryDomain, Pipeline, PipelineBarrierInfo, RenderPass, RenderPassAttachment, RenderPassCommand, RenderPassDescription, StencilAttachment, StencilLoadOp, SubpassDescription, ToVk, TransitionInfo};
 
 use ash::vk::PushConstantRange;
 use gpu::{
@@ -1827,6 +1819,25 @@ impl GpuRunner {
             Ok(allocator.images.get(ctx, &desc, id)?.resource())
         }
     }
+    pub fn get_image_unchecked<'r, 'e>(
+        ctx: &'e GraphRunContext,
+        graph: &RenderGraph,
+        id: &ResourceId,
+        allocator: &'r DefaultResourceAllocator,
+    ) -> &'e GpuImage
+        where
+            'r: 'e,
+    {
+        if ctx.external_resources.external_images.contains_key(id) {
+            ctx.external_resources.external_images[id]
+        } else {
+            let desc = match &graph.allocations[id].ty {
+                AllocationType::Image(d) => *d,
+                _ => panic!("Type is not an image!"),
+            };
+            allocator.images.get_unchecked(id).resource()
+        }
+    }
 
     fn get_renderpass<'e, 'a>(
         &'a self,
@@ -1892,108 +1903,405 @@ impl RenderGraphRunner for GpuRunner {
             [0.0, 0.3, 0.0, 1.0],
         );
         for op in &graph.cached_graph.graph_operations {
-            if let GraphOperation::ExecuteRenderPass(rp) = op {
-                self.ensure_render_pass_exists(
-                    ctx,
-                    rp,
-                    &mut resource_allocator.render_passes,
-                    graph,
-                )?;
-                let info = &graph.passes[rp];
+            match op {
+                GraphOperation::ExecuteRenderPass(rp) => {
+                    self.ensure_render_pass_exists(
+                        ctx,
+                        rp,
+                        &mut resource_allocator.render_passes,
+                        graph,
+                    )?;
+                    let info = &graph.passes[rp];
+                    ensure_graph_allocated_resources_exist(ctx, info, graph, resource_allocator)?;
+                    ensure_graph_allocated_samplers_exists(ctx, info, graph, resource_allocator)?;
 
-                ensure_graph_allocated_resources_exist(ctx, info, graph, resource_allocator)?;
-                ensure_graph_allocated_samplers_exists(ctx, info, graph, resource_allocator)?;
-                let (color_views, depth_view, stencil_view) = resolve_render_image_views_unchecked(
-                    info,
-                    graph,
-                    &ctx.external_resources,
-                    &resource_allocator.image_views,
-                );
-                
-                let read_descriptor_set = resolve_input_descriptor_set(
-                    ctx,
-                    graph,
-                    info,
-                    &resource_allocator.image_views,
-                    &resource_allocator.buffers,
-                    &resource_allocator.samplers,
-                    &mut resource_allocator.descriptors,
-                );
+                    // Transition shader reads
+                    {
+                        let mut color_transitions = vec![];
+                        let mut depth_stencil_transitions = vec![];
+                        for read in &info.shader_reads {
+                            let info = graph.get_resource_info(read)?;
+                            let image_desc = if let AllocationType::Image(d) = info.ty { d } else { continue; };
+                            let old_layout = *self.resource_states.entry(*read).or_insert(TransitionInfo {
+                                layout: ImageLayout::UNDEFINED,
+                                access_mask: AccessFlags::empty(),
+                                stage_mask: if image_desc.format.is_color() {
+                                    PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                                } else {
+                                    PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                                },
+                            });
 
-                let cb = ctx.callbacks.callbacks.get_mut(rp);
-                let clear = ctx.callbacks.clear_color_cbs.get(rp);
-                let clear_color_values: Vec<_> = info
-                    .attachment_writes
-                    .iter()
-                    .chain(info.attachment_reads.iter())
-                    .map(|rd| {
-                        if let Some(func) = clear {
-                            func(rd)
-                        } else {
-                            let res_info = &graph.allocations[rd];
-                            match &res_info.ty {
-                                AllocationType::Image(desc) => {
-                                    if desc.format.is_color() {
-                                        ClearValue {
-                                            color: vk::ClearColorValue {
-                                                float32: [0.0, 0.0, 0.0, 0.0],
-                                            },
-                                        }
-                                    } else {
-                                        ClearValue {
-                                            depth_stencil: ClearDepthStencilValue {
-                                                depth: 1.0,
-                                                stencil: 255,
-                                            },
-                                        }
-                                    }
-                                }
-                                AllocationType::Buffer { .. } => {
-                                    panic!("Graph can't treat buffer as render target!")
-                                }
+                            let new_layout = TransitionInfo {
+                                layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                                access_mask: AccessFlags::SHADER_READ,
+                                stage_mask: PipelineStageFlags::FRAGMENT_SHADER | PipelineStageFlags::VERTEX_SHADER,
+                            };
+
+                            self.resource_states.insert(*read, new_layout);
+
+                            let image = Self::get_image_unchecked(&ctx, graph, read, &resource_allocator);
+                            if image_desc.format.is_color() {
+                                color_transitions.push(ImageMemoryBarrier {
+                                    src_access_mask: old_layout.access_mask,
+                                    dst_access_mask: new_layout.access_mask,
+                                    old_layout: old_layout.layout,
+                                    new_layout: new_layout.layout,
+                                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                    image,
+                                    subresource_range: vk::ImageSubresourceRange {
+                                        aspect_mask: ImageAspectFlags::COLOR,
+                                        base_mip_level: 0,
+                                        level_count: 1,
+                                        base_array_layer: 0,
+                                        layer_count: 1,
+                                    },
+                                })
+                            } else {
+                                depth_stencil_transitions.push(ImageMemoryBarrier {
+                                    src_access_mask: old_layout.access_mask,
+                                    dst_access_mask: new_layout.access_mask,
+                                    old_layout: old_layout.layout,
+                                    new_layout: new_layout.layout,
+                                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                    image,
+                                    subresource_range: vk::ImageSubresourceRange {
+                                        aspect_mask: ImageAspectFlags::DEPTH,
+                                        base_mip_level: 0,
+                                        level_count: 1,
+                                        base_array_layer: 0,
+                                        layer_count: 1,
+                                    },
+                                })
                             }
                         }
-                    })
-                    .collect();
 
-                let render_pass_label = command_buffer.begin_debug_region(
-                    &format!("Begin Render Pass: {}", rp.label),
-                    [0.3, 0.0, 0.0, 1.0],
-                );
-                let mut render_pass_command =
-                    command_buffer.begin_render_pass(&BeginRenderPassInfo {
-                        color_attachments: &color_views,
-                        depth_attachment: depth_view,
-                        stencil_attachment: stencil_view,
-                        render_area: Rect2D {
-                            offset: Offset2D::default(),
-                            extent: info.extents,
-                        },
-                    });
-
-                let pipeline = graph.get_pipeline(rp);
-                if let Some(pipeline) = pipeline {
-                    render_pass_command.bind_pipeline(pipeline);
-                    if let Some(resource) = read_descriptor_set {
-                        render_pass_command.bind_descriptor_sets(
-                            PipelineBindPoint::GRAPHICS,
-                            pipeline,
-                            0,
-                            &[resource.resource()],
-                        )
+                        if !color_transitions.is_empty() {
+                            command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                                dst_stage_mask: PipelineStageFlags::VERTEX_SHADER | PipelineStageFlags::FRAGMENT_SHADER,
+                                dependency_flags: Default::default(),
+                                memory_barriers: &[],
+                                buffer_memory_barriers: &[],
+                                image_memory_barriers: &color_transitions,
+                            })
+                        }
+                        if !depth_stencil_transitions.is_empty() {
+                            command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                                src_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+                                dst_stage_mask: PipelineStageFlags::VERTEX_SHADER | PipelineStageFlags::FRAGMENT_SHADER,
+                                dependency_flags: Default::default(),
+                                memory_barriers: &[],
+                                buffer_memory_barriers: &[],
+                                image_memory_barriers: &color_transitions,
+                            })
+                        }
                     }
-                }
-                let mut context = RenderPassContext {
-                    render_graph: graph,
-                    render_pass_command,
-                    pipeline,
-                    read_descriptor_set: read_descriptor_set.map(|r| r.resource()),
-                };
+                    
+                    // Transition attach write 
+                    {
+                        let mut color_transitions = vec![];
+                        let mut depth_stencil_transitions = vec![];
+                        for read in &info.attachment_writes {
+                            let info = graph.get_resource_info(read)?;
+                            let image_desc = if let AllocationType::Image(d) = info.ty { d } else { continue; };
+                            let old_layout = *self.resource_states.entry(*read).or_insert(TransitionInfo {
+                                layout: ImageLayout::UNDEFINED,
+                                access_mask: AccessFlags::empty(),
+                                stage_mask: if image_desc.format.is_color() {
+                                    PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                                } else {
+                                    PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                                },
+                            });
 
-                if let Some(cb) = cb {
-                    cb(ctx.gpu, &mut context);
+                            let new_layout = TransitionInfo {
+                                layout: if image_desc.present {
+                                    ImageLayout::PRESENT_SRC_KHR  
+                                } else if image_desc.format.is_color() {
+                                    ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                                } else {
+                                    ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                                },
+                                access_mask: if image_desc.format.is_color() {
+                                    AccessFlags::COLOR_ATTACHMENT_WRITE
+                                } else {
+                                    AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
+                                },
+                                stage_mask: if image_desc.format.is_color() {
+                                    PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                                } else {
+                                    PipelineStageFlags::LATE_FRAGMENT_TESTS
+                                },
+                            };
+                            self.resource_states.insert(*read, new_layout);
+
+                            let image = Self::get_image_unchecked(&ctx, graph, read, &resource_allocator);
+                            if image_desc.format.is_color() {
+                                color_transitions.push(ImageMemoryBarrier {
+                                    src_access_mask: old_layout.access_mask,
+                                    dst_access_mask: new_layout.access_mask,
+                                    old_layout: old_layout.layout,
+                                    new_layout: new_layout.layout,
+                                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                    image,
+                                    subresource_range: vk::ImageSubresourceRange {
+                                        aspect_mask: ImageAspectFlags::COLOR,
+                                        base_mip_level: 0,
+                                        level_count: 1,
+                                        base_array_layer: 0,
+                                        layer_count: 1,
+                                    },
+                                })
+                            } else {
+                                depth_stencil_transitions.push(ImageMemoryBarrier {
+                                    src_access_mask: old_layout.access_mask,
+                                    dst_access_mask: new_layout.access_mask,
+                                    old_layout: old_layout.layout,
+                                    new_layout: new_layout.layout,
+                                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                    image,
+                                    subresource_range: vk::ImageSubresourceRange {
+                                        aspect_mask: ImageAspectFlags::DEPTH,
+                                        base_mip_level: 0,
+                                        level_count: 1,
+                                        base_array_layer: 0,
+                                        layer_count: 1,
+                                    },
+                                })
+                            }
+                        }
+
+                        if !color_transitions.is_empty() {
+                            command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                                dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                                dependency_flags: Default::default(),
+                                memory_barriers: &[],
+                                buffer_memory_barriers: &[],
+                                image_memory_barriers: &color_transitions,
+                            })
+                        }
+                        if !depth_stencil_transitions.is_empty() {
+                            command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                                src_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+                                dst_stage_mask: PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                                dependency_flags: Default::default(),
+                                memory_barriers: &[],
+                                buffer_memory_barriers: &[],
+                                image_memory_barriers: &color_transitions,
+                            })
+                        }
+                    }
+                    
+                    // Transition attach read
+                    {
+
+                        let mut color_transitions = vec![];
+                        let mut depth_stencil_transitions = vec![];
+                        for read in &info.attachment_reads {
+                            let info = graph.get_resource_info(read)?;
+                            let image_desc = if let AllocationType::Image(d) = info.ty { d } else { continue; };
+                            let old_layout = *self.resource_states.entry(*read).or_insert(TransitionInfo {
+                                layout: ImageLayout::UNDEFINED,
+                                access_mask: AccessFlags::empty(),
+                                stage_mask: if image_desc.format.is_color() {
+                                    PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                                } else {
+                                    PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                                },
+                            });
+
+                            let new_layout = TransitionInfo {
+                                layout: if image_desc.format.is_color() {
+                                    ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                                } else {
+                                    ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                                },
+                                access_mask: if image_desc.format.is_color() {
+                                    AccessFlags::COLOR_ATTACHMENT_READ
+                                } else {
+                                    AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
+                                },
+                                stage_mask: if image_desc.format.is_color() {
+                                    PipelineStageFlags::ALL_GRAPHICS
+                                } else {
+                                    PipelineStageFlags::ALL_GRAPHICS
+                                },
+                            };
+                            self.resource_states.insert(*read, new_layout);
+
+                            let image = Self::get_image_unchecked(&ctx, graph, read, &resource_allocator);
+                            if image_desc.format.is_color() {
+                                color_transitions.push(ImageMemoryBarrier {
+                                    src_access_mask: old_layout.access_mask,
+                                    dst_access_mask: new_layout.access_mask,
+                                    old_layout: old_layout.layout,
+                                    new_layout: new_layout.layout,
+                                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                    image,
+                                    subresource_range: vk::ImageSubresourceRange {
+                                        aspect_mask: ImageAspectFlags::COLOR,
+                                        base_mip_level: 0,
+                                        level_count: 1,
+                                        base_array_layer: 0,
+                                        layer_count: 1,
+                                    },
+                                })
+                            } else {
+                                depth_stencil_transitions.push(ImageMemoryBarrier {
+                                    src_access_mask: old_layout.access_mask,
+                                    dst_access_mask: new_layout.access_mask,
+                                    old_layout: old_layout.layout,
+                                    new_layout: new_layout.layout,
+                                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                    image,
+                                    subresource_range: vk::ImageSubresourceRange {
+                                        aspect_mask: ImageAspectFlags::DEPTH,
+                                        base_mip_level: 0,
+                                        level_count: 1,
+                                        base_array_layer: 0,
+                                        layer_count: 1,
+                                    },
+                                })
+                            }
+                        }
+
+                        if !color_transitions.is_empty() {
+                            command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                                dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                                dependency_flags: Default::default(),
+                                memory_barriers: &[],
+                                buffer_memory_barriers: &[],
+                                image_memory_barriers: &color_transitions,
+                            })
+                        }
+                        if !depth_stencil_transitions.is_empty() {
+                            command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                                src_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+                                dst_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                                dependency_flags: Default::default(),
+                                memory_barriers: &[],
+                                buffer_memory_barriers: &[],
+                                image_memory_barriers: &color_transitions,
+                            })
+                        }
+                    }
+                    let (color_views, depth_view, stencil_view) = resolve_render_image_views_unchecked(
+                        info,
+                        graph,
+                        &ctx.external_resources,
+                        &resource_allocator.image_views,
+                    );
+
+                    let read_descriptor_set = resolve_input_descriptor_set(
+                        ctx,
+                        graph,
+                        info,
+                        &resource_allocator.image_views,
+                        &resource_allocator.buffers,
+                        &resource_allocator.samplers,
+                        &mut resource_allocator.descriptors,
+                    );
+
+                    let cb = ctx.callbacks.callbacks.get_mut(rp);
+                    let clear = ctx.callbacks.clear_color_cbs.get(rp);
+                    let clear_color_values: Vec<_> = info
+                        .attachment_writes
+                        .iter()
+                        .chain(info.attachment_reads.iter())
+                        .map(|rd| {
+                            if let Some(func) = clear {
+                                func(rd)
+                            } else {
+                                let res_info = &graph.allocations[rd];
+                                match &res_info.ty {
+                                    AllocationType::Image(desc) => {
+                                        if desc.format.is_color() {
+                                            ClearValue {
+                                                color: vk::ClearColorValue {
+                                                    float32: [0.0, 0.0, 0.0, 0.0],
+                                                },
+                                            }
+                                        } else {
+                                            ClearValue {
+                                                depth_stencil: ClearDepthStencilValue {
+                                                    depth: 1.0,
+                                                    stencil: 255,
+                                                },
+                                            }
+                                        }
+                                    }
+                                    AllocationType::Buffer { .. } => {
+                                        panic!("Graph can't treat buffer as render target!")
+                                    }
+                                }
+                            }
+                        })
+                        .collect();
+
+                    let render_pass_label = command_buffer.begin_debug_region(
+                        &format!("Begin Render Pass: {}", rp.label),
+                        [0.3, 0.0, 0.0, 1.0],
+                    );
+
+                    let color_views: Vec<_> = color_views.iter().map(|(_, v)| *v).collect();
+                    let depth_view = depth_view.map(|(_, v)| v);
+                    let stencil_view = stencil_view.map(|(_, v)| v);
+
+                    let mut render_pass_command =
+                        command_buffer.begin_render_pass(&BeginRenderPassInfo {
+                            color_attachments: &color_views,
+                            depth_attachment: depth_view,
+                            stencil_attachment: stencil_view,
+                            render_area: Rect2D {
+                                offset: Offset2D::default(),
+                                extent: info.extents,
+                            },
+                        });
+
+                    let pipeline = graph.get_pipeline(rp);
+                    if let Some(pipeline) = pipeline {
+                        render_pass_command.bind_pipeline(pipeline);
+                        if let Some(resource) = read_descriptor_set {
+                            render_pass_command.bind_descriptor_sets(
+                                PipelineBindPoint::GRAPHICS,
+                                pipeline,
+                                0,
+                                &[resource.resource()],
+                            )
+                        }
+                    }
+                    let mut context = RenderPassContext {
+                        render_graph: graph,
+                        render_pass_command,
+                        pipeline,
+                        read_descriptor_set: read_descriptor_set.map(|r| r.resource()),
+                    };
+
+                    if let Some(cb) = cb {
+                        cb(ctx.gpu, &mut context);
+                    }
+                    render_pass_label.end();
                 }
-                render_pass_label.end();
+                GraphOperation::TransitionShaderRead(reads) => {
+                    
+                    
+                    
+                    
+                }
+                GraphOperation::TransitionAttachmentWrite(attach_writes) => {
+                    
+                }
+                GraphOperation::TransitionAttachmentRead(attach_read) => {
+                }
             }
         }
         if let Some(end_cb) = &mut ctx.callbacks.end_callback {
@@ -2015,6 +2323,13 @@ impl RenderGraphRunner for GpuRunner {
 
         Ok(())
     }
+}
+
+fn place_pipeline_barriers(cmd: &mut CommandBuffer, pass_info: &RenderPassInfo, colors: &[(ResourceId, ColorAttachment)],
+                                                                              depth: &Option<(ResourceId, DepthAttachment)>,
+                                                                              stencil: &Option<(ResourceId, StencilAttachment)>) {
+
+    
 }
 
 fn separate_image_views(views: Vec<&GpuImageView>) -> (Vec<&GpuImageView>, Option<&GpuImageView>, Option<&GpuImageView>) {
@@ -2148,7 +2463,9 @@ fn resolve_render_image_views_unchecked<'e, 'a>(
     graph: &RenderGraph,
     external_resources: &'e ExternalResources<'e>,
     image_views_allocator: &'a ImageViewAllocator,
-) -> (Vec<ColorAttachment<'e>>, Option<DepthAttachment<'e>>, Option<StencilAttachment<'e>>)
+) -> (Vec<(ResourceId, ColorAttachment<'e>)>, 
+      Option<(ResourceId, DepthAttachment<'e>)>, 
+      Option<(ResourceId, StencilAttachment<'e>)>)
 where
     'a: 'e,
 {
@@ -2169,26 +2486,26 @@ where
         };
         
         if view.format().is_color() {
-            colors.push(ColorAttachment {
+            colors.push((*writes, ColorAttachment {
                 image_view: view,
                 load_op: ColorLoadOp::DontCare,
                 store_op: gpu::AttachmentStoreOp::Store,
                 initial_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            });
+            }));
         } else if view.format().is_depth() {
-            depth = Some(DepthAttachment {
+            depth = Some((*writes, DepthAttachment {
                 image_view: view,
                 load_op: DepthLoadOp::DontCare,
                 store_op: gpu::AttachmentStoreOp::Store,
-                final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            });
+                initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            }));
         } else {
-            stencil = Some(StencilAttachment {
+            stencil = Some((*writes, StencilAttachment {
                 image_view: view,
                 load_op: StencilLoadOp::DontCare,
                 store_op: gpu::AttachmentStoreOp::Store,
-                final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            });
+                initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            }));
         }
     }
     for reads in &info.attachment_reads {
@@ -2204,26 +2521,26 @@ where
         };
 
         if view.format().is_color() {
-            colors.push(ColorAttachment {
+            colors.push((*reads, ColorAttachment {
                 image_view: view,
                 load_op: ColorLoadOp::Load,
                 store_op: gpu::AttachmentStoreOp::Store,
                 initial_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            });
+            }));
         } else if view.format().is_depth() {
-            depth = Some(DepthAttachment {
+            depth = Some((*reads, DepthAttachment {
                 image_view: view,
                 load_op: DepthLoadOp::Load,
                 store_op: gpu::AttachmentStoreOp::Store,
-                final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            });
+                initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            }));
         } else {
-            stencil = Some(StencilAttachment {
+            stencil = Some((*reads, StencilAttachment {
                 image_view: view,
                 load_op: StencilLoadOp::Load,
                 store_op: gpu::AttachmentStoreOp::Store,
-                final_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            });
+                initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            }));
         }
     }
     (colors, depth, stencil)

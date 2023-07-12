@@ -463,7 +463,7 @@ pub struct DepthAttachment<'a> {
     pub image_view: &'a GpuImageView,
     pub load_op: DepthLoadOp,
     pub store_op: AttachmentStoreOp,
-    pub final_layout: ImageLayout,
+    pub initial_layout: ImageLayout,
 }
 
 #[derive(Clone, Copy)]
@@ -471,7 +471,7 @@ pub struct StencilAttachment<'a> {
     pub image_view: &'a GpuImageView,
     pub load_op: StencilLoadOp,
     pub store_op: AttachmentStoreOp,
-    pub final_layout: ImageLayout,
+    pub initial_layout: ImageLayout,
 }
 
 #[derive(Clone, Copy)]
@@ -510,7 +510,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 s_type: StructureType::RENDERING_ATTACHMENT_INFO,
                 p_next: std::ptr::null(),
                 image_view: attch.image_view.inner,
-                image_layout: attch.final_layout,
+                image_layout: attch.initial_layout,
                 resolve_mode: ResolveModeFlags::NONE,
                 resolve_image_view: vk::ImageView::null(),
                 resolve_image_layout: ImageLayout::UNDEFINED,
@@ -532,7 +532,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 s_type: StructureType::RENDERING_ATTACHMENT_INFO,
                 p_next: std::ptr::null(),
                 image_view: attch.image_view.inner,
-                image_layout: attch.final_layout,
+                image_layout: attch.initial_layout,
                 resolve_mode: ResolveModeFlags::NONE,
                 resolve_image_view: vk::ImageView::null(),
                 resolve_image_layout: ImageLayout::UNDEFINED,

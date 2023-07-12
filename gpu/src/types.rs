@@ -380,6 +380,7 @@ impl_raii_wrapper_to_vk!(GpuImage, vk::Image);
 
 define_raii_wrapper!((struct GpuImageView{
     format: ImageFormat,
+    owner_image: vk::Image,
     extents: Extent2D,
 }, vk::ImageView, ash::Device::destroy_image_view) {
     (create_info: &vk::ImageViewCreateInfo,) => {
@@ -394,6 +395,9 @@ define_raii_wrapper!((struct GpuImageView{
 impl GpuImageView {
     pub fn inner_image_view(&self) -> vk::ImageView {
         self.inner
+    }
+    pub fn inner_image(&self) -> vk::Image {
+        self.owner_image
     }
 
     pub fn format(&self) -> ImageFormat {

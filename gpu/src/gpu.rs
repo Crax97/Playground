@@ -1299,6 +1299,7 @@ impl Gpu {
             self.vk_logical_device(),
             &vk_create_info,
             gpu_view_format,
+            image,
             create_info.image.extents,
         )
     }
