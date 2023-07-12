@@ -114,7 +114,15 @@ impl From<&Light> for GpuLightInfo {
     }
 }
 
-use crate::{app_state, camera::Camera, material::{MasterMaterial, MasterMaterialDescription}, BufferDescription, BufferType, FragmentState, GpuRunner, GraphRunContext, Light, LightType, MaterialDescription, MaterialDomain, MaterialInstance, MeshPrimitive, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage, RenderingPipeline, Scene, ClearValue};
+use crate::{
+    app_state,
+    camera::Camera,
+    material::{MasterMaterial, MasterMaterialDescription},
+    BufferDescription, BufferType, ClearValue, FragmentState, GpuRunner, GraphRunContext, Light,
+    LightType, MaterialDescription, MaterialDomain, MaterialInstance, MeshPrimitive, ModuleInfo,
+    PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage,
+    RenderingPipeline, Scene,
+};
 
 use ash::vk::{
     AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
@@ -683,7 +691,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             format: ImageFormat::Rgba8,
             samples: 1,
             present: false,
-            clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0])
+            clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
         };
         let framebuffer_normal_desc = crate::ImageDescription {
             width: swapchain_extents.width,
@@ -691,7 +699,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             format: ImageFormat::Rgba8,
             samples: 1,
             present: false,
-            clear_value: ClearValue::Color([0.5, 0.5, 0.5, 1.0])
+            clear_value: ClearValue::Color([0.5, 0.5, 0.5, 1.0]),
         };
         let framebuffer_vector_desc = crate::ImageDescription {
             width: swapchain_extents.width,
@@ -699,7 +707,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             format: ImageFormat::RgbaFloat,
             samples: 1,
             present: false,
-            clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0])
+            clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
         };
         let framebuffer_depth_desc = crate::ImageDescription {
             width: swapchain_extents.width,
@@ -707,15 +715,15 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             format: ImageFormat::Depth,
             samples: 1,
             present: false,
-            clear_value: ClearValue::Depth(1.0)
+            clear_value: ClearValue::Depth(1.0),
         };
         let framebuffer_swapchain_desc = crate::ImageDescription {
             width: swapchain_extents.width,
             height: swapchain_extents.height,
             format: swapchain_format.into(),
             samples: 1,
-            present: true,
-            clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0])
+            present: false,
+            clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
         };
 
         let camera_buffer = self.render_graph.use_buffer(
@@ -1266,9 +1274,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             logic_op: None,
         };
 
-        MasterMaterial::new(
-            gpu,
-            &master_description
-        )
+        MasterMaterial::new(gpu, &master_description)
     }
 }

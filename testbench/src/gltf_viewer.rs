@@ -3,17 +3,27 @@ mod gltf_loader;
 mod utils;
 
 use app::{bootstrap, App};
-use ash::vk::{PipelineStageFlags, PresentModeKHR};
-use egui::{FontDefinitions, Style};
-use egui_winit_ash_integration::Integration;
-use gpu::{CommandBuffer, CommandBufferSubmitInfo};
-use utils::EguiVkAllocator;
+use ash::vk::{
+    AccessFlags, DependencyFlags, ImageAspectFlags, ImageSubresourceRange,
+    PipelineStageFlags, PresentModeKHR,
+};
+use ash::vk::{ImageLayout, Rect2D};
+
+use gpu::ColorAttachment;
+use gpu::CommandBufferSubmitInfo;
+use gpu::{BeginRenderPassInfo, ImageMemoryBarrier, PipelineBarrierInfo};
+use imgui::*;
+use imgui_rs_vulkan_renderer::{DynamicRendering as ImguiDynamicRendering, *};
+use imgui_winit_support::{HiDpiMode, WinitPlatform};
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
-use engine::{AppState, Camera, DeferredRenderingPipeline, FxaaSettings, Light, LightType, RenderingPipeline, Scene};
+use engine::{
+    AppState, Camera, DeferredRenderingPipeline, FxaaSettings, Light, LightType, RenderingPipeline,
+    Scene,
+};
 use nalgebra::*;
 use resource_map::ResourceMap;
-use winit::event::ElementState;
+use winit::event::{ElementState, Event};
 use winit::event::VirtualKeyCode;
 use winit::event_loop::EventLoop;
 
@@ -40,7 +50,9 @@ pub struct GLTFViewer {
     scene_renderer: DeferredRenderingPipeline,
     gltf_loader: GltfLoader,
 
-    egui_integration: egui_winit_ash_integration::Integration<EguiVkAllocator>,
+    imgui: Context,
+    platform: WinitPlatform,
+    renderer: Renderer,
 }
 
 impl App for GLTFViewer {
@@ -48,7 +60,7 @@ impl App for GLTFViewer {
         format!("GLTF Viewer - FPS {}", 1.0 / app_state.time().delta_frame())
     }
 
-    fn create(app_state: &AppState, event_loop: &EventLoop<()>) -> anyhow::Result<Self>
+    fn create(app_state: &AppState, _event_loop: &EventLoop<()>) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
@@ -102,26 +114,38 @@ impl App for GLTFViewer {
             .swapchain_mut()
             .select_present_mode(PresentModeKHR::IMMEDIATE)?;
 
-        let window_size = engine::app_state().gpu.swapchain().window.inner_size();
-        let scale_factor = engine::app_state().gpu.swapchain().window.scale_factor();
-
-        let allocator = EguiVkAllocator(engine::app_state().gpu.allocator());
-        let egui_integration = Integration::new(
-            event_loop,
-            window_size.width,
-            window_size.height,
-            scale_factor,
-            FontDefinitions::default(),
-            Style::default(),
-            engine::app_state().gpu.vk_logical_device(),
-            allocator,
-            app_state.gpu.queue_families().graphics_family.index,
-            app_state.gpu.graphics_queue(),
-            app_state.gpu.swapchain().swapchain_extension.clone(),
-            app_state.gpu.swapchain().current_swapchain.clone(),
-            engine::app_state().gpu.swapchain().present_format,
+        let mut imgui = Context::create();
+        let mut platform = WinitPlatform::init(&mut imgui);
+        let hidpi_factor = platform.hidpi_factor();
+        let font_size = (13.0 * hidpi_factor) as f32;
+        imgui.fonts().add_font(&[FontSource::DefaultFontData {
+            config: Some(FontConfig {
+                size_pixels: font_size,
+                ..FontConfig::default()
+            }),
+        }]);
+        imgui.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
+        platform.attach_window(
+            imgui.io_mut(),
+            &app_state.gpu.swapchain().window,
+            HiDpiMode::Rounded,
         );
-
+        let renderer = Renderer::with_default_allocator(
+            &app_state.gpu.instance(),
+            app_state.gpu.vk_physical_device(),
+            app_state.gpu.vk_logical_device(),
+            app_state.gpu.graphics_queue(),
+            app_state.gpu.command_pool(),
+            ImguiDynamicRendering {
+                color_attachment_format: app_state.gpu.swapchain().present_format(),
+                depth_attachment_format: None,
+            },
+            &mut imgui,
+            Some(Options {
+                in_flight_frames: 2,
+                ..Default::default()
+            }),
+        )?;
         Ok(Self {
             resource_map,
             camera,
@@ -133,10 +157,17 @@ impl App for GLTFViewer {
             movement,
             scene_renderer,
             gltf_loader,
-            egui_integration,
+            imgui,
+            renderer,
+            platform,
         })
     }
 
+    fn on_event(&mut self, event: &Event<()>, app_state: &AppState) -> anyhow::Result<()> {
+        self.platform.handle_event(self.imgui.io_mut(), &app_state.gpu.swapchain().window, event);
+        Ok(())
+    }
+    
     fn input(
         &mut self,
         _app_state: &AppState,
@@ -162,23 +193,27 @@ impl App for GLTFViewer {
                         fxaa_quality_edge_threshold: 0.333,
                         fxaa_quality_edge_threshold_min: 0.0833,
                     });
-                } else if input.virtual_keycode.unwrap_or(VirtualKeyCode::A) == VirtualKeyCode::Key2 {
+                } else if input.virtual_keycode.unwrap_or(VirtualKeyCode::A) == VirtualKeyCode::Key2
+                {
                     self.scene_renderer.set_fxaa_settings_mut(FxaaSettings {
                         fxaa_quality_subpix: 0.25,
                         fxaa_quality_edge_threshold: 0.250,
                         fxaa_quality_edge_threshold_min: 0.0833,
                     });
-                } else if input.virtual_keycode.unwrap_or(VirtualKeyCode::A) == VirtualKeyCode::Key3 {
+                } else if input.virtual_keycode.unwrap_or(VirtualKeyCode::A) == VirtualKeyCode::Key3
+                {
                     self.scene_renderer.set_fxaa_settings_mut(FxaaSettings {
                         fxaa_quality_subpix: 0.5,
                         fxaa_quality_edge_threshold: 0.166,
                         fxaa_quality_edge_threshold_min: 0.0625,
                     });
-                } else if input.virtual_keycode.unwrap_or(VirtualKeyCode::A) == VirtualKeyCode::Key4 {
-                    self.scene_renderer.set_fxaa_settings_mut(FxaaSettings::default());
+                } else if input.virtual_keycode.unwrap_or(VirtualKeyCode::A) == VirtualKeyCode::Key4
+                {
+                    self.scene_renderer
+                        .set_fxaa_settings_mut(FxaaSettings::default());
                 }
             }
-            
+
             winit::event::DeviceEvent::MouseMotion { delta } => {
                 self.movement.x = (delta.0.abs() as f32 - MIN_DELTA).max(0.0)
                     * delta.0.signum() as f32
@@ -221,15 +256,75 @@ impl App for GLTFViewer {
         let swapchain_extents = app_state.gpu.swapchain().extents();
         let (swapchain_image, swapchain_image_view) =
             app_state.gpu.swapchain_mut().acquire_next_image()?;
-        let command_buffer = self.scene_renderer.render(
+        let mut command_buffer = self.scene_renderer.render(
             &self.camera,
-            &self.gltf_loader.scene(),
+            self.gltf_loader.scene(),
             swapchain_extents,
             swapchain_format,
             swapchain_image,
             swapchain_image_view,
             &self.resource_map,
         )?;
+        self.imgui
+            .io_mut()
+            .update_delta_time(std::time::Duration::from_secs_f32(
+                app_state.time.delta_frame(),
+            ));
+        self.platform.prepare_frame(
+            self.imgui.io_mut(),
+            &engine::app_state().gpu.swapchain().window,
+        )?;
+        let ui = self.imgui.frame();
+        self.platform.prepare_render(
+            ui,
+            &engine::app_state().gpu.swapchain().window,
+        );
+
+        ui.text("Hiii");
+
+        let data = self.imgui.render();
+        {
+            let color = vec![ColorAttachment {
+                image_view: swapchain_image_view,
+                load_op: gpu::ColorLoadOp::Load,
+                store_op: gpu::AttachmentStoreOp::Store,
+                initial_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            }];
+            let render_imgui = command_buffer.begin_render_pass(&BeginRenderPassInfo {
+                color_attachments: &color,
+                depth_attachment: None,
+                stencil_attachment: None,
+                render_area: Rect2D {
+                    offset: ash::vk::Offset2D { x: 0, y: 0 },
+                    extent: swapchain_extents,
+                },
+            });
+            let cmd_buf = render_imgui.inner();
+            self.renderer.cmd_draw(cmd_buf, data)?;
+        }
+        command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            dependency_flags: DependencyFlags::empty(),
+            memory_barriers: &[],
+            buffer_memory_barriers: &[],
+            image_memory_barriers: &[ImageMemoryBarrier {
+                src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                dst_access_mask: AccessFlags::COLOR_ATTACHMENT_READ,
+                old_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                new_layout: ImageLayout::PRESENT_SRC_KHR,
+                src_queue_family_index: ash::vk::QUEUE_FAMILY_IGNORED,
+                dst_queue_family_index: ash::vk::QUEUE_FAMILY_IGNORED,
+                image: swapchain_image,
+                subresource_range: ImageSubresourceRange {
+                    aspect_mask: ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+            }],
+        });
         let frame = app_state.gpu.get_current_swapchain_frame();
         command_buffer.submit(&CommandBufferSubmitInfo {
             wait_semaphores: &[&frame.image_available_semaphore],

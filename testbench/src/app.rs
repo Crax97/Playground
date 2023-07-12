@@ -13,6 +13,10 @@ pub trait App {
     where
         Self: Sized;
 
+    fn on_event(&mut self, _event: &Event<()>, _app_state: &AppState) -> anyhow::Result<()> { 
+        Ok(())
+    }
+    
     fn input(
         &mut self,
         app_state: &AppState,
@@ -27,6 +31,7 @@ pub fn app_loop<A: App + 'static>(
     event: Event<'_, ()>,
 ) -> anyhow::Result<ControlFlow> {
     let app_state_mut = engine::app_state_mut();
+    app.on_event(&event, app_state_mut)?;
     match event {
         winit::event::Event::NewEvents(_) => {}
         winit::event::Event::WindowEvent { event, .. } => match event {

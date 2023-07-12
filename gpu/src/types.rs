@@ -6,7 +6,7 @@ use ash::{
     prelude::*,
     vk::{
         self, AllocationCallbacks, Buffer, Extent2D, FenceCreateInfo,
-        SamplerCreateInfo, SemaphoreCreateInfo, ShaderModuleCreateInfo, StructureType,
+        SamplerCreateInfo, SemaphoreCreateInfo, ShaderModuleCreateInfo,
     },
 };
 

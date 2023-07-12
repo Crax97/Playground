@@ -30,10 +30,9 @@ gltf = "1.2.0"
 gpu = { path = "../gpu" }
 resource_map = { path = "../resource_map" }
 engine = { path = "../engine" }
-
-egui = "0.20.1"
-egui-winit-ash-integration = {version = "0.3.0", features = ["gpu-allocator-feature"]}
-egui-winit = "0.20.1"
+imgui = "0.11.0"
+imgui-rs-vulkan-renderer = { version = "1.9.0", features = ["dynamic-rendering"] }
+imgui-winit-support = "0.11.0"
 
 [build-dependencies]
 shaderc = "0.8.2"

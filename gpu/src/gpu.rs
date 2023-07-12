@@ -680,11 +680,25 @@ impl Gpu {
 
         Ok(())
     }
-
+    pub fn instance(&self) -> Instance {
+        self.state.instance.clone()
+    }
+    
+    pub fn dynamic_rendering(&self) -> DynamicRendering {
+        self.state.dynamic_rendering.clone()
+    }
+    
     pub fn vk_logical_device(&self) -> Device {
         self.state.logical_device.clone()
     }
-
+    
+    pub fn vk_physical_device(&self) -> vk::PhysicalDevice {
+        self.state.physical_device.physical_device
+    }
+    
+    pub fn command_pool(&self) -> vk::CommandPool {
+        self.thread_local_states[0].graphics_command_pool
+    }
     pub fn queue_families(&self) -> QueueFamilies {
         self.state.queue_families.clone()
     }
