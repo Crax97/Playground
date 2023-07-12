@@ -28,6 +28,7 @@ use ash::{
     },
     *,
 };
+use ash::extensions::khr::DynamicRendering;
 
 use log::{error, trace, warn};
 use raw_window_handle::HasRawDisplayHandle;
@@ -86,6 +87,7 @@ pub struct GpuState {
     pub(crate) pipeline_cache: PipelineCache,
     features: SupportedFeatures,
     messenger: Option<vk::DebugUtilsMessengerEXT>,
+    pub dynamic_rendering: DynamicRendering,
 }
 
 impl Drop for GpuState {
@@ -265,13 +267,14 @@ impl Gpu {
         if configuration.enable_debug_utilities {
             instance_extensions.push("VK_EXT_debug_utils".into());
         }
-
+        
         Self::ensure_required_instance_extensions_are_available(&instance_extensions, &entry)?;
 
         let instance = Self::create_instance(&entry, &configuration, &instance_extensions)?;
         trace!("Created instance");
 
-        let device_extensions = vec!["VK_KHR_swapchain".into()];
+        let device_extensions = vec!["VK_KHR_swapchain".into(),
+                                     "VK_KHR_dynamic_rendering".into()];
 
         let physical_device = Self::select_discrete_physical_device(&instance)?;
         trace!("Created physical device");
@@ -355,6 +358,8 @@ impl Gpu {
         let pipeline_cache =
             Self::create_pipeline_cache(&logical_device, configuration.pipeline_cache_path)?;
 
+        let dynamic_rendering = Self::create_dynamic_rendering(&instance, &logical_device)?;
+        
         let state = Arc::new(GpuState {
             entry,
             instance,
@@ -371,6 +376,7 @@ impl Gpu {
             gpu_memory_allocator: Arc::new(RefCell::new(gpu_memory_allocator)),
             descriptor_set_allocator: Arc::new(RefCell::new(descriptor_set_allocator)),
             messenger,
+            dynamic_rendering,
         });
 
         let swapchain = Swapchain::new(state.clone(), configuration.window)?;
@@ -641,16 +647,18 @@ impl Gpu {
         let all_extensions = unsafe {
             instance.enumerate_device_extension_properties(physical_device.physical_device)
         }?;
-        let mut all_extensions_c_names = all_extensions
+        let mut all_supported_extensions : Vec<_> = all_extensions
             .iter()
-            .map(|ext| unsafe { CStr::from_ptr(ext.extension_name.as_ptr()) });
-
+            .map(|ext| 
+                unsafe { CStr::from_ptr(ext.extension_name.as_ptr()) }.to_str()
+                    .expect("Failed to get extension name")
+                    .to_owned())
+            .collect();
+        
+        
         for requested_extension in device_extensions {
-            let required_c_name =
-                unsafe { CString::from_vec_unchecked(requested_extension.clone().into_bytes()) };
-
-            if !all_extensions_c_names.any(|name| name == required_c_name.as_c_str()) {
-                error!("Device extension {:?} is not supported", required_c_name);
+            if !all_supported_extensions.contains(requested_extension) {
+                error!("Device extension {:?} is not supported", requested_extension);
             }
         }
 
@@ -884,6 +892,10 @@ impl Gpu {
 
     pub fn swapchain_mut(&mut self) -> &mut Swapchain {
         &mut self.swapchain
+    }
+    fn create_dynamic_rendering(instance: &Instance, device: &Device) -> VkResult<DynamicRendering> {
+        let dynamic_rendering = DynamicRendering::new(instance, device);
+        Ok(dynamic_rendering)
     }
 }
 
