@@ -249,10 +249,32 @@ impl App for GLTFViewer {
     }
 
     fn draw(&mut self, app_state: &mut AppState) -> anyhow::Result<()> {
+        
+        self.imgui
+            .io_mut()
+            .update_delta_time(std::time::Duration::from_secs_f32(
+                app_state.time.delta_frame(),
+            ));
+        self.platform.prepare_frame(
+            self.imgui.io_mut(),
+            &engine::app_state().gpu.swapchain().window,
+        )?;
+        let ui = self.imgui.frame();
+        
         let swapchain_format = app_state.gpu.swapchain().present_format();
         let swapchain_extents = app_state.gpu.swapchain().extents();
         let (swapchain_image, swapchain_image_view) =
             app_state.gpu.swapchain_mut().acquire_next_image()?;
+        
+        
+        let mut settings = self.scene_renderer.fxaa_settings();
+        ui.text("Hiii");
+
+        ui.slider("FXAA subpix", 0.0, 1.0, &mut settings.fxaa_quality_subpix);
+        ui.slider("FXAA Edge Threshold", 0.0, 1.0, &mut settings.fxaa_quality_edge_threshold);
+        ui.slider("FXAA Edge Threshold min", 0.0, 1.0, &mut settings.fxaa_quality_edge_threshold_min);
+        self.scene_renderer.set_fxaa_settings_mut(settings);
+        
         let mut command_buffer = self.scene_renderer.render(
             &self.camera,
             self.gltf_loader.scene(),
@@ -264,23 +286,13 @@ impl App for GLTFViewer {
             },
             &self.resource_map,
         )?;
-        self.imgui
-            .io_mut()
-            .update_delta_time(std::time::Duration::from_secs_f32(
-                app_state.time.delta_frame(),
-            ));
-        self.platform.prepare_frame(
-            self.imgui.io_mut(),
-            &engine::app_state().gpu.swapchain().window,
-        )?;
-        let ui = self.imgui.frame();
+        
         self.platform.prepare_render(
             ui,
             &engine::app_state().gpu.swapchain().window,
         );
 
-        ui.text("Hiii");
-
+        
         let data = self.imgui.render();
         {
             let color = vec![ColorAttachment {

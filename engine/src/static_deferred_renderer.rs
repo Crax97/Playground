@@ -37,6 +37,7 @@ struct FxaaShaderParams {
     fxaa_quality_edge_threshold_min: f32,
 }
 
+#[derive(Clone, Copy)]
 pub struct FxaaSettings {
     pub fxaa_quality_subpix: f32,
     pub fxaa_quality_edge_threshold: f32,
@@ -224,8 +225,8 @@ impl DeferredRenderingPipeline {
         })
     }
 
-    pub fn fxaa_settings(&self) -> &FxaaSettings {
-        &self.fxaa_settings
+    pub fn fxaa_settings(&self) -> FxaaSettings {
+        self.fxaa_settings
     }
     pub fn fxaa_settings_mut(&mut self) -> &mut FxaaSettings {
         &mut self.fxaa_settings
