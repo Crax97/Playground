@@ -6,22 +6,8 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use ash::vk::{
-    self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor,
-    BlendOp, BorderColor, BufferUsageFlags, ClearDepthStencilValue, ClearValue,
-    ColorComponentFlags, CompareOp, ComponentMapping, DependencyFlags, Extent2D, Filter,
-    ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType, Offset2D,
-    PipelineBindPoint, PipelineStageFlags, Rect2D, SampleCountFlags, SamplerAddressMode,
-    SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency,
-    SubpassDescriptionFlags,
-};
-use gpu::{
-    BeginRenderPassInfo, BindingType, BlendState, BufferCreateInfo, BufferRange, CommandBuffer,
-    DescriptorInfo, DescriptorSetInfo, FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet,
-    GpuFramebuffer, GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, ImageFormat,
-    ImageViewCreateInfo, MemoryDomain, Pipeline, RenderPass, RenderPassAttachment,
-    RenderPassCommand, RenderPassDescription, SubpassDescription, ToVk, TransitionInfo,
-};
+use ash::vk::{self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor, BufferUsageFlags, ColorComponentFlags, CompareOp, ComponentMapping, DependencyFlags, Extent2D, Filter, ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency, SubpassDescriptionFlags};
+use gpu::{BeginRenderPassInfo, BindingType, BlendState, BufferCreateInfo, BufferRange, ColorAttachment, ColorLoadOp, CommandBuffer, DepthAttachment, DepthLoadOp, DescriptorInfo, DescriptorSetInfo, FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, ImageFormat, ImageMemoryBarrier, ImageViewCreateInfo, MemoryDomain, Pipeline, PipelineBarrierInfo, RenderPass, RenderPassAttachment, RenderPassCommand, RenderPassDescription, StencilAttachment, StencilLoadOp, SubpassDescription, ToVk, TransitionInfo};
 
 use ash::vk::PushConstantRange;
 use gpu::{
@@ -896,15 +882,6 @@ impl<'a, 'e> GraphRunContext<'a, 'e> {
         self.callbacks.register_callback(handle, callback)
     }
 
-    pub fn set_clear_callback<F: Fn(&ResourceId) -> ash::vk::ClearValue + 'e>(
-        &mut self,
-        handle: &RenderPassHandle,
-        callback: F,
-    ) {
-        self.callbacks
-            .set_clear_callback(handle, Box::new(callback));
-    }
-
     pub fn register_end_callback<F: FnMut(&Gpu, &mut EndContext) + 'e>(&mut self, callback: F) {
         self.callbacks.register_end_callback(callback)
     }
@@ -965,6 +942,49 @@ impl ResourceId {
     }
 }
 
+#[derive(Default, Copy, Clone, PartialEq, Debug)]
+pub enum ClearValue {
+    #[default]
+    DontCare,
+    Color([f32; 4]),
+    Depth(f32),
+    Stencil(u8),
+}
+
+impl std::hash::Hash for ClearValue {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state)
+    }
+}
+
+impl Eq for ClearValue {
+    
+}
+
+impl ClearValue {
+    pub(crate) fn color_op(&self) -> ColorLoadOp {
+        match self {
+            ClearValue::DontCare => ColorLoadOp::DontCare,
+            ClearValue::Color(c) => ColorLoadOp::Clear(*c),
+            _ => unreachable!()
+        }
+    }
+    pub(crate) fn depth_op(&self) -> DepthLoadOp {
+        match self {
+            ClearValue::DontCare => DepthLoadOp::DontCare,
+            ClearValue::Depth(d) => DepthLoadOp::Clear(*d),
+            _ => unreachable!()
+        }
+    }
+    pub(crate) fn stencil_op(&self) -> StencilLoadOp {
+        match self {
+            ClearValue::DontCare => StencilLoadOp::DontCare,
+            ClearValue::Stencil(s) => StencilLoadOp::Clear(*s),
+            _ => unreachable!()
+        }
+    }
+}
+
 #[derive(Hash, Copy, Clone, PartialEq, Eq)]
 pub struct ImageDescription {
     pub width: u32,
@@ -972,6 +992,7 @@ pub struct ImageDescription {
     pub format: ImageFormat,
     pub samples: u32,
     pub present: bool,
+    pub clear_value: ClearValue
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Copy, Hash)]
@@ -1068,7 +1089,6 @@ pub struct RenderGraphPipelineDescription<'a> {
 pub(crate) fn create_pipeline_for_graph_renderpass(
     graph: &RenderGraph,
     pass_info: &RenderPassInfo,
-    vk_renderpass: &RenderPass,
     gpu: &Gpu,
     description: &RenderGraphPipelineDescription,
 ) -> anyhow::Result<Pipeline> {
@@ -1168,7 +1188,7 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
         push_constant_ranges: description.fragment_state.push_constant_ranges,
     };
 
-    Ok(Pipeline::new(gpu, vk_renderpass, &description)?)
+    Ok(Pipeline::new(gpu, &description)?)
 }
 
 pub struct RenderGraph {
@@ -1378,9 +1398,7 @@ pub enum GraphOperation {
 
 pub struct RenderPassContext<'p, 'g> {
     pub render_graph: &'p RenderGraph,
-    pub render_pass: &'p RenderPass,
     pub render_pass_command: RenderPassCommand<'p, 'g>,
-    pub framebuffer: &'p GpuFramebuffer,
     pub read_descriptor_set: Option<&'p GpuDescriptorSet>,
     pub pipeline: Option<&'p Pipeline>,
 }
@@ -1402,13 +1420,11 @@ impl CompiledRenderGraph {
 }
 
 type RenderCallback<'g> = Box<dyn FnMut(&Gpu, &mut RenderPassContext) + 'g>;
-type ClearColorCallback<'g> = Box<dyn Fn(&ResourceId) -> ash::vk::ClearValue + 'g>;
 type EndCallback<'g> = Box<dyn FnMut(&Gpu, &mut EndContext) + 'g>;
 
 #[derive(Default)]
 struct Callbacks<'g> {
     callbacks: HashMap<RenderPassHandle, RenderCallback<'g>>,
-    clear_color_cbs: HashMap<RenderPassHandle, ClearColorCallback<'g>>,
     end_callback: Option<EndCallback<'g>>,
 }
 
@@ -1420,13 +1436,7 @@ impl<'g> Callbacks<'g> {
     ) {
         self.callbacks.insert(*handle, Box::new(callback));
     }
-    pub fn set_clear_callback<F: Fn(&ResourceId) -> ash::vk::ClearValue + 'g>(
-        &mut self,
-        handle: &RenderPassHandle,
-        callback: F,
-    ) {
-        self.clear_color_cbs.insert(*handle, Box::new(callback));
-    }
+    
     pub fn register_end_callback<F: FnMut(&Gpu, &mut EndContext) + 'g>(&mut self, callback: F) {
         self.end_callback = Some(Box::new(callback));
     }
@@ -1730,21 +1740,11 @@ impl RenderGraph {
         pipeline_description: &RenderGraphPipelineDescription<'_>,
     ) -> anyhow::Result<()> {
         if !self.render_pass_pipelines.contains_key(pass_handle) {
-            let mut allocator = self.resource_allocator.borrow_mut();
             let pass_info = &self.passes[pass_handle];
-            let pass = allocator.render_passes.get_explicit(
-                gpu,
-                0,
-                &RenderGraphPassCreateInfo {
-                    graph: self,
-                    pass_info,
-                },
-                pass_handle,
-            )?;
+
             let pipeline = create_pipeline_for_graph_renderpass(
                 self,
                 pass_info,
-                pass.resource(),
                 gpu,
                 pipeline_description,
             )?;
@@ -1841,51 +1841,19 @@ impl GpuRunner {
             Ok(allocator.images.get(ctx, &desc, id)?.resource())
         }
     }
-
-    fn get_renderpass<'e, 'a>(
-        &'a self,
-        id: &RenderPassHandle,
-        external_resources: &ExternalResources<'e>,
-        pass_allocator: &'e RenderPassAllocator,
-    ) -> &'e RenderPass
-    where
-        'a: 'e,
+    fn get_image_unchecked<'r, 'e>(
+        external_resources: &'e ExternalResources,
+        id: &ResourceId,
+        allocator: &'r DefaultResourceAllocator,
+    ) -> &'e GpuImage
+        where
+            'r: 'e,
     {
-        if external_resources.external_render_passes.contains_key(id) {
-            return external_resources.external_render_passes[id];
+        if external_resources.external_images.contains_key(id) {
+            external_resources.external_images[id]
+        } else {
+            allocator.images.get_unchecked(id).resource()
         }
-        pass_allocator.get_unchecked(id).resource()
-    }
-
-    fn ensure_render_pass_exists(
-        &mut self,
-        ctx: &GraphRunContext,
-        rp: &RenderPassHandle,
-        pass_allocator: &mut RenderPassAllocator,
-        graph: &RenderGraph,
-    ) -> Result<(), anyhow::Error> {
-        {
-            let pass_info = &graph.passes[rp];
-            if pass_info.is_external {
-                if !ctx
-                    .external_resources
-                    .external_render_passes
-                    .contains_key(rp)
-                {
-                    panic!(
-                        "RenderPass {} is external, but it hasn't been injected",
-                        rp.label
-                    );
-                }
-            } else {
-                pass_allocator.ensure_resource_exists(
-                    ctx.gpu,
-                    &RenderGraphPassCreateInfo { graph, pass_info },
-                    rp,
-                )?;
-            };
-        }
-        Ok(())
     }
 }
 
@@ -1905,17 +1873,290 @@ impl RenderGraphRunner for GpuRunner {
         );
         for op in &graph.cached_graph.graph_operations {
             if let GraphOperation::ExecuteRenderPass(rp) = op {
-                self.ensure_render_pass_exists(
-                    ctx,
-                    rp,
-                    &mut resource_allocator.render_passes,
-                    graph,
-                )?;
                 let info = &graph.passes[rp];
-
                 ensure_graph_allocated_resources_exist(ctx, info, graph, resource_allocator)?;
                 ensure_graph_allocated_samplers_exists(ctx, info, graph, resource_allocator)?;
-                let views = resolve_framebuffer_image_views_unchecked(
+
+                // Transition shader reads
+                {
+                    let mut color_transitions = vec![];
+                    let mut depth_stencil_transitions = vec![];
+                    for read in &info.shader_reads {
+                        let info = graph.get_resource_info(read)?;
+                        let image_desc = if let AllocationType::Image(d) = info.ty { d } else { continue; };
+                        let old_layout = *self.resource_states.entry(*read).or_insert(TransitionInfo {
+                            layout: ImageLayout::UNDEFINED,
+                            access_mask: AccessFlags::empty(),
+                            stage_mask: if image_desc.format.is_color() {
+                                PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                            } else {
+                                PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                            },
+                        });
+
+                        let new_layout = TransitionInfo {
+                            layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                            access_mask: AccessFlags::SHADER_READ,
+                            stage_mask: PipelineStageFlags::FRAGMENT_SHADER | PipelineStageFlags::VERTEX_SHADER,
+                        };
+
+                        self.resource_states.insert(*read, new_layout);
+
+                        let image = Self::get_image_unchecked(&ctx.external_resources, read, resource_allocator);
+                        if image_desc.format.is_color() {
+                            color_transitions.push(ImageMemoryBarrier {
+                                src_access_mask: old_layout.access_mask,
+                                dst_access_mask: new_layout.access_mask,
+                                old_layout: old_layout.layout,
+                                new_layout: new_layout.layout,
+                                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                image,
+                                subresource_range: vk::ImageSubresourceRange {
+                                    aspect_mask: ImageAspectFlags::COLOR,
+                                    base_mip_level: 0,
+                                    level_count: 1,
+                                    base_array_layer: 0,
+                                    layer_count: 1,
+                                },
+                            })
+                        } else {
+                            depth_stencil_transitions.push(ImageMemoryBarrier {
+                                src_access_mask: old_layout.access_mask,
+                                dst_access_mask: new_layout.access_mask,
+                                old_layout: old_layout.layout,
+                                new_layout: new_layout.layout,
+                                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                image,
+                                subresource_range: vk::ImageSubresourceRange {
+                                    aspect_mask: ImageAspectFlags::DEPTH,
+                                    base_mip_level: 0,
+                                    level_count: 1,
+                                    base_array_layer: 0,
+                                    layer_count: 1,
+                                },
+                            })
+                        }
+                    }
+
+                    if !color_transitions.is_empty() {
+                        ctx.command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                            dst_stage_mask: PipelineStageFlags::VERTEX_SHADER | PipelineStageFlags::FRAGMENT_SHADER,
+                            dependency_flags: Default::default(),
+                            memory_barriers: &[],
+                            buffer_memory_barriers: &[],
+                            image_memory_barriers: &color_transitions,
+                        })
+                    }
+                    if !depth_stencil_transitions.is_empty() {
+                        ctx.command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                            src_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+                            dst_stage_mask: PipelineStageFlags::VERTEX_SHADER | PipelineStageFlags::FRAGMENT_SHADER,
+                            dependency_flags: Default::default(),
+                            memory_barriers: &[],
+                            buffer_memory_barriers: &[],
+                            image_memory_barriers: &color_transitions,
+                        })
+                    }
+                }
+                
+                // Transition attach write 
+                {
+                    let mut color_transitions = vec![];
+                    let mut depth_stencil_transitions = vec![];
+                    for read in &info.attachment_writes {
+                        let info = graph.get_resource_info(read)?;
+                        let image_desc = if let AllocationType::Image(d) = info.ty { d } else { continue; };
+                        let old_layout = *self.resource_states.entry(*read).or_insert(TransitionInfo {
+                            layout: ImageLayout::UNDEFINED,
+                            access_mask: AccessFlags::empty(),
+                            stage_mask: if image_desc.format.is_color() {
+                                PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                            } else {
+                                PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                            },
+                        });
+
+                        let new_layout = TransitionInfo {
+                            layout: if image_desc.present {
+                                ImageLayout::PRESENT_SRC_KHR  
+                            } else if image_desc.format.is_color() {
+                                ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                            } else {
+                                ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                            },
+                            access_mask: if image_desc.format.is_color() {
+                                AccessFlags::COLOR_ATTACHMENT_WRITE
+                            } else {
+                                AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
+                            },
+                            stage_mask: if image_desc.format.is_color() {
+                                PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                            } else {
+                                PipelineStageFlags::LATE_FRAGMENT_TESTS
+                            },
+                        };
+                        self.resource_states.insert(*read, new_layout);
+
+                        let image = Self::get_image_unchecked(&ctx.external_resources, read, resource_allocator);
+                        if image_desc.format.is_color() {
+                            color_transitions.push(ImageMemoryBarrier {
+                                src_access_mask: old_layout.access_mask,
+                                dst_access_mask: new_layout.access_mask,
+                                old_layout: old_layout.layout,
+                                new_layout: new_layout.layout,
+                                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                image,
+                                subresource_range: vk::ImageSubresourceRange {
+                                    aspect_mask: ImageAspectFlags::COLOR,
+                                    base_mip_level: 0,
+                                    level_count: 1,
+                                    base_array_layer: 0,
+                                    layer_count: 1,
+                                },
+                            })
+                        } else {
+                            depth_stencil_transitions.push(ImageMemoryBarrier {
+                                src_access_mask: old_layout.access_mask,
+                                dst_access_mask: new_layout.access_mask,
+                                old_layout: old_layout.layout,
+                                new_layout: new_layout.layout,
+                                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                image,
+                                subresource_range: vk::ImageSubresourceRange {
+                                    aspect_mask: ImageAspectFlags::DEPTH,
+                                    base_mip_level: 0,
+                                    level_count: 1,
+                                    base_array_layer: 0,
+                                    layer_count: 1,
+                                },
+                            })
+                        }
+                    }
+
+                    if !color_transitions.is_empty() {
+                        ctx.command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                            dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                            dependency_flags: Default::default(),
+                            memory_barriers: &[],
+                            buffer_memory_barriers: &[],
+                            image_memory_barriers: &color_transitions,
+                        })
+                    }
+                    if !depth_stencil_transitions.is_empty() {
+                        ctx.command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                            src_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+                            dst_stage_mask: PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                            dependency_flags: Default::default(),
+                            memory_barriers: &[],
+                            buffer_memory_barriers: &[],
+                            image_memory_barriers: &color_transitions,
+                        })
+                    }
+                }
+                
+                // Transition attach read
+                {
+
+                    let mut color_transitions = vec![];
+                    let mut depth_stencil_transitions = vec![];
+                    for read in &info.attachment_reads {
+                        let info = graph.get_resource_info(read)?;
+                        let image_desc = if let AllocationType::Image(d) = info.ty { d } else { continue; };
+                        let old_layout = *self.resource_states.entry(*read).or_insert(TransitionInfo {
+                            layout: ImageLayout::UNDEFINED,
+                            access_mask: AccessFlags::empty(),
+                            stage_mask: if image_desc.format.is_color() {
+                                PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                            } else {
+                                PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                            },
+                        });
+
+                        let new_layout = TransitionInfo {
+                            layout: if image_desc.format.is_color() {
+                                ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                            } else {
+                                ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                            },
+                            access_mask: if image_desc.format.is_color() {
+                                AccessFlags::COLOR_ATTACHMENT_READ
+                            } else {
+                                AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
+                            },
+                            stage_mask: if image_desc.format.is_color() {
+                                PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                            } else {
+                                PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                            },
+                        };
+                        self.resource_states.insert(*read, new_layout);
+
+                        let image = Self::get_image_unchecked(&ctx.external_resources, read, resource_allocator);
+                        if image_desc.format.is_color() {
+                            color_transitions.push(ImageMemoryBarrier {
+                                src_access_mask: old_layout.access_mask,
+                                dst_access_mask: new_layout.access_mask,
+                                old_layout: old_layout.layout,
+                                new_layout: new_layout.layout,
+                                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                image,
+                                subresource_range: vk::ImageSubresourceRange {
+                                    aspect_mask: ImageAspectFlags::COLOR,
+                                    base_mip_level: 0,
+                                    level_count: 1,
+                                    base_array_layer: 0,
+                                    layer_count: 1,
+                                },
+                            })
+                        } else {
+                            depth_stencil_transitions.push(ImageMemoryBarrier {
+                                src_access_mask: old_layout.access_mask,
+                                dst_access_mask: new_layout.access_mask,
+                                old_layout: old_layout.layout,
+                                new_layout: new_layout.layout,
+                                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                image,
+                                subresource_range: vk::ImageSubresourceRange {
+                                    aspect_mask: ImageAspectFlags::DEPTH,
+                                    base_mip_level: 0,
+                                    level_count: 1,
+                                    base_array_layer: 0,
+                                    layer_count: 1,
+                                },
+                            })
+                        }
+                    }
+
+                    if !color_transitions.is_empty() {
+                        ctx.command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                            dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                            dependency_flags: Default::default(),
+                            memory_barriers: &[],
+                            buffer_memory_barriers: &[],
+                            image_memory_barriers: &color_transitions,
+                        })
+                    }
+                    if !depth_stencil_transitions.is_empty() {
+                        ctx. command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                            src_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+                            dst_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+                            dependency_flags: Default::default(),
+                            memory_barriers: &[],
+                            buffer_memory_barriers: &[],
+                            image_memory_barriers: &color_transitions,
+                        })
+                    }
+                }
+                let (color_views, depth_view, stencil_view) = resolve_render_image_views_unchecked(
                     info,
                     graph,
                     &ctx.external_resources,
@@ -1932,71 +2173,18 @@ impl RenderGraphRunner for GpuRunner {
                     &mut resource_allocator.descriptors,
                 );
 
-                let framebuffer_hash = compute_framebuffer_hash(&views);
-
-                let pass = self.get_renderpass(
-                    rp,
-                    &ctx.external_resources,
-                    &resource_allocator.render_passes,
-                );
-                let framebuffer = resource_allocator
-                    .framebuffers
-                    .get(
-                        ctx,
-                        &RenderGraphFramebufferCreateInfo {
-                            render_pass: pass,
-                            render_targets: &views,
-                            extents: info.extents,
-                            framebuffer_hash,
-                        },
-                        &framebuffer_hash,
-                    )?
-                    .resource();
-
                 let cb = ctx.callbacks.callbacks.get_mut(rp);
-                let clear = ctx.callbacks.clear_color_cbs.get(rp);
-                let clear_color_values: Vec<_> = info
-                    .attachment_writes
-                    .iter()
-                    .chain(info.attachment_reads.iter())
-                    .map(|rd| {
-                        if let Some(func) = clear {
-                            func(rd)
-                        } else {
-                            let res_info = &graph.allocations[rd];
-                            match &res_info.ty {
-                                AllocationType::Image(desc) => {
-                                    if desc.format.is_color() {
-                                        ClearValue {
-                                            color: vk::ClearColorValue {
-                                                float32: [0.0, 0.0, 0.0, 0.0],
-                                            },
-                                        }
-                                    } else {
-                                        ClearValue {
-                                            depth_stencil: ClearDepthStencilValue {
-                                                depth: 1.0,
-                                                stencil: 255,
-                                            },
-                                        }
-                                    }
-                                }
-                                AllocationType::Buffer { .. } => {
-                                    panic!("Graph can't treat buffer as render target!")
-                                }
-                            }
-                        }
-                    })
-                    .collect();
                 let render_pass_label = ctx.command_buffer.begin_debug_region(
+
                     &format!("Begin Render Pass: {}", rp.label),
                     [0.3, 0.0, 0.0, 1.0],
                 );
+                
                 let mut render_pass_command =
                     ctx.command_buffer.begin_render_pass(&BeginRenderPassInfo {
-                        framebuffer,
-                        render_pass: pass,
-                        clear_color_values: &clear_color_values,
+                        color_attachments: &color_views,
+                        depth_attachment: depth_view,
+                        stencil_attachment: stencil_view,
                         render_area: Rect2D {
                             offset: Offset2D::default(),
                             extent: info.extents,
@@ -2017,8 +2205,6 @@ impl RenderGraphRunner for GpuRunner {
                 }
                 let mut context = RenderPassContext {
                     render_graph: graph,
-                    render_pass: pass,
-                    framebuffer,
                     render_pass_command,
                     pipeline,
                     read_descriptor_set: read_descriptor_set.map(|r| r.resource()),
@@ -2034,29 +2220,13 @@ impl RenderGraphRunner for GpuRunner {
             end_cb(
                 ctx.gpu,
                 &mut EndContext {
-                    command_buffer: &mut ctx.command_buffer,
+                    command_buffer: ctx.command_buffer,
                 },
             );
         }
         label.end();
         Ok(())
     }
-}
-
-fn compute_framebuffer_hash(views: &Vec<&GpuImageView>) -> FramebufferHandle {
-    let framebuffer_hash = hash_image_views(views);
-    FramebufferHandle {
-        hash: framebuffer_hash,
-    }
-}
-
-fn hash_image_views(views: &Vec<&GpuImageView>) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    for view in views {
-        view.hash(&mut hasher);
-    }
-
-    hasher.finish()
 }
 
 fn ensure_graph_allocated_resources_exist(
@@ -2151,16 +2321,20 @@ fn ensure_graph_allocated_samplers_exists(
     Ok(())
 }
 
-fn resolve_framebuffer_image_views_unchecked<'e, 'a>(
+fn resolve_render_image_views_unchecked<'e, 'a>(
     info: &RenderPassInfo,
     graph: &RenderGraph,
     external_resources: &'e ExternalResources<'e>,
     image_views_allocator: &'a ImageViewAllocator,
-) -> Vec<&'e GpuImageView>
+) -> (Vec<ColorAttachment<'e>>, 
+      Option<DepthAttachment<'e>>, 
+      Option<StencilAttachment<'e>>)
 where
     'a: 'e,
 {
-    let mut views = vec![];
+    let mut colors = vec![];
+    let mut depth = None;
+    let mut stencil = None;
     for writes in &info.attachment_writes {
         let resource_info = graph
             .get_resource_info(writes)
@@ -2173,7 +2347,31 @@ where
         } else {
             image_views_allocator.get_unchecked(writes).resource()
         };
-        views.push(view);
+        
+        let image_desc = if let AllocationType::Image(d) = resource_info.ty { d } else {continue};
+        
+        if view.format().is_color() {
+            colors.push(ColorAttachment {
+                image_view: view,
+                load_op: image_desc.clear_value.color_op(),
+                store_op: gpu::AttachmentStoreOp::Store,
+                initial_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            });
+        } else if view.format().is_depth() {
+            depth = Some(DepthAttachment {
+                image_view: view,
+                load_op: image_desc.clear_value.depth_op(),
+                store_op: gpu::AttachmentStoreOp::Store,
+                initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            });
+        } else {
+            stencil = Some(StencilAttachment {
+                image_view: view,
+                load_op: image_desc.clear_value.stencil_op(),
+                store_op: gpu::AttachmentStoreOp::Store,
+                initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            });
+        }
     }
     for reads in &info.attachment_reads {
         let view = if external_resources
@@ -2186,9 +2384,31 @@ where
         } else {
             image_views_allocator.get_unchecked(reads).resource()
         };
-        views.push(view);
+
+        if view.format().is_color() {
+            colors.push( ColorAttachment {
+                image_view: view,
+                load_op: ColorLoadOp::Load,
+                store_op: gpu::AttachmentStoreOp::Store,
+                initial_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            });
+        } else if view.format().is_depth() {
+            depth = Some(DepthAttachment {
+                image_view: view,
+                load_op: DepthLoadOp::Load,
+                store_op: gpu::AttachmentStoreOp::Store,
+                initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            });
+        } else {
+            stencil = Some( StencilAttachment {
+                image_view: view,
+                load_op: StencilLoadOp::Load,
+                store_op: gpu::AttachmentStoreOp::Store,
+                initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            });
+        }
     }
-    views
+    (colors, depth, stencil)
 }
 
 fn resolve_input_descriptor_set<'a>(
@@ -2270,6 +2490,7 @@ mod test {
     use ash::vk::Extent2D;
 
     use crate::{CompileError, ResourceId, ResourceLayout};
+    use crate::ClearValue::{Color, DontCare};
 
     use super::{ImageDescription, RenderGraph};
 
@@ -2280,6 +2501,7 @@ mod test {
             format: gpu::ImageFormat::Rgba8,
             samples: 1,
             present: false,
+            clear_value: Color([0.0, 0.0, 0.0, 0.0]),
         };
 
         rg.use_image(name, &description, false).unwrap()
@@ -2319,6 +2541,7 @@ mod test {
                 format: gpu::ImageFormat::Rgba8,
                 samples: 1,
                 present: false,
+                clear_value: DontCare,
             };
 
             render_graph.use_image("color1", &description, false)

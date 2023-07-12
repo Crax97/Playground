@@ -13,8 +13,9 @@ use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::{AppState, Camera, DeferredRenderingPipeline, FxaaSettings, Light, LightType, RenderingPipeline, Scene};
 use nalgebra::*;
 use resource_map::ResourceMap;
-use winit::{event::ElementState, event_loop::EventLoop};
+use winit::event::ElementState;
 use winit::event::VirtualKeyCode;
+use winit::event_loop::EventLoop;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -87,7 +88,7 @@ impl App for GLTFViewer {
         )?;
 
         let mut gltf_loader = GltfLoader::load(
-            "gltf_models/Sponza/glTF/Sponza.gltf",
+            "gltf_models/bottle/glTF/WaterBottle.gltf",
             &app_state.gpu,
             &mut scene_renderer,
             &mut resource_map,

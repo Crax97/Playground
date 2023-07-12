@@ -1,21 +1,19 @@
 use core::panic;
 use std::{ffi::CString, ops::Deref};
 
-use ash::{
-    extensions::ext::DebugUtils,
-    prelude::VkResult,
-    vk::{
-        self, ClearValue, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
-        CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags, IndexType, Offset2D,
-        PipelineBindPoint, PipelineStageFlags, Rect2D, RenderPassBeginInfo, ShaderStageFlags,
-        StructureType, SubmitInfo, SubpassContents, Viewport,
-    },
-};
+use ash::{extensions::ext::DebugUtils, prelude::VkResult, RawPtr, vk::{
+    self, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
+    CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags, IndexType, Offset2D,
+    PipelineBindPoint, PipelineStageFlags, Rect2D, ShaderStageFlags,
+    StructureType, SubmitInfo, Viewport,
+    ClearDepthStencilValue
+}};
+use ash::vk::{ImageLayout, RenderingAttachmentInfoKHR, RenderingFlags, RenderingInfoKHR, ResolveModeFlags};
 
-use crate::{GPUFence, GPUSemaphore, GpuImage, ToVk};
+use crate::{GPUFence, GPUSemaphore, GpuImage, ToVk, GpuImageView};
 
 use super::{
-    pipeline::RenderPass, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, Pipeline, QueueType,
+    Gpu, GpuBuffer, GpuDescriptorSet, Pipeline, QueueType,
 };
 
 #[derive(Default)]
@@ -370,32 +368,201 @@ impl<'g> Drop for CommandBuffer<'g> {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum ColorLoadOp {
+    DontCare,
+    Load,
+    Clear([f32; 4]),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum DepthLoadOp {
+    DontCare,
+    Load,
+    Clear(f32),
+}
+#[derive(Clone, Copy, Debug)]
+pub enum StencilLoadOp {
+    DontCare,
+    Load,
+    Clear(u8),
+}
+
+
+
+impl ToVk for ColorLoadOp{
+    type Inner = vk::AttachmentLoadOp;
+
+    fn to_vk(&self) -> Self::Inner {
+        use ColorLoadOp::{DontCare, Load, Clear};
+        match self {
+            DontCare => Self::Inner::DONT_CARE,
+            Load => Self::Inner::LOAD,
+            Clear(_) => Self::Inner::CLEAR,
+        }
+    }
+}
+
+
+impl ToVk for DepthLoadOp {
+    type Inner = vk::AttachmentLoadOp;
+
+    fn to_vk(&self) -> Self::Inner {
+        use DepthLoadOp::{DontCare, Load, Clear};
+        match self {
+            DontCare => Self::Inner::DONT_CARE,
+            Load => Self::Inner::LOAD,
+            Clear(_) => Self::Inner::CLEAR,
+        }
+    }
+}
+
+
+impl ToVk for StencilLoadOp {
+    type Inner = vk::AttachmentLoadOp;
+
+    fn to_vk(&self) -> Self::Inner {
+        use StencilLoadOp::{DontCare, Load, Clear};
+        match self {
+            DontCare => Self::Inner::DONT_CARE,
+            Load => Self::Inner::LOAD,
+            Clear(_) => Self::Inner::CLEAR,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum AttachmentStoreOp {
+    DontCare,
+    Store,
+}
+
+impl ToVk for AttachmentStoreOp {
+    type Inner = vk::AttachmentStoreOp;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            AttachmentStoreOp::DontCare => Self::Inner::DONT_CARE,
+            AttachmentStoreOp::Store => Self::Inner::STORE
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ColorAttachment<'a> {
+    pub image_view: &'a GpuImageView,
+    pub load_op: ColorLoadOp,
+    pub store_op: AttachmentStoreOp,
+    pub initial_layout: ImageLayout,
+}
+
+#[derive(Clone, Copy)]
+pub struct DepthAttachment<'a> {
+    pub image_view: &'a GpuImageView,
+    pub load_op: DepthLoadOp,
+    pub store_op: AttachmentStoreOp,
+    pub initial_layout: ImageLayout,
+}
+
+#[derive(Clone, Copy)]
+pub struct StencilAttachment<'a> {
+    pub image_view: &'a GpuImageView,
+    pub load_op: StencilLoadOp,
+    pub store_op: AttachmentStoreOp,
+    pub initial_layout: ImageLayout,
+}
+
 #[derive(Clone, Copy)]
 pub struct BeginRenderPassInfo<'a> {
-    pub framebuffer: &'a GpuFramebuffer,
-    pub render_pass: &'a RenderPass,
-    pub clear_color_values: &'a [ClearValue],
+    pub color_attachments: &'a [ColorAttachment<'a>],
+    pub depth_attachment: Option<DepthAttachment<'a>>,
+    pub stencil_attachment: Option<StencilAttachment<'a>>,
     pub render_area: Rect2D,
 }
 
 impl<'c, 'g> RenderPassCommand<'c, 'g> {
     fn new(command_buffer: &'c mut CommandBuffer<'g>, info: &BeginRenderPassInfo<'c>) -> Self {
-        let device = command_buffer.gpu.vk_logical_device();
-        let framebuffer = info.framebuffer.inner;
-        let create_info = RenderPassBeginInfo {
-            s_type: StructureType::RENDER_PASS_BEGIN_INFO,
+        let color_attachments: Vec<_> = info.color_attachments.iter().map(|attch| {
+           RenderingAttachmentInfoKHR {
+               s_type: StructureType::RENDERING_ATTACHMENT_INFO,
+               p_next: std::ptr::null(),
+               image_view: attch.image_view.inner,
+               image_layout: attch.initial_layout,
+               resolve_mode: ResolveModeFlags::NONE,
+               resolve_image_view: vk::ImageView::null(),
+               resolve_image_layout: ImageLayout::UNDEFINED,
+               load_op: attch.load_op.to_vk(),
+               store_op: attch.store_op.to_vk(),
+               clear_value: match attch.load_op {
+                   ColorLoadOp::Clear(color) => {ash::vk::ClearValue {
+                       color: ash::vk::ClearColorValue { float32: color}
+                   }}
+                   _ => ash::vk::ClearValue::default()
+               }
+           } 
+        }).collect();
+
+        let depth_attachment = info.depth_attachment.map(|attch| {
+            RenderingAttachmentInfoKHR {
+                s_type: StructureType::RENDERING_ATTACHMENT_INFO,
+                p_next: std::ptr::null(),
+                image_view: attch.image_view.inner,
+                image_layout: attch.initial_layout,
+                resolve_mode: ResolveModeFlags::NONE,
+                resolve_image_view: vk::ImageView::null(),
+                resolve_image_layout: ImageLayout::UNDEFINED,
+                load_op: attch.load_op.to_vk(),
+                store_op: attch.store_op.to_vk(),
+                clear_value: match attch.load_op {
+                    DepthLoadOp::Clear(d) => {ash::vk::ClearValue {
+                        depth_stencil: ClearDepthStencilValue {
+                            depth: d,
+                            stencil: 255,
+                        }}}
+                    _ => ash::vk::ClearValue::default()
+                }
+            }
+        });
+
+        let stencil_attachment = info.stencil_attachment.map(|attch| {
+            RenderingAttachmentInfoKHR {
+                s_type: StructureType::RENDERING_ATTACHMENT_INFO,
+                p_next: std::ptr::null(),
+                image_view: attch.image_view.inner,
+                image_layout: attch.initial_layout,
+                resolve_mode: ResolveModeFlags::NONE,
+                resolve_image_view: vk::ImageView::null(),
+                resolve_image_layout: ImageLayout::UNDEFINED,
+                load_op: attch.load_op.to_vk(),
+                store_op: attch.store_op.to_vk(),
+                clear_value: match attch.load_op {
+                    StencilLoadOp::Clear(s) => {ash::vk::ClearValue {
+                        depth_stencil: ClearDepthStencilValue {
+                            depth: 0.0,
+                            stencil: s as _,
+                        }}}
+                    _ => ash::vk::ClearValue::default()
+                }
+            }
+        });
+        
+        let create_info = RenderingInfoKHR {
+            s_type: StructureType::RENDERING_INFO_KHR,
             p_next: std::ptr::null(),
-            render_pass: info.render_pass.inner,
-            framebuffer,
+            flags: RenderingFlags::empty(),
+            layer_count: 1,
+            view_mask: 0,
             render_area: info.render_area,
-            clear_value_count: info.clear_color_values.len() as _,
-            p_clear_values: info.clear_color_values.as_ptr(),
+            color_attachment_count: color_attachments.len() as _,
+            p_color_attachments: color_attachments.as_ptr(),
+            p_depth_attachment: depth_attachment.as_ref().as_raw_ptr(),
+            p_stencil_attachment: stencil_attachment.as_ref().as_raw_ptr(),
+            
         };
         unsafe {
-            device.cmd_begin_render_pass(
+            command_buffer.gpu.state.dynamic_rendering.cmd_begin_rendering(
                 command_buffer.inner_command_buffer,
                 &create_info,
-                SubpassContents::INLINE,
             );
         };
 
@@ -561,7 +728,6 @@ impl<'c, 'g> Deref for RenderPassCommand<'c, 'g> {
 
 impl<'c, 'g> Drop for RenderPassCommand<'c, 'g> {
     fn drop(&mut self) {
-        let device = &self.command_buffer.gpu.vk_logical_device();
-        unsafe { device.cmd_end_render_pass(self.command_buffer.inner_command_buffer) };
+        unsafe { self.command_buffer.gpu.state.dynamic_rendering.cmd_end_rendering(self.command_buffer.inner_command_buffer) };
     }
 }

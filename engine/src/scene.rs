@@ -1,5 +1,5 @@
 use ash::vk::{Extent2D, Format};
-use gpu::{CommandBuffer, Gpu, GpuImage, GpuImageView, Swapchain};
+use gpu::{CommandBuffer, Gpu, GpuImage, GpuImageView};
 use nalgebra::{Matrix4, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
 

@@ -1,5 +1,5 @@
 extern crate proc_macro;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -129,11 +129,12 @@ impl GlslInfo {
 }
 
 fn consume_eq(input: &syn::parse::ParseBuffer<'_>) -> Result<(), syn::Error> {
-    Ok(if input.peek(Token![=]) {
+    if input.peek(Token![=]) {
         input.parse::<Token![=]>()?;
     } else {
-        return Err(input.error(format!("Expected equals sign")));
-    })
+        return Err(input.error("Expected equals sign"));
+    }
+    Ok(())
 }
 
 impl Parse for GlslInfo {
@@ -145,20 +146,20 @@ impl Parse for GlslInfo {
         let mut entry_point = None;
 
         while go_on {
-            let keyword = kw::GlslKeyword::parse(&input)?;
+            let keyword = kw::GlslKeyword::parse(input)?;
 
             match keyword {
                 kw::GlslKeyword::Path => {
-                    source = Some(Self::parse_glsl_path(&input)?);
+                    source = Some(Self::parse_glsl_path(input)?);
                 }
                 kw::GlslKeyword::Source => {
-                    source = Some(Self::parse_glsl_source(&input)?);
+                    source = Some(Self::parse_glsl_source(input)?);
                 }
                 kw::GlslKeyword::EntryPoint => {
-                    entry_point = Some(Self::parse_entrypoint(&input)?);
+                    entry_point = Some(Self::parse_entrypoint(input)?);
                 }
                 kw::GlslKeyword::Kind => {
-                    kind = Some(Self::parse_shader_kind(&input)?);
+                    kind = Some(Self::parse_shader_kind(input)?);
                 }
             }
 
@@ -194,7 +195,7 @@ fn compile_shader(info: GlslInfo) -> anyhow::Result<Vec<u32>> {
     let mut options = shaderc::CompileOptions::new().unwrap();
     options.set_include_callback(|incl, _, _, _| {
         let file_path = std::path::Path::new(incl);
-        let file_path = crate_path.join(&file_path);
+        let file_path = crate_path.join(file_path);
         let absolute = file_path.canonicalize();
         let absolute = match absolute {
             Ok(s) => s,
@@ -231,7 +232,7 @@ fn compile_shader(info: GlslInfo) -> anyhow::Result<Vec<u32>> {
     Ok(spirv.as_binary().to_vec())
 }
 
-fn get_source_file_path(path: String, crate_path: &PathBuf) -> Result<PathBuf, anyhow::Error> {
+fn get_source_file_path(path: String, crate_path: &Path) -> Result<PathBuf, anyhow::Error> {
     let path = std::path::Path::new(&path);
     let path = crate_path.join(std::path::Path::new(&path));
     let path = path.canonicalize().map_err(|e| {
