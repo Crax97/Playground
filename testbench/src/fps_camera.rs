@@ -1,5 +1,5 @@
 use engine::Camera;
-use nalgebra::{vector, Point3, Rotation3, Transform3};
+use nalgebra::{vector, Point3, Rotation3};
 
 use crate::input::{key::Key, InputState};
 
