@@ -10,13 +10,12 @@ use imgui::Ui;
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::{
-    AppState, Backbuffer, Camera, DeferredRenderingPipeline, FxaaSettings, Light, LightType,
-    RenderingPipeline, Scene,
+    AppState, Backbuffer, Camera, DeferredRenderingPipeline, Light, LightType, RenderingPipeline,
+    Scene,
 };
 use nalgebra::*;
 use resource_map::ResourceMap;
 use winit::event::ElementState;
-use winit::event::VirtualKeyCode;
 use winit::event_loop::EventLoop;
 
 #[repr(C)]
@@ -134,33 +133,7 @@ impl App for GLTFViewer {
                     self.forward_movement = mul;
                 }
             }
-            winit::event::DeviceEvent::Key(input) => {
-                if input.virtual_keycode.unwrap_or(VirtualKeyCode::A) == VirtualKeyCode::Key1 {
-                    self.scene_renderer.set_fxaa_settings_mut(FxaaSettings {
-                        fxaa_quality_subpix: 0.0,
-                        fxaa_quality_edge_threshold: 0.333,
-                        fxaa_quality_edge_threshold_min: 0.0833,
-                    });
-                } else if input.virtual_keycode.unwrap_or(VirtualKeyCode::A) == VirtualKeyCode::Key2
-                {
-                    self.scene_renderer.set_fxaa_settings_mut(FxaaSettings {
-                        fxaa_quality_subpix: 0.25,
-                        fxaa_quality_edge_threshold: 0.250,
-                        fxaa_quality_edge_threshold_min: 0.0833,
-                    });
-                } else if input.virtual_keycode.unwrap_or(VirtualKeyCode::A) == VirtualKeyCode::Key3
-                {
-                    self.scene_renderer.set_fxaa_settings_mut(FxaaSettings {
-                        fxaa_quality_subpix: 0.5,
-                        fxaa_quality_edge_threshold: 0.166,
-                        fxaa_quality_edge_threshold_min: 0.0625,
-                    });
-                } else if input.virtual_keycode.unwrap_or(VirtualKeyCode::A) == VirtualKeyCode::Key4
-                {
-                    self.scene_renderer
-                        .set_fxaa_settings_mut(FxaaSettings::default());
-                }
-            }
+            winit::event::DeviceEvent::Key(_) => {}
 
             winit::event::DeviceEvent::MouseMotion { delta } => {
                 self.movement.x = (delta.0.abs() as f32 - MIN_DELTA).max(0.0)
@@ -180,6 +153,7 @@ impl App for GLTFViewer {
 
         ui.text("Hiii");
 
+        ui.slider("FXAA iterations", 0, 12, &mut settings.iterations);
         ui.slider("FXAA subpix", 0.0, 1.0, &mut settings.fxaa_quality_subpix);
         ui.slider(
             "FXAA Edge Threshold",

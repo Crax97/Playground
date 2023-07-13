@@ -227,240 +227,6 @@ A. Or use FXAA_GREEN_AS_LUMA.
         #define FXAA_GATHER4_ALPHA 0
     #endif
 #endif
-
-/*============================================================================
-                        FXAA QUALITY - TUNING KNOBS
-------------------------------------------------------------------------------
-NOTE the other tuning knobs are now in the shader function inputs!
-============================================================================*/
-#ifndef FXAA_QUALITY__PRESET
-    //
-    // Choose the quality preset.
-    // This needs to be compiled into the shader as it effects code.
-    // Best option to include multiple presets is to 
-    // in each shader define the preset, then include this file.
-    // 
-    // OPTIONS
-    // -----------------------------------------------------------------------
-    // 10 to 15 - default medium dither (10=fastest, 15=highest quality)
-    // 20 to 29 - less dither, more expensive (20=fastest, 29=highest quality)
-    // 39       - no dither, very expensive 
-    //
-    // NOTES
-    // -----------------------------------------------------------------------
-    // 12 = slightly faster then FXAA 3.9 and higher edge quality (default)
-    // 13 = about same speed as FXAA 3.9 and better than 12
-    // 23 = closest to FXAA 3.9 visually and performance wise
-    //  _ = the lowest digit is directly related to performance
-    // _  = the highest digit is directly related to style
-    // 
-    #define FXAA_QUALITY__PRESET 39
-#endif
-
-
-/*============================================================================
-
-                           FXAA QUALITY - PRESETS
-
-============================================================================*/
-
-/*============================================================================
-                     FXAA QUALITY - MEDIUM DITHER PRESETS
-============================================================================*/
-#if (FXAA_QUALITY__PRESET == 10)
-    #define FXAA_QUALITY__PS 3
-    #define FXAA_QUALITY__P0 1.5
-    #define FXAA_QUALITY__P1 3.0
-    #define FXAA_QUALITY__P2 12.0
-#endif
-/*--------------------------------------------------------------------------*/
-#if (FXAA_QUALITY__PRESET == 11)
-    #define FXAA_QUALITY__PS 4
-    #define FXAA_QUALITY__P0 1.0
-    #define FXAA_QUALITY__P1 1.5
-    #define FXAA_QUALITY__P2 3.0
-    #define FXAA_QUALITY__P3 12.0
-#endif
-/*--------------------------------------------------------------------------*/
-#if (FXAA_QUALITY__PRESET == 12)
-    #define FXAA_QUALITY__PS 5
-    #define FXAA_QUALITY__P0 1.0
-    #define FXAA_QUALITY__P1 1.5
-    #define FXAA_QUALITY__P2 2.0
-    #define FXAA_QUALITY__P3 4.0
-    #define FXAA_QUALITY__P4 12.0
-#endif
-/*--------------------------------------------------------------------------*/
-#if (FXAA_QUALITY__PRESET == 13)
-    #define FXAA_QUALITY__PS 6
-    #define FXAA_QUALITY__P0 1.0
-    #define FXAA_QUALITY__P1 1.5
-    #define FXAA_QUALITY__P2 2.0
-    #define FXAA_QUALITY__P3 2.0
-    #define FXAA_QUALITY__P4 4.0
-    #define FXAA_QUALITY__P5 12.0
-#endif
-/*--------------------------------------------------------------------------*/
-#if (FXAA_QUALITY__PRESET == 14)
-    #define FXAA_QUALITY__PS 7
-    #define FXAA_QUALITY__P0 1.0
-    #define FXAA_QUALITY__P1 1.5
-    #define FXAA_QUALITY__P2 2.0
-    #define FXAA_QUALITY__P3 2.0
-    #define FXAA_QUALITY__P4 2.0
-    #define FXAA_QUALITY__P5 4.0
-    #define FXAA_QUALITY__P6 12.0
-#endif
-/*--------------------------------------------------------------------------*/
-#if (FXAA_QUALITY__PRESET == 15)
-    #define FXAA_QUALITY__PS 8
-    #define FXAA_QUALITY__P0 1.0
-    #define FXAA_QUALITY__P1 1.5
-    #define FXAA_QUALITY__P2 2.0
-    #define FXAA_QUALITY__P3 2.0
-    #define FXAA_QUALITY__P4 2.0
-    #define FXAA_QUALITY__P5 2.0
-    #define FXAA_QUALITY__P6 4.0
-    #define FXAA_QUALITY__P7 12.0
-#endif
-
-/*============================================================================
-                     FXAA QUALITY - LOW DITHER PRESETS
-============================================================================*/
-#if (FXAA_QUALITY__PRESET == 20)
-    #define FXAA_QUALITY__PS 3
-    #define FXAA_QUALITY__P0 1.5
-    #define FXAA_QUALITY__P1 2.0
-    #define FXAA_QUALITY__P2 8.0
-#endif
-/*--------------------------------------------------------------------------*/
-#if (FXAA_QUALITY__PRESET == 21)
-    #define FXAA_QUALITY__PS 4
-    #define FXAA_QUALITY__P0 1.0
-    #define FXAA_QUALITY__P1 1.5
-    #define FXAA_QUALITY__P2 2.0
-    #define FXAA_QUALITY__P3 8.0
-#endif
-/*--------------------------------------------------------------------------*/
-#if (FXAA_QUALITY__PRESET == 22)
-    #define FXAA_QUALITY__PS 5
-    #define FXAA_QUALITY__P0 1.0
-    #define FXAA_QUALITY__P1 1.5
-    #define FXAA_QUALITY__P2 2.0
-    #define FXAA_QUALITY__P3 2.0
-    #define FXAA_QUALITY__P4 8.0
-#endif
-/*--------------------------------------------------------------------------*/
-#if (FXAA_QUALITY__PRESET == 23)
-    #define FXAA_QUALITY__PS 6
-    #define FXAA_QUALITY__P0 1.0
-    #define FXAA_QUALITY__P1 1.5
-    #define FXAA_QUALITY__P2 2.0
-    #define FXAA_QUALITY__P3 2.0
-    #define FXAA_QUALITY__P4 2.0
-    #define FXAA_QUALITY__P5 8.0
-#endif
-/*--------------------------------------------------------------------------*/
-#if (FXAA_QUALITY__PRESET == 24)
-    #define FXAA_QUALITY__PS 7
-    #define FXAA_QUALITY__P0 1.0
-    #define FXAA_QUALITY__P1 1.5
-    #define FXAA_QUALITY__P2 2.0
-    #define FXAA_QUALITY__P3 2.0
-    #define FXAA_QUALITY__P4 2.0
-    #define FXAA_QUALITY__P5 3.0
-    #define FXAA_QUALITY__P6 8.0
-#endif
-/*--------------------------------------------------------------------------*/
-#if (FXAA_QUALITY__PRESET == 25)
-    #define FXAA_QUALITY__PS 8
-    #define FXAA_QUALITY__P0 1.0
-    #define FXAA_QUALITY__P1 1.5
-    #define FXAA_QUALITY__P2 2.0
-    #define FXAA_QUALITY__P3 2.0
-    #define FXAA_QUALITY__P4 2.0
-    #define FXAA_QUALITY__P5 2.0
-    #define FXAA_QUALITY__P6 4.0
-    #define FXAA_QUALITY__P7 8.0
-#endif
-/*--------------------------------------------------------------------------*/
-#if (FXAA_QUALITY__PRESET == 26)
-    #define FXAA_QUALITY__PS 9
-    #define FXAA_QUALITY__P0 1.0
-    #define FXAA_QUALITY__P1 1.5
-    #define FXAA_QUALITY__P2 2.0
-    #define FXAA_QUALITY__P3 2.0
-    #define FXAA_QUALITY__P4 2.0
-    #define FXAA_QUALITY__P5 2.0
-    #define FXAA_QUALITY__P6 2.0
-    #define FXAA_QUALITY__P7 4.0
-    #define FXAA_QUALITY__P8 8.0
-#endif
-/*--------------------------------------------------------------------------*/
-#if (FXAA_QUALITY__PRESET == 27)
-    #define FXAA_QUALITY__PS 10
-    #define FXAA_QUALITY__P0 1.0
-    #define FXAA_QUALITY__P1 1.5
-    #define FXAA_QUALITY__P2 2.0
-    #define FXAA_QUALITY__P3 2.0
-    #define FXAA_QUALITY__P4 2.0
-    #define FXAA_QUALITY__P5 2.0
-    #define FXAA_QUALITY__P6 2.0
-    #define FXAA_QUALITY__P7 2.0
-    #define FXAA_QUALITY__P8 4.0
-    #define FXAA_QUALITY__P9 8.0
-#endif
-/*--------------------------------------------------------------------------*/
-#if (FXAA_QUALITY__PRESET == 28)
-    #define FXAA_QUALITY__PS 11
-    #define FXAA_QUALITY__P0 1.0
-    #define FXAA_QUALITY__P1 1.5
-    #define FXAA_QUALITY__P2 2.0
-    #define FXAA_QUALITY__P3 2.0
-    #define FXAA_QUALITY__P4 2.0
-    #define FXAA_QUALITY__P5 2.0
-    #define FXAA_QUALITY__P6 2.0
-    #define FXAA_QUALITY__P7 2.0
-    #define FXAA_QUALITY__P8 2.0
-    #define FXAA_QUALITY__P9 4.0
-    #define FXAA_QUALITY__P10 8.0
-#endif
-/*--------------------------------------------------------------------------*/
-#if (FXAA_QUALITY__PRESET == 29)
-    #define FXAA_QUALITY__PS 12
-    #define FXAA_QUALITY__P0 1.0
-    #define FXAA_QUALITY__P1 1.5
-    #define FXAA_QUALITY__P2 2.0
-    #define FXAA_QUALITY__P3 2.0
-    #define FXAA_QUALITY__P4 2.0
-    #define FXAA_QUALITY__P5 2.0
-    #define FXAA_QUALITY__P6 2.0
-    #define FXAA_QUALITY__P7 2.0
-    #define FXAA_QUALITY__P8 2.0
-    #define FXAA_QUALITY__P9 2.0
-    #define FXAA_QUALITY__P10 4.0
-    #define FXAA_QUALITY__P11 8.0
-#endif
-
-/*============================================================================
-                     FXAA QUALITY - EXTREME QUALITY
-============================================================================*/
-#if (FXAA_QUALITY__PRESET == 39)
-    #define FXAA_QUALITY__PS 12
-    #define FXAA_QUALITY__P0 1.0
-    #define FXAA_QUALITY__P1 1.0
-    #define FXAA_QUALITY__P2 1.0
-    #define FXAA_QUALITY__P3 1.0
-    #define FXAA_QUALITY__P4 1.0
-    #define FXAA_QUALITY__P5 1.5
-    #define FXAA_QUALITY__P6 2.0
-    #define FXAA_QUALITY__P7 2.0
-    #define FXAA_QUALITY__P8 2.0
-    #define FXAA_QUALITY__P9 2.0
-    #define FXAA_QUALITY__P10 4.0
-    #define FXAA_QUALITY__P11 8.0
-#endif
-
 layout(location = 0) in vec2 uv;
 
 layout(location = 0) out vec4 color;
@@ -471,12 +237,17 @@ layout(push_constant) uniform FxaaInput {
     float fxaaQualitySubpix;
     float fxaaQualityEdgeThreshold;
     float fxaaQualityEdgeThresholdMin;
+    uint interations;
 } fxaa_input;
-
 
 float FxaaLuma(vec3 rgb) { 
     vec3 scale = vec3(0.2126, 0.7152, 0.0722);
     return dot(scale, rgb);
+}
+
+float quality(uint i) {
+    float q[] = float[12](1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 4.0, 8.0);
+    return q[i];
 }
 
 #define saturate(x) clamp(x, 0.0, 1.0)
@@ -662,11 +433,11 @@ vec4 FxaaPixelShader(
     if( horzSpan) posB.y += lengthSign * 0.5;
 /*--------------------------------------------------------------------------*/
     vec2 posN;
-    posN.x = posB.x - offNP.x * FXAA_QUALITY__P0;
-    posN.y = posB.y - offNP.y * FXAA_QUALITY__P0;
+    posN.x = posB.x - offNP.x * quality(0);
+    posN.y = posB.y - offNP.y * quality(0);
     vec2 posP;
-    posP.x = posB.x + offNP.x * FXAA_QUALITY__P0;
-    posP.y = posB.y + offNP.y * FXAA_QUALITY__P0;
+    posP.x = posB.x + offNP.x * quality(0);
+    posP.y = posB.y + offNP.y * quality(0);
     float subpixD = ((-2.0)*subpixC) + 3.0;
     float lumaEndN = FxaaLuma(Tex2DTop(tex, posN));
     float subpixE = subpixC * subpixC;
@@ -678,201 +449,26 @@ vec4 FxaaPixelShader(
     float subpixF = subpixD * subpixE;
     bool lumaMLTZero = lumaMM < 0.0;
 /*--------------------------------------------------------------------------*/
-    lumaEndN -= lumaNN * 0.5;
-    lumaEndP -= lumaNN * 0.5;
-    bool doneN = abs(lumaEndN) >= gradientScaled;
-    bool doneP = abs(lumaEndP) >= gradientScaled;
-    if(!doneN) posN.x -= offNP.x * FXAA_QUALITY__P1;
-    if(!doneN) posN.y -= offNP.y * FXAA_QUALITY__P1;
-    bool doneNP = (!doneN) || (!doneP);
-    if(!doneP) posP.x += offNP.x * FXAA_QUALITY__P1;
-    if(!doneP) posP.y += offNP.y * FXAA_QUALITY__P1;
-/*--------------------------------------------------------------------------*/
-    if(doneNP) {
+
+    bool doneN = false;
+    bool doneP = false;
+    bool doneNP = false;
+
+
+    for (uint i = 0; i < fxaa_input.interations; i ++) {
         if(!doneN) lumaEndN = FxaaLuma(Tex2DTop(tex, posN.xy));
         if(!doneP) lumaEndP = FxaaLuma(Tex2DTop(tex, posP.xy));
         if(!doneN) lumaEndN = lumaEndN - lumaNN * 0.5;
         if(!doneP) lumaEndP = lumaEndP - lumaNN * 0.5;
         doneN = abs(lumaEndN) >= gradientScaled;
         doneP = abs(lumaEndP) >= gradientScaled;
-        if(!doneN) posN.x -= offNP.x * FXAA_QUALITY__P2;
-        if(!doneN) posN.y -= offNP.y * FXAA_QUALITY__P2;
+        if(!doneN) posN.x -= offNP.x * quality(i);
+        if(!doneN) posN.y -= offNP.y * quality(i);
         doneNP = (!doneN) || (!doneP);
-        if(!doneP) posP.x += offNP.x * FXAA_QUALITY__P2;
-        if(!doneP) posP.y += offNP.y * FXAA_QUALITY__P2;
-/*--------------------------------------------------------------------------*/
-        #if (FXAA_QUALITY__PS > 3)
-        if(doneNP) {
-            if(!doneN) lumaEndN = FxaaLuma(Tex2DTop(tex, posN.xy));
-            if(!doneP) lumaEndP = FxaaLuma(Tex2DTop(tex, posP.xy));
-            if(!doneN) lumaEndN = lumaEndN - lumaNN * 0.5;
-            if(!doneP) lumaEndP = lumaEndP - lumaNN * 0.5;
-            doneN = abs(lumaEndN) >= gradientScaled;
-            doneP = abs(lumaEndP) >= gradientScaled;
-            if(!doneN) posN.x -= offNP.x * FXAA_QUALITY__P3;
-            if(!doneN) posN.y -= offNP.y * FXAA_QUALITY__P3;
-            doneNP = (!doneN) || (!doneP);
-            if(!doneP) posP.x += offNP.x * FXAA_QUALITY__P3;
-            if(!doneP) posP.y += offNP.y * FXAA_QUALITY__P3;
-/*--------------------------------------------------------------------------*/
-            #if (FXAA_QUALITY__PS > 4)
-            if(doneNP) {
-                if(!doneN) lumaEndN = FxaaLuma(Tex2DTop(tex, posN.xy));
-                if(!doneP) lumaEndP = FxaaLuma(Tex2DTop(tex, posP.xy));
-                if(!doneN) lumaEndN = lumaEndN - lumaNN * 0.5;
-                if(!doneP) lumaEndP = lumaEndP - lumaNN * 0.5;
-                doneN = abs(lumaEndN) >= gradientScaled;
-                doneP = abs(lumaEndP) >= gradientScaled;
-                if(!doneN) posN.x -= offNP.x * FXAA_QUALITY__P4;
-                if(!doneN) posN.y -= offNP.y * FXAA_QUALITY__P4;
-                doneNP = (!doneN) || (!doneP);
-                if(!doneP) posP.x += offNP.x * FXAA_QUALITY__P4;
-                if(!doneP) posP.y += offNP.y * FXAA_QUALITY__P4;
-/*--------------------------------------------------------------------------*/
-                #if (FXAA_QUALITY__PS > 5)
-                if(doneNP) {
-                    if(!doneN) lumaEndN = FxaaLuma(Tex2DTop(tex, posN.xy));
-                    if(!doneP) lumaEndP = FxaaLuma(Tex2DTop(tex, posP.xy));
-                    if(!doneN) lumaEndN = lumaEndN - lumaNN * 0.5;
-                    if(!doneP) lumaEndP = lumaEndP - lumaNN * 0.5;
-                    doneN = abs(lumaEndN) >= gradientScaled;
-                    doneP = abs(lumaEndP) >= gradientScaled;
-                    if(!doneN) posN.x -= offNP.x * FXAA_QUALITY__P5;
-                    if(!doneN) posN.y -= offNP.y * FXAA_QUALITY__P5;
-                    doneNP = (!doneN) || (!doneP);
-                    if(!doneP) posP.x += offNP.x * FXAA_QUALITY__P5;
-                    if(!doneP) posP.y += offNP.y * FXAA_QUALITY__P5;
-/*--------------------------------------------------------------------------*/
-                    #if (FXAA_QUALITY__PS > 6)
-                    if(doneNP) {
-                        if(!doneN) lumaEndN = FxaaLuma(Tex2DTop(tex, posN.xy));
-                        if(!doneP) lumaEndP = FxaaLuma(Tex2DTop(tex, posP.xy));
-                        if(!doneN) lumaEndN = lumaEndN - lumaNN * 0.5;
-                        if(!doneP) lumaEndP = lumaEndP - lumaNN * 0.5;
-                        doneN = abs(lumaEndN) >= gradientScaled;
-                        doneP = abs(lumaEndP) >= gradientScaled;
-                        if(!doneN) posN.x -= offNP.x * FXAA_QUALITY__P6;
-                        if(!doneN) posN.y -= offNP.y * FXAA_QUALITY__P6;
-                        doneNP = (!doneN) || (!doneP);
-                        if(!doneP) posP.x += offNP.x * FXAA_QUALITY__P6;
-                        if(!doneP) posP.y += offNP.y * FXAA_QUALITY__P6;
-/*--------------------------------------------------------------------------*/
-                        #if (FXAA_QUALITY__PS > 7)
-                        if(doneNP) {
-                            if(!doneN) lumaEndN = FxaaLuma(Tex2DTop(tex, posN.xy));
-                            if(!doneP) lumaEndP = FxaaLuma(Tex2DTop(tex, posP.xy));
-                            if(!doneN) lumaEndN = lumaEndN - lumaNN * 0.5;
-                            if(!doneP) lumaEndP = lumaEndP - lumaNN * 0.5;
-                            doneN = abs(lumaEndN) >= gradientScaled;
-                            doneP = abs(lumaEndP) >= gradientScaled;
-                            if(!doneN) posN.x -= offNP.x * FXAA_QUALITY__P7;
-                            if(!doneN) posN.y -= offNP.y * FXAA_QUALITY__P7;
-                            doneNP = (!doneN) || (!doneP);
-                            if(!doneP) posP.x += offNP.x * FXAA_QUALITY__P7;
-                            if(!doneP) posP.y += offNP.y * FXAA_QUALITY__P7;
-/*--------------------------------------------------------------------------*/
-    #if (FXAA_QUALITY__PS > 8)
-    if(doneNP) {
-        if(!doneN) lumaEndN = FxaaLuma(Tex2DTop(tex, posN.xy));
-        if(!doneP) lumaEndP = FxaaLuma(Tex2DTop(tex, posP.xy));
-        if(!doneN) lumaEndN = lumaEndN - lumaNN * 0.5;
-        if(!doneP) lumaEndP = lumaEndP - lumaNN * 0.5;
-        doneN = abs(lumaEndN) >= gradientScaled;
-        doneP = abs(lumaEndP) >= gradientScaled;
-        if(!doneN) posN.x -= offNP.x * FXAA_QUALITY__P8;
-        if(!doneN) posN.y -= offNP.y * FXAA_QUALITY__P8;
-        doneNP = (!doneN) || (!doneP);
-        if(!doneP) posP.x += offNP.x * FXAA_QUALITY__P8;
-        if(!doneP) posP.y += offNP.y * FXAA_QUALITY__P8;
-/*--------------------------------------------------------------------------*/
-        #if (FXAA_QUALITY__PS > 9)
-        if(doneNP) {
-            if(!doneN) lumaEndN = FxaaLuma(Tex2DTop(tex, posN.xy));
-            if(!doneP) lumaEndP = FxaaLuma(Tex2DTop(tex, posP.xy));
-            if(!doneN) lumaEndN = lumaEndN - lumaNN * 0.5;
-            if(!doneP) lumaEndP = lumaEndP - lumaNN * 0.5;
-            doneN = abs(lumaEndN) >= gradientScaled;
-            doneP = abs(lumaEndP) >= gradientScaled;
-            if(!doneN) posN.x -= offNP.x * FXAA_QUALITY__P9;
-            if(!doneN) posN.y -= offNP.y * FXAA_QUALITY__P9;
-            doneNP = (!doneN) || (!doneP);
-            if(!doneP) posP.x += offNP.x * FXAA_QUALITY__P9;
-            if(!doneP) posP.y += offNP.y * FXAA_QUALITY__P9;
-/*--------------------------------------------------------------------------*/
-            #if (FXAA_QUALITY__PS > 10)
-            if(doneNP) {
-                if(!doneN) lumaEndN = FxaaLuma(Tex2DTop(tex, posN.xy));
-                if(!doneP) lumaEndP = FxaaLuma(Tex2DTop(tex, posP.xy));
-                if(!doneN) lumaEndN = lumaEndN - lumaNN * 0.5;
-                if(!doneP) lumaEndP = lumaEndP - lumaNN * 0.5;
-                doneN = abs(lumaEndN) >= gradientScaled;
-                doneP = abs(lumaEndP) >= gradientScaled;
-                if(!doneN) posN.x -= offNP.x * FXAA_QUALITY__P10;
-                if(!doneN) posN.y -= offNP.y * FXAA_QUALITY__P10;
-                doneNP = (!doneN) || (!doneP);
-                if(!doneP) posP.x += offNP.x * FXAA_QUALITY__P10;
-                if(!doneP) posP.y += offNP.y * FXAA_QUALITY__P10;
-/*--------------------------------------------------------------------------*/
-                #if (FXAA_QUALITY__PS > 11)
-                if(doneNP) {
-                    if(!doneN) lumaEndN = FxaaLuma(Tex2DTop(tex, posN.xy));
-                    if(!doneP) lumaEndP = FxaaLuma(Tex2DTop(tex, posP.xy));
-                    if(!doneN) lumaEndN = lumaEndN - lumaNN * 0.5;
-                    if(!doneP) lumaEndP = lumaEndP - lumaNN * 0.5;
-                    doneN = abs(lumaEndN) >= gradientScaled;
-                    doneP = abs(lumaEndP) >= gradientScaled;
-                    if(!doneN) posN.x -= offNP.x * FXAA_QUALITY__P11;
-                    if(!doneN) posN.y -= offNP.y * FXAA_QUALITY__P11;
-                    doneNP = (!doneN) || (!doneP);
-                    if(!doneP) posP.x += offNP.x * FXAA_QUALITY__P11;
-                    if(!doneP) posP.y += offNP.y * FXAA_QUALITY__P11;
-/*--------------------------------------------------------------------------*/
-                    #if (FXAA_QUALITY__PS > 12)
-                    if(doneNP) {
-                        if(!doneN) lumaEndN = FxaaLuma(Tex2DTop(tex, posN.xy));
-                        if(!doneP) lumaEndP = FxaaLuma(Tex2DTop(tex, posP.xy));
-                        if(!doneN) lumaEndN = lumaEndN - lumaNN * 0.5;
-                        if(!doneP) lumaEndP = lumaEndP - lumaNN * 0.5;
-                        doneN = abs(lumaEndN) >= gradientScaled;
-                        doneP = abs(lumaEndP) >= gradientScaled;
-                        if(!doneN) posN.x -= offNP.x * FXAA_QUALITY__P12;
-                        if(!doneN) posN.y -= offNP.y * FXAA_QUALITY__P12;
-                        doneNP = (!doneN) || (!doneP);
-                        if(!doneP) posP.x += offNP.x * FXAA_QUALITY__P12;
-                        if(!doneP) posP.y += offNP.y * FXAA_QUALITY__P12;
-/*--------------------------------------------------------------------------*/
-                    }
-                    #endif
-/*--------------------------------------------------------------------------*/
-                }
-                #endif
-/*--------------------------------------------------------------------------*/
-            }
-            #endif
-/*--------------------------------------------------------------------------*/
-        }
-        #endif
-/*--------------------------------------------------------------------------*/
+        if(!doneP) posP.x += offNP.x * quality(i);
+        if(!doneP) posP.y += offNP.y * quality(i);
     }
-    #endif
-/*--------------------------------------------------------------------------*/
-                        }
-                        #endif
-/*--------------------------------------------------------------------------*/
-                    }
-                    #endif
-/*--------------------------------------------------------------------------*/
-                }
-                #endif
-/*--------------------------------------------------------------------------*/
-            }
-            #endif
-/*--------------------------------------------------------------------------*/
-        }
-        #endif
-/*--------------------------------------------------------------------------*/
-    }
-/*--------------------------------------------------------------------------*/
+
     float dstN = posM.x - posN.x;
     float dstP = posP.x - posM.x;
     if(!horzSpan) dstN = posM.y - posN.y;

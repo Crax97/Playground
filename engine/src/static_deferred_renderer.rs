@@ -34,6 +34,7 @@ struct FxaaShaderParams {
     fxaa_quality_subpix: f32,
     fxaa_quality_edge_threshold: f32,
     fxaa_quality_edge_threshold_min: f32,
+    iterations: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -41,6 +42,7 @@ pub struct FxaaSettings {
     pub fxaa_quality_subpix: f32,
     pub fxaa_quality_edge_threshold: f32,
     pub fxaa_quality_edge_threshold_min: f32,
+    pub iterations: u32,
 }
 
 impl Default for FxaaSettings {
@@ -49,6 +51,7 @@ impl Default for FxaaSettings {
             fxaa_quality_subpix: 0.75,
             fxaa_quality_edge_threshold: 0.166,
             fxaa_quality_edge_threshold_min: 0.0833,
+            iterations: 12,
         }
     }
 }
@@ -1078,6 +1081,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 fxaa_quality_subpix: self.fxaa_settings.fxaa_quality_subpix,
                 fxaa_quality_edge_threshold: self.fxaa_settings.fxaa_quality_edge_threshold,
                 fxaa_quality_edge_threshold_min: self.fxaa_settings.fxaa_quality_edge_threshold_min,
+                iterations: self.fxaa_settings.iterations,
             };
 
             ctx.render_pass_command.push_constant(
