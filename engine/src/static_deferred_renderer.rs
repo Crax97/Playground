@@ -1,12 +1,9 @@
 use engine_macros::glsl;
 use std::{collections::HashMap, mem::size_of};
 
-use ash::{
-    prelude::VkResult,
-    vk::{
-        BufferUsageFlags, CompareOp, IndexType, PipelineBindPoint, PipelineStageFlags,
-        PushConstantRange, ShaderModuleCreateFlags, ShaderStageFlags, StencilOpState,
-    },
+use ash::vk::{
+    BufferUsageFlags, CompareOp, IndexType, PipelineBindPoint, PushConstantRange,
+    ShaderModuleCreateFlags, ShaderStageFlags, StencilOpState,
 };
 use gpu::{
     BindingType, BufferCreateInfo, CommandBuffer, DepthStencilState, FragmentStageInfo, Gpu,
@@ -128,13 +125,10 @@ use crate::{
 };
 
 use ash::vk::{
-    AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
-    ColorComponentFlags, DependencyFlags, ImageLayout, SampleCountFlags, SubpassDependency,
-    SubpassDescriptionFlags, SUBPASS_EXTERNAL,
+    AttachmentLoadOp, AttachmentStoreOp, BlendFactor, BlendOp, ColorComponentFlags, ImageLayout,
+    SampleCountFlags,
 };
-use gpu::{
-    BlendState, RenderPass, RenderPassAttachment, RenderPassDescription, SubpassDescription,
-};
+use gpu::{BlendState, RenderPassAttachment};
 
 struct FrameBuffers {
     camera_buffer: GpuBuffer,
@@ -149,7 +143,6 @@ struct DrawCall<'a> {
 
 pub struct DeferredRenderingPipeline {
     frame_buffers: Vec<FrameBuffers>,
-    material_context: DeferredRenderingMaterialContext,
     render_graph: RenderGraph,
     screen_quad: GpuShaderModule,
     texture_copy: GpuShaderModule,
@@ -205,8 +198,6 @@ impl DeferredRenderingPipeline {
             })
         }
 
-        let material_context = DeferredRenderingMaterialContext::new(gpu)?;
-
         let render_graph = RenderGraph::new();
 
         let fxaa_vs = gpu.create_shader_module(&ShaderModuleCreateInfo {
@@ -219,7 +210,6 @@ impl DeferredRenderingPipeline {
         })?;
 
         Ok(Self {
-            material_context,
             render_graph,
             screen_quad,
             gbuffer_combine,
@@ -336,301 +326,6 @@ impl DeferredRenderingPipeline {
             }
         }
         draw_hashmap
-    }
-}
-
-pub struct DeferredRenderingMaterialContext {
-    render_passes: HashMap<PipelineTarget, RenderPass>,
-}
-
-impl DeferredRenderingMaterialContext {
-    pub fn new(gpu: &Gpu) -> VkResult<Self> {
-        let mut render_passes: HashMap<PipelineTarget, RenderPass> = HashMap::new();
-
-        let depth_only_render_pass = RenderPass::new(
-            gpu,
-            &RenderPassDescription {
-                attachments: &[RenderPassAttachment {
-                    format: ImageFormat::Depth.to_vk(),
-                    samples: SampleCountFlags::TYPE_1,
-                    load_op: AttachmentLoadOp::CLEAR,
-                    store_op: AttachmentStoreOp::STORE,
-                    stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                    stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                    initial_layout: ImageLayout::UNDEFINED,
-                    final_layout: ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                    blend_state: BlendState {
-                        blend_enable: true,
-                        src_color_blend_factor: BlendFactor::ONE,
-                        dst_color_blend_factor: BlendFactor::ZERO,
-                        color_blend_op: BlendOp::ADD,
-                        src_alpha_blend_factor: BlendFactor::ONE,
-                        dst_alpha_blend_factor: BlendFactor::ZERO,
-                        alpha_blend_op: BlendOp::ADD,
-                        color_write_mask: ColorComponentFlags::RGBA,
-                    },
-                }],
-                subpasses: &[SubpassDescription {
-                    flags: SubpassDescriptionFlags::empty(),
-                    pipeline_bind_point: PipelineBindPoint::GRAPHICS,
-                    input_attachments: &[],
-                    color_attachments: &[],
-                    resolve_attachments: &[],
-                    depth_stencil_attachment: &[AttachmentReference {
-                        attachment: 0,
-                        layout: ImageLayout::DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL,
-                    }],
-                    preserve_attachments: &[],
-                }],
-                dependencies: &[SubpassDependency {
-                    src_subpass: SUBPASS_EXTERNAL,
-                    dst_subpass: 0,
-                    src_stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-                    dst_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
-                    src_access_mask: AccessFlags::empty(),
-                    dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                    dependency_flags: DependencyFlags::empty(),
-                }],
-            },
-        )?;
-        let surface_render_pass = Self::make_surface_color_depth_pass(gpu)?;
-        let post_process_render_pass = Self::make_post_process_pass(gpu)?;
-        render_passes.insert(PipelineTarget::DepthOnly, depth_only_render_pass);
-        render_passes.insert(PipelineTarget::ColorAndDepth, surface_render_pass);
-        render_passes.insert(PipelineTarget::PostProcess, post_process_render_pass);
-
-        Ok(Self { render_passes })
-    }
-
-    fn make_surface_color_depth_pass(gpu: &Gpu) -> VkResult<RenderPass> {
-        let surface_attachments = &[
-            // Position
-            RenderPassAttachment {
-                format: ImageFormat::RgbaFloat.to_vk(),
-                samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::CLEAR,
-                store_op: AttachmentStoreOp::STORE,
-                stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                blend_state: BlendState {
-                    blend_enable: true,
-                    src_color_blend_factor: BlendFactor::ONE,
-                    dst_color_blend_factor: BlendFactor::ZERO,
-                    color_blend_op: BlendOp::ADD,
-                    src_alpha_blend_factor: BlendFactor::ONE,
-                    dst_alpha_blend_factor: BlendFactor::ZERO,
-                    alpha_blend_op: BlendOp::ADD,
-                    color_write_mask: ColorComponentFlags::RGBA,
-                },
-            },
-            // Normals
-            RenderPassAttachment {
-                format: ImageFormat::Rgba8.to_vk(),
-                samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::CLEAR,
-                store_op: AttachmentStoreOp::STORE,
-                stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                blend_state: BlendState {
-                    blend_enable: true,
-                    src_color_blend_factor: BlendFactor::ONE,
-                    dst_color_blend_factor: BlendFactor::ZERO,
-                    color_blend_op: BlendOp::ADD,
-                    src_alpha_blend_factor: BlendFactor::ONE,
-                    dst_alpha_blend_factor: BlendFactor::ZERO,
-                    alpha_blend_op: BlendOp::ADD,
-                    color_write_mask: ColorComponentFlags::RGBA,
-                },
-            },
-            // Diffuse
-            RenderPassAttachment {
-                format: ImageFormat::Rgba8.to_vk(),
-                samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::CLEAR,
-                store_op: AttachmentStoreOp::STORE,
-                stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                blend_state: BlendState {
-                    blend_enable: true,
-                    src_color_blend_factor: BlendFactor::ONE,
-                    dst_color_blend_factor: BlendFactor::ZERO,
-                    color_blend_op: BlendOp::ADD,
-                    src_alpha_blend_factor: BlendFactor::ONE,
-                    dst_alpha_blend_factor: BlendFactor::ZERO,
-                    alpha_blend_op: BlendOp::ADD,
-                    color_write_mask: ColorComponentFlags::RGBA,
-                },
-            },
-            // Emissive
-            RenderPassAttachment {
-                format: ImageFormat::Rgba8.to_vk(),
-                samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::CLEAR,
-                store_op: AttachmentStoreOp::STORE,
-                stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                blend_state: BlendState {
-                    blend_enable: true,
-                    src_color_blend_factor: BlendFactor::ONE,
-                    dst_color_blend_factor: BlendFactor::ZERO,
-                    color_blend_op: BlendOp::ADD,
-                    src_alpha_blend_factor: BlendFactor::ONE,
-                    dst_alpha_blend_factor: BlendFactor::ZERO,
-                    alpha_blend_op: BlendOp::ADD,
-                    color_write_mask: ColorComponentFlags::RGBA,
-                },
-            },
-            // Metal/Roughness
-            RenderPassAttachment {
-                format: ImageFormat::Rgba8.to_vk(),
-                samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::CLEAR,
-                store_op: AttachmentStoreOp::STORE,
-                stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                blend_state: BlendState {
-                    blend_enable: true,
-                    src_color_blend_factor: BlendFactor::ONE,
-                    dst_color_blend_factor: BlendFactor::ZERO,
-                    color_blend_op: BlendOp::ADD,
-                    src_alpha_blend_factor: BlendFactor::ONE,
-                    dst_alpha_blend_factor: BlendFactor::ZERO,
-                    alpha_blend_op: BlendOp::ADD,
-                    color_write_mask: ColorComponentFlags::RGBA,
-                },
-            },
-            // Depth
-            RenderPassAttachment {
-                format: ImageFormat::Depth.to_vk(),
-                samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::LOAD,
-                store_op: AttachmentStoreOp::NONE,
-                stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                final_layout: ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                blend_state: BlendState {
-                    blend_enable: false,
-                    src_color_blend_factor: BlendFactor::ONE,
-                    dst_color_blend_factor: BlendFactor::ZERO,
-                    color_blend_op: BlendOp::ADD,
-                    src_alpha_blend_factor: BlendFactor::ONE,
-                    dst_alpha_blend_factor: BlendFactor::ZERO,
-                    alpha_blend_op: BlendOp::ADD,
-                    color_write_mask: ColorComponentFlags::RGBA,
-                },
-            },
-        ];
-        let surface_render_pass = RenderPass::new(
-            gpu,
-            &RenderPassDescription {
-                attachments: surface_attachments,
-                subpasses: &[SubpassDescription {
-                    flags: SubpassDescriptionFlags::empty(),
-                    pipeline_bind_point: PipelineBindPoint::GRAPHICS,
-                    input_attachments: &[],
-                    color_attachments: &[
-                        AttachmentReference {
-                            attachment: 0,
-                            layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                        },
-                        AttachmentReference {
-                            attachment: 1,
-                            layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                        },
-                        AttachmentReference {
-                            attachment: 2,
-                            layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                        },
-                        AttachmentReference {
-                            attachment: 3,
-                            layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                        },
-                        AttachmentReference {
-                            attachment: 4,
-                            layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                        },
-                    ],
-                    resolve_attachments: &[],
-                    depth_stencil_attachment: &[AttachmentReference {
-                        attachment: 5,
-                        layout: ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-                    }],
-                    preserve_attachments: &[],
-                }],
-                dependencies: &[SubpassDependency {
-                    src_subpass: SUBPASS_EXTERNAL,
-                    dst_subpass: 0,
-                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                    dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                    src_access_mask: AccessFlags::empty(),
-                    dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                    dependency_flags: DependencyFlags::empty(),
-                }],
-            },
-        )?;
-        Ok(surface_render_pass)
-    }
-
-    fn make_post_process_pass(gpu: &Gpu) -> VkResult<RenderPass> {
-        let post_process_attachments = &[RenderPassAttachment {
-            format: ImageFormat::Rgba8.to_vk(),
-            samples: SampleCountFlags::TYPE_1,
-            load_op: AttachmentLoadOp::CLEAR,
-            store_op: AttachmentStoreOp::STORE,
-            stencil_load_op: AttachmentLoadOp::DONT_CARE,
-            stencil_store_op: AttachmentStoreOp::DONT_CARE,
-            initial_layout: ImageLayout::UNDEFINED,
-            final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            blend_state: BlendState {
-                blend_enable: true,
-                src_color_blend_factor: BlendFactor::ONE,
-                dst_color_blend_factor: BlendFactor::ZERO,
-                color_blend_op: BlendOp::ADD,
-                src_alpha_blend_factor: BlendFactor::ONE,
-                dst_alpha_blend_factor: BlendFactor::ZERO,
-                alpha_blend_op: BlendOp::ADD,
-                color_write_mask: ColorComponentFlags::RGBA,
-            },
-        }];
-        let post_process_render_pass = RenderPass::new(
-            gpu,
-            &RenderPassDescription {
-                attachments: post_process_attachments,
-                subpasses: &[SubpassDescription {
-                    flags: SubpassDescriptionFlags::empty(),
-                    pipeline_bind_point: PipelineBindPoint::GRAPHICS,
-                    input_attachments: &[],
-                    color_attachments: &[AttachmentReference {
-                        attachment: 0,
-                        layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                    }],
-                    resolve_attachments: &[],
-                    depth_stencil_attachment: &[],
-                    preserve_attachments: &[],
-                }],
-                dependencies: &[SubpassDependency {
-                    src_subpass: SUBPASS_EXTERNAL,
-                    dst_subpass: 0,
-                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                    dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                    src_access_mask: AccessFlags::empty(),
-                    dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                    dependency_flags: DependencyFlags::empty(),
-                }],
-            },
-        )?;
-        Ok(post_process_render_pass)
     }
 }
 
@@ -1094,21 +789,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         context.register_callback(&present_render_pass, |_: &Gpu, ctx| {
             ctx.render_pass_command.draw(4, 1, 0, 0);
         });
-
-        context.inject_external_renderpass(
-            &gbuffer_pass,
-            self.material_context
-                .render_passes
-                .get(&PipelineTarget::ColorAndDepth)
-                .unwrap(),
-        );
-        context.inject_external_renderpass(
-            &dbuffer_pass,
-            self.material_context
-                .render_passes
-                .get(&PipelineTarget::DepthOnly)
-                .unwrap(),
-        );
 
         context.inject_external_image(&swapchain_image, backbuffer.image, backbuffer.image_view);
         context.injext_external_buffer(&camera_buffer, &current_buffers.camera_buffer);

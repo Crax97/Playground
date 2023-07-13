@@ -6,8 +6,23 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use ash::vk::{self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp, BorderColor, BufferUsageFlags, ColorComponentFlags, CompareOp, ComponentMapping, DependencyFlags, Extent2D, Filter, ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency, SubpassDescriptionFlags};
-use gpu::{BeginRenderPassInfo, BindingType, BlendState, BufferCreateInfo, BufferRange, ColorAttachment, ColorLoadOp, CommandBuffer, DepthAttachment, DepthLoadOp, DescriptorInfo, DescriptorSetInfo, FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, ImageFormat, ImageMemoryBarrier, ImageViewCreateInfo, MemoryDomain, Pipeline, PipelineBarrierInfo, RenderPass, RenderPassAttachment, RenderPassCommand, RenderPassDescription, StencilAttachment, StencilLoadOp, SubpassDescription, ToVk, TransitionInfo};
+use ash::vk::{
+    self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor,
+    BlendOp, BorderColor, BufferUsageFlags, ColorComponentFlags, CompareOp, ComponentMapping,
+    DependencyFlags, Extent2D, Filter, ImageAspectFlags, ImageLayout, ImageSubresourceRange,
+    ImageUsageFlags, ImageViewType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D,
+    SampleCountFlags, SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode,
+    StructureType, SubpassDependency, SubpassDescriptionFlags,
+};
+use gpu::{
+    BeginRenderPassInfo, BindingType, BlendState, BufferCreateInfo, BufferRange, ColorAttachment,
+    ColorLoadOp, CommandBuffer, DepthAttachment, DepthLoadOp, DescriptorInfo, DescriptorSetInfo,
+    FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage,
+    GpuImageView, GpuSampler, ImageCreateInfo, ImageFormat, ImageMemoryBarrier,
+    ImageViewCreateInfo, MemoryDomain, Pipeline, PipelineBarrierInfo, RenderPass,
+    RenderPassAttachment, RenderPassCommand, RenderPassDescription, StencilAttachment,
+    StencilLoadOp, SubpassDescription, ToVk, TransitionInfo,
+};
 
 use ash::vk::PushConstantRange;
 use gpu::{
@@ -237,7 +252,6 @@ impl<'a> ExternalShaderResource<'a> {
 struct ExternalResources<'a> {
     external_images: HashMap<ResourceId, &'a GpuImage>,
     external_shader_resources: HashMap<ResourceId, ExternalShaderResource<'a>>,
-    external_render_passes: HashMap<RenderPassHandle, &'a RenderPass>,
 }
 
 impl<'a> ExternalResources<'a> {
@@ -263,14 +277,6 @@ impl<'a> ExternalResources<'a> {
     pub fn inject_external_buffer(&mut self, id: &ResourceId, buffer: &'a GpuBuffer) {
         self.external_shader_resources
             .insert(*id, ExternalShaderResource::Buffer(buffer));
-    }
-
-    pub fn inject_external_renderpass(
-        &mut self,
-        handle: &RenderPassHandle,
-        render_pass: &'a RenderPass,
-    ) {
-        self.external_render_passes.insert(*handle, render_pass);
     }
 }
 
@@ -886,15 +892,6 @@ impl<'a, 'e> GraphRunContext<'a, 'e> {
         self.callbacks.register_end_callback(callback)
     }
 
-    pub(crate) fn inject_external_renderpass(
-        &mut self,
-        handle: &RenderPassHandle,
-        pass: &'e RenderPass,
-    ) {
-        self.external_resources
-            .inject_external_renderpass(handle, pass);
-    }
-
     pub(crate) fn inject_external_image(
         &mut self,
         handle: &ResourceId,
@@ -957,30 +954,28 @@ impl std::hash::Hash for ClearValue {
     }
 }
 
-impl Eq for ClearValue {
-    
-}
+impl Eq for ClearValue {}
 
 impl ClearValue {
     pub(crate) fn color_op(&self) -> ColorLoadOp {
         match self {
             ClearValue::DontCare => ColorLoadOp::DontCare,
             ClearValue::Color(c) => ColorLoadOp::Clear(*c),
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
     pub(crate) fn depth_op(&self) -> DepthLoadOp {
         match self {
             ClearValue::DontCare => DepthLoadOp::DontCare,
             ClearValue::Depth(d) => DepthLoadOp::Clear(*d),
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
     pub(crate) fn stencil_op(&self) -> StencilLoadOp {
         match self {
             ClearValue::DontCare => StencilLoadOp::DontCare,
             ClearValue::Stencil(s) => StencilLoadOp::Clear(*s),
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 }
@@ -992,7 +987,7 @@ pub struct ImageDescription {
     pub format: ImageFormat,
     pub samples: u32,
     pub present: bool,
-    pub clear_value: ClearValue
+    pub clear_value: ClearValue,
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Copy, Hash)]
@@ -1436,7 +1431,7 @@ impl<'g> Callbacks<'g> {
     ) {
         self.callbacks.insert(*handle, Box::new(callback));
     }
-    
+
     pub fn register_end_callback<F: FnMut(&Gpu, &mut EndContext) + 'g>(&mut self, callback: F) {
         self.end_callback = Some(Box::new(callback));
     }
@@ -1742,12 +1737,8 @@ impl RenderGraph {
         if !self.render_pass_pipelines.contains_key(pass_handle) {
             let pass_info = &self.passes[pass_handle];
 
-            let pipeline = create_pipeline_for_graph_renderpass(
-                self,
-                pass_info,
-                gpu,
-                pipeline_description,
-            )?;
+            let pipeline =
+                create_pipeline_for_graph_renderpass(self, pass_info, gpu, pipeline_description)?;
 
             trace!(
                 "Created new pipeline '{}' for render pass '{}'",
@@ -1846,8 +1837,8 @@ impl GpuRunner {
         id: &ResourceId,
         allocator: &'r DefaultResourceAllocator,
     ) -> &'e GpuImage
-        where
-            'r: 'e,
+    where
+        'r: 'e,
     {
         if external_resources.external_images.contains_key(id) {
             external_resources.external_images[id]
@@ -1883,26 +1874,36 @@ impl RenderGraphRunner for GpuRunner {
                     let mut depth_stencil_transitions = vec![];
                     for read in &info.shader_reads {
                         let info = graph.get_resource_info(read)?;
-                        let image_desc = if let AllocationType::Image(d) = info.ty { d } else { continue; };
-                        let old_layout = *self.resource_states.entry(*read).or_insert(TransitionInfo {
-                            layout: ImageLayout::UNDEFINED,
-                            access_mask: AccessFlags::empty(),
-                            stage_mask: if image_desc.format.is_color() {
-                                PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-                            } else {
-                                PipelineStageFlags::EARLY_FRAGMENT_TESTS
-                            },
-                        });
+                        let image_desc = if let AllocationType::Image(d) = info.ty {
+                            d
+                        } else {
+                            continue;
+                        };
+                        let old_layout =
+                            *self.resource_states.entry(*read).or_insert(TransitionInfo {
+                                layout: ImageLayout::UNDEFINED,
+                                access_mask: AccessFlags::empty(),
+                                stage_mask: if image_desc.format.is_color() {
+                                    PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                                } else {
+                                    PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                                },
+                            });
 
                         let new_layout = TransitionInfo {
                             layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                             access_mask: AccessFlags::SHADER_READ,
-                            stage_mask: PipelineStageFlags::FRAGMENT_SHADER | PipelineStageFlags::VERTEX_SHADER,
+                            stage_mask: PipelineStageFlags::FRAGMENT_SHADER
+                                | PipelineStageFlags::VERTEX_SHADER,
                         };
 
                         self.resource_states.insert(*read, new_layout);
 
-                        let image = Self::get_image_unchecked(&ctx.external_resources, read, resource_allocator);
+                        let image = Self::get_image_unchecked(
+                            &ctx.external_resources,
+                            read,
+                            resource_allocator,
+                        );
                         if image_desc.format.is_color() {
                             color_transitions.push(ImageMemoryBarrier {
                                 src_access_mask: old_layout.access_mask,
@@ -1943,7 +1944,8 @@ impl RenderGraphRunner for GpuRunner {
                     if !color_transitions.is_empty() {
                         ctx.command_buffer.pipeline_barrier(&PipelineBarrierInfo {
                             src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                            dst_stage_mask: PipelineStageFlags::VERTEX_SHADER | PipelineStageFlags::FRAGMENT_SHADER,
+                            dst_stage_mask: PipelineStageFlags::VERTEX_SHADER
+                                | PipelineStageFlags::FRAGMENT_SHADER,
                             dependency_flags: Default::default(),
                             memory_barriers: &[],
                             buffer_memory_barriers: &[],
@@ -1953,7 +1955,8 @@ impl RenderGraphRunner for GpuRunner {
                     if !depth_stencil_transitions.is_empty() {
                         ctx.command_buffer.pipeline_barrier(&PipelineBarrierInfo {
                             src_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
-                            dst_stage_mask: PipelineStageFlags::VERTEX_SHADER | PipelineStageFlags::FRAGMENT_SHADER,
+                            dst_stage_mask: PipelineStageFlags::VERTEX_SHADER
+                                | PipelineStageFlags::FRAGMENT_SHADER,
                             dependency_flags: Default::default(),
                             memory_barriers: &[],
                             buffer_memory_barriers: &[],
@@ -1961,27 +1964,32 @@ impl RenderGraphRunner for GpuRunner {
                         })
                     }
                 }
-                
-                // Transition attach write 
+
+                // Transition attach write
                 {
                     let mut color_transitions = vec![];
                     let mut depth_stencil_transitions = vec![];
                     for read in &info.attachment_writes {
                         let info = graph.get_resource_info(read)?;
-                        let image_desc = if let AllocationType::Image(d) = info.ty { d } else { continue; };
-                        let old_layout = *self.resource_states.entry(*read).or_insert(TransitionInfo {
-                            layout: ImageLayout::UNDEFINED,
-                            access_mask: AccessFlags::empty(),
-                            stage_mask: if image_desc.format.is_color() {
-                                PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-                            } else {
-                                PipelineStageFlags::EARLY_FRAGMENT_TESTS
-                            },
-                        });
+                        let image_desc = if let AllocationType::Image(d) = info.ty {
+                            d
+                        } else {
+                            continue;
+                        };
+                        let old_layout =
+                            *self.resource_states.entry(*read).or_insert(TransitionInfo {
+                                layout: ImageLayout::UNDEFINED,
+                                access_mask: AccessFlags::empty(),
+                                stage_mask: if image_desc.format.is_color() {
+                                    PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                                } else {
+                                    PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                                },
+                            });
 
                         let new_layout = TransitionInfo {
                             layout: if image_desc.present {
-                                ImageLayout::PRESENT_SRC_KHR  
+                                ImageLayout::PRESENT_SRC_KHR
                             } else if image_desc.format.is_color() {
                                 ImageLayout::COLOR_ATTACHMENT_OPTIMAL
                             } else {
@@ -2000,7 +2008,11 @@ impl RenderGraphRunner for GpuRunner {
                         };
                         self.resource_states.insert(*read, new_layout);
 
-                        let image = Self::get_image_unchecked(&ctx.external_resources, read, resource_allocator);
+                        let image = Self::get_image_unchecked(
+                            &ctx.external_resources,
+                            read,
+                            resource_allocator,
+                        );
                         if image_desc.format.is_color() {
                             color_transitions.push(ImageMemoryBarrier {
                                 src_access_mask: old_layout.access_mask,
@@ -2059,24 +2071,28 @@ impl RenderGraphRunner for GpuRunner {
                         })
                     }
                 }
-                
+
                 // Transition attach read
                 {
-
                     let mut color_transitions = vec![];
                     let mut depth_stencil_transitions = vec![];
                     for read in &info.attachment_reads {
                         let info = graph.get_resource_info(read)?;
-                        let image_desc = if let AllocationType::Image(d) = info.ty { d } else { continue; };
-                        let old_layout = *self.resource_states.entry(*read).or_insert(TransitionInfo {
-                            layout: ImageLayout::UNDEFINED,
-                            access_mask: AccessFlags::empty(),
-                            stage_mask: if image_desc.format.is_color() {
-                                PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-                            } else {
-                                PipelineStageFlags::EARLY_FRAGMENT_TESTS
-                            },
-                        });
+                        let image_desc = if let AllocationType::Image(d) = info.ty {
+                            d
+                        } else {
+                            continue;
+                        };
+                        let old_layout =
+                            *self.resource_states.entry(*read).or_insert(TransitionInfo {
+                                layout: ImageLayout::UNDEFINED,
+                                access_mask: AccessFlags::empty(),
+                                stage_mask: if image_desc.format.is_color() {
+                                    PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                                } else {
+                                    PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                                },
+                            });
 
                         let new_layout = TransitionInfo {
                             layout: if image_desc.format.is_color() {
@@ -2097,7 +2113,11 @@ impl RenderGraphRunner for GpuRunner {
                         };
                         self.resource_states.insert(*read, new_layout);
 
-                        let image = Self::get_image_unchecked(&ctx.external_resources, read, resource_allocator);
+                        let image = Self::get_image_unchecked(
+                            &ctx.external_resources,
+                            read,
+                            resource_allocator,
+                        );
                         if image_desc.format.is_color() {
                             color_transitions.push(ImageMemoryBarrier {
                                 src_access_mask: old_layout.access_mask,
@@ -2146,7 +2166,7 @@ impl RenderGraphRunner for GpuRunner {
                         })
                     }
                     if !depth_stencil_transitions.is_empty() {
-                        ctx. command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                        ctx.command_buffer.pipeline_barrier(&PipelineBarrierInfo {
                             src_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
                             dst_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
                             dependency_flags: Default::default(),
@@ -2175,11 +2195,10 @@ impl RenderGraphRunner for GpuRunner {
 
                 let cb = ctx.callbacks.callbacks.get_mut(rp);
                 let render_pass_label = ctx.command_buffer.begin_debug_region(
-
                     &format!("Begin Render Pass: {}", rp.label),
                     [0.3, 0.0, 0.0, 1.0],
                 );
-                
+
                 let mut render_pass_command =
                     ctx.command_buffer.begin_render_pass(&BeginRenderPassInfo {
                         color_attachments: &color_views,
@@ -2326,9 +2345,11 @@ fn resolve_render_image_views_unchecked<'e, 'a>(
     graph: &RenderGraph,
     external_resources: &'e ExternalResources<'e>,
     image_views_allocator: &'a ImageViewAllocator,
-) -> (Vec<ColorAttachment<'e>>, 
-      Option<DepthAttachment<'e>>, 
-      Option<StencilAttachment<'e>>)
+) -> (
+    Vec<ColorAttachment<'e>>,
+    Option<DepthAttachment<'e>>,
+    Option<StencilAttachment<'e>>,
+)
 where
     'a: 'e,
 {
@@ -2347,9 +2368,13 @@ where
         } else {
             image_views_allocator.get_unchecked(writes).resource()
         };
-        
-        let image_desc = if let AllocationType::Image(d) = resource_info.ty { d } else {continue};
-        
+
+        let image_desc = if let AllocationType::Image(d) = resource_info.ty {
+            d
+        } else {
+            continue;
+        };
+
         if view.format().is_color() {
             colors.push(ColorAttachment {
                 image_view: view,
@@ -2386,7 +2411,7 @@ where
         };
 
         if view.format().is_color() {
-            colors.push( ColorAttachment {
+            colors.push(ColorAttachment {
                 image_view: view,
                 load_op: ColorLoadOp::Load,
                 store_op: gpu::AttachmentStoreOp::Store,
@@ -2400,7 +2425,7 @@ where
                 initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             });
         } else {
-            stencil = Some( StencilAttachment {
+            stencil = Some(StencilAttachment {
                 image_view: view,
                 load_op: StencilLoadOp::Load,
                 store_op: gpu::AttachmentStoreOp::Store,
@@ -2489,8 +2514,8 @@ fn resolve_input_descriptor_set<'a>(
 mod test {
     use ash::vk::Extent2D;
 
-    use crate::{CompileError, ResourceId, ResourceLayout};
     use crate::ClearValue::{Color, DontCare};
+    use crate::{CompileError, ResourceId, ResourceLayout};
 
     use super::{ImageDescription, RenderGraph};
 
