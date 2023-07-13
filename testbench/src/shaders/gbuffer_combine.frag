@@ -50,8 +50,10 @@ vec3 get_light_intensity(float n_dot_l, float light_distance, LightInfo light, F
     } else if (light.type == SPOT_LIGHT) {
         vec3 frag_direction = normalize(light.position_radius.xyz - frag_info.position);
         float cos_theta = dot(-light.direction.xyz, frag_direction);
+        float inner_angle_cutoff = light.extras.x;
         float outer_angle_cutoff = light.extras.y;
-        float cutoff = float(cos_theta > 0.0) * clamp((cos_theta - outer_angle_cutoff) / cos_theta, 0.0, 1.0);
+        float eps = inner_angle_cutoff - outer_angle_cutoff;
+        float cutoff = float(cos_theta > 0.0) * clamp((cos_theta - outer_angle_cutoff) / eps, 0.0, 1.0);
         return cutoff * (i / dist);
     } else {
         // for now

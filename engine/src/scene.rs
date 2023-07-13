@@ -100,6 +100,11 @@ impl Scene {
     pub fn all_lights(&self) -> &[Light] {
         &self.lights
     }
+
+    pub fn all_lights_mut(&mut self) -> &mut [Light] {
+        &mut self.lights
+    }
+
     pub fn all_enabled_lights(&self) -> impl Iterator<Item = &Light> {
         self.lights.iter().filter(|l| l.enabled)
     }

@@ -39,6 +39,63 @@ pub struct GLTFViewer {
     input: InputState,
     camera_light: LightHandle,
 }
+impl GLTFViewer {
+    fn lights_ui(&mut self, ui: &mut Ui) {
+        ui.separator();
+        let group = ui.begin_group();
+        self.gltf_loader
+            .scene_mut()
+            .all_lights_mut()
+            .iter_mut()
+            .enumerate()
+            .for_each(|(i, l)| {
+                let light_string = match l.ty {
+                    LightType::Point => "Point",
+                    LightType::Directional { .. } => "Directional",
+                    LightType::Spotlight { .. } => "Spotlight",
+                    LightType::Rect { .. } => "Rect",
+                };
+                ui.text(&format!("{light_string} light nr. #{i}"));
+                ui.indent();
+                ui.checkbox("Enabled", &mut l.enabled);
+                ui.input_float3("Position", &mut l.position.coords.data.0[0])
+                    .build();
+                ui.input_float3("Color", &mut l.color.data.0[0]).build();
+                ui.slider("Intensity", 0.0, 100000.0, &mut l.intensity);
+                ui.slider("Radius", 0.0, 100000.0, &mut l.radius);
+                match &mut l.ty {
+                    LightType::Point => {}
+                    LightType::Directional { direction } => {
+                        ui.input_float3("Direction", &mut direction.data.0[0])
+                            .build();
+                    }
+                    LightType::Spotlight {
+                        direction,
+                        inner_cone_degrees,
+                        outer_cone_degrees,
+                    } => {
+                        ui.input_float3("Direction", &mut direction.data.0[0])
+                            .build();
+                        ui.slider("Outer cone", *inner_cone_degrees, 90.0, outer_cone_degrees);
+                        ui.slider("Inner cone", 0.0, *outer_cone_degrees, inner_cone_degrees);
+                    }
+                    LightType::Rect {
+                        direction,
+                        width,
+                        height,
+                    } => {
+                        ui.input_float3("Direction", &mut direction.data.0[0])
+                            .build();
+                        ui.slider("Width", 0.0, 100000.0, width);
+                        ui.slider("Height", 0.0, 100000.0, height);
+                    }
+                }
+                ui.unindent();
+                ui.separator();
+            });
+        group.end();
+    }
+}
 
 impl App for GLTFViewer {
     fn window_name(&self, app_state: &AppState) -> String {
@@ -129,6 +186,9 @@ impl App for GLTFViewer {
             1.0,
             &mut settings.fxaa_quality_edge_threshold_min,
         );
+
+        self.lights_ui(ui);
+
         self.scene_renderer.set_fxaa_settings_mut(settings);
 
         if ui.io().want_capture_keyboard || ui.io().want_capture_mouse {
