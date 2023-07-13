@@ -177,6 +177,7 @@ impl App for GLTFViewer {
 
     fn update(&mut self, _app_state: &mut AppState, ui: &mut Ui) -> anyhow::Result<()> {
         let mut settings = self.scene_renderer.fxaa_settings();
+
         ui.text("Hiii");
 
         ui.slider("FXAA subpix", 0.0, 1.0, &mut settings.fxaa_quality_subpix);
@@ -193,6 +194,10 @@ impl App for GLTFViewer {
             &mut settings.fxaa_quality_edge_threshold_min,
         );
         self.scene_renderer.set_fxaa_settings_mut(settings);
+
+        if ui.io().want_capture_keyboard || ui.io().want_capture_mouse {
+            return Ok(());
+        }
 
         if self.rotation_movement > 0.0 {
             self.rot_y += self.movement.x;
