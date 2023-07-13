@@ -7,7 +7,13 @@ use std::io::BufReader;
 use app::{bootstrap, App};
 use ash::vk::PresentModeKHR;
 
-use engine::{Backbuffer, Camera, DeferredRenderingPipeline, MaterialDescription, MaterialDomain, MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo, RenderingPipeline, Scene, ScenePrimitive, Texture, TextureInput};
+use engine::{
+    Backbuffer, Camera, DeferredRenderingPipeline, MaterialDescription, MaterialDomain,
+    MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo,
+    RenderingPipeline, Scene, ScenePrimitive, Texture, TextureInput,
+};
+use gpu::CommandBuffer;
+use imgui::Ui;
 use nalgebra::*;
 use resource_map::ResourceMap;
 use winit::{event::ElementState, event_loop::EventLoop};
@@ -234,29 +240,12 @@ impl App for PlanesApp {
         Ok(())
     }
 
-    fn draw(&mut self, app_state: &mut engine::AppState) -> anyhow::Result<()> {
-        let swapchain_format = app_state.gpu.swapchain().present_format();
-        let swapchain_extents = app_state.gpu.swapchain().extents();
-        let (swapchain_image, swapchain_image_view) =
-            app_state.gpu.swapchain_mut().acquire_next_image()?;
+    fn draw(&mut self, backbuffer: &Backbuffer) -> anyhow::Result<CommandBuffer> {
         self.scene_renderer
-            .render(
-                &self.camera,
-                &self.scene,
-                Backbuffer {
-                    size: swapchain_extents,
-                    format: swapchain_format,
-                    image: swapchain_image,
-                    image_view: swapchain_image_view,
-                },
-                &self.resource_map,
-            )
-            .unwrap();
-
-        Ok(())
+            .render(&self.camera, &self.scene, backbuffer, &self.resource_map)
     }
 
-    fn update(&mut self, _app_state: &mut engine::AppState) -> anyhow::Result<()> {
+    fn update(&mut self, _app_state: &mut engine::AppState, _ui: &mut Ui) -> anyhow::Result<()> {
         if self.rotation_movement > 0.0 {
             self.rot_z += self.movement.y;
             self.rot_z = self.rot_z.clamp(-89.0, 89.0);

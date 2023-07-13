@@ -111,7 +111,7 @@ pub trait RenderingPipeline {
         &mut self,
         pov: &Camera,
         scene: &Scene,
-        backbuffer: Backbuffer,
+        backbuffer: &Backbuffer,
         resource_map: &ResourceMap,
     ) -> anyhow::Result<CommandBuffer>;
 

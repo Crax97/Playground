@@ -4,15 +4,14 @@ use std::{collections::HashMap, mem::size_of};
 use ash::{
     prelude::VkResult,
     vk::{
-        BufferUsageFlags, CompareOp, IndexType, PipelineBindPoint,
-        PipelineStageFlags, PushConstantRange, ShaderModuleCreateFlags, ShaderStageFlags,
-        StencilOpState,
+        BufferUsageFlags, CompareOp, IndexType, PipelineBindPoint, PipelineStageFlags,
+        PushConstantRange, ShaderModuleCreateFlags, ShaderStageFlags, StencilOpState,
     },
 };
 use gpu::{
     BindingType, BufferCreateInfo, CommandBuffer, DepthStencilState, FragmentStageInfo, Gpu,
-    GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain,
-    ShaderModuleCreateInfo, Swapchain, ToVk, VertexStageInfo,
+    GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain, ShaderModuleCreateInfo, Swapchain, ToVk,
+    VertexStageInfo,
 };
 use nalgebra::{vector, Matrix4, Vector2, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -115,7 +114,15 @@ impl From<&Light> for GpuLightInfo {
     }
 }
 
-use crate::{app_state, camera::Camera, material::{MasterMaterial, MasterMaterialDescription}, BufferDescription, BufferType, ClearValue, FragmentState, GpuRunner, GraphRunContext, Light, LightType, MaterialDescription, MaterialDomain, MaterialInstance, MeshPrimitive, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage, RenderingPipeline, Scene, Backbuffer};
+use crate::{
+    app_state,
+    camera::Camera,
+    material::{MasterMaterial, MasterMaterialDescription},
+    Backbuffer, BufferDescription, BufferType, ClearValue, FragmentState, GpuRunner,
+    GraphRunContext, Light, LightType, MaterialDescription, MaterialDomain, MaterialInstance,
+    MeshPrimitive, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription,
+    RenderPassContext, RenderStage, RenderingPipeline, Scene,
+};
 
 use ash::vk::{
     AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
@@ -629,7 +636,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         &mut self,
         pov: &Camera,
         scene: &Scene,
-        backbuffer: Backbuffer,
+        backbuffer: &Backbuffer,
         resource_map: &ResourceMap,
     ) -> anyhow::Result<CommandBuffer> {
         let projection = pov.projection();
@@ -1063,10 +1070,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             ctx.render_pass_command.draw(4, 1, 0, 0);
         });
         context.register_callback(&fxaa_pass, |_: &Gpu, ctx| {
-            let rcp_frame = vector![
-                backbuffer.size.width as f32,
-                backbuffer.size.height as f32
-            ];
+            let rcp_frame = vector![backbuffer.size.width as f32, backbuffer.size.height as f32];
             let rcp_frame = vector![1.0 / rcp_frame.x, 1.0 / rcp_frame.y];
 
             let params = FxaaShaderParams {
@@ -1102,11 +1106,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 .unwrap(),
         );
 
-        context.inject_external_image(
-            &swapchain_image,
-            backbuffer.image,
-            backbuffer.image_view,
-        );
+        context.inject_external_image(&swapchain_image, backbuffer.image, backbuffer.image_view);
         context.injext_external_buffer(&camera_buffer, &current_buffers.camera_buffer);
         context.injext_external_buffer(&light_buffer, &current_buffers.light_buffer);
         //#endregion
