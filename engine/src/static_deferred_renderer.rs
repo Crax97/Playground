@@ -86,7 +86,12 @@ impl From<&Light> for GpuLightInfo {
                 outer_cone_degrees,
             } => (
                 vector![direction.x, direction.y, direction.z, 0.0],
-                vector![inner_cone_degrees, outer_cone_degrees, 0.0, 0.0],
+                vector![
+                    inner_cone_degrees.to_radians(),
+                    outer_cone_degrees.to_radians(),
+                    0.0,
+                    0.0
+                ],
                 2,
             ),
             LightType::Rect {

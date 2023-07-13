@@ -15,7 +15,8 @@ use winit::dpi::{PhysicalPosition, Position};
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::{
-    AppState, Backbuffer, DeferredRenderingPipeline, Light, LightType, RenderingPipeline, Scene,
+    AppState, Backbuffer, DeferredRenderingPipeline, Light, LightHandle, LightType,
+    RenderingPipeline, Scene,
 };
 use nalgebra::*;
 use resource_map::ResourceMap;
@@ -36,6 +37,7 @@ pub struct GLTFViewer {
     scene_renderer: DeferredRenderingPipeline,
     gltf_loader: GltfLoader,
     input: InputState,
+    camera_light: LightHandle,
 }
 
 impl App for GLTFViewer {
@@ -74,7 +76,7 @@ impl App for GLTFViewer {
             GltfLoadOptions {},
         )?;
 
-        add_scene_lights(gltf_loader.scene_mut());
+        let camera_light = add_scene_lights(gltf_loader.scene_mut());
 
         engine::app_state_mut()
             .gpu
@@ -87,6 +89,7 @@ impl App for GLTFViewer {
             gltf_loader,
             input: InputState::new(),
             camera: FpsCamera::default(),
+            camera_light,
         })
     }
 
@@ -156,6 +159,7 @@ impl App for GLTFViewer {
             self.camera
                 .update(&self.input, app_state.time.delta_frame());
             let window_size = app_state.gpu.swapchain().window.inner_size();
+
             app_state
                 .gpu
                 .swapchain()
@@ -165,6 +169,18 @@ impl App for GLTFViewer {
                     y: window_size.height as i32 / 2,
                 }))?;
         }
+
+        if self.input.is_mouse_button_pressed(MouseButton::Left) {
+            self.gltf_loader
+                .scene_mut()
+                .edit_light(&self.camera_light)
+                .position = self.camera.location;
+            self.gltf_loader
+                .scene_mut()
+                .edit_light(&self.camera_light)
+                .set_direction(self.camera.forward());
+        }
+
         self.input.end_frame();
         Ok(())
     }
@@ -180,37 +196,37 @@ impl App for GLTFViewer {
     }
 }
 
-fn add_scene_lights(scene: &mut Scene) {
-    scene.add_light(Light {
-        ty: LightType::Point,
-        position: vector![0.0, 10.0, 0.0],
-        radius: 50.0,
-        color: vector![1.0, 0.0, 0.0],
-        intensity: 1.0,
-        enabled: true,
-    });
-    scene.add_light(Light {
-        ty: LightType::Directional {
-            direction: vector![-0.45, -0.45, 0.0],
-        },
-        position: vector![100.0, 100.0, 0.0],
-        radius: 10.0,
-        color: vector![1.0, 1.0, 1.0],
-        intensity: 1.0,
-        enabled: true,
-    });
+fn add_scene_lights(scene: &mut Scene) -> LightHandle {
+    // scene.add_light(Light {
+    //     ty: LightType::Point,
+    //     position: point![0.0, 10.0, 0.0],
+    //     radius: 50.0,
+    //     color: vector![1.0, 0.0, 0.0],
+    //     intensity: 1.0,
+    //     enabled: true,
+    // });
+    // scene.add_light(Light {
+    //     ty: LightType::Directional {
+    //         direction: vector![-0.45, -0.45, 0.0],
+    //     },
+    //     position: point![100.0, 100.0, 0.0],
+    //     radius: 10.0,
+    //     color: vector![1.0, 1.0, 1.0],
+    //     intensity: 1.0,
+    //     enabled: true,
+    // });
     scene.add_light(Light {
         ty: LightType::Spotlight {
             direction: vector![0.45, -0.45, 0.0],
             inner_cone_degrees: 15.0,
             outer_cone_degrees: 35.0,
         },
-        position: vector![100.0, 100.0, 0.0],
-        radius: 10.0,
+        position: point![100.0, 100.0, 0.0],
+        radius: 100.0,
         color: vector![1.0, 1.0, 1.0],
-        intensity: 1.0,
+        intensity: 10.0,
         enabled: true,
-    });
+    })
 }
 
 fn main() -> anyhow::Result<()> {

@@ -1,6 +1,6 @@
 use ash::vk::{Extent2D, Format};
 use gpu::{CommandBuffer, Gpu, GpuImage, GpuImageView};
-use nalgebra::{Matrix4, Vector3};
+use nalgebra::{Matrix4, Point3, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
 
 #[repr(C)]
@@ -40,12 +40,22 @@ pub enum LightType {
 #[derive(Clone, Copy, PartialEq)]
 pub struct Light {
     pub ty: LightType,
-    pub position: Vector3<f32>,
+    pub position: Point3<f32>,
     pub radius: f32,
     pub color: Vector3<f32>,
     pub intensity: f32,
 
     pub enabled: bool,
+}
+impl Light {
+    pub fn set_direction(&mut self, forward: Vector3<f32>) {
+        match &mut self.ty {
+            LightType::Point => {}
+            LightType::Directional { direction }
+            | LightType::Spotlight { direction, .. }
+            | LightType::Rect { direction, .. } => *direction = forward,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialOrd, PartialEq)]

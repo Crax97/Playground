@@ -1,5 +1,7 @@
 #version 460
 
+#pragma GL_GOOGLE_include_directive : require
+
 #include "definitions.glsl"
 #include "light_definitions.glsl"
 
@@ -31,13 +33,31 @@ struct FragmentInfo {
 };
 
 vec3 get_unnormalized_light_direction(LightInfo info, FragmentInfo frag_info) {
-    if (info.type == DIRECTIONAL_LIGHT) {
+    if (info.type == DIRECTIONAL_LIGHT || info.type == SPOT_LIGHT) {
         return info.direction.xyz;
     } else {
         return frag_info.position - info.position_radius.xyz ;
     }
 }
 
+vec3 get_light_intensity(float n_dot_l, float light_distance, LightInfo light, FragmentInfo frag_info) {
+    float dist = clamp(light_distance / light.position_radius.w, 0.0, 1.0);
+    dist = max(dist * dist, 0.01);
+    vec3 i = light.color_intensity.rgb * light.color_intensity.a;
+    float luminous_power = 0.0;
+    if (light.type == POINT_LIGHT) {
+        return i / dist;
+    } else if (light.type == SPOT_LIGHT) {
+        vec3 frag_direction = normalize(light.position_radius.xyz - frag_info.position);
+        float cos_theta = dot(-light.direction.xyz, frag_direction);
+        float outer_angle_cutoff = light.extras.y;
+        float cutoff = float(cos_theta > 0.0) * clamp((cos_theta - outer_angle_cutoff) / cos_theta, 0.0, 1.0);
+        return cutoff * (i / dist);
+    } else {
+        // for now
+        return i / dist;
+    }
+}
 
 FragmentInfo get_fragment_info(vec2 in_uv) {
     FragmentInfo info;
@@ -82,11 +102,11 @@ float d_trowbridge_reitz_ggx(float n_dot_h, float rough)
 
 vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, LightInfo light_info) {
 
-    vec3 light_dir = get_unnormalized_light_direction(light_info, frag_info);
+    vec3 light_dir = -get_unnormalized_light_direction(light_info, frag_info);
     float l_dot_n = max(dot(light_dir, frag_info.normal), 0.0);
     float light_dist = length(light_dir);
     light_dir /= light_dist;
-    vec3 light_radiance = get_light_intensity(l_dot_n, light_dist, light_info);
+    vec3 light_radiance = get_light_intensity(l_dot_n, light_dist, light_info, frag_info);
     
     vec3 h = normalize(view_direction + light_dir);
     

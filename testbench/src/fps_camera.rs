@@ -1,14 +1,14 @@
 use engine::Camera;
-use nalgebra::{vector, Point3, Rotation3};
+use nalgebra::{vector, Point3, Rotation3, Vector3};
 
 use crate::input::{key::Key, InputState};
 
 pub struct FpsCamera {
-    location: Point3<f32>,
-    rotation: Rotation3<f32>,
-    speed: f32,
-    rotation_speed: f32,
+    pub location: Point3<f32>,
+    pub speed: f32,
+    pub rotation_speed: f32,
 
+    rotation: Rotation3<f32>,
     roll: f32,
     pitch: f32,
 }
@@ -67,5 +67,11 @@ impl FpsCamera {
             near: 0.001,
             far: 1000.0,
         }
+    }
+
+    pub fn forward(&self) -> Vector3<f32> {
+        let transform = self.rotation.to_homogeneous();
+        let forward = transform.column(2).xyz();
+        forward
     }
 }
