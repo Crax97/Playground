@@ -47,11 +47,7 @@ impl InputState {
         }
     }
 
-    pub(crate) fn update<T: 'static>(&mut self, event: &winit::event::Event<T>) {
-        self.last_button_state = self.pointer_button_state.clone();
-        self.last_key_states = self.key_states.clone();
-        self.last_modifiers = self.current_modifiers.clone();
-        self.current_wheel_delta = 0.0;
+    pub fn update<T: 'static>(&mut self, event: &winit::event::Event<T>) {
         match event {
             winit::event::Event::WindowEvent { event, .. } => match event {
                 winit::event::WindowEvent::Resized(new_size) => self.window_size = *new_size,
@@ -133,6 +129,13 @@ impl InputState {
             winit::event::Event::DeviceEvent { .. } => {}
             _ => {}
         }
+    }
+
+    pub fn end_frame(&mut self) {
+        self.last_button_state = self.pointer_button_state.clone();
+        self.last_key_states = self.key_states.clone();
+        self.last_modifiers = self.current_modifiers.clone();
+        self.current_wheel_delta = 0.0;
     }
 
     fn set_cursor_button_state(&mut self, button: MouseButton, state: ElementState) {
