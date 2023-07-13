@@ -1,5 +1,6 @@
 mod app;
 mod gltf_loader;
+mod input;
 mod utils;
 
 use app::{bootstrap, App};
@@ -7,6 +8,7 @@ use ash::vk::PresentModeKHR;
 
 use gpu::CommandBuffer;
 use imgui::Ui;
+use input::InputState;
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::{
@@ -15,7 +17,7 @@ use engine::{
 };
 use nalgebra::*;
 use resource_map::ResourceMap;
-use winit::event::ElementState;
+use winit::event::{ElementState, MouseButton};
 use winit::event_loop::EventLoop;
 
 #[repr(C)]
@@ -40,6 +42,7 @@ pub struct GLTFViewer {
     movement: Vector3<f32>,
     scene_renderer: DeferredRenderingPipeline,
     gltf_loader: GltfLoader,
+    input: InputState,
 }
 
 impl App for GLTFViewer {
@@ -112,7 +115,17 @@ impl App for GLTFViewer {
             movement,
             scene_renderer,
             gltf_loader,
+            input: InputState::new(),
         })
+    }
+
+    fn on_event(
+        &mut self,
+        event: &winit::event::Event<()>,
+        _app_state: &AppState,
+    ) -> anyhow::Result<()> {
+        self.input.update(&event);
+        Ok(())
     }
 
     fn input(
@@ -173,11 +186,16 @@ impl App for GLTFViewer {
             return Ok(());
         }
 
-        if self.rotation_movement > 0.0 {
-            self.rot_y += self.movement.x;
-            self.rot_x += -self.movement.y;
+        let mouse_delta = self.input.normalized_mouse_delta();
+
+        if self
+            .input
+            .is_mouse_button_pressed(winit::event::MouseButton::Right)
+        {
+            self.rot_y += mouse_delta.x;
+            self.rot_x += mouse_delta.y;
             self.rot_x = self.rot_x.clamp(-89.0, 89.0);
-        } else {
+        } else if self.input.is_mouse_button_pressed(MouseButton::Left) {
             self.dist += self.movement.y * self.forward_movement * SPEED;
         }
 
@@ -219,6 +237,18 @@ fn add_scene_lights(scene: &mut Scene) {
     scene.add_light(Light {
         ty: LightType::Directional {
             direction: vector![-0.45, -0.45, 0.0],
+        },
+        position: vector![100.0, 100.0, 0.0],
+        radius: 10.0,
+        color: vector![1.0, 1.0, 1.0],
+        intensity: 1.0,
+        enabled: true,
+    });
+    scene.add_light(Light {
+        ty: LightType::Spotlight {
+            direction: vector![0.45, -0.45, 0.0],
+            inner_cone_degrees: 15.0,
+            outer_cone_degrees: 35.0,
         },
         position: vector![100.0, 100.0, 0.0],
         radius: 10.0,
