@@ -14,8 +14,8 @@ layout(set = 0, binding = 2) uniform sampler2D difSampler;
 layout(set = 0, binding = 3) uniform sampler2D emissSampler;
 layout(set = 0, binding = 4) uniform sampler2D pbrSampler;
 
-layout(set = 0, binding = 5) uniform  PerFrameDataBlock {
-    PerFrameData pfd;
+layout(set = 0, binding = 5) readonly buffer  PerFrameDataBlock {
+    PerFrameData pfd[];
 } per_frame_data;
 
 layout(set = 0, binding = 6, std140) readonly buffer LightData {
@@ -142,7 +142,7 @@ vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, LightInfo light_
 
 vec3 calculate_light_influence(FragmentInfo frag_info) {
     vec3 ck = vec3(0.0);
-    vec3 view = normalize(per_frame_data.pfd.eye.xyz - frag_info.position);
+    vec3 view = normalize(per_frame_data.pfd[0].eye.xyz - frag_info.position);
     
     for (uint i = 0; i < light_data.light_count; i ++) {
         ck += cook_torrance(view, frag_info, light_data.lights[i]);

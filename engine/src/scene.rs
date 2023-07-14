@@ -1,6 +1,6 @@
 use ash::vk::{Extent2D, Format};
 use gpu::{CommandBuffer, Gpu, GpuImage, GpuImageView};
-use nalgebra::{Matrix4, Point3, Vector3};
+use nalgebra::{vector, Matrix4, Point3, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
 
 #[repr(C)]
@@ -54,6 +54,40 @@ impl Light {
             LightType::Directional { direction }
             | LightType::Spotlight { direction, .. }
             | LightType::Rect { direction, .. } => *direction = forward,
+        }
+    }
+
+    pub fn direction(&self) -> Vector3<f32> {
+        match self.ty {
+            LightType::Point => {
+                todo!()
+            }
+            LightType::Directional { direction }
+            | LightType::Spotlight { direction, .. }
+            | LightType::Rect { direction, .. } => direction,
+        }
+    }
+
+    pub(crate) fn view_matrix(&self) -> Matrix4<f32> {
+        Matrix4::look_at_rh(
+            &self.position,
+            &(&self.position + self.direction()),
+            &vector![0.0, 1.0, 0.0],
+        )
+    }
+
+    pub(crate) fn projection_matrix(&self) -> Matrix4<f32> {
+        match self.ty {
+            LightType::Point => todo!(),
+            LightType::Directional { .. } => {
+                Matrix4::new_orthographic(-256.0, 256.0, -256.0, 256.0, 0.01, 1000.0)
+            }
+            LightType::Spotlight {
+                outer_cone_degrees, ..
+            } => Matrix4::new_perspective(1.0, outer_cone_degrees, 0.01, 1000.0),
+            LightType::Rect { width, height, .. } => {
+                Matrix4::new_perspective(width / height, 90.0, 0.01, 1000.0)
+            }
         }
     }
 }

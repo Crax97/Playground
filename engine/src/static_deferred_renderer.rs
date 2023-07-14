@@ -10,7 +10,7 @@ use gpu::{
     GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain, ShaderModuleCreateInfo, Swapchain, ToVk,
     VertexStageInfo,
 };
-use nalgebra::{vector, Matrix4, Vector2, Vector4};
+use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
 
 const FXAA_FS: &[u32] = glsl!(
@@ -32,6 +32,13 @@ struct FxaaShaderParams {
     fxaa_quality_edge_threshold: f32,
     fxaa_quality_edge_threshold_min: f32,
     iterations: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ObjectDrawInfo {
+    model: Matrix4<f32>,
+    camera_index: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -56,7 +63,7 @@ impl Default for FxaaSettings {
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct PerFrameData {
-    eye: Vector4<f32>,
+    eye: Point4<f32>,
     view: nalgebra::Matrix4<f32>,
     projection: nalgebra::Matrix4<f32>,
 }
@@ -176,8 +183,10 @@ impl DeferredRenderingPipeline {
             let camera_buffer = {
                 let create_info = BufferCreateInfo {
                     label: Some("Deferred Renderer - Camera buffer"),
-                    size: std::mem::size_of::<PerFrameData>(),
-                    usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
+                    size: std::mem::size_of::<PerFrameData>() * 100,
+                    usage: BufferUsageFlags::STORAGE_BUFFER
+                        | BufferUsageFlags::UNIFORM_BUFFER
+                        | BufferUsageFlags::TRANSFER_DST,
                 };
                 gpu.create_buffer(
                     &create_info,
@@ -244,6 +253,7 @@ impl DeferredRenderingPipeline {
         resource_map: &ResourceMap,
         pipeline_target: PipelineTarget,
         draw_hashmap: &HashMap<&MasterMaterial, Vec<DrawCall>>,
+        camera_index: u32,
         ctx: &mut RenderPassContext,
     ) {
         let mut total_primitives_rendered = 0;
@@ -292,8 +302,14 @@ impl DeferredRenderingPipeline {
                         ],
                         &[0, 0, 0, 0, 0],
                     );
-                    ctx.render_pass_command
-                        .push_constant(pipeline, &draw_call.transform, 0);
+                    ctx.render_pass_command.push_constant(
+                        pipeline,
+                        &ObjectDrawInfo {
+                            model: draw_call.transform,
+                            camera_index,
+                        },
+                        0,
+                    );
                     ctx.render_pass_command
                         .draw_indexed(draw_call.prim.index_count, 1, 0, 0, 0);
 
@@ -348,16 +364,23 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         self.in_flight_frame = (1 + self.in_flight_frame) % self.max_frames_in_flight;
 
+        let mut per_frame_data = vec![PerFrameData {
+            eye: Point4::new(pov.location[0], pov.location[1], pov.location[2], 0.0),
+            view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * pov.view(),
+            projection,
+        }];
+
+        per_frame_data.extend(scene.all_lights().iter().filter(|l| l.enabled).map(|l| {
+            PerFrameData {
+                eye: Point4::new(l.position.x, l.position.y, l.position.z, 0.0),
+                view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * l.view_matrix(),
+                projection: l.projection_matrix(),
+            }
+        }));
+
         super::app_state()
             .gpu
-            .write_buffer_data(
-                &current_buffers.camera_buffer,
-                &[PerFrameData {
-                    eye: Vector4::new(pov.location[0], pov.location[1], pov.location[2], 0.0),
-                    view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * pov.view(),
-                    projection,
-                }],
-            )
+            .write_buffer_data(&current_buffers.camera_buffer, &per_frame_data)
             .unwrap();
 
         let collected_active_lights: Vec<GpuLightInfo> =
@@ -430,7 +453,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             "camera-buffer",
             &BufferDescription {
                 length: std::mem::size_of::<PerFrameData>() as u64,
-                ty: BufferType::Uniform,
+                ty: BufferType::Storage,
             },
             true,
         )?;
@@ -755,13 +778,20 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         //#region context setup
         context.register_callback(&dbuffer_pass, |_: &Gpu, ctx| {
-            Self::main_render_loop(resource_map, PipelineTarget::DepthOnly, &draw_hashmap, ctx);
+            Self::main_render_loop(
+                resource_map,
+                PipelineTarget::DepthOnly,
+                &draw_hashmap,
+                0,
+                ctx,
+            );
         });
         context.register_callback(&gbuffer_pass, |_: &Gpu, ctx| {
             Self::main_render_loop(
                 resource_map,
                 PipelineTarget::ColorAndDepth,
                 &draw_hashmap,
+                0,
                 ctx,
             );
         });
@@ -920,9 +950,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             name: material_description.name,
             domain: material_description.domain,
             global_inputs: match material_description.domain {
-                MaterialDomain::Surface => &[BindingType::Uniform],
+                MaterialDomain::Surface => &[BindingType::Storage],
                 MaterialDomain::PostProcess => &[
-                    BindingType::Uniform,              // Camera buffer
+                    BindingType::Storage,              // Camera buffer
                     BindingType::CombinedImageSampler, // Previous post process result/ Initial scene color,
                     BindingType::CombinedImageSampler, // Scene position,
                     BindingType::CombinedImageSampler, // Scene diffuse,
@@ -948,7 +978,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             push_constant_ranges: &[PushConstantRange {
                 stage_flags: ShaderStageFlags::ALL,
                 offset: 0,
-                size: std::mem::size_of::<Matrix4<f32>>() as u32,
+                size: std::mem::size_of::<ObjectDrawInfo>() as u32,
             }],
             logic_op: None,
         };
