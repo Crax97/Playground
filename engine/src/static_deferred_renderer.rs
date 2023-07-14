@@ -2,7 +2,7 @@ use engine_macros::glsl;
 use std::{collections::HashMap, mem::size_of};
 
 use ash::vk::{
-    BufferUsageFlags, CompareOp, IndexType, PipelineBindPoint, PushConstantRange,
+    BufferUsageFlags, CompareOp, Extent2D, IndexType, PipelineBindPoint, PushConstantRange,
     ShaderModuleCreateFlags, ShaderStageFlags, StencilOpState,
 };
 use gpu::{
@@ -10,7 +10,7 @@ use gpu::{
     GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain, ShaderModuleCreateInfo, Swapchain, ToVk,
     VertexStageInfo,
 };
-use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector4};
+use nalgebra::{vector, Matrix4, Point4, Vector2, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
 
 const FXAA_FS: &[u32] = glsl!(
@@ -415,6 +415,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             samples: 1,
             present: false,
             clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
+            sampler_state: None,
         };
         let framebuffer_normal_desc = crate::ImageDescription {
             width: backbuffer.size.width,
@@ -423,6 +424,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             samples: 1,
             present: false,
             clear_value: ClearValue::Color([0.5, 0.5, 0.5, 1.0]),
+            sampler_state: None,
         };
         let framebuffer_vector_desc = crate::ImageDescription {
             width: backbuffer.size.width,
@@ -431,6 +433,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             samples: 1,
             present: false,
             clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
+            sampler_state: None,
         };
         let framebuffer_depth_desc = crate::ImageDescription {
             width: backbuffer.size.width,
@@ -439,6 +442,16 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             samples: 1,
             present: false,
             clear_value: ClearValue::Depth(1.0),
+            sampler_state: None,
+        };
+        let shadow_map_desc = crate::ImageDescription {
+            width: 512, // TODO: Change me
+            height: 512,
+            format: ImageFormat::Depth,
+            samples: 1,
+            present: false,
+            clear_value: ClearValue::Depth(1.0),
+            sampler_state: None,
         };
         let framebuffer_swapchain_desc = crate::ImageDescription {
             width: backbuffer.size.width,
@@ -447,6 +460,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             samples: 1,
             present: false,
             clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
+            sampler_state: None,
         };
 
         let camera_buffer = self.render_graph.use_buffer(
@@ -473,6 +487,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let depth_target =
             self.render_graph
                 .use_image("depth-buffer", &framebuffer_depth_desc, false)?;
+        let shadow_map = self
+            .render_graph
+            .use_image("shadow_map", &shadow_map_desc, false)?;
         let color_target =
             self.render_graph
                 .use_image("color-buffer", &framebuffer_vector_desc, false)?;
@@ -505,6 +522,19 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .render_graph
             .begin_render_pass("EarlyZPass", backbuffer.size)?
             .writes_attachments(&[depth_target])
+            .shader_reads(&[camera_buffer])
+            .mark_external()
+            .commit();
+        let shadow_map_pass = self
+            .render_graph
+            .begin_render_pass(
+                "ShadowMapRendering",
+                Extent2D {
+                    width: 512,
+                    height: 512,
+                },
+            )?
+            .writes_attachments(&[shadow_map])
             .shader_reads(&[camera_buffer])
             .mark_external()
             .commit();
@@ -544,6 +574,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 diffuse_target,
                 emissive_target,
                 pbr_target,
+                shadow_map,
                 camera_buffer,
                 light_buffer,
             ])
@@ -783,6 +814,15 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 PipelineTarget::DepthOnly,
                 &draw_hashmap,
                 0,
+                ctx,
+            );
+        });
+        context.register_callback(&shadow_map_pass, |_: &Gpu, ctx| {
+            Self::main_render_loop(
+                resource_map,
+                PipelineTarget::DepthOnly,
+                &draw_hashmap,
+                1,
                 ctx,
             );
         });

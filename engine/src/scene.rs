@@ -80,13 +80,13 @@ impl Light {
         match self.ty {
             LightType::Point => todo!(),
             LightType::Directional { .. } => {
-                Matrix4::new_orthographic(-256.0, 256.0, -256.0, 256.0, 0.01, 1000.0)
+                Matrix4::new_orthographic(-256.0, 256.0, -256.0, 256.0, 0.01, self.radius)
             }
             LightType::Spotlight {
                 outer_cone_degrees, ..
-            } => Matrix4::new_perspective(1.0, outer_cone_degrees, 0.01, 1000.0),
+            } => Matrix4::new_perspective(1.0, outer_cone_degrees.to_radians(), 0.01, self.radius),
             LightType::Rect { width, height, .. } => {
-                Matrix4::new_perspective(width / height, 90.0, 0.01, 1000.0)
+                Matrix4::new_perspective(width / height, 90.0, 0.01, self.radius)
             }
         }
     }

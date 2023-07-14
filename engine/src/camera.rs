@@ -46,6 +46,11 @@ impl Camera {
         )
     }
     pub fn projection(&self) -> Matrix4<f32> {
-        Matrix4::new_perspective(self.width / self.height, self.fov, self.near, self.far)
+        Matrix4::new_perspective(
+            self.width / self.height,
+            self.fov.to_radians(),
+            self.near,
+            self.far,
+        )
     }
 }

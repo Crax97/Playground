@@ -13,12 +13,13 @@ layout(set = 0, binding = 1) uniform sampler2D normSampler;
 layout(set = 0, binding = 2) uniform sampler2D difSampler;
 layout(set = 0, binding = 3) uniform sampler2D emissSampler;
 layout(set = 0, binding = 4) uniform sampler2D pbrSampler;
+layout(set = 0, binding = 5) uniform sampler2D shadowMap;
 
-layout(set = 0, binding = 5) readonly buffer  PerFrameDataBlock {
+layout(set = 0, binding = 6) readonly buffer  PerFrameDataBlock {
     PerFrameData pfd[];
 } per_frame_data;
 
-layout(set = 0, binding = 6, std140) readonly buffer LightData {
+layout(set = 0, binding = 7, std140) readonly buffer LightData {
     uint light_count;
     LightInfo lights[];
 } light_data;
@@ -38,6 +39,16 @@ vec3 get_unnormalized_light_direction(LightInfo info, FragmentInfo frag_info) {
     } else {
         return frag_info.position - info.position_radius.xyz ;
     }
+}
+
+float shadow_influence(FragmentInfo frag_info) {
+    mat4 light_vp = per_frame_data.pfd[1].proj * per_frame_data.pfd[1].view;
+    vec4 frag_pos_light_unnorm = light_vp * vec4(frag_info.position, 1.0);
+    vec4 frag_pos_light = frag_pos_light_unnorm / frag_pos_light_unnorm.w;
+    frag_pos_light.xy = frag_pos_light.xy * 0.5 + 0.5;
+    float test_z = frag_pos_light.z - 0.000005;
+    float d = texture(shadowMap, frag_pos_light.xy).r;
+    return float(d > test_z);
 }
 
 vec3 get_light_intensity(float n_dot_l, LightInfo light, FragmentInfo frag_info) {
@@ -60,7 +71,7 @@ vec3 get_light_intensity(float n_dot_l, LightInfo light, FragmentInfo frag_info)
         i *= cutoff;
         i *= attenuation;
     }
-    return i;
+    return i * shadow_influence(frag_info);
 }
 
 FragmentInfo get_fragment_info(vec2 in_uv) {
