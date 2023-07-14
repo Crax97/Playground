@@ -1578,6 +1578,7 @@ impl RenderGraph {
         let mut render_passes = self.passes.clone();
 
         let mut working_set: HashSet<_> = self.persistent_resources.iter().cloned().collect();
+        let mut all_written_resources = HashSet::new();
 
         while !working_set.is_empty() {
             // Find a render pass that writes any of the attachments in the working set
@@ -1593,32 +1594,36 @@ impl RenderGraph {
                 })
                 .collect();
 
-            // If there's more than one pass that writes to any of the working set, the graph
-            // is not acyclic: refuse it
-            if writing_passes.len() > 1 {
-                return Err(CompileError::CyclicGraph);
+            working_set.clear();
+
+            for writing_pass_handle in writing_passes {
+                let writing_pass_info = render_passes.remove(&writing_pass_handle).unwrap();
+
+                let pass_writes = writing_pass_info.attachment_writes;
+
+                for pass_write in pass_writes {
+                    // If a resource is written more than once, the graph is acyclic
+                    if all_written_resources.contains(&pass_write) {
+                        return Err(CompileError::CyclicGraph);
+                    }
+                    compiled.resources_used.insert(pass_write);
+                    all_written_resources.insert(pass_write);
+                }
+                // Schedule the pass
+
+                working_set = writing_pass_info.shader_reads.iter().cloned().collect();
+                working_set.extend(writing_pass_info.attachment_reads.iter());
+
+                compiled.schedule_pass(writing_pass_handle);
+
+                // 3. Record all the resources used by the pass
+                for read in writing_pass_info.shader_reads {
+                    compiled.resources_used.insert(read);
+                }
             }
 
             // If we found a pass that writes to the working set
             // update the pass's reads with the working set
-            if let Some(handle) = writing_passes.first() {
-                let writing_pass = render_passes.remove(handle).unwrap();
-
-                working_set = writing_pass.shader_reads.iter().cloned().collect();
-                working_set.extend(writing_pass.attachment_reads.iter());
-
-                compiled.schedule_pass(*handle);
-
-                // 3. Record all the resources used by the pass
-                for read in writing_pass.shader_reads {
-                    compiled.resources_used.insert(read);
-                }
-                for write in writing_pass.attachment_writes {
-                    compiled.resources_used.insert(write);
-                }
-            } else {
-                working_set.clear();
-            }
         }
         compiled.pass_sequence.reverse();
         Ok(())
@@ -1672,22 +1677,6 @@ impl RenderGraph {
     ) {
         // TODO: Upgrade to merge candidates
         for handle in compiled.pass_sequence.iter() {
-            let pass = &self.passes[handle];
-            compiled
-                .graph_operations
-                .push(GraphOperation::TransitionShaderRead(
-                    pass.shader_reads.clone(),
-                ));
-            compiled
-                .graph_operations
-                .push(GraphOperation::TransitionAttachmentRead(
-                    pass.attachment_reads.clone(),
-                ));
-            compiled
-                .graph_operations
-                .push(GraphOperation::TransitionAttachmentWrite(
-                    pass.attachment_writes.clone(),
-                ));
             compiled
                 .graph_operations
                 .push(GraphOperation::ExecuteRenderPass(*handle));
@@ -1960,7 +1949,7 @@ impl RenderGraphRunner for GpuRunner {
                             dependency_flags: Default::default(),
                             memory_barriers: &[],
                             buffer_memory_barriers: &[],
-                            image_memory_barriers: &color_transitions,
+                            image_memory_barriers: &depth_stencil_transitions,
                         })
                     }
                 }
@@ -2067,7 +2056,7 @@ impl RenderGraphRunner for GpuRunner {
                             dependency_flags: Default::default(),
                             memory_barriers: &[],
                             buffer_memory_barriers: &[],
-                            image_memory_barriers: &color_transitions,
+                            image_memory_barriers: &depth_stencil_transitions,
                         })
                     }
                 }
@@ -2172,7 +2161,7 @@ impl RenderGraphRunner for GpuRunner {
                             dependency_flags: Default::default(),
                             memory_barriers: &[],
                             buffer_memory_barriers: &[],
-                            image_memory_barriers: &color_transitions,
+                            image_memory_barriers: &depth_stencil_transitions,
                         })
                     }
                 }
