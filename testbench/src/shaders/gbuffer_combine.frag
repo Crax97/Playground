@@ -40,25 +40,27 @@ vec3 get_unnormalized_light_direction(LightInfo info, FragmentInfo frag_info) {
     }
 }
 
-vec3 get_light_intensity(float n_dot_l, float light_distance, LightInfo light, FragmentInfo frag_info) {
-    float dist = clamp(light_distance / light.position_radius.w, 0.0, 1.0);
-    dist = max(dist * dist, 0.01);
+vec3 get_light_intensity(float n_dot_l, LightInfo light, FragmentInfo frag_info) {
+    float attenuation = 1.0;
+    vec3 light_dir = light.position_radius.xyz - frag_info.position;
+    float light_distance = length(light_dir);
+    light_dir /= light_distance;
     vec3 i = light.color_intensity.rgb * light.color_intensity.a;
-    float luminous_power = 0.0;
+    float light_distance_normalized = clamp(light_distance / light.position_radius.w, 0.0, 1.0);
+    attenuation = 1.0 / (light_distance_normalized * light_distance_normalized + 0.01);
     if (light.type == POINT_LIGHT) {
-        return i / dist;
+        i *= attenuation;
     } else if (light.type == SPOT_LIGHT) {
-        vec3 frag_direction = normalize(light.position_radius.xyz - frag_info.position);
+        vec3 frag_direction = light_dir;
         float cos_theta = dot(-light.direction.xyz, frag_direction);
         float inner_angle_cutoff = light.extras.x;
         float outer_angle_cutoff = light.extras.y;
         float eps = inner_angle_cutoff - outer_angle_cutoff;
         float cutoff = float(cos_theta > 0.0) * clamp((cos_theta - outer_angle_cutoff) / eps, 0.0, 1.0);
-        return cutoff * (i / dist);
-    } else {
-        // for now
-        return i / dist;
+        i *= cutoff;
+        i *= attenuation;
     }
+    return i;
 }
 
 FragmentInfo get_fragment_info(vec2 in_uv) {
@@ -104,11 +106,9 @@ float d_trowbridge_reitz_ggx(float n_dot_h, float rough)
 
 vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, LightInfo light_info) {
 
-    vec3 light_dir = -get_unnormalized_light_direction(light_info, frag_info);
+    vec3 light_dir = normalize(-get_unnormalized_light_direction(light_info, frag_info));
     float l_dot_n = max(dot(light_dir, frag_info.normal), 0.0);
-    float light_dist = length(light_dir);
-    light_dir /= light_dist;
-    vec3 light_radiance = get_light_intensity(l_dot_n, light_dist, light_info, frag_info);
+    vec3 light_radiance = get_light_intensity(l_dot_n, light_info, frag_info);
     
     vec3 h = normalize(view_direction + light_dir);
     
