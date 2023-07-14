@@ -282,7 +282,7 @@ fn add_scene_lights(scene: &mut Scene) -> LightHandle {
             outer_cone_degrees: 35.0,
         },
         position: point![100.0, 100.0, 0.0],
-        radius: 100.0,
+        radius: 10.0,
         color: vector![1.0, 1.0, 1.0],
         intensity: 10.0,
         enabled: true,
