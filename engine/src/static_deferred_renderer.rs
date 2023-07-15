@@ -24,6 +24,10 @@ const FXAA_VS: &[u32] = glsl!(
     path = "src/shaders/fxaa_vs.vert",
     entry_point = "main"
 );
+
+const SHADOW_MAP_WIDTH: u32 = 7680;
+const SHADOW_MAP_HEIGHT: u32 = 4320;
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct FxaaShaderParams {
@@ -447,8 +451,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             sampler_state: None,
         };
         let shadow_map_desc = crate::ImageDescription {
-            width: 512, // TODO: Change me
-            height: 512,
+            width: SHADOW_MAP_WIDTH,
+            height: SHADOW_MAP_HEIGHT,
             format: ImageFormat::Depth,
             samples: 1,
             present: false,
