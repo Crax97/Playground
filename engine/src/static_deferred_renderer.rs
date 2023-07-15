@@ -70,6 +70,7 @@ struct PerFrameData {
     eye: Point4<f32>,
     view: nalgebra::Matrix4<f32>,
     projection: nalgebra::Matrix4<f32>,
+    viewport_size_offset: Vector4<f32>,
 }
 
 #[repr(C)]
@@ -80,7 +81,6 @@ struct GpuLightInfo {
     color: Vector4<f32>,
     extras: Vector4<f32>,
     ty: [u32; 4],
-    viewport: [f32; 4],
 }
 
 impl From<&Light> for GpuLightInfo {
@@ -127,7 +127,6 @@ impl From<&Light> for GpuLightInfo {
             direction,
             extras,
             ty: [ty, 0, 0, 0],
-            viewport: [0.0, 0.0, 64.0, 64.0],
         }
     }
 }
@@ -374,30 +373,76 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             eye: Point4::new(pov.location[0], pov.location[1], pov.location[2], 0.0),
             view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * pov.view(),
             projection,
+            viewport_size_offset: vector![
+                0.0,
+                0.0,
+                backbuffer.size.width as f32,
+                backbuffer.size.height as f32
+            ],
         }];
+        let mut x = 0.0;
+        let mut y = 0.0;
+        let collected_active_lights: Vec<GpuLightInfo> =
+            scene.all_enabled_lights().map(|l| l.into()).collect();
+        let light_povs = scene
+            .all_lights()
+            .iter()
+            .filter(|l| l.enabled)
+            .flat_map(|l| {
+                l.shadow_view_matrices()
+                    .iter()
+                    .map(|v| {
+                        let w = 64.0;
+                        let h = 64.0;
 
-        per_frame_data.extend(scene.all_lights().iter().filter(|l| l.enabled).map(|l| {
-            PerFrameData {
-                eye: Point4::new(l.position.x, l.position.y, l.position.z, 0.0),
-                view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * l.view_matrix(),
-                projection: l.projection_matrix(),
-            }
-        }));
+                        let pfd = Some(PerFrameData {
+                            eye: Point4::new(l.position.x, l.position.y, l.position.z, 0.0),
+                            view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * v,
+                            projection: l.projection_matrix(),
+                            viewport_size_offset: vector![x, y, w, h],
+                        });
+
+                        x += w;
+                        if x > SHADOW_MAP_WIDTH as f32 {
+                            if (y + h) <= SHADOW_MAP_HEIGHT as f32 {
+                                x = 0.0;
+                                y += h;
+                            } else {
+                                return None;
+                            }
+                        }
+                        pfd
+                    })
+                    .take_while(|l| l.is_some())
+                    .collect::<Vec<_>>()
+            })
+            .filter_map(|x| x);
+
+        per_frame_data.extend(light_povs);
 
         super::app_state()
             .gpu
-            .write_buffer_data(&current_buffers.camera_buffer, &per_frame_data)
+            .write_buffer_data_with_offset(
+                &current_buffers.camera_buffer,
+                0,
+                &[per_frame_data.len() as u32 - 1],
+            )
             .unwrap();
-
-        let collected_active_lights: Vec<GpuLightInfo> =
-            scene.all_enabled_lights().map(|l| l.into()).collect();
+        super::app_state()
+            .gpu
+            .write_buffer_data_with_offset(
+                &current_buffers.camera_buffer,
+                size_of::<u32>() as u64 * 4,
+                &per_frame_data,
+            )
+            .unwrap();
 
         super::app_state()
             .gpu
             .write_buffer_data_with_offset(
                 &current_buffers.light_buffer,
                 0,
-                &[collected_active_lights.len() as u64],
+                &[collected_active_lights.len() as u32],
             )
             .unwrap();
         super::app_state()
@@ -538,8 +583,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .begin_render_pass(
                 "ShadowMapRendering",
                 Extent2D {
-                    width: 512,
-                    height: 512,
+                    width: SHADOW_MAP_WIDTH,
+                    height: SHADOW_MAP_HEIGHT,
                 },
             )?
             .writes_attachments(&[shadow_map])
@@ -826,22 +871,24 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             );
         });
         context.register_callback(&shadow_map_pass, |_: &Gpu, ctx| {
-            ctx.render_pass_command.set_viewport(gpu::Viewport {
-                x: 0.0,
-                y: 0.0,
-                width: 64.0,
-                height: 64.0,
-                min_depth: 0.0,
-                max_depth: 1.0,
-            });
+            for (i, pov) in per_frame_data.iter().enumerate().skip(1) {
+                ctx.render_pass_command.set_viewport(gpu::Viewport {
+                    x: pov.viewport_size_offset.x,
+                    y: pov.viewport_size_offset.y,
+                    width: pov.viewport_size_offset.z,
+                    height: pov.viewport_size_offset.w,
+                    min_depth: 0.0,
+                    max_depth: 1.0,
+                });
 
-            Self::main_render_loop(
-                resource_map,
-                PipelineTarget::DepthOnly,
-                &draw_hashmap,
-                1,
-                ctx,
-            );
+                Self::main_render_loop(
+                    resource_map,
+                    PipelineTarget::DepthOnly,
+                    &draw_hashmap,
+                    i as _,
+                    ctx,
+                );
+            }
         });
         context.register_callback(&gbuffer_pass, |_: &Gpu, ctx| {
             Self::main_render_loop(

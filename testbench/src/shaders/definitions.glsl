@@ -12,6 +12,7 @@ struct PerFrameData {
     vec4 eye;
     mat4 view;
     mat4 proj;
+    vec4 viewport_size_offset;
 };
 
 const float PI = 3.14159265359;

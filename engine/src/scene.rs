@@ -68,19 +68,53 @@ impl Light {
         }
     }
 
-    pub(crate) fn view_matrix(&self) -> Matrix4<f32> {
-        Matrix4::look_at_rh(
-            &self.position,
-            &(&self.position + self.direction()),
-            &vector![0.0, 1.0, 0.0],
-        )
+    pub(crate) fn shadow_view_matrices(&self) -> Vec<Matrix4<f32>> {
+        match self.ty {
+            LightType::Point => vec![
+                Matrix4::look_at_rh(
+                    &self.position,
+                    &(&self.position + vector![0.0, 1.0, 0.0]),
+                    &vector![0.0, 1.0, 0.0],
+                ),
+                Matrix4::look_at_rh(
+                    &self.position,
+                    &(&self.position + vector![0.0, -1.0, 0.0]),
+                    &vector![0.0, 1.0, 0.0],
+                ),
+                Matrix4::look_at_rh(
+                    &self.position,
+                    &(&self.position + vector![1.0, 0.0, 0.0]),
+                    &vector![0.0, 1.0, 0.0],
+                ),
+                Matrix4::look_at_rh(
+                    &self.position,
+                    &(&self.position + vector![-1.0, 0.0, 0.0]),
+                    &vector![0.0, 1.0, 0.0],
+                ),
+                Matrix4::look_at_rh(
+                    &self.position,
+                    &(&self.position + vector![0.0, 0.0, 1.0]),
+                    &vector![0.0, 1.0, 0.0],
+                ),
+                Matrix4::look_at_rh(
+                    &self.position,
+                    &(&self.position + vector![0.0, 0.0, -1.0]),
+                    &vector![0.0, 1.0, 0.0],
+                ),
+            ],
+            _ => vec![Matrix4::look_at_rh(
+                &self.position,
+                &(&self.position + self.direction()),
+                &vector![0.0, 1.0, 0.0],
+            )],
+        }
     }
 
     pub(crate) fn projection_matrix(&self) -> Matrix4<f32> {
         match self.ty {
-            LightType::Point => todo!(),
+            LightType::Point => Matrix4::new_perspective(1.0, 45.0f32.to_radians(), 0.01, self.radius),
             LightType::Directional { .. } => {
-                Matrix4::new_orthographic(-256.0, 256.0, -256.0, 256.0, 0.01, self.radius)
+                Matrix4::new_orthographic(-32.0, 32.0, -32.0, 32.0, 0.01, self.radius)
             }
             LightType::Spotlight {
                 outer_cone_degrees, ..

@@ -55,14 +55,16 @@ impl GLTFViewer {
                     LightType::Spotlight { .. } => "Spotlight",
                     LightType::Rect { .. } => "Rect",
                 };
+                let id = ui.new_id(i);
+
                 ui.text(&format!("{light_string} light nr. #{i}"));
                 ui.indent();
                 ui.checkbox("Enabled", &mut l.enabled);
                 ui.input_float3("Position", &mut l.position.coords.data.0[0])
                     .build();
                 ui.input_float3("Color", &mut l.color.data.0[0]).build();
-                ui.slider("Intensity", 0.0, 100000.0, &mut l.intensity);
-                ui.slider("Radius", 0.0, 100000.0, &mut l.radius);
+                ui.slider("Intensity", 0.0, 1000.0, &mut l.intensity);
+                ui.slider("Radius", 0.0, 1000.0, &mut l.radius);
                 match &mut l.ty {
                     LightType::Point => {}
                     LightType::Directional { direction } => {
@@ -92,6 +94,7 @@ impl GLTFViewer {
                 }
                 ui.unindent();
                 ui.separator();
+                drop(id);
             });
         group.end();
     }
@@ -265,28 +268,28 @@ fn add_scene_lights(scene: &mut Scene) -> LightHandle {
     //     intensity: 1.0,
     //     enabled: true,
     // });
-    // scene.add_light(Light {
-    //     ty: LightType::Directional {
-    //         direction: vector![-0.45, -0.45, 0.0],
-    //     },
-    //     position: point![100.0, 100.0, 0.0],
-    //     radius: 10.0,
-    //     color: vector![1.0, 1.0, 1.0],
-    //     intensity: 1.0,
-    //     enabled: true,
-    // });
     scene.add_light(Light {
-        ty: LightType::Spotlight {
-            direction: vector![0.45, -0.45, 0.0],
-            inner_cone_degrees: 15.0,
-            outer_cone_degrees: 35.0,
+        ty: LightType::Directional {
+            direction: vector![-0.45, -0.45, 0.0],
         },
         position: point![100.0, 100.0, 0.0],
-        radius: 100.0,
+        radius: 10.0,
         color: vector![1.0, 1.0, 1.0],
-        intensity: 10.0,
+        intensity: 1.0,
         enabled: true,
     })
+    //scene.add_light(Light {
+    //    ty: LightType::Spotlight {
+    //        direction: vector![0.45, -0.45, 0.0],
+    //        inner_cone_degrees: 15.0,
+    //        outer_cone_degrees: 35.0,
+    //    },
+    //    position: point![100.0, 100.0, 0.0],
+    //    radius: 100.0,
+    //    color: vector![1.0, 1.0, 1.0],
+    //    intensity: 10.0,
+    //    enabled: true,
+    //})
 }
 
 fn main() -> anyhow::Result<()> {

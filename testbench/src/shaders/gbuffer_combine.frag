@@ -16,7 +16,9 @@ layout(set = 0, binding = 4) uniform sampler2D pbrSampler;
 layout(set = 0, binding = 5) uniform sampler2DShadow shadowMap;
 
 layout(set = 0, binding = 6) readonly buffer  PerFrameDataBlock {
-    PerFrameData pfd[];
+    uint shadow_count;
+    PerFrameData camera;
+    PerFrameData shadows[];
 } per_frame_data;
 
 layout(set = 0, binding = 7, std140) readonly buffer LightData {
@@ -34,24 +36,29 @@ struct FragmentInfo {
 };
 
 vec3 get_unnormalized_light_direction(LightInfo info, FragmentInfo frag_info) {
-    if (info.type == DIRECTIONAL_LIGHT || info.type == SPOT_LIGHT) {
+    if (info.type == DIRECTIONAL_LIGHT) {
+        return info.direction.xyz;
+    } else if (info.type == SPOT_LIGHT) {
         return info.direction.xyz;
     } else {
         return frag_info.position - info.position_radius.xyz ;
     }
 }
 
-float shadow_influence(float shadow_bias_scale, FragmentInfo frag_info, LightInfo light) {
+float shadow_influence(uint shadow_index, float shadow_bias_scale, FragmentInfo frag_info) {
     vec2 tex_size = textureSize(shadowMap, 0);
     float max_shadow_bias = 0.0005;
     float shadow_bias = shadow_bias_scale * max_shadow_bias;
-    mat4 light_vp = per_frame_data.pfd[1].proj * per_frame_data.pfd[1].view;
+
+    PerFrameData shadow = per_frame_data.shadows[shadow_index];
+
+    mat4 light_vp = shadow.proj * shadow.view;
     vec4 frag_pos_light_unnorm = light_vp * vec4(frag_info.position, 1.0);
     vec4 frag_pos_light = frag_pos_light_unnorm / frag_pos_light_unnorm.w;
     frag_pos_light.xy = frag_pos_light.xy * 0.5 + 0.5;
 
-    vec2 scaled_light_offset = light.extents_offset_size.xy / tex_size;
-    vec2 scaled_light_size = light.extents_offset_size.zw / tex_size;
+    vec2 scaled_light_offset = shadow.viewport_size_offset.xy / tex_size;
+    vec2 scaled_light_size = shadow.viewport_size_offset.zw / tex_size;
 
     frag_pos_light.xy *=  scaled_light_size;
     frag_pos_light.xy += scaled_light_offset;
@@ -80,7 +87,7 @@ vec3 get_light_intensity(float n_dot_l, LightInfo light, FragmentInfo frag_info)
         i *= cutoff;
         i *= attenuation;
     }
-    return i * shadow_influence(clamp(tan(acos(n_dot_l)), 0.1, 1.0), frag_info, light);
+    return i;
 }
 
 FragmentInfo get_fragment_info(vec2 in_uv) {
@@ -162,7 +169,7 @@ vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, LightInfo light_
 
 vec3 calculate_light_influence(FragmentInfo frag_info) {
     vec3 ck = vec3(0.0);
-    vec3 view = normalize(per_frame_data.pfd[0].eye.xyz - frag_info.position);
+    vec3 view = normalize(per_frame_data.camera.eye.xyz - frag_info.position);
     
     for (uint i = 0; i < light_data.light_count; i ++) {
         ck += cook_torrance(view, frag_info, light_data.lights[i]);
@@ -170,6 +177,19 @@ vec3 calculate_light_influence(FragmentInfo frag_info) {
     
     return ck + 0.5 * frag_info.diffuse;
 }
+
+float calculate_shadow_influence(FragmentInfo frag_info) {
+    float shadow = 0.0;
+    
+    for (uint i = 0; i < per_frame_data.shadow_count; i ++) {
+        vec3 shadow0loc = per_frame_data.shadows[0].eye.xyz;
+        float l_dot_n = clamp(dot(shadow0loc - frag_info.position, frag_info.normal), 0.0, 1.0);
+
+        shadow += shadow_influence(i, clamp(tan(acos(l_dot_n)), 0.1, 1.0), frag_info) * 1.0 / float(per_frame_data.shadow_count);
+    }
+    return shadow;
+}
+
 
 vec3 rgb(int r, int g, int b) {
     return vec3(
@@ -181,6 +201,7 @@ vec3 rgb(int r, int g, int b) {
 
 void main() {
     FragmentInfo fragInfo = get_fragment_info(uv);
-    vec3 light_a = calculate_light_influence(fragInfo);
+    float shadow = calculate_shadow_influence(fragInfo);
+    vec3 light_a = calculate_light_influence(fragInfo) * max(shadow, 0.4);
     color = vec4(light_a, 1.0) + fragInfo.emissive;
 }
