@@ -41,10 +41,10 @@ vec3 get_unnormalized_light_direction(LightInfo info, FragmentInfo frag_info) {
     }
 }
 
-float shadow_influence(FragmentInfo frag_info, LightInfo light) {
+float shadow_influence(float shadow_bias_scale, FragmentInfo frag_info, LightInfo light) {
     vec2 tex_size = textureSize(shadowMap, 0);
     float max_shadow_bias = 0.0005;
-    float shadow_bias = (1.0 - dot(frag_info.normal, vec3(0, 1, 0))) * max_shadow_bias;
+    float shadow_bias = shadow_bias_scale * max_shadow_bias;
     mat4 light_vp = per_frame_data.pfd[1].proj * per_frame_data.pfd[1].view;
     vec4 frag_pos_light_unnorm = light_vp * vec4(frag_info.position, 1.0);
     vec4 frag_pos_light = frag_pos_light_unnorm / frag_pos_light_unnorm.w;
@@ -80,7 +80,7 @@ vec3 get_light_intensity(float n_dot_l, LightInfo light, FragmentInfo frag_info)
         i *= cutoff;
         i *= attenuation;
     }
-    return i * shadow_influence(frag_info, light);
+    return i * shadow_influence(clamp(tan(acos(n_dot_l)), 0.1, 1.0), frag_info, light);
 }
 
 FragmentInfo get_fragment_info(vec2 in_uv) {
