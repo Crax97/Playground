@@ -451,7 +451,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             samples: 1,
             present: false,
             clear_value: ClearValue::Depth(1.0),
-            sampler_state: None,
+            sampler_state: Some(crate::SamplerState {
+                compare_op: Some(gpu::CompareOp::LessEqual),
+            }),
         };
         let framebuffer_swapchain_desc = crate::ImageDescription {
             width: backbuffer.size.width,
