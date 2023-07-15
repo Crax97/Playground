@@ -42,7 +42,8 @@ vec3 get_unnormalized_light_direction(LightInfo info, FragmentInfo frag_info) {
 }
 
 float shadow_influence(FragmentInfo frag_info) {
-    float shadow_bias = 0.0005;
+    float max_shadow_bias = 0.0005;
+    float shadow_bias = (1.0 - dot(frag_info.normal, vec3(0, 1, 0))) * max_shadow_bias;
     mat4 light_vp = per_frame_data.pfd[1].proj * per_frame_data.pfd[1].view;
     vec4 frag_pos_light_unnorm = light_vp * vec4(frag_info.position, 1.0);
     vec4 frag_pos_light = frag_pos_light_unnorm / frag_pos_light_unnorm.w;
