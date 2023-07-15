@@ -1,20 +1,24 @@
 use core::panic;
 use std::{ffi::CString, ops::Deref};
 
-use ash::{extensions::ext::DebugUtils, prelude::VkResult, RawPtr, vk::{
-    self, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
-    CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags, IndexType, Offset2D,
-    PipelineBindPoint, PipelineStageFlags, Rect2D, ShaderStageFlags,
-    StructureType, SubmitInfo, Viewport,
-    ClearDepthStencilValue
-}};
-use ash::vk::{ImageLayout, RenderingAttachmentInfoKHR, RenderingFlags, RenderingInfoKHR, ResolveModeFlags};
-
-use crate::{GPUFence, GPUSemaphore, GpuImage, ToVk, GpuImageView};
-
-use super::{
-    Gpu, GpuBuffer, GpuDescriptorSet, Pipeline, QueueType,
+use ash::vk::{
+    ImageLayout, RenderingAttachmentInfoKHR, RenderingFlags, RenderingInfoKHR, ResolveModeFlags,
 };
+use ash::{
+    extensions::ext::DebugUtils,
+    prelude::VkResult,
+    vk::{
+        self, ClearDepthStencilValue, CommandBufferAllocateInfo, CommandBufferBeginInfo,
+        CommandBufferLevel, CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags, Extent2D,
+        IndexType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D, ShaderStageFlags,
+        StructureType, SubmitInfo,
+    },
+    RawPtr,
+};
+
+use crate::{GPUFence, GPUSemaphore, GpuImage, GpuImageView, ToVk};
+
+use super::{Gpu, GpuBuffer, GpuDescriptorSet, Pipeline, QueueType};
 
 #[derive(Default)]
 pub struct CommandBufferSubmitInfo<'a> {
@@ -388,13 +392,11 @@ pub enum StencilLoadOp {
     Clear(u8),
 }
 
-
-
-impl ToVk for ColorLoadOp{
+impl ToVk for ColorLoadOp {
     type Inner = vk::AttachmentLoadOp;
 
     fn to_vk(&self) -> Self::Inner {
-        use ColorLoadOp::{DontCare, Load, Clear};
+        use ColorLoadOp::{Clear, DontCare, Load};
         match self {
             DontCare => Self::Inner::DONT_CARE,
             Load => Self::Inner::LOAD,
@@ -402,13 +404,12 @@ impl ToVk for ColorLoadOp{
         }
     }
 }
-
 
 impl ToVk for DepthLoadOp {
     type Inner = vk::AttachmentLoadOp;
 
     fn to_vk(&self) -> Self::Inner {
-        use DepthLoadOp::{DontCare, Load, Clear};
+        use DepthLoadOp::{Clear, DontCare, Load};
         match self {
             DontCare => Self::Inner::DONT_CARE,
             Load => Self::Inner::LOAD,
@@ -417,12 +418,11 @@ impl ToVk for DepthLoadOp {
     }
 }
 
-
 impl ToVk for StencilLoadOp {
     type Inner = vk::AttachmentLoadOp;
 
     fn to_vk(&self) -> Self::Inner {
-        use StencilLoadOp::{DontCare, Load, Clear};
+        use StencilLoadOp::{Clear, DontCare, Load};
         match self {
             DontCare => Self::Inner::DONT_CARE,
             Load => Self::Inner::LOAD,
@@ -443,7 +443,32 @@ impl ToVk for AttachmentStoreOp {
     fn to_vk(&self) -> Self::Inner {
         match self {
             AttachmentStoreOp::DontCare => Self::Inner::DONT_CARE,
-            AttachmentStoreOp::Store => Self::Inner::STORE
+            AttachmentStoreOp::Store => Self::Inner::STORE,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub struct Viewport {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub min_depth: f32,
+    pub max_depth: f32,
+}
+
+impl ToVk for Viewport {
+    type Inner = vk::Viewport;
+
+    fn to_vk(&self) -> Self::Inner {
+        vk::Viewport {
+            x: self.x,
+            y: self.y,
+            width: self.width,
+            height: self.height,
+            min_depth: self.min_depth,
+            max_depth: self.max_depth,
         }
     }
 }
@@ -482,28 +507,10 @@ pub struct BeginRenderPassInfo<'a> {
 
 impl<'c, 'g> RenderPassCommand<'c, 'g> {
     fn new(command_buffer: &'c mut CommandBuffer<'g>, info: &BeginRenderPassInfo<'c>) -> Self {
-        let color_attachments: Vec<_> = info.color_attachments.iter().map(|attch| {
-           RenderingAttachmentInfoKHR {
-               s_type: StructureType::RENDERING_ATTACHMENT_INFO,
-               p_next: std::ptr::null(),
-               image_view: attch.image_view.inner,
-               image_layout: attch.initial_layout,
-               resolve_mode: ResolveModeFlags::NONE,
-               resolve_image_view: vk::ImageView::null(),
-               resolve_image_layout: ImageLayout::UNDEFINED,
-               load_op: attch.load_op.to_vk(),
-               store_op: attch.store_op.to_vk(),
-               clear_value: match attch.load_op {
-                   ColorLoadOp::Clear(color) => {ash::vk::ClearValue {
-                       color: ash::vk::ClearColorValue { float32: color}
-                   }}
-                   _ => ash::vk::ClearValue::default()
-               }
-           } 
-        }).collect();
-
-        let depth_attachment = info.depth_attachment.map(|attch| {
-            RenderingAttachmentInfoKHR {
+        let color_attachments: Vec<_> = info
+            .color_attachments
+            .iter()
+            .map(|attch| RenderingAttachmentInfoKHR {
                 s_type: StructureType::RENDERING_ATTACHMENT_INFO,
                 p_next: std::ptr::null(),
                 image_view: attch.image_view.inner,
@@ -514,18 +521,40 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 load_op: attch.load_op.to_vk(),
                 store_op: attch.store_op.to_vk(),
                 clear_value: match attch.load_op {
-                    DepthLoadOp::Clear(d) => {ash::vk::ClearValue {
+                    ColorLoadOp::Clear(color) => ash::vk::ClearValue {
+                        color: ash::vk::ClearColorValue { float32: color },
+                    },
+                    _ => ash::vk::ClearValue::default(),
+                },
+            })
+            .collect();
+
+        let depth_attachment = info
+            .depth_attachment
+            .map(|attch| RenderingAttachmentInfoKHR {
+                s_type: StructureType::RENDERING_ATTACHMENT_INFO,
+                p_next: std::ptr::null(),
+                image_view: attch.image_view.inner,
+                image_layout: attch.initial_layout,
+                resolve_mode: ResolveModeFlags::NONE,
+                resolve_image_view: vk::ImageView::null(),
+                resolve_image_layout: ImageLayout::UNDEFINED,
+                load_op: attch.load_op.to_vk(),
+                store_op: attch.store_op.to_vk(),
+                clear_value: match attch.load_op {
+                    DepthLoadOp::Clear(d) => ash::vk::ClearValue {
                         depth_stencil: ClearDepthStencilValue {
                             depth: d,
                             stencil: 255,
-                        }}}
-                    _ => ash::vk::ClearValue::default()
-                }
-            }
-        });
+                        },
+                    },
+                    _ => ash::vk::ClearValue::default(),
+                },
+            });
 
-        let stencil_attachment = info.stencil_attachment.map(|attch| {
-            RenderingAttachmentInfoKHR {
+        let stencil_attachment = info
+            .stencil_attachment
+            .map(|attch| RenderingAttachmentInfoKHR {
                 s_type: StructureType::RENDERING_ATTACHMENT_INFO,
                 p_next: std::ptr::null(),
                 image_view: attch.image_view.inner,
@@ -536,16 +565,16 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 load_op: attch.load_op.to_vk(),
                 store_op: attch.store_op.to_vk(),
                 clear_value: match attch.load_op {
-                    StencilLoadOp::Clear(s) => {ash::vk::ClearValue {
+                    StencilLoadOp::Clear(s) => ash::vk::ClearValue {
                         depth_stencil: ClearDepthStencilValue {
                             depth: 0.0,
                             stencil: s as _,
-                        }}}
-                    _ => ash::vk::ClearValue::default()
-                }
-            }
-        });
-        
+                        },
+                    },
+                    _ => ash::vk::ClearValue::default(),
+                },
+            });
+
         let create_info = RenderingInfoKHR {
             s_type: StructureType::RENDERING_INFO_KHR,
             p_next: std::ptr::null(),
@@ -557,13 +586,13 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
             p_color_attachments: color_attachments.as_ptr(),
             p_depth_attachment: depth_attachment.as_ref().as_raw_ptr(),
             p_stencil_attachment: stencil_attachment.as_ref().as_raw_ptr(),
-            
         };
         unsafe {
-            command_buffer.gpu.state.dynamic_rendering.cmd_begin_rendering(
-                command_buffer.inner_command_buffer,
-                &create_info,
-            );
+            command_buffer
+                .gpu
+                .state
+                .dynamic_rendering
+                .cmd_begin_rendering(command_buffer.inner_command_buffer, &create_info);
         };
 
         Self {
@@ -631,6 +660,10 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         }
     }
 
+    pub fn set_viewport(&mut self, viewport: Viewport) {
+        self.viewport_area = Some(viewport);
+    }
+
     fn prepare_draw(&self) {
         let device = self.command_buffer.gpu.vk_logical_device();
 
@@ -655,7 +688,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
             },
         };
         unsafe {
-            device.cmd_set_viewport(self.command_buffer.inner(), 0, &[viewport]);
+            device.cmd_set_viewport(self.command_buffer.inner(), 0, &[viewport.to_vk()]);
             device.cmd_set_scissor(self.command_buffer.inner(), 0, &[scissor]);
         }
     }
@@ -728,6 +761,12 @@ impl<'c, 'g> Deref for RenderPassCommand<'c, 'g> {
 
 impl<'c, 'g> Drop for RenderPassCommand<'c, 'g> {
     fn drop(&mut self) {
-        unsafe { self.command_buffer.gpu.state.dynamic_rendering.cmd_end_rendering(self.command_buffer.inner_command_buffer) };
+        unsafe {
+            self.command_buffer
+                .gpu
+                .state
+                .dynamic_rendering
+                .cmd_end_rendering(self.command_buffer.inner_command_buffer)
+        };
     }
 }

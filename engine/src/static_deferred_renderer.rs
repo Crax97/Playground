@@ -76,6 +76,7 @@ struct GpuLightInfo {
     color: Vector4<f32>,
     extras: Vector4<f32>,
     ty: [u32; 4],
+    viewport: [f32; 4],
 }
 
 impl From<&Light> for GpuLightInfo {
@@ -122,6 +123,7 @@ impl From<&Light> for GpuLightInfo {
             direction,
             extras,
             ty: [ty, 0, 0, 0],
+            viewport: [0.0, 0.0, 64.0, 64.0],
         }
     }
 }
@@ -820,6 +822,15 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             );
         });
         context.register_callback(&shadow_map_pass, |_: &Gpu, ctx| {
+            ctx.render_pass_command.set_viewport(gpu::Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: 64.0,
+                height: 64.0,
+                min_depth: 0.0,
+                max_depth: 1.0,
+            });
+
             Self::main_render_loop(
                 resource_map,
                 PipelineTarget::DepthOnly,

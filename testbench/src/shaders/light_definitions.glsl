@@ -4,6 +4,7 @@ struct LightInfo {
     vec4 color_intensity;
     vec4 extras;
     uint type;
+    vec4 extents_offset_size;
 };
 
 const uint POINT_LIGHT = 0;
