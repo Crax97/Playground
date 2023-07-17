@@ -1,7 +1,7 @@
 use std::ptr::addr_of;
 use std::{ffi::CString, sync::Arc};
 
-use ash::vk::{Format, PipelineRenderingCreateInfoKHR};
+use ash::vk::{CullModeFlags, Format, PipelineRenderingCreateInfoKHR};
 use ash::{
     prelude::VkResult,
     vk::{
@@ -169,6 +169,18 @@ pub enum CullMode {
     None,
     FrontAndBack,
 }
+impl ToVk for CullMode {
+    type Inner = vk::CullModeFlags;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            CullMode::Back => CullModeFlags::BACK,
+            CullMode::Front => CullModeFlags::FRONT,
+            CullMode::None => CullModeFlags::NONE,
+            CullMode::FrontAndBack => CullModeFlags::FRONT_AND_BACK,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, Hash)]
 pub enum FrontFace {
@@ -177,6 +189,16 @@ pub enum FrontFace {
     ClockWise,
 }
 
+impl ToVk for FrontFace {
+    type Inner = vk::FrontFace;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            FrontFace::CounterClockWise => vk::FrontFace::COUNTER_CLOCKWISE,
+            FrontFace::ClockWise => vk::FrontFace::CLOCKWISE,
+        }
+    }
+}
 #[derive(Copy, Clone, Default)]
 pub struct DepthStencilState {
     pub depth_test_enable: bool,
@@ -454,10 +476,7 @@ impl std::hash::Hash for Pipeline {
 }
 
 impl Pipeline {
-    pub fn new(
-        gpu: &Gpu,
-        pipeline_description: &PipelineDescription,
-    ) -> VkResult<Self> {
+    pub fn new(gpu: &Gpu, pipeline_description: &PipelineDescription) -> VkResult<Self> {
         let descriptor_set_layouts = pipeline_description.create_descriptor_set_layouts(gpu)?;
         let color_blend_attachments = pipeline_description.get_output_attachments();
         let mut stages = vec![];
@@ -641,13 +660,19 @@ impl Pipeline {
                 blend_constants: [0.0, 0.0, 0.0, 0.0],
             };
 
+            let dynamic_state_flags = [
+                DynamicState::VIEWPORT,
+                DynamicState::SCISSOR,
+                DynamicState::FRONT_FACE,
+                DynamicState::CULL_MODE,
+            ];
+
             let dynamic_state = PipelineDynamicStateCreateInfo {
                 s_type: StructureType::PIPELINE_DYNAMIC_STATE_CREATE_INFO,
                 p_next: std::ptr::null(),
                 flags: PipelineDynamicStateCreateFlags::empty(),
-                dynamic_state_count: 2,
-                p_dynamic_states: &[DynamicState::VIEWPORT, DynamicState::SCISSOR]
-                    as *const DynamicState,
+                dynamic_state_count: dynamic_state_flags.len() as _,
+                p_dynamic_states: dynamic_state_flags.as_ptr(),
             };
 
             let color_attachment = pipeline_description

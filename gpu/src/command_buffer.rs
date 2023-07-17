@@ -16,7 +16,7 @@ use ash::{
     RawPtr,
 };
 
-use crate::{GPUFence, GPUSemaphore, GpuImage, GpuImageView, ToVk};
+use crate::{CullMode, FrontFace, GPUFence, GPUSemaphore, GpuImage, GpuImageView, ToVk};
 
 use super::{Gpu, GpuBuffer, GpuDescriptorSet, Pipeline, QueueType};
 
@@ -687,6 +687,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 extent: self.render_area.extent,
             },
         };
+
         unsafe {
             device.cmd_set_viewport(self.command_buffer.inner(), 0, &[viewport.to_vk()]);
             device.cmd_set_scissor(self.command_buffer.inner(), 0, &[scissor]);
