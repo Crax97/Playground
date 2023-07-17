@@ -166,30 +166,30 @@ vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, LightInfo light_
     return vec3(o);
 }
 
+float calculate_shadow_influence(FragmentInfo frag_info) {
+    float shadow = 0.0;
+    
+    for (uint i = 0; i < per_frame_data.shadow_count; i ++) {
+        vec3 shadow_location = per_frame_data.shadows[i].eye.xyz;
+        float l_dot_n = clamp(dot(shadow_location - frag_info.position, frag_info.normal), 0.0, 1.0);
+
+        shadow += shadow_influence(i, 1.0 - clamp(tan(acos(l_dot_n)), 0.1, 1.0), frag_info) * 1.0 / float(per_frame_data.shadow_count);
+    }
+    return shadow;
+}
 
 vec3 calculate_light_influence(FragmentInfo frag_info) {
     vec3 ck = vec3(0.0);
     vec3 view = normalize(per_frame_data.camera.eye.xyz - frag_info.position);
     
+    float shadow = calculate_shadow_influence(frag_info);
+
     for (uint i = 0; i < light_data.light_count; i ++) {
         ck += cook_torrance(view, frag_info, light_data.lights[i]);
     }
     
-    return ck + 0.5 * frag_info.diffuse;
+    return ck * frag_info.diffuse * max(shadow, 0.1);
 }
-
-float calculate_shadow_influence(FragmentInfo frag_info) {
-    float shadow = 0.0;
-    
-    for (uint i = 0; i < per_frame_data.shadow_count; i ++) {
-        vec3 shadow0loc = per_frame_data.shadows[0].eye.xyz;
-        float l_dot_n = clamp(dot(shadow0loc - frag_info.position, frag_info.normal), 0.0, 1.0);
-
-        shadow += shadow_influence(i, clamp(tan(acos(l_dot_n)), 0.1, 1.0), frag_info) * 1.0 / float(per_frame_data.shadow_count);
-    }
-    return shadow;
-}
-
 
 vec3 rgb(int r, int g, int b) {
     return vec3(
@@ -201,7 +201,6 @@ vec3 rgb(int r, int g, int b) {
 
 void main() {
     FragmentInfo fragInfo = get_fragment_info(uv);
-    float shadow = calculate_shadow_influence(fragInfo);
-    vec3 light_a = calculate_light_influence(fragInfo) * max(shadow, 0.4);
+    vec3 light_a = calculate_light_influence(fragInfo);
     color = vec4(light_a, 1.0) + fragInfo.emissive;
 }

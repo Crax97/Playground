@@ -87,7 +87,7 @@ impl From<&Light> for GpuLightInfo {
     fn from(light: &Light) -> Self {
         let (direction, extras, ty) = match light.ty {
             LightType::Point => (Default::default(), Default::default(), 0),
-            LightType::Directional { direction } => (
+            LightType::Directional { direction, .. } => (
                 vector![direction.x, direction.y, direction.z, 0.0],
                 Default::default(),
                 1,
@@ -387,13 +387,13 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let light_povs = scene
             .all_lights()
             .iter()
-            .filter(|l| l.enabled)
+            .filter(|l| l.enabled && l.shadow_setup.is_some())
             .flat_map(|l| {
                 l.shadow_view_matrices()
                     .iter()
                     .map(|v| {
-                        let w = 64.0;
-                        let h = 64.0;
+                        let w = l.shadow_setup.unwrap().width as f32;
+                        let h = l.shadow_setup.unwrap().height as f32;
 
                         let pfd = Some(PerFrameData {
                             eye: Point4::new(l.position.x, l.position.y, l.position.z, 0.0),
