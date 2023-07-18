@@ -46,12 +46,12 @@ vec3 get_unnormalized_light_direction(LightInfo info, FragmentInfo frag_info) {
     }
 }
 
-vec3 get_light_intensity(float n_dot_l, LightInfo light, FragmentInfo frag_info) {
+float get_light_mask(float n_dot_l, LightInfo light, FragmentInfo frag_info) {
     float attenuation = 1.0;
     vec3 light_dir = light.position_radius.xyz - frag_info.position;
     float light_distance = length(light_dir);
     light_dir /= light_distance;
-    vec3 i = light.color_intensity.rgb * light.color_intensity.a;
+    float i = 1.0;
     float light_distance_normalized = clamp(light_distance / light.position_radius.w, 0.0, 1.0);
     attenuation = 1.0 / (light_distance_normalized * light_distance_normalized + 0.01);
     if (light.type == POINT_LIGHT) {
@@ -110,14 +110,7 @@ float d_trowbridge_reitz_ggx(float n_dot_h, float rough)
     return a_2 / (PI * d * d);
 }
 
-vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, LightInfo light_info) {
-
-    vec3 light_dir = normalize(-get_unnormalized_light_direction(light_info, frag_info));
-    float l_dot_n = max(dot(light_dir, frag_info.normal), 0.0);
-    vec3 light_radiance = get_light_intensity(l_dot_n, light_info, frag_info);
-    
-    vec3 h = normalize(view_direction + light_dir);
-    
+vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, float l_dot_n, vec3 h) {
     float v_dot_n = max(dot(view_direction, frag_info.normal), 0.0);
     float n_dot_h = max(dot(frag_info.normal, h), 0.0);
     float h_dot_v = max(dot(h, view_direction), 0.0);
@@ -140,7 +133,7 @@ vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, LightInfo light_
     vec3 lambert = frag_info.diffuse / PI;
     vec3 ks = f;
     vec3 kd = mix(vec3(1.0) - f, vec3(0.0), frag_info.metalness);
-    vec3 o = (kd * lambert + s_cook_torrance) * light_radiance * l_dot_n;
+    vec3 o = (kd * lambert + s_cook_torrance) * l_dot_n;
     return vec3(o);
 }
 
@@ -174,7 +167,7 @@ float calculate_shadow_influence(FragmentInfo frag_info) {
         shadow += shadow_influence(i, frag_info);
     }
 
-    return shadow;
+    return min(shadow, 1.0);
 }
 
 vec3 lit_fragment(FragmentInfo frag_info) {
@@ -184,10 +177,20 @@ vec3 lit_fragment(FragmentInfo frag_info) {
     vec3 ambient_color = light_data.ambient_light_color.xyz * light_data.ambient_light_color.w ;
     
     vec3 light_color = vec3(0.0);
-    for (uint i = 0; i < light_data.light_count; i ++) {
-        light_color += cook_torrance(view, frag_info, light_data.lights[i]);
-    }
+
     float light_fragment_visibility = calculate_shadow_influence(frag_info);
+    float overall_mask = 0.0;
+    for (uint i = 0; i < light_data.light_count; i ++) {
+
+        LightInfo light_info = light_data.lights[i];
+        
+        vec3 light_dir = normalize(-get_unnormalized_light_direction(light_info, frag_info));
+        float l_dot_n = max(dot(light_dir, frag_info.normal), 0.0);
+        vec3 h = normalize(view + light_dir);
+        float light_mask = get_light_mask(l_dot_n, light_info, frag_info);
+        overall_mask += light_mask;
+        light_color += cook_torrance(view, frag_info, l_dot_n, h) * light_mask * light_info.color_intensity.xyz * light_info.color_intensity.w;
+    }
     
     return frag_info.diffuse * (ambient_color + light_color * light_fragment_visibility);
 }
