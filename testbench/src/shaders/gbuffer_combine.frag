@@ -132,7 +132,6 @@ vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, LightInfo light_
     vec3 dfg = d * g * f;
     
     const float eps = 0.0001;
-    return dfg * light_radiance;
     
     float denom = max(4.0 * (l_dot_n * v_dot_n), eps);
     vec3 s_cook_torrance = dfg / denom;
@@ -147,21 +146,17 @@ vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, LightInfo light_
 
 float shadow_influence(uint shadow_index, FragmentInfo frag_info) {
     vec2 tex_size = textureSize(shadowMap, 0);
-    float max_shadow_bias = 0.0005;
-
     PerFrameData shadow = per_frame_data.shadows[shadow_index];
 
     mat4 light_vp = shadow.proj * shadow.view;
     vec4 frag_pos_light_unnorm = light_vp * vec4(frag_info.position, 1.0);
     vec4 frag_pos_light = frag_pos_light_unnorm / frag_pos_light_unnorm.w;
     frag_pos_light.xy = frag_pos_light.xy * 0.5 + 0.5;
-
-
+    
     if (frag_pos_light.x < 0.0 || frag_pos_light.x > 1.0 ||
         frag_pos_light.y < 0.0 || frag_pos_light.y > 1.0) {
         return 0.0;
     }
-
 
     vec2 scaled_light_offset = shadow.viewport_size_offset.xy / tex_size;
     vec2 scaled_light_size = shadow.viewport_size_offset.zw / tex_size;
