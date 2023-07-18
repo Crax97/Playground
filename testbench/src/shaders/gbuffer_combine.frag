@@ -45,27 +45,6 @@ vec3 get_unnormalized_light_direction(LightInfo info, FragmentInfo frag_info) {
     }
 }
 
-float shadow_influence(uint shadow_index, FragmentInfo frag_info) {
-    vec2 tex_size = textureSize(shadowMap, 0);
-    float max_shadow_bias = 0.0005;
-
-    PerFrameData shadow = per_frame_data.shadows[shadow_index];
-
-    mat4 light_vp = shadow.proj * shadow.view;
-    vec4 frag_pos_light_unnorm = light_vp * vec4(frag_info.position, 1.0);
-    vec4 frag_pos_light = frag_pos_light_unnorm / frag_pos_light_unnorm.w;
-    frag_pos_light.xy = frag_pos_light.xy * 0.5 + 0.5;
-
-    vec2 scaled_light_offset = shadow.viewport_size_offset.xy / tex_size;
-    vec2 scaled_light_size = shadow.viewport_size_offset.zw / tex_size;
-
-    frag_pos_light.xy *=  scaled_light_size;
-    frag_pos_light.xy += scaled_light_offset;
-
-    // frag_pos_light.z -= shadow_bias; 
-    return texture(shadowMap, frag_pos_light.xyz);
-}
-
 vec3 get_light_intensity(float n_dot_l, LightInfo light, FragmentInfo frag_info) {
     float attenuation = 1.0;
     vec3 light_dir = light.position_radius.xyz - frag_info.position;
@@ -165,14 +144,33 @@ vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, LightInfo light_
     return vec3(o);
 }
 
+float shadow_influence(uint shadow_index, FragmentInfo frag_info) {
+    vec2 tex_size = textureSize(shadowMap, 0);
+    float max_shadow_bias = 0.0005;
+
+    PerFrameData shadow = per_frame_data.shadows[shadow_index];
+
+    mat4 light_vp = shadow.proj * shadow.view;
+    vec4 frag_pos_light_unnorm = light_vp * vec4(frag_info.position, 1.0);
+    vec4 frag_pos_light = frag_pos_light_unnorm / frag_pos_light_unnorm.w;
+    frag_pos_light.xy = frag_pos_light.xy * 0.5 + 0.5;
+
+    vec2 scaled_light_offset = shadow.viewport_size_offset.xy / tex_size;
+    vec2 scaled_light_size = shadow.viewport_size_offset.zw / tex_size;
+
+    frag_pos_light.xy *=  scaled_light_size;
+    frag_pos_light.xy += scaled_light_offset;
+
+    return texture(shadowMap, frag_pos_light.xyz);
+}
+
 float calculate_shadow_influence(FragmentInfo frag_info) {
     float shadow = 0.0;
     
     for (uint i = 0; i < per_frame_data.shadow_count; i ++) {
-        vec3 shadow_location = per_frame_data.shadows[i].eye.xyz;
-
         shadow += shadow_influence(i, frag_info) * 1.0 / float(per_frame_data.shadow_count);
     }
+    
     return shadow;
 }
 

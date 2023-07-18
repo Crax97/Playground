@@ -45,6 +45,7 @@ where
     scissor_area: Option<Rect2D>,
     has_draw_command: bool,
     render_area: Rect2D,
+    depth_bias_setup: Option<(f32, f32, f32)>,
 }
 pub struct MemoryBarrier {
     pub src_access_mask: vk::AccessFlags,
@@ -601,6 +602,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
             viewport_area: None,
             scissor_area: None,
             render_area: info.render_area,
+            depth_bias_setup: None,
         }
     }
 
@@ -664,6 +666,10 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         self.viewport_area = Some(viewport);
     }
 
+    pub fn set_depth_bias(&mut self, constant: f32, clamp: f32, slope: f32) {
+        self.depth_bias_setup = Some((constant, clamp, slope));
+    }
+
     fn prepare_draw(&self) {
         let device = self.command_buffer.gpu.vk_logical_device();
 
@@ -687,8 +693,16 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 extent: self.render_area.extent,
             },
         };
-
         unsafe {
+            if let Some((depth_constant, depth_clamp, depth_slope)) = self.depth_bias_setup {
+                device.cmd_set_depth_bias_enable(self.command_buffer.inner(), true);
+                device.cmd_set_depth_bias(
+                    self.command_buffer.inner(),
+                    depth_constant,
+                    depth_clamp,
+                    depth_slope,
+                );
+            }
             device.cmd_set_viewport(self.command_buffer.inner(), 0, &[viewport.to_vk()]);
             device.cmd_set_scissor(self.command_buffer.inner(), 0, &[scissor]);
         }

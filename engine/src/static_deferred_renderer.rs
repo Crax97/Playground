@@ -99,8 +99,8 @@ impl From<&Light> for GpuLightInfo {
             } => (
                 vector![direction.x, direction.y, direction.z, 0.0],
                 vector![
-                    (90.0 - inner_cone_degrees * 0.5).to_radians(),
-                    (90.0 - outer_cone_degrees * 0.5).to_radians(),
+                    (90.0 - inner_cone_degrees).to_radians(),
+                    (90.0 - outer_cone_degrees).to_radians(),
                     0.0,
                     0.0
                 ],
@@ -173,6 +173,10 @@ pub struct DeferredRenderingPipeline {
     fxaa_fs: GpuShaderModule,
     in_flight_frame: usize,
     max_frames_in_flight: usize,
+
+    pub depth_bias_constant: f32,
+    pub depth_bias_clamp: f32,
+    pub depth_bias_slope: f32,
 }
 
 impl DeferredRenderingPipeline {
@@ -241,6 +245,9 @@ impl DeferredRenderingPipeline {
             runner: GpuRunner::new(),
             in_flight_frame: 0,
             max_frames_in_flight: Swapchain::MAX_FRAMES_IN_FLIGHT,
+            depth_bias_constant: 1.25,
+            depth_bias_clamp: 0.0,
+            depth_bias_slope: 1.75,
         })
     }
 
@@ -871,6 +878,11 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             );
         });
         context.register_callback(&shadow_map_pass, |_: &Gpu, ctx| {
+            ctx.render_pass_command.set_depth_bias(
+                self.depth_bias_constant,
+                self.depth_bias_clamp,
+                self.depth_bias_slope,
+            );
             for (i, pov) in per_frame_data.iter().enumerate().skip(1) {
                 ctx.render_pass_command.set_viewport(gpu::Viewport {
                     x: pov.viewport_size_offset.x,

@@ -665,6 +665,7 @@ impl Pipeline {
                 DynamicState::SCISSOR,
                 DynamicState::FRONT_FACE,
                 DynamicState::CULL_MODE,
+                DynamicState::DEPTH_BIAS,
             ];
 
             let dynamic_state = PipelineDynamicStateCreateInfo {

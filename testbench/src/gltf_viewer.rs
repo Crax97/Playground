@@ -9,7 +9,7 @@ use ash::vk::PresentModeKHR;
 
 use fps_camera::FpsCamera;
 use gpu::CommandBuffer;
-use imgui::Ui;
+use imgui::{TreeNodeFlags, Ui};
 use input::InputState;
 use winit::dpi::{PhysicalPosition, Position};
 
@@ -199,6 +199,23 @@ impl App for GLTFViewer {
             1.0,
             &mut settings.fxaa_quality_edge_threshold_min,
         );
+
+        ui.separator();
+
+        if ui.collapsing_header("Shadow settings", TreeNodeFlags::DEFAULT_OPEN) {
+            ui.slider(
+                "Depth Bias constant",
+                -2.0,
+                2.0,
+                &mut self.scene_renderer.depth_bias_constant,
+            );
+            ui.slider(
+                "Depth Bias slope",
+                -2.0,
+                2.0,
+                &mut self.scene_renderer.depth_bias_slope,
+            );
+        }
 
         self.lights_ui(ui);
 
