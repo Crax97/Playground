@@ -22,6 +22,7 @@ layout(set = 0, binding = 6) readonly buffer  PerFrameDataBlock {
 } per_frame_data;
 
 layout(set = 0, binding = 7, std140) readonly buffer LightData {
+    vec4 ambient_light_color;
     uint light_count;
     LightInfo lights[];
 } light_data;
@@ -155,6 +156,13 @@ float shadow_influence(uint shadow_index, FragmentInfo frag_info) {
     vec4 frag_pos_light = frag_pos_light_unnorm / frag_pos_light_unnorm.w;
     frag_pos_light.xy = frag_pos_light.xy * 0.5 + 0.5;
 
+
+    if (frag_pos_light.x < 0.0 || frag_pos_light.x > 1.0 ||
+        frag_pos_light.y < 0.0 || frag_pos_light.y > 1.0) {
+        return 0.0;
+    }
+
+
     vec2 scaled_light_offset = shadow.viewport_size_offset.xy / tex_size;
     vec2 scaled_light_size = shadow.viewport_size_offset.zw / tex_size;
 
@@ -168,23 +176,25 @@ float calculate_shadow_influence(FragmentInfo frag_info) {
     float shadow = 0.0;
     
     for (uint i = 0; i < per_frame_data.shadow_count; i ++) {
-        shadow += shadow_influence(i, frag_info) * 1.0 / float(per_frame_data.shadow_count);
+        shadow += shadow_influence(i, frag_info);
     }
-    
+
     return shadow;
 }
 
-vec3 calculate_light_influence(FragmentInfo frag_info) {
-    vec3 ck = vec3(0.0);
+vec3 lit_fragment(FragmentInfo frag_info) {
+    
     vec3 view = normalize(per_frame_data.camera.eye.xyz - frag_info.position);
     
-    float shadow = calculate_shadow_influence(frag_info);
-
-    for (uint i = 0; i < light_data.light_count; i ++) {
-        ck += cook_torrance(view, frag_info, light_data.lights[i]);
-    }
+    vec3 ambient_color = light_data.ambient_light_color.xyz * light_data.ambient_light_color.w ;
     
-    return ck * frag_info.diffuse * shadow;
+    vec3 light_color = vec3(0.0);
+    for (uint i = 0; i < light_data.light_count; i ++) {
+        light_color += cook_torrance(view, frag_info, light_data.lights[i]);
+    }
+    float light_fragment_visibility = calculate_shadow_influence(frag_info);
+    
+    return frag_info.diffuse * (ambient_color + light_color * light_fragment_visibility);
 }
 
 vec3 rgb(int r, int g, int b) {
@@ -197,6 +207,6 @@ vec3 rgb(int r, int g, int b) {
 
 void main() {
     FragmentInfo fragInfo = get_fragment_info(uv);
-    vec3 light_a = calculate_light_influence(fragInfo);
+    vec3 light_a = lit_fragment(fragInfo);
     color = vec4(light_a, 1.0) + fragInfo.emissive;
 }

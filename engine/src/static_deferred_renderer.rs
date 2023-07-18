@@ -10,7 +10,7 @@ use gpu::{
     GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain, ShaderModuleCreateInfo, Swapchain, ToVk,
     VertexStageInfo,
 };
-use nalgebra::{vector, Matrix4, Point4, Vector2, Vector4};
+use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
 
 const FXAA_FS: &[u32] = glsl!(
@@ -177,6 +177,9 @@ pub struct DeferredRenderingPipeline {
     pub depth_bias_constant: f32,
     pub depth_bias_clamp: f32,
     pub depth_bias_slope: f32,
+
+    pub ambient_color: Vector3<f32>,
+    pub ambient_intensity: f32,
 }
 
 impl DeferredRenderingPipeline {
@@ -248,6 +251,8 @@ impl DeferredRenderingPipeline {
             depth_bias_constant: 1.25,
             depth_bias_clamp: 0.0,
             depth_bias_slope: 1.75,
+            ambient_color: vector![1.0, 1.0, 1.0],
+            ambient_intensity: 0.3,
         })
     }
 
@@ -444,11 +449,22 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             )
             .unwrap();
 
+        let ambient = vector![
+            self.ambient_color.x,
+            self.ambient_color.y,
+            self.ambient_color.z,
+            self.ambient_intensity
+        ];
+
+        super::app_state()
+            .gpu
+            .write_buffer_data_with_offset(&current_buffers.light_buffer, 0, &[ambient])
+            .unwrap();
         super::app_state()
             .gpu
             .write_buffer_data_with_offset(
                 &current_buffers.light_buffer,
-                0,
+                std::mem::size_of::<Vector4<f32>>() as _,
                 &[collected_active_lights.len() as u32],
             )
             .unwrap();
@@ -456,7 +472,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .gpu
             .write_buffer_data_with_offset(
                 &current_buffers.light_buffer,
-                size_of::<u32>() as u64 * 4,
+                std::mem::size_of::<Vector4<f32>>() as u64 + size_of::<u32>() as u64 * 4,
                 &collected_active_lights,
             )
             .unwrap();

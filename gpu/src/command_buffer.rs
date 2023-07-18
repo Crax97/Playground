@@ -693,16 +693,20 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 extent: self.render_area.extent,
             },
         };
-        unsafe {
-            if let Some((depth_constant, depth_clamp, depth_slope)) = self.depth_bias_setup {
-                device.cmd_set_depth_bias_enable(self.command_buffer.inner(), true);
-                device.cmd_set_depth_bias(
-                    self.command_buffer.inner(),
-                    depth_constant,
-                    depth_clamp,
-                    depth_slope,
-                );
+        let (depth_constant, depth_clamp, depth_slope) = match self.depth_bias_setup {
+            Some((depth_constant, depth_clamp, depth_slope)) => {
+                (depth_constant, depth_clamp, depth_slope)
             }
+            _ => (0.0, 0.0, 0.0),
+        };
+        unsafe {
+            device.cmd_set_depth_bias_enable(self.command_buffer.inner(), true);
+            device.cmd_set_depth_bias(
+                self.command_buffer.inner(),
+                depth_constant,
+                depth_clamp,
+                depth_slope,
+            );
             device.cmd_set_viewport(self.command_buffer.inner(), 0, &[viewport.to_vk()]);
             device.cmd_set_scissor(self.command_buffer.inner(), 0, &[scissor]);
         }

@@ -604,7 +604,7 @@ impl Pipeline {
                     FrontFace::CounterClockWise => vk::FrontFace::COUNTER_CLOCKWISE,
                     FrontFace::ClockWise => vk::FrontFace::CLOCKWISE,
                 },
-                depth_bias_enable: vk::FALSE,
+                depth_bias_enable: vk::TRUE,
                 depth_bias_constant_factor: 0.0,
                 depth_bias_clamp: 0.0,
                 depth_bias_slope_factor: 0.0,
@@ -663,9 +663,8 @@ impl Pipeline {
             let dynamic_state_flags = [
                 DynamicState::VIEWPORT,
                 DynamicState::SCISSOR,
-                DynamicState::FRONT_FACE,
-                DynamicState::CULL_MODE,
                 DynamicState::DEPTH_BIAS,
+                DynamicState::DEPTH_BIAS_ENABLE,
             ];
 
             let dynamic_state = PipelineDynamicStateCreateInfo {
