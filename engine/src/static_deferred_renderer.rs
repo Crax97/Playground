@@ -1,5 +1,6 @@
 use engine_macros::glsl;
 use std::{collections::HashMap, mem::size_of};
+use std::convert::identity;
 
 use ash::vk::{
     BufferUsageFlags, CompareOp, Extent2D, IndexType, PipelineBindPoint, PushConstantRange,
@@ -80,7 +81,7 @@ struct GpuLightInfo {
     direction: Vector4<f32>,
     color: Vector4<f32>,
     extras: Vector4<f32>,
-    ty: [u32; 4],
+    ty_shadowcaster: [i32; 4],
 }
 
 impl From<&Light> for GpuLightInfo {
@@ -126,7 +127,7 @@ impl From<&Light> for GpuLightInfo {
             color: vector![light.color.x, light.color.y, light.color.z, light.intensity],
             direction,
             extras,
-            ty: [ty, 0, 0, 0],
+            ty_shadowcaster: [ty, -1, 0, 0],
         }
     }
 }
@@ -394,44 +395,44 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         }];
         let mut x = 0.0;
         let mut y = 0.0;
-        let collected_active_lights: Vec<GpuLightInfo> =
-            scene.all_enabled_lights().map(|l| l.into()).collect();
-        let light_povs = scene
-            .all_lights()
-            .iter()
-            .filter(|l| l.enabled && l.shadow_setup.is_some())
-            .flat_map(|l| {
-                l.shadow_view_matrices()
-                    .iter()
-                    .map(|v| {
-                        let w = l.shadow_setup.unwrap().width as f32;
-                        let h = l.shadow_setup.unwrap().height as f32;
+        let mut shadow_caster_idx = 0;
+        let collected_active_lights : Vec<GpuLightInfo> =
+            scene.all_enabled_lights().enumerate().map(|(i, l)| {
+                let mut light : GpuLightInfo = l.into();
+                if l.shadow_setup.is_some() {
+                    light.ty_shadowcaster[1] = shadow_caster_idx;
+                    let povs = l.shadow_view_matrices()
+                        .iter()
+                        .map(|v| {
+                            let w = l.shadow_setup.unwrap().width as f32;
+                            let h = l.shadow_setup.unwrap().height as f32;
 
-                        let pfd = Some(PerFrameData {
-                            eye: Point4::new(l.position.x, l.position.y, l.position.z, 0.0),
-                            view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * v,
-                            projection: l.projection_matrix(),
-                            viewport_size_offset: vector![x, y, w, h],
-                        });
+                            let pfd = Some(PerFrameData {
+                                eye: Point4::new(l.position.x, l.position.y, l.position.z, 0.0),
+                                view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * v,
+                                projection: l.projection_matrix(),
+                                viewport_size_offset: vector![x, y, w, h],
+                            });
 
-                        x += w;
-                        if x > SHADOW_MAP_WIDTH as f32 {
-                            if (y + h) <= SHADOW_MAP_HEIGHT as f32 {
-                                x = 0.0;
-                                y += h;
-                            } else {
-                                return None;
+                            x += w;
+                            if x > SHADOW_MAP_WIDTH as f32 {
+                                if (y + h) <= SHADOW_MAP_HEIGHT as f32 {
+                                    x = 0.0;
+                                    y += h;
+                                } else {
+                                    return None;
+                                }
                             }
-                        }
-                        pfd
-                    })
-                    .take_while(|l| l.is_some())
-                    .collect::<Vec<_>>()
-            })
-            .filter_map(|x| x);
-
-        per_frame_data.extend(light_povs);
-
+                            shadow_caster_idx += 1;
+                            pfd
+                        })
+                        .take_while(|l| l.is_some())
+                        .flatten()
+                        .collect::<Vec<_>>();
+                        per_frame_data.extend(povs);
+                    }
+                light
+            }).collect();
         super::app_state()
             .gpu
             .write_buffer_data_with_offset(

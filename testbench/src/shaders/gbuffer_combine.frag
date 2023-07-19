@@ -17,8 +17,8 @@ layout(set = 0, binding = 5) uniform sampler2DShadow shadowMap;
 
 layout(set = 0, binding = 6) readonly buffer  PerFrameDataBlock {
     uint shadow_count;
-    PerFrameData camera;
-    PerFrameData shadows[];
+    PointOfView camera;
+    PointOfView shadows[];
 } per_frame_data;
 
 layout(set = 0, binding = 7, std140) readonly buffer LightData {
@@ -37,9 +37,9 @@ struct FragmentInfo {
 };
 
 vec3 get_unnormalized_light_direction(LightInfo info, FragmentInfo frag_info) {
-    if (info.type == DIRECTIONAL_LIGHT) {
+    if (info.type_shadowcaster.x == DIRECTIONAL_LIGHT) {
         return info.direction.xyz;
-    } else if (info.type == SPOT_LIGHT) {
+    } else if (info.type_shadowcaster.x == SPOT_LIGHT) {
         return info.direction.xyz;
     } else {
         return frag_info.position - info.position_radius.xyz ;
@@ -54,9 +54,9 @@ float get_light_mask(float n_dot_l, LightInfo light, FragmentInfo frag_info) {
     float i = 1.0;
     float light_distance_normalized = clamp(light_distance / light.position_radius.w, 0.0, 1.0);
     attenuation = 1.0 / (light_distance_normalized * light_distance_normalized + 0.01);
-    if (light.type == POINT_LIGHT) {
+    if (light.type_shadowcaster.x == POINT_LIGHT) {
         i *= attenuation;
-    } else if (light.type == SPOT_LIGHT) {
+    } else if (light.type_shadowcaster.x == SPOT_LIGHT) {
         vec3 frag_direction = light_dir;
         float cos_theta = dot(-light.direction.xyz, frag_direction);
         float inner_angle_cutoff = light.extras.x;
@@ -139,7 +139,7 @@ vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, float l_dot_n, v
 
 float shadow_influence(uint shadow_index, FragmentInfo frag_info) {
     vec2 tex_size = textureSize(shadowMap, 0);
-    PerFrameData shadow = per_frame_data.shadows[shadow_index];
+    PointOfView shadow = per_frame_data.shadows[shadow_index];
 
     mat4 light_vp = shadow.proj * shadow.view;
     vec4 frag_pos_light_unnorm = light_vp * vec4(frag_info.position, 1.0);
@@ -160,14 +160,20 @@ float shadow_influence(uint shadow_index, FragmentInfo frag_info) {
     return texture(shadowMap, frag_pos_light.xyz);
 }
 
-float calculate_shadow_influence(FragmentInfo frag_info) {
+float calculate_shadow_influence(FragmentInfo frag_info, LightInfo light_info) {
     float shadow = 0.0;
     
-    for (uint i = 0; i < per_frame_data.shadow_count; i ++) {
-        shadow += shadow_influence(i, frag_info);
+    uint shadow_caster_count = 1;
+    if (light_info.type_shadowcaster.x == POINT_LIGHT) {
+        shadow_caster_count = 6;
     }
 
-    return min(shadow, 1.0);
+    uint base_shadow_index = light_info.type_shadowcaster.y;
+    for (uint i = 0; i < shadow_caster_count; i ++) {
+        shadow += shadow_influence(base_shadow_index + i, frag_info);
+    }
+
+    return shadow;
 }
 
 vec3 lit_fragment(FragmentInfo frag_info) {
@@ -176,9 +182,8 @@ vec3 lit_fragment(FragmentInfo frag_info) {
     
     vec3 ambient_color = light_data.ambient_light_color.xyz * light_data.ambient_light_color.w ;
     
-    vec3 light_color = vec3(0.0);
+    vec3 fragment_light = vec3(0.0);
 
-    float light_fragment_visibility = calculate_shadow_influence(frag_info);
     float overall_mask = 0.0;
     for (uint i = 0; i < light_data.light_count; i ++) {
 
@@ -188,11 +193,17 @@ vec3 lit_fragment(FragmentInfo frag_info) {
         float l_dot_n = max(dot(light_dir, frag_info.normal), 0.0);
         vec3 h = normalize(view + light_dir);
         float light_mask = get_light_mask(l_dot_n, light_info, frag_info);
+        vec3 masked_light_color = light_mask * light_info.color_intensity.xyz * light_info.color_intensity.w;
         overall_mask += light_mask;
-        light_color += cook_torrance(view, frag_info, l_dot_n, h) * light_mask * light_info.color_intensity.xyz * light_info.color_intensity.w;
+        vec3 light_color = cook_torrance(view, frag_info, l_dot_n, h) * masked_light_color;
+        if (light_info.type_shadowcaster.y != -1) {
+            light_color *= calculate_shadow_influence(frag_info, light_info);
+        }
+        
+        fragment_light += light_color;
     }
     
-    return frag_info.diffuse * (ambient_color + light_color * light_fragment_visibility);
+    return frag_info.diffuse * (ambient_color + fragment_light);
 }
 
 vec3 rgb(int r, int g, int b) {

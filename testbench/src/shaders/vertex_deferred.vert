@@ -10,7 +10,7 @@ layout(location = 4) in vec2 in_uv;
 
 layout(set = 0, binding = 0) readonly buffer PerFrameDataBlock {
     uint shadow_count;
-    PerFrameData pfd[];
+    PointOfView pfd[];
 } per_frame_data;
 
 layout(push_constant) uniform PerObjectData {

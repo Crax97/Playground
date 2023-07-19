@@ -8,7 +8,7 @@ struct FragmentOut {
     vec3 color;
 };
 
-struct PerFrameData {
+struct PointOfView {
     vec4 eye;
     mat4 view;
     mat4 proj;

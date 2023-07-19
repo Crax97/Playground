@@ -3,10 +3,10 @@ struct LightInfo {
     vec4 direction;
     vec4 color_intensity;
     vec4 extras;
-    uint type;
+    ivec4 type_shadowcaster; // -1 means no shadow caster, since 0 is reserved for the camera
 };
 
-const uint POINT_LIGHT = 0;
-const uint DIRECTIONAL_LIGHT = 1;
-const uint SPOT_LIGHT = 2;
-const uint RECT_LIGHT = 3;
+const int POINT_LIGHT = 0;
+const int DIRECTIONAL_LIGHT = 1;
+const int SPOT_LIGHT = 2;
+const int RECT_LIGHT = 3;
