@@ -81,43 +81,43 @@ impl Light {
             LightType::Point => vec![
                 Matrix4::look_at_rh(
                     &self.position,
-                    &(&self.position + vector![0.0, 1.0, 0.0]),
+                    &(self.position + vector![0.0, 1.0, 0.0]),
+                    &vector![0.0, 0.0, 1.0],
+                ),
+                Matrix4::look_at_rh(
+                    &self.position,
+                    &(self.position + vector![0.0, -1.0, 0.0]),
+                    &vector![0.0, 0.0, 1.0],
+                ),
+                Matrix4::look_at_rh(
+                    &self.position,
+                    &(self.position + vector![1.0, 0.0, 0.0]),
                     &vector![0.0, 1.0, 0.0],
                 ),
                 Matrix4::look_at_rh(
                     &self.position,
-                    &(&self.position + vector![0.0, -1.0, 0.0]),
+                    &(self.position + vector![-1.0, 0.0, 0.0]),
                     &vector![0.0, 1.0, 0.0],
                 ),
                 Matrix4::look_at_rh(
                     &self.position,
-                    &(&self.position + vector![1.0, 0.0, 0.0]),
+                    &(self.position + vector![0.0, 0.0, 1.0]),
                     &vector![0.0, 1.0, 0.0],
                 ),
                 Matrix4::look_at_rh(
                     &self.position,
-                    &(&self.position + vector![-1.0, 0.0, 0.0]),
-                    &vector![0.0, 1.0, 0.0],
-                ),
-                Matrix4::look_at_rh(
-                    &self.position,
-                    &(&self.position + vector![0.0, 0.0, 1.0]),
-                    &vector![0.0, 1.0, 0.0],
-                ),
-                Matrix4::look_at_rh(
-                    &self.position,
-                    &(&self.position + vector![0.0, 0.0, -1.0]),
+                    &(self.position + vector![0.0, 0.0, -1.0]),
                     &vector![0.0, 1.0, 0.0],
                 ),
             ],
             LightType::Directional { direction, .. } => vec![Matrix4::look_at_rh(
                 &self.position,
-                &(&self.position + direction),
+                &(self.position + direction),
                 &vector![0.0, 1.0, 0.0],
             )],
             _ => vec![Matrix4::look_at_rh(
                 &self.position,
-                &(&self.position + self.direction()),
+                &(self.position + self.direction()),
                 &vector![0.0, 1.0, 0.0],
             )],
         }
@@ -127,7 +127,7 @@ impl Light {
         const ZNEAR: f32 = 1.0;
         match self.ty {
             LightType::Point => {
-                Matrix4::new_perspective(1.0, 45.0f32.to_radians(), ZNEAR, self.radius)
+                Matrix4::new_perspective(1.0, 90.0f32.to_radians(), ZNEAR, self.radius.max(ZNEAR + 0.1))
             }
             LightType::Directional { size, .. } => Matrix4::new_orthographic(
                 -size.x * 0.5,
@@ -139,9 +139,9 @@ impl Light {
             ),
             LightType::Spotlight {
                 outer_cone_degrees, ..
-            } => Matrix4::new_perspective(1.0, outer_cone_degrees.to_radians(), ZNEAR, self.radius),
+            } => Matrix4::new_perspective(1.0, outer_cone_degrees.to_radians(), ZNEAR, self.radius.max(ZNEAR + 0.1)),
             LightType::Rect { width, height, .. } => {
-                Matrix4::new_perspective(width / height, 90.0, ZNEAR, self.radius)
+                Matrix4::new_perspective(width / height, 90.0, ZNEAR, self.radius.max(ZNEAR + 0.1))
             }
         }
     }
