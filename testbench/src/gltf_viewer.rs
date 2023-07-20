@@ -84,7 +84,7 @@ impl GLTFViewer {
             ui.checkbox("Enabled", &mut l.enabled);
             ui.input_float3("Position", &mut l.position.coords.data.0[0])
                 .build();
-            ui.input_float3("Color", &mut l.color.data.0[0]).build();
+            ui.color_edit3("Color", &mut l.color.data.0[0]);
             ui.slider("Intensity", 0.0, 1000.0, &mut l.intensity);
             ui.slider("Radius", 0.0, 1000.0, &mut l.radius);
             match &mut l.ty {
@@ -117,6 +117,56 @@ impl GLTFViewer {
             }
             ui.unindent();
             ui.separator();
+            
+            if ui.button("Add new spotlight") {
+                self.gltf_loader.scene_mut().add_light(Light {
+                    ty: LightType::Spotlight {
+                        direction: vector![0.454, -0.324, -0.830],
+                        inner_cone_degrees: 15.0,
+                        outer_cone_degrees: 35.0,
+                    },
+                    position: point![9.766, -0.215, 2.078],
+                    radius: 100.0,
+                    color: vector![1.0, 1.0, 1.0],
+                    intensity: 10.0,
+                    enabled: true,
+                    shadow_setup: Some(ShadowSetup {
+                        width: 512,
+                        height: 512,
+                    })
+                });
+            }
+            if ui.button("Add new directional light") {
+                self.gltf_loader.scene_mut().add_light(Light {
+                    ty: LightType::Directional {
+                        direction: vector![0.454, -0.324, -0.830],
+                        size: vector![10.0, 10.0],
+                    },
+                    position: point![9.766, -0.215, 2.078],
+                    radius: 100.0,
+                    color: vector![1.0, 1.0, 1.0],
+                    intensity: 10.0,
+                    enabled: true,
+                    shadow_setup: Some(ShadowSetup {
+                        width: 512,
+                        height: 512,
+                    })
+                });
+            }
+            if ui.button("Add new point light") {
+                self.gltf_loader.scene_mut().add_light(Light {
+                    ty: LightType::Point,
+                    position: point![9.766, -0.215, 2.078],
+                    radius: 100.0,
+                    color: vector![1.0, 1.0, 1.0],
+                    intensity: 10.0,
+                    enabled: true,
+                    shadow_setup: Some(ShadowSetup {
+                        width: 512,
+                        height: 512,
+                    })
+                });
+            }
 
             group.end();
         }
