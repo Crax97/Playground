@@ -137,7 +137,7 @@ vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, float l_dot_n, v
     return vec3(o);
 }
 
-float shadow_influence(uint shadow_index, FragmentInfo frag_info) {
+float shadow_influence(uint shadow_index, FragmentInfo frag_info, float light_dist) {
     vec2 tex_size = textureSize(shadowMap, 0);
     PointOfView shadow = per_frame_data.shadows[shadow_index];
 
@@ -147,7 +147,7 @@ float shadow_influence(uint shadow_index, FragmentInfo frag_info) {
     frag_pos_light.xy = frag_pos_light.xy * 0.5 + 0.5;
     
     if (frag_pos_light.x < 0.0 || frag_pos_light.x > 1.0 ||
-        frag_pos_light.y < 0.0 || frag_pos_light.y > 1.0) {
+    frag_pos_light.y < 0.0 || frag_pos_light.y > 1.0) {
         return 0.0;
     }
 
@@ -155,12 +155,25 @@ float shadow_influence(uint shadow_index, FragmentInfo frag_info) {
     vec2 scaled_light_size = shadow.viewport_size_offset.zw / tex_size;
 
     frag_pos_light.xy *=  scaled_light_size;
-    frag_pos_light.xy += scaled_light_offset;
-
-    return texture(shadowMap, frag_pos_light.xyz);
+    frag_pos_light.xy += scaled_light_offset; 
+    
+    float STEPS = 4.0;
+    float STEPS_TOTAL = 4.0 * STEPS * STEPS;
+    float s = 0.0;
+    for (float x = -STEPS; x <= STEPS; x += 1.0) {
+        for (float y = -STEPS; y <= STEPS; y += 1.0) {
+            vec3 loc = vec3(frag_pos_light.xy + vec2(x, y) * 1.0 / tex_size, frag_pos_light.z);
+            if (loc.x < scaled_light_offset.x || loc.x > scaled_light_offset.x + scaled_light_size.x ||
+            loc.y < scaled_light_offset.y || loc.y > scaled_light_offset.y + scaled_light_size.y) {
+                continue;
+            }
+            s += texture(shadowMap, loc) * 1.0 / STEPS_TOTAL;
+        }   
+    }
+    return s;
 }
 
-float calculate_shadow_influence(FragmentInfo frag_info, LightInfo light_info) {
+float calculate_shadow_influence(FragmentInfo frag_info, LightInfo light_info, float light_dist) {
     float shadow = 0.0;
     
     uint shadow_caster_count = 1;
@@ -170,7 +183,7 @@ float calculate_shadow_influence(FragmentInfo frag_info, LightInfo light_info) {
 
     uint base_shadow_index = light_info.type_shadowcaster.y;
     for (uint i = 0; i < shadow_caster_count; i ++) {
-        shadow += shadow_influence(base_shadow_index + i, frag_info);
+        shadow += shadow_influence(base_shadow_index + i, frag_info, light_dist);
     }
 
     return shadow;
@@ -188,8 +201,9 @@ vec3 lit_fragment(FragmentInfo frag_info) {
     for (uint i = 0; i < light_data.light_count; i ++) {
 
         LightInfo light_info = light_data.lights[i];
-        
-        vec3 light_dir = normalize(-get_unnormalized_light_direction(light_info, frag_info));
+        vec3 light_dir_unnorm = get_unnormalized_light_direction(light_info, frag_info);
+        float light_dist = length(light_dir_unnorm);
+        vec3 light_dir = -light_dir_unnorm / light_dist;
         float l_dot_n = max(dot(light_dir, frag_info.normal), 0.0);
         vec3 h = normalize(view + light_dir);
         float light_mask = get_light_mask(l_dot_n, light_info, frag_info);
@@ -197,7 +211,7 @@ vec3 lit_fragment(FragmentInfo frag_info) {
         overall_mask += light_mask;
         vec3 light_color = cook_torrance(view, frag_info, l_dot_n, h) * masked_light_color;
         if (light_info.type_shadowcaster.y != -1) {
-            light_color *= calculate_shadow_influence(frag_info, light_info);
+            light_color *= calculate_shadow_influence(frag_info, light_info, light_dist);
         }
         
         fragment_light += light_color;
