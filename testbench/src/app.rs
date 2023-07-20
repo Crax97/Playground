@@ -61,12 +61,14 @@ pub fn app_loop<A: App + 'static>(
             winit::event::WindowEvent::CloseRequested => {
                 return Ok(ControlFlow::ExitWithCode(0));
             }
-            winit::event::WindowEvent::Resized(_) => {
-                app_state_mut
-                    .gpu
-                    .swapchain_mut()
-                    .recreate_swapchain()
-                    .unwrap();
+            winit::event::WindowEvent::Resized(new_size) => {
+                if new_size.width > 0 && new_size.height > 0 {
+                    app_state_mut
+                        .gpu
+                        .swapchain_mut()
+                        .recreate_swapchain()
+                        .unwrap();
+                }
             }
             _ => {}
         },
@@ -80,52 +82,10 @@ pub fn app_loop<A: App + 'static>(
             app_state_mut.gpu.swapchain_mut().window.request_redraw();
         }
         winit::event::Event::RedrawRequested(..) => {
-            app_state_mut.begin_frame().unwrap();
-            imgui_data.platform.prepare_frame(
-                imgui_data.imgui.io_mut(),
-                &app_state_mut.gpu.swapchain().window,
-            )?;
-            imgui_data
-                .imgui
-                .io_mut()
-                .update_delta_time(std::time::Duration::from_secs_f32(
-                    app_state_mut.time.delta_frame(),
-                ));
-
-            let window_name = app.window_name(app_state_mut);
-
-            app_state_mut
-                .gpu
-                .swapchain_mut()
-                .window
-                .set_title(&window_name);
-
-            let ui = imgui_data.imgui.frame();
-            app.update(app_state_mut, ui)?;
-            imgui_data
-                .platform
-                .prepare_render(ui, &engine::app_state().gpu.swapchain().window);
-
-            let swapchain_format = app_state_mut.gpu.swapchain().present_format();
-            let swapchain_extents = app_state_mut.gpu.swapchain().extents();
-            let (swapchain_image, swapchain_image_view) = app_state_mut.gpu.acquire_next_image()?;
-            let backbuffer = Backbuffer {
-                size: swapchain_extents,
-                format: swapchain_format,
-                image: swapchain_image,
-                image_view: swapchain_image_view,
-            };
-            let mut command_buffer = app.draw(&backbuffer)?;
-
-            draw_imgui(imgui_data, &backbuffer, &mut command_buffer)?;
-            let frame = app_state_mut.gpu.get_current_swapchain_frame();
-            command_buffer.submit(&CommandBufferSubmitInfo {
-                wait_semaphores: &[&frame.image_available_semaphore],
-                wait_stages: &[PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
-                signal_semaphores: &[&frame.render_finished_semaphore],
-                fence: Some(&frame.in_flight_fence),
-            })?;
-            app_state_mut.end_frame().unwrap();
+            let win_size = app_state_mut.gpu.swapchain().window.inner_size();
+            if win_size.width > 0 && win_size.height > 0 {
+                update_loop(app, imgui_data, app_state_mut)?;
+            }
         }
         winit::event::Event::RedrawEventsCleared => {}
         winit::event::Event::LoopDestroyed => {
@@ -137,6 +97,56 @@ pub fn app_loop<A: App + 'static>(
     }
 
     Ok(ControlFlow::Poll)
+}
+
+fn update_loop(app: &mut dyn App, imgui_data: &mut ImguiData, app_state_mut: &mut AppState) -> anyhow::Result<()> {
+    app_state_mut.begin_frame().unwrap();
+    imgui_data.platform.prepare_frame(
+        imgui_data.imgui.io_mut(),
+        &app_state_mut.gpu.swapchain().window,
+    )?;
+    imgui_data
+        .imgui
+        .io_mut()
+        .update_delta_time(std::time::Duration::from_secs_f32(
+            app_state_mut.time.delta_frame(),
+        ));
+
+    let window_name = app.window_name(app_state_mut);
+
+    app_state_mut
+        .gpu
+        .swapchain_mut()
+        .window
+        .set_title(&window_name);
+
+    let ui = imgui_data.imgui.frame();
+    app.update(app_state_mut, ui)?;
+    imgui_data
+        .platform
+        .prepare_render(ui, &engine::app_state().gpu.swapchain().window);
+
+    let swapchain_format = app_state_mut.gpu.swapchain().present_format();
+    let swapchain_extents = app_state_mut.gpu.swapchain().extents();
+    let (swapchain_image, swapchain_image_view) = app_state_mut.gpu.acquire_next_image()?;
+    let backbuffer = Backbuffer {
+        size: swapchain_extents,
+        format: swapchain_format,
+        image: swapchain_image,
+        image_view: swapchain_image_view,
+    };
+    let mut command_buffer = app.draw(&backbuffer)?;
+
+    draw_imgui(imgui_data, &backbuffer, &mut command_buffer)?;
+    let frame = app_state_mut.gpu.get_current_swapchain_frame();
+    command_buffer.submit(&CommandBufferSubmitInfo {
+        wait_semaphores: &[&frame.image_available_semaphore],
+        wait_stages: &[PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
+        signal_semaphores: &[&frame.render_finished_semaphore],
+        fence: Some(&frame.in_flight_fence),
+    })?;
+    app_state_mut.end_frame()?;
+    Ok(())
 }
 
 fn draw_imgui(
