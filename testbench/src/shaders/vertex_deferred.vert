@@ -8,18 +8,20 @@ layout(location = 2) in vec3 in_normal;
 layout(location = 3) in vec3 in_tangent;
 layout(location = 4) in vec2 in_uv;
 
-layout(set = 0, binding = 0) uniform PerFrameDataBlock {
-    PerFrameData pfd;
+layout(set = 0, binding = 0) readonly buffer PerFrameDataBlock {
+    uint shadow_count;
+    PointOfView pfd[];
 } per_frame_data;
 
 layout(push_constant) uniform PerObjectData {
     mat4 model;
+    uint camera_index;
 } pod;
 
 layout(location = 0) out FragmentOut frag_out;
 
 void main() {
-    mat4 mv = per_frame_data.pfd.proj * per_frame_data.pfd.view;
+    mat4 mv = per_frame_data.pfd[pod.camera_index].proj * per_frame_data.pfd[pod.camera_index].view;
     vec4 world_pos = pod.model  * vec4(in_position, 1.0);
     gl_Position = mv * world_pos;
     frag_out.color = in_color;

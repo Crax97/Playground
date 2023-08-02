@@ -1,6 +1,6 @@
 use ash::vk::{Extent2D, Format};
 use gpu::{CommandBuffer, Gpu, GpuImage, GpuImageView};
-use nalgebra::{Matrix4, Point3, Vector3};
+use nalgebra::{vector, Matrix4, Point3, Vector2, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
 
 #[repr(C)]
@@ -24,6 +24,7 @@ pub enum LightType {
     Point,
     Directional {
         direction: Vector3<f32>,
+        size: Vector2<f32>,
     },
     Spotlight {
         direction: Vector3<f32>,
@@ -37,6 +38,12 @@ pub enum LightType {
     },
 }
 
+#[derive(Clone, Copy, PartialEq, Default)]
+pub struct ShadowSetup {
+    pub width: u32,
+    pub height: u32,
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub struct Light {
     pub ty: LightType,
@@ -46,20 +53,102 @@ pub struct Light {
     pub intensity: f32,
 
     pub enabled: bool,
+    pub shadow_setup: Option<ShadowSetup>,
 }
 impl Light {
     pub fn set_direction(&mut self, forward: Vector3<f32>) {
         match &mut self.ty {
             LightType::Point => {}
-            LightType::Directional { direction }
+            LightType::Directional { direction, .. }
             | LightType::Spotlight { direction, .. }
             | LightType::Rect { direction, .. } => *direction = forward,
+        }
+    }
+
+    pub fn direction(&self) -> Vector3<f32> {
+        match self.ty {
+            LightType::Point => {
+                todo!()
+            }
+            LightType::Directional { direction, .. }
+            | LightType::Spotlight { direction, .. }
+            | LightType::Rect { direction, .. } => direction,
+        }
+    }
+
+    pub(crate) fn shadow_view_matrices(&self) -> Vec<Matrix4<f32>> {
+        match self.ty {
+            LightType::Point => vec![
+                Matrix4::look_at_rh(
+                    &self.position,
+                    &(self.position + vector![0.0, 1.0, 0.0]),
+                    &vector![0.0, 0.0, 1.0],
+                ),
+                Matrix4::look_at_rh(
+                    &self.position,
+                    &(self.position + vector![0.0, -1.0, 0.0]),
+                    &vector![0.0, 0.0, 1.0],
+                ),
+                Matrix4::look_at_rh(
+                    &self.position,
+                    &(self.position + vector![1.0, 0.0, 0.0]),
+                    &vector![0.0, 1.0, 0.0],
+                ),
+                Matrix4::look_at_rh(
+                    &self.position,
+                    &(self.position + vector![-1.0, 0.0, 0.0]),
+                    &vector![0.0, 1.0, 0.0],
+                ),
+                Matrix4::look_at_rh(
+                    &self.position,
+                    &(self.position + vector![0.0, 0.0, 1.0]),
+                    &vector![0.0, 1.0, 0.0],
+                ),
+                Matrix4::look_at_rh(
+                    &self.position,
+                    &(self.position + vector![0.0, 0.0, -1.0]),
+                    &vector![0.0, 1.0, 0.0],
+                ),
+            ],
+            LightType::Directional { direction, .. } => vec![Matrix4::look_at_rh(
+                &self.position,
+                &(self.position + direction),
+                &vector![0.0, 1.0, 0.0],
+            )],
+            _ => vec![Matrix4::look_at_rh(
+                &self.position,
+                &(self.position + self.direction()),
+                &vector![0.0, 1.0, 0.0],
+            )],
+        }
+    }
+
+    pub(crate) fn projection_matrix(&self) -> Matrix4<f32> {
+        const ZNEAR: f32 = 1.0;
+        match self.ty {
+            LightType::Point => {
+                Matrix4::new_perspective(1.0, 90.0f32.to_radians(), ZNEAR, self.radius.max(ZNEAR + 0.1))
+            }
+            LightType::Directional { size, .. } => Matrix4::new_orthographic(
+                -size.x * 0.5,
+                size.x * 0.5,
+                -size.y * 0.5,
+                size.y * 0.5,
+                -self.radius * 0.5,
+                self.radius * 0.5,
+            ),
+            LightType::Spotlight {
+                outer_cone_degrees, ..
+            } => Matrix4::new_perspective(1.0, outer_cone_degrees.to_radians(), ZNEAR, self.radius.max(ZNEAR + 0.1)),
+            LightType::Rect { width, height, .. } => {
+                Matrix4::new_perspective(width / height, 90.0, ZNEAR, self.radius.max(ZNEAR + 0.1))
+            }
         }
     }
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialOrd, PartialEq)]
-pub struct LightHandle(usize);
+pub struct LightHandle(pub usize);
 
 #[derive(Default)]
 pub struct Scene {

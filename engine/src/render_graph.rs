@@ -326,23 +326,25 @@ impl<'a> CreateFrom<'a, ImageDescription> for GraphImage {
     }
 }
 
-#[derive(PartialEq)]
-pub struct NoDesc;
+#[derive(Clone, Copy, Default, Hash, PartialEq, Eq)]
+pub struct SamplerState {
+    pub compare_op: Option<gpu::CompareOp>,
+}
 
-impl AsRef<NoDesc> for NoDesc {
-    fn as_ref(&self) -> &NoDesc {
+impl AsRef<SamplerState> for SamplerState {
+    fn as_ref(&self) -> &SamplerState {
         self
     }
 }
 
 pub struct GraphSampler {
     image: GpuSampler,
-    desc: NoDesc,
+    desc: SamplerState,
 }
 
 impl GraphResource for GraphSampler {
     type Inner = GpuSampler;
-    type Desc = NoDesc;
+    type Desc = SamplerState;
 
     fn construct(image: GpuSampler, desc: Self::Desc) -> Self
     where
@@ -360,8 +362,8 @@ impl GraphResource for GraphSampler {
     }
 }
 
-impl<'a> CreateFrom<'a, NoDesc> for GraphSampler {
-    fn create(gpu: &Gpu, _: &'a NoDesc) -> anyhow::Result<Self> {
+impl<'a> CreateFrom<'a, SamplerState> for GraphSampler {
+    fn create(gpu: &Gpu, samp: &'a SamplerState) -> anyhow::Result<Self> {
         let sam = gpu
             .create_sampler(&SamplerCreateInfo {
                 s_type: StructureType::SAMPLER_CREATE_INFO,
@@ -379,15 +381,19 @@ impl<'a> CreateFrom<'a, NoDesc> for GraphSampler {
                     .physical_device_properties()
                     .limits
                     .max_sampler_anisotropy,
-                compare_enable: vk::FALSE,
-                compare_op: CompareOp::ALWAYS,
+                compare_enable: if samp.compare_op.is_some() {
+                    vk::TRUE
+                } else {
+                    vk::FALSE
+                },
+                compare_op: samp.compare_op.map(|s| s.to_vk()).unwrap_or_default(),
                 min_lod: 0.0,
                 max_lod: 0.0,
                 border_color: BorderColor::default(),
                 unnormalized_coordinates: vk::FALSE,
             })
             .expect("Failed to create image resource");
-        Ok(GraphSampler::construct(sam, NoDesc))
+        Ok(GraphSampler::construct(sam, *samp))
     }
 }
 
@@ -988,6 +994,7 @@ pub struct ImageDescription {
     pub samples: u32,
     pub present: bool,
     pub clear_value: ClearValue,
+    pub sampler_state: Option<SamplerState>,
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Copy, Hash)]
@@ -1577,7 +1584,8 @@ impl RenderGraph {
     fn prune_passes(&self, compiled: &mut CompiledRenderGraph) -> GraphResult<()> {
         let mut render_passes = self.passes.clone();
 
-        let mut working_set: HashSet<_> = self.persistent_resources.iter().cloned().collect();
+        let mut working_set: IndexSet<_> = self.persistent_resources.iter().cloned().collect();
+        let mut all_written_resources = IndexSet::new();
 
         while !working_set.is_empty() {
             // Find a render pass that writes any of the attachments in the working set
@@ -1593,32 +1601,36 @@ impl RenderGraph {
                 })
                 .collect();
 
-            // If there's more than one pass that writes to any of the working set, the graph
-            // is not acyclic: refuse it
-            if writing_passes.len() > 1 {
-                return Err(CompileError::CyclicGraph);
+            working_set.clear();
+
+            for writing_pass_handle in writing_passes {
+                let writing_pass_info = render_passes.remove(&writing_pass_handle).unwrap();
+
+                let pass_writes = writing_pass_info.attachment_writes;
+
+                for pass_write in pass_writes {
+                    // If a resource is written more than once, the graph is acyclic
+                    if all_written_resources.contains(&pass_write) {
+                        return Err(CompileError::CyclicGraph);
+                    }
+                    compiled.resources_used.insert(pass_write);
+                    all_written_resources.insert(pass_write);
+                }
+                // Schedule the pass
+
+                working_set.extend(writing_pass_info.attachment_reads.iter());
+                working_set.extend(writing_pass_info.shader_reads.iter());
+
+                compiled.schedule_pass(writing_pass_handle);
+
+                // 3. Record all the resources used by the pass
+                for read in writing_pass_info.shader_reads {
+                    compiled.resources_used.insert(read);
+                }
             }
 
             // If we found a pass that writes to the working set
             // update the pass's reads with the working set
-            if let Some(handle) = writing_passes.first() {
-                let writing_pass = render_passes.remove(handle).unwrap();
-
-                working_set = writing_pass.shader_reads.iter().cloned().collect();
-                working_set.extend(writing_pass.attachment_reads.iter());
-
-                compiled.schedule_pass(*handle);
-
-                // 3. Record all the resources used by the pass
-                for read in writing_pass.shader_reads {
-                    compiled.resources_used.insert(read);
-                }
-                for write in writing_pass.attachment_writes {
-                    compiled.resources_used.insert(write);
-                }
-            } else {
-                working_set.clear();
-            }
         }
         compiled.pass_sequence.reverse();
         Ok(())
@@ -1672,22 +1684,6 @@ impl RenderGraph {
     ) {
         // TODO: Upgrade to merge candidates
         for handle in compiled.pass_sequence.iter() {
-            let pass = &self.passes[handle];
-            compiled
-                .graph_operations
-                .push(GraphOperation::TransitionShaderRead(
-                    pass.shader_reads.clone(),
-                ));
-            compiled
-                .graph_operations
-                .push(GraphOperation::TransitionAttachmentRead(
-                    pass.attachment_reads.clone(),
-                ));
-            compiled
-                .graph_operations
-                .push(GraphOperation::TransitionAttachmentWrite(
-                    pass.attachment_writes.clone(),
-                ));
             compiled
                 .graph_operations
                 .push(GraphOperation::ExecuteRenderPass(*handle));
@@ -1960,7 +1956,7 @@ impl RenderGraphRunner for GpuRunner {
                             dependency_flags: Default::default(),
                             memory_barriers: &[],
                             buffer_memory_barriers: &[],
-                            image_memory_barriers: &color_transitions,
+                            image_memory_barriers: &depth_stencil_transitions,
                         })
                     }
                 }
@@ -2067,7 +2063,7 @@ impl RenderGraphRunner for GpuRunner {
                             dependency_flags: Default::default(),
                             memory_barriers: &[],
                             buffer_memory_barriers: &[],
-                            image_memory_barriers: &color_transitions,
+                            image_memory_barriers: &depth_stencil_transitions,
                         })
                     }
                 }
@@ -2172,7 +2168,7 @@ impl RenderGraphRunner for GpuRunner {
                             dependency_flags: Default::default(),
                             memory_barriers: &[],
                             buffer_memory_barriers: &[],
-                            image_memory_barriers: &color_transitions,
+                            image_memory_barriers: &depth_stencil_transitions,
                         })
                     }
                 }
@@ -2330,11 +2326,16 @@ fn ensure_graph_allocated_samplers_exists(
             .external_shader_resources
             .contains_key(writes)
         {
-            match &graph.allocations[writes].ty {
+            let desc = match &graph.allocations[writes].ty {
                 AllocationType::Image(d) => *d,
                 AllocationType::Buffer { .. } => panic!("A buffer cannot have a sampler! Bug?"),
             };
-            resource_allocator.samplers.get(ctx, &NoDesc, writes)?;
+
+            let sampler_description = resource_allocator.samplers.get(
+                ctx,
+                &desc.sampler_state.unwrap_or_default(),
+                writes,
+            )?;
         };
     }
     Ok(())
@@ -2527,6 +2528,7 @@ mod test {
             samples: 1,
             present: false,
             clear_value: Color([0.0, 0.0, 0.0, 0.0]),
+            sampler_state: None,
         };
 
         rg.use_image(name, &description, false).unwrap()
@@ -2567,6 +2569,7 @@ mod test {
                 samples: 1,
                 present: false,
                 clear_value: DontCare,
+                sampler_state: None,
             };
 
             render_graph.use_image("color1", &description, false)

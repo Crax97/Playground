@@ -5,8 +5,8 @@ use ash::vk::{ImageAspectFlags, ImageLayout, ImageUsageFlags};
 use ash::{
     prelude::*,
     vk::{
-        self, AllocationCallbacks, Buffer, Extent2D, FenceCreateInfo,
-        SamplerCreateInfo, SemaphoreCreateInfo, ShaderModuleCreateInfo,
+        self, AllocationCallbacks, Buffer, Extent2D, FenceCreateInfo, SamplerCreateInfo,
+        SemaphoreCreateInfo, ShaderModuleCreateInfo,
     },
 };
 
@@ -141,6 +141,51 @@ impl From<vk::Format> for ImageFormat {
     }
 }
 
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum CompareOp {
+    #[default]
+    Always,
+    Never,
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreatereEqual,
+}
+
+impl ToVk for CompareOp {
+    type Inner = vk::CompareOp;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            CompareOp::Always => vk::CompareOp::ALWAYS,
+            CompareOp::Never => vk::CompareOp::NEVER,
+            CompareOp::Equal => vk::CompareOp::EQUAL,
+            CompareOp::NotEqual => vk::CompareOp::NOT_EQUAL,
+            CompareOp::Less => vk::CompareOp::LESS,
+            CompareOp::LessEqual => vk::CompareOp::LESS_OR_EQUAL,
+            CompareOp::Greater => vk::CompareOp::GREATER,
+            CompareOp::GreatereEqual => vk::CompareOp::GREATER_OR_EQUAL,
+        }
+    }
+}
+
+impl From<vk::CompareOp> for CompareOp {
+    fn from(value: vk::CompareOp) -> Self {
+        match value {
+            vk::CompareOp::ALWAYS => CompareOp::Always,
+            vk::CompareOp::NEVER => CompareOp::Never,
+            vk::CompareOp::EQUAL => CompareOp::Equal,
+            vk::CompareOp::NOT_EQUAL => CompareOp::NotEqual,
+            vk::CompareOp::LESS => CompareOp::Less,
+            vk::CompareOp::LESS_OR_EQUAL => CompareOp::LessEqual,
+            vk::CompareOp::GREATER => CompareOp::Greater,
+            vk::CompareOp::GREATER_OR_EQUAL => CompareOp::GreatereEqual,
+            _ => unreachable!(),
+        }
+    }
+}
 macro_rules! impl_raii_wrapper_hash {
     ($name:ident) => {
         impl std::hash::Hash for $name {

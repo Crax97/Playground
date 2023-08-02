@@ -9,14 +9,14 @@ use ash::vk::PresentModeKHR;
 
 use fps_camera::FpsCamera;
 use gpu::CommandBuffer;
-use imgui::Ui;
+use imgui::{TreeNodeFlags, Ui};
 use input::InputState;
 use winit::dpi::{PhysicalPosition, Position};
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::{
     AppState, Backbuffer, DeferredRenderingPipeline, Light, LightHandle, LightType,
-    RenderingPipeline, Scene,
+    RenderingPipeline, Scene, ShadowSetup,
 };
 use nalgebra::*;
 use resource_map::ResourceMap;
@@ -41,59 +41,135 @@ pub struct GLTFViewer {
 }
 impl GLTFViewer {
     fn lights_ui(&mut self, ui: &mut Ui) {
-        ui.separator();
-        let group = ui.begin_group();
-        self.gltf_loader
-            .scene_mut()
-            .all_lights_mut()
-            .iter_mut()
-            .enumerate()
-            .for_each(|(i, l)| {
-                let light_string = match l.ty {
-                    LightType::Point => "Point",
-                    LightType::Directional { .. } => "Directional",
-                    LightType::Spotlight { .. } => "Spotlight",
-                    LightType::Rect { .. } => "Rect",
-                };
-                ui.text(&format!("{light_string} light nr. #{i}"));
-                ui.indent();
-                ui.checkbox("Enabled", &mut l.enabled);
-                ui.input_float3("Position", &mut l.position.coords.data.0[0])
-                    .build();
-                ui.input_float3("Color", &mut l.color.data.0[0]).build();
-                ui.slider("Intensity", 0.0, 100000.0, &mut l.intensity);
-                ui.slider("Radius", 0.0, 100000.0, &mut l.radius);
-                match &mut l.ty {
-                    LightType::Point => {}
-                    LightType::Directional { direction } => {
-                        ui.input_float3("Direction", &mut direction.data.0[0])
-                            .build();
+        if ui.collapsing_header("Lighting settings", TreeNodeFlags::DEFAULT_OPEN) {
+            ui.separator();
+
+            ui.color_edit3(
+                "Ambient light color",
+                &mut self.scene_renderer.ambient_color.data.0[0],
+            );
+            ui.input_float(
+                "Ambient light intensity",
+                &mut self.scene_renderer.ambient_intensity,
+            )
+            .build();
+
+            let group = ui.begin_group();
+            self.gltf_loader
+                .scene()
+                .all_lights()
+                .iter()
+                .enumerate()
+                .for_each(|(i, l)| {
+                    let light_string = match l.ty {
+                        LightType::Point => "Point",
+                        LightType::Directional { .. } => "Directional",
+                        LightType::Spotlight { .. } => "Spotlight",
+                        LightType::Rect { .. } => "Rect",
+                    };
+
+                    let handle = LightHandle(i);
+
+                    if ui
+                        .selectable_config(&format!("{light_string} light nr. #{i}"))
+                        .selected(self.camera_light == handle)
+                        .build()
+                    {
+                        self.camera_light = handle;
                     }
-                    LightType::Spotlight {
-                        direction,
-                        inner_cone_degrees,
-                        outer_cone_degrees,
-                    } => {
-                        ui.input_float3("Direction", &mut direction.data.0[0])
-                            .build();
-                        ui.slider("Outer cone", *inner_cone_degrees, 90.0, outer_cone_degrees);
-                        ui.slider("Inner cone", 0.0, *outer_cone_degrees, inner_cone_degrees);
-                    }
-                    LightType::Rect {
-                        direction,
-                        width,
-                        height,
-                    } => {
-                        ui.input_float3("Direction", &mut direction.data.0[0])
-                            .build();
-                        ui.slider("Width", 0.0, 100000.0, width);
-                        ui.slider("Height", 0.0, 100000.0, height);
-                    }
+                });
+
+            let l = self.gltf_loader.scene_mut().edit_light(&self.camera_light);
+            ui.indent();
+            ui.checkbox("Enabled", &mut l.enabled);
+            ui.input_float3("Position", &mut l.position.coords.data.0[0])
+                .build();
+            ui.color_edit3("Color", &mut l.color.data.0[0]);
+            ui.slider("Intensity", 0.0, 1000.0, &mut l.intensity);
+            ui.slider("Radius", 0.0, 1000.0, &mut l.radius);
+            match &mut l.ty {
+                LightType::Point => {}
+                LightType::Directional { direction, size } => {
+                    ui.input_float3("Direction", &mut direction.data.0[0])
+                        .build();
+                    ui.input_float2("Shadow size", &mut size.data.0[0]).build();
                 }
-                ui.unindent();
-                ui.separator();
-            });
-        group.end();
+                LightType::Spotlight {
+                    direction,
+                    inner_cone_degrees,
+                    outer_cone_degrees,
+                } => {
+                    ui.input_float3("Direction", &mut direction.data.0[0])
+                        .build();
+                    ui.slider("Outer cone", *inner_cone_degrees, 90.0, outer_cone_degrees);
+                    ui.slider("Inner cone", 0.0, *outer_cone_degrees, inner_cone_degrees);
+                }
+                LightType::Rect {
+                    direction,
+                    width,
+                    height,
+                } => {
+                    ui.input_float3("Direction", &mut direction.data.0[0])
+                        .build();
+                    ui.slider("Width", 0.0, 100000.0, width);
+                    ui.slider("Height", 0.0, 100000.0, height);
+                }
+            }
+            ui.unindent();
+            ui.separator();
+            
+            if ui.button("Add new spotlight") {
+                self.gltf_loader.scene_mut().add_light(Light {
+                    ty: LightType::Spotlight {
+                        direction: vector![0.454, -0.324, -0.830],
+                        inner_cone_degrees: 15.0,
+                        outer_cone_degrees: 35.0,
+                    },
+                    position: point![9.766, -0.215, 2.078],
+                    radius: 100.0,
+                    color: vector![1.0, 1.0, 1.0],
+                    intensity: 10.0,
+                    enabled: true,
+                    shadow_setup: Some(ShadowSetup {
+                        width: 512,
+                        height: 512,
+                    })
+                });
+            }
+            if ui.button("Add new directional light") {
+                self.gltf_loader.scene_mut().add_light(Light {
+                    ty: LightType::Directional {
+                        direction: vector![0.454, -0.324, -0.830],
+                        size: vector![10.0, 10.0],
+                    },
+                    position: point![9.766, -0.215, 2.078],
+                    radius: 100.0,
+                    color: vector![1.0, 1.0, 1.0],
+                    intensity: 10.0,
+                    enabled: true,
+                    shadow_setup: Some(ShadowSetup {
+                        width: 512,
+                        height: 512,
+                    })
+                });
+            }
+            if ui.button("Add new point light") {
+                self.gltf_loader.scene_mut().add_light(Light {
+                    ty: LightType::Point,
+                    position: point![9.766, -0.215, 2.078],
+                    radius: 100.0,
+                    color: vector![1.0, 1.0, 1.0],
+                    intensity: 10.0,
+                    enabled: true,
+                    shadow_setup: Some(ShadowSetup {
+                        width: 512,
+                        height: 512,
+                    })
+                });
+            }
+
+            group.end();
+        }
     }
 }
 
@@ -187,6 +263,23 @@ impl App for GLTFViewer {
             &mut settings.fxaa_quality_edge_threshold_min,
         );
 
+        ui.separator();
+
+        if ui.collapsing_header("Shadow settings", TreeNodeFlags::DEFAULT_OPEN) {
+            ui.slider(
+                "Depth Bias constant",
+                -2.0,
+                2.0,
+                &mut self.scene_renderer.depth_bias_constant,
+            );
+            ui.slider(
+                "Depth Bias slope",
+                -2.0,
+                2.0,
+                &mut self.scene_renderer.depth_bias_slope,
+            );
+        }
+
         self.lights_ui(ui);
 
         self.scene_renderer.set_fxaa_settings_mut(settings);
@@ -265,27 +358,36 @@ fn add_scene_lights(scene: &mut Scene) -> LightHandle {
     //     intensity: 1.0,
     //     enabled: true,
     // });
-    // scene.add_light(Light {
-    //     ty: LightType::Directional {
-    //         direction: vector![-0.45, -0.45, 0.0],
-    //     },
-    //     position: point![100.0, 100.0, 0.0],
-    //     radius: 10.0,
-    //     color: vector![1.0, 1.0, 1.0],
-    //     intensity: 1.0,
-    //     enabled: true,
-    // });
+    scene.add_light(Light {
+        ty: LightType::Directional {
+            direction: vector![0.680, -0.731, -0.061],
+            size: vector![50.0, 50.0],
+        },
+        position: point![-11.0, -20.0, 1.5],
+        radius: 100.0,
+        color: vector![1.0, 1.0, 1.0],
+        intensity: 100.0,
+        enabled: true,
+        shadow_setup: Some(ShadowSetup {
+            width: 2048,
+            height: 2048,
+        }),
+    });
     scene.add_light(Light {
         ty: LightType::Spotlight {
-            direction: vector![0.45, -0.45, 0.0],
+            direction: vector![0.454, -0.324, -0.830],
             inner_cone_degrees: 15.0,
             outer_cone_degrees: 35.0,
         },
-        position: point![100.0, 100.0, 0.0],
-        radius: 10.0,
+        position: point![9.766, -0.215, 2.078],
+        radius: 100.0,
         color: vector![1.0, 1.0, 1.0],
         intensity: 10.0,
         enabled: true,
+        shadow_setup: Some(ShadowSetup {
+            width: 512,
+            height: 512,
+        }),
     })
 }
 

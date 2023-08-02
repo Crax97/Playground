@@ -1,8 +1,9 @@
 use engine_macros::glsl;
 use std::{collections::HashMap, mem::size_of};
+use std::convert::identity;
 
 use ash::vk::{
-    BufferUsageFlags, CompareOp, IndexType, PipelineBindPoint, PushConstantRange,
+    BufferUsageFlags, CompareOp, Extent2D, IndexType, PipelineBindPoint, PushConstantRange,
     ShaderModuleCreateFlags, ShaderStageFlags, StencilOpState,
 };
 use gpu::{
@@ -10,7 +11,7 @@ use gpu::{
     GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain, ShaderModuleCreateInfo, Swapchain, ToVk,
     VertexStageInfo,
 };
-use nalgebra::{vector, Matrix4, Vector2, Vector4};
+use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
 
 const FXAA_FS: &[u32] = glsl!(
@@ -24,6 +25,10 @@ const FXAA_VS: &[u32] = glsl!(
     path = "src/shaders/fxaa_vs.vert",
     entry_point = "main"
 );
+
+const SHADOW_MAP_WIDTH: u32 = 7680;
+const SHADOW_MAP_HEIGHT: u32 = 4320;
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct FxaaShaderParams {
@@ -32,6 +37,13 @@ struct FxaaShaderParams {
     fxaa_quality_edge_threshold: f32,
     fxaa_quality_edge_threshold_min: f32,
     iterations: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ObjectDrawInfo {
+    model: Matrix4<f32>,
+    camera_index: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -56,9 +68,10 @@ impl Default for FxaaSettings {
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct PerFrameData {
-    eye: Vector4<f32>,
+    eye: Point4<f32>,
     view: nalgebra::Matrix4<f32>,
     projection: nalgebra::Matrix4<f32>,
+    viewport_size_offset: Vector4<f32>,
 }
 
 #[repr(C)]
@@ -68,14 +81,14 @@ struct GpuLightInfo {
     direction: Vector4<f32>,
     color: Vector4<f32>,
     extras: Vector4<f32>,
-    ty: [u32; 4],
+    ty_shadowcaster: [i32; 4],
 }
 
 impl From<&Light> for GpuLightInfo {
     fn from(light: &Light) -> Self {
         let (direction, extras, ty) = match light.ty {
             LightType::Point => (Default::default(), Default::default(), 0),
-            LightType::Directional { direction } => (
+            LightType::Directional { direction, .. } => (
                 vector![direction.x, direction.y, direction.z, 0.0],
                 Default::default(),
                 1,
@@ -114,7 +127,7 @@ impl From<&Light> for GpuLightInfo {
             color: vector![light.color.x, light.color.y, light.color.z, light.intensity],
             direction,
             extras,
-            ty: [ty, 0, 0, 0],
+            ty_shadowcaster: [ty, -1, 0, 0],
         }
     }
 }
@@ -161,6 +174,13 @@ pub struct DeferredRenderingPipeline {
     fxaa_fs: GpuShaderModule,
     in_flight_frame: usize,
     max_frames_in_flight: usize,
+
+    pub depth_bias_constant: f32,
+    pub depth_bias_clamp: f32,
+    pub depth_bias_slope: f32,
+
+    pub ambient_color: Vector3<f32>,
+    pub ambient_intensity: f32,
 }
 
 impl DeferredRenderingPipeline {
@@ -176,8 +196,10 @@ impl DeferredRenderingPipeline {
             let camera_buffer = {
                 let create_info = BufferCreateInfo {
                     label: Some("Deferred Renderer - Camera buffer"),
-                    size: std::mem::size_of::<PerFrameData>(),
-                    usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
+                    size: std::mem::size_of::<PerFrameData>() * 100,
+                    usage: BufferUsageFlags::STORAGE_BUFFER
+                        | BufferUsageFlags::UNIFORM_BUFFER
+                        | BufferUsageFlags::TRANSFER_DST,
                 };
                 gpu.create_buffer(
                     &create_info,
@@ -227,6 +249,11 @@ impl DeferredRenderingPipeline {
             runner: GpuRunner::new(),
             in_flight_frame: 0,
             max_frames_in_flight: Swapchain::MAX_FRAMES_IN_FLIGHT,
+            depth_bias_constant: 1.25,
+            depth_bias_clamp: 0.0,
+            depth_bias_slope: 1.75,
+            ambient_color: vector![1.0, 1.0, 1.0],
+            ambient_intensity: 0.3,
         })
     }
 
@@ -244,6 +271,7 @@ impl DeferredRenderingPipeline {
         resource_map: &ResourceMap,
         pipeline_target: PipelineTarget,
         draw_hashmap: &HashMap<&MasterMaterial, Vec<DrawCall>>,
+        camera_index: u32,
         ctx: &mut RenderPassContext,
     ) {
         let mut total_primitives_rendered = 0;
@@ -292,8 +320,14 @@ impl DeferredRenderingPipeline {
                         ],
                         &[0, 0, 0, 0, 0],
                     );
-                    ctx.render_pass_command
-                        .push_constant(pipeline, &draw_call.transform, 0);
+                    ctx.render_pass_command.push_constant(
+                        pipeline,
+                        &ObjectDrawInfo {
+                            model: draw_call.transform,
+                            camera_index,
+                        },
+                        0,
+                    );
                     ctx.render_pass_command
                         .draw_indexed(draw_call.prim.index_count, 1, 0, 0, 0);
 
@@ -348,34 +382,98 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         self.in_flight_frame = (1 + self.in_flight_frame) % self.max_frames_in_flight;
 
+        let mut per_frame_data = vec![PerFrameData {
+            eye: Point4::new(pov.location[0], pov.location[1], pov.location[2], 0.0),
+            view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * pov.view(),
+            projection,
+            viewport_size_offset: vector![
+                0.0,
+                0.0,
+                backbuffer.size.width as f32,
+                backbuffer.size.height as f32
+            ],
+        }];
+        let mut x = 0.0;
+        let mut y = 0.0;
+        let mut shadow_caster_idx = 0;
+        let collected_active_lights : Vec<GpuLightInfo> =
+            scene.all_enabled_lights().enumerate().map(|(i, l)| {
+                let mut light : GpuLightInfo = l.into();
+                if l.shadow_setup.is_some() {
+                    light.ty_shadowcaster[1] = shadow_caster_idx;
+                    let povs = l.shadow_view_matrices()
+                        .iter()
+                        .map(|v| {
+                            let w = l.shadow_setup.unwrap().width as f32;
+                            let h = l.shadow_setup.unwrap().height as f32;
+
+                            let pfd = Some(PerFrameData {
+                                eye: Point4::new(l.position.x, l.position.y, l.position.z, 0.0),
+                                view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * v,
+                                projection: l.projection_matrix(),
+                                viewport_size_offset: vector![x, y, w, h],
+                            });
+
+                            x += w;
+                            if x > SHADOW_MAP_WIDTH as f32 {
+                                if (y + h) <= SHADOW_MAP_HEIGHT as f32 {
+                                    x = 0.0;
+                                    y += h;
+                                } else {
+                                    return None;
+                                }
+                            }
+                            shadow_caster_idx += 1;
+                            pfd
+                        })
+                        .take_while(|l| l.is_some())
+                        .flatten()
+                        .collect::<Vec<_>>();
+                        per_frame_data.extend(povs);
+                    }
+                light
+            }).collect();
         super::app_state()
             .gpu
-            .write_buffer_data(
+            .write_buffer_data_with_offset(
                 &current_buffers.camera_buffer,
-                &[PerFrameData {
-                    eye: Vector4::new(pov.location[0], pov.location[1], pov.location[2], 0.0),
-                    view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * pov.view(),
-                    projection,
-                }],
-            )
-            .unwrap();
-
-        let collected_active_lights: Vec<GpuLightInfo> =
-            scene.all_enabled_lights().map(|l| l.into()).collect();
-
-        super::app_state()
-            .gpu
-            .write_buffer_data_with_offset(
-                &current_buffers.light_buffer,
                 0,
-                &[collected_active_lights.len() as u64],
+                &[per_frame_data.len() as u32 - 1],
+            )
+            .unwrap();
+        super::app_state()
+            .gpu
+            .write_buffer_data_with_offset(
+                &current_buffers.camera_buffer,
+                size_of::<u32>() as u64 * 4,
+                &per_frame_data,
+            )
+            .unwrap();
+
+        let ambient = vector![
+            self.ambient_color.x,
+            self.ambient_color.y,
+            self.ambient_color.z,
+            self.ambient_intensity
+        ];
+
+        super::app_state()
+            .gpu
+            .write_buffer_data_with_offset(&current_buffers.light_buffer, 0, &[ambient])
+            .unwrap();
+        super::app_state()
+            .gpu
+            .write_buffer_data_with_offset(
+                &current_buffers.light_buffer,
+                std::mem::size_of::<Vector4<f32>>() as _,
+                &[collected_active_lights.len() as u32],
             )
             .unwrap();
         super::app_state()
             .gpu
             .write_buffer_data_with_offset(
                 &current_buffers.light_buffer,
-                size_of::<u32>() as u64 * 4,
+                std::mem::size_of::<Vector4<f32>>() as u64 + size_of::<u32>() as u64 * 4,
                 &collected_active_lights,
             )
             .unwrap();
@@ -392,6 +490,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             samples: 1,
             present: false,
             clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
+            sampler_state: None,
         };
         let framebuffer_normal_desc = crate::ImageDescription {
             width: backbuffer.size.width,
@@ -400,6 +499,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             samples: 1,
             present: false,
             clear_value: ClearValue::Color([0.5, 0.5, 0.5, 1.0]),
+            sampler_state: None,
         };
         let framebuffer_vector_desc = crate::ImageDescription {
             width: backbuffer.size.width,
@@ -408,6 +508,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             samples: 1,
             present: false,
             clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
+            sampler_state: None,
         };
         let framebuffer_depth_desc = crate::ImageDescription {
             width: backbuffer.size.width,
@@ -416,6 +517,18 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             samples: 1,
             present: false,
             clear_value: ClearValue::Depth(1.0),
+            sampler_state: None,
+        };
+        let shadow_map_desc = crate::ImageDescription {
+            width: SHADOW_MAP_WIDTH,
+            height: SHADOW_MAP_HEIGHT,
+            format: ImageFormat::Depth,
+            samples: 1,
+            present: false,
+            clear_value: ClearValue::Depth(1.0),
+            sampler_state: Some(crate::SamplerState {
+                compare_op: Some(gpu::CompareOp::LessEqual),
+            }),
         };
         let framebuffer_swapchain_desc = crate::ImageDescription {
             width: backbuffer.size.width,
@@ -424,13 +537,14 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             samples: 1,
             present: false,
             clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
+            sampler_state: None,
         };
 
         let camera_buffer = self.render_graph.use_buffer(
             "camera-buffer",
             &BufferDescription {
                 length: std::mem::size_of::<PerFrameData>() as u64,
-                ty: BufferType::Uniform,
+                ty: BufferType::Storage,
             },
             true,
         )?;
@@ -450,6 +564,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let depth_target =
             self.render_graph
                 .use_image("depth-buffer", &framebuffer_depth_desc, false)?;
+        let shadow_map = self
+            .render_graph
+            .use_image("shadow_map", &shadow_map_desc, false)?;
         let color_target =
             self.render_graph
                 .use_image("color-buffer", &framebuffer_vector_desc, false)?;
@@ -482,6 +599,19 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .render_graph
             .begin_render_pass("EarlyZPass", backbuffer.size)?
             .writes_attachments(&[depth_target])
+            .shader_reads(&[camera_buffer])
+            .mark_external()
+            .commit();
+        let shadow_map_pass = self
+            .render_graph
+            .begin_render_pass(
+                "ShadowMapRendering",
+                Extent2D {
+                    width: SHADOW_MAP_WIDTH,
+                    height: SHADOW_MAP_HEIGHT,
+                },
+            )?
+            .writes_attachments(&[shadow_map])
             .shader_reads(&[camera_buffer])
             .mark_external()
             .commit();
@@ -521,6 +651,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 diffuse_target,
                 emissive_target,
                 pbr_target,
+                shadow_map,
                 camera_buffer,
                 light_buffer,
             ])
@@ -755,13 +886,45 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         //#region context setup
         context.register_callback(&dbuffer_pass, |_: &Gpu, ctx| {
-            Self::main_render_loop(resource_map, PipelineTarget::DepthOnly, &draw_hashmap, ctx);
+            Self::main_render_loop(
+                resource_map,
+                PipelineTarget::DepthOnly,
+                &draw_hashmap,
+                0,
+                ctx,
+            );
+        });
+        context.register_callback(&shadow_map_pass, |_: &Gpu, ctx| {
+            ctx.render_pass_command.set_depth_bias(
+                self.depth_bias_constant,
+                self.depth_bias_clamp,
+                self.depth_bias_slope,
+            );
+            for (i, pov) in per_frame_data.iter().enumerate().skip(1) {
+                ctx.render_pass_command.set_viewport(gpu::Viewport {
+                    x: pov.viewport_size_offset.x,
+                    y: pov.viewport_size_offset.y,
+                    width: pov.viewport_size_offset.z,
+                    height: pov.viewport_size_offset.w,
+                    min_depth: 0.0,
+                    max_depth: 1.0,
+                });
+
+                Self::main_render_loop(
+                    resource_map,
+                    PipelineTarget::DepthOnly,
+                    &draw_hashmap,
+                    i as _,
+                    ctx,
+                );
+            }
         });
         context.register_callback(&gbuffer_pass, |_: &Gpu, ctx| {
             Self::main_render_loop(
                 resource_map,
                 PipelineTarget::ColorAndDepth,
                 &draw_hashmap,
+                0,
                 ctx,
             );
         });
@@ -920,9 +1083,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             name: material_description.name,
             domain: material_description.domain,
             global_inputs: match material_description.domain {
-                MaterialDomain::Surface => &[BindingType::Uniform],
+                MaterialDomain::Surface => &[BindingType::Storage],
                 MaterialDomain::PostProcess => &[
-                    BindingType::Uniform,              // Camera buffer
+                    BindingType::Storage,              // Camera buffer
                     BindingType::CombinedImageSampler, // Previous post process result/ Initial scene color,
                     BindingType::CombinedImageSampler, // Scene position,
                     BindingType::CombinedImageSampler, // Scene diffuse,
@@ -948,7 +1111,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             push_constant_ranges: &[PushConstantRange {
                 stage_flags: ShaderStageFlags::ALL,
                 offset: 0,
-                size: std::mem::size_of::<Matrix4<f32>>() as u32,
+                size: std::mem::size_of::<ObjectDrawInfo>() as u32,
             }],
             logic_op: None,
         };
