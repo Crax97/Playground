@@ -22,6 +22,7 @@ use nalgebra::*;
 use resource_map::ResourceMap;
 use winit::event::MouseButton;
 use winit::event_loop::EventLoop;
+use crate::input::key::Key;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -39,6 +40,15 @@ pub struct GLTFViewer {
     input: InputState,
     camera_light: LightHandle,
 }
+
+impl GLTFViewer {
+    pub(crate) fn print_lights(&self) {
+        for light in self.gltf_loader.scene().all_lights() {
+            println!("{light:?}");
+        }
+    }
+}
+
 impl GLTFViewer {
     fn lights_ui(&mut self, ui: &mut Ui) {
         if ui.collapsing_header("Lighting settings", TreeNodeFlags::DEFAULT_OPEN) {
@@ -287,6 +297,10 @@ impl App for GLTFViewer {
         if ui.io().want_capture_keyboard || ui.io().want_capture_mouse {
             return Ok(());
         }
+        
+        if self.input.is_key_just_pressed(Key::P) {
+            self.print_lights();
+        }
 
         if self.input.is_mouse_button_just_pressed(MouseButton::Right) {
             app_state
@@ -350,45 +364,10 @@ impl App for GLTFViewer {
 }
 
 fn add_scene_lights(scene: &mut Scene) -> LightHandle {
-    // scene.add_light(Light {
-    //     ty: LightType::Point,
-    //     position: point![0.0, 10.0, 0.0],
-    //     radius: 50.0,
-    //     color: vector![1.0, 0.0, 0.0],
-    //     intensity: 1.0,
-    //     enabled: true,
-    // });
-    scene.add_light(Light {
-        ty: LightType::Directional {
-            direction: vector![0.680, -0.731, -0.061],
-            size: vector![50.0, 50.0],
-        },
-        position: point![-11.0, -20.0, 1.5],
-        radius: 100.0,
-        color: vector![1.0, 1.0, 1.0],
-        intensity: 100.0,
-        enabled: true,
-        shadow_setup: Some(ShadowSetup {
-            width: 2048,
-            height: 2048,
-        }),
-    });
-    scene.add_light(Light {
-        ty: LightType::Spotlight {
-            direction: vector![0.454, -0.324, -0.830],
-            inner_cone_degrees: 15.0,
-            outer_cone_degrees: 35.0,
-        },
-        position: point![9.766, -0.215, 2.078],
-        radius: 100.0,
-        color: vector![1.0, 1.0, 1.0],
-        intensity: 10.0,
-        enabled: true,
-        shadow_setup: Some(ShadowSetup {
-            width: 512,
-            height: 512,
-        }),
-    })
+    scene.add_light(Light { ty: LightType::Directional { direction: vector![-0.52155536, 0.8490293, 0.08443476], size: vector![50.0, 50.0] }, position: point![9.261562, -20.304585, -1.3664505], radius: 100.0, color: vector![0.95098037, 0.90916246, 0.66661865], intensity: 9.836, enabled: true, shadow_setup: Some(ShadowSetup { width: 2048, height: 2048 }) });
+    scene.add_light(Light { ty: LightType::Spotlight { direction: vector![-0.1424134, -0.31258363, 0.9391538], inner_cone_degrees: 15.0, outer_cone_degrees: 35.0 }, position: point![-9.699096, -0.08773269, -3.9881172], radius: 100.0, color: vector![1.0, 0.3333333, 0.3333333], intensity: 10.0, enabled: true, shadow_setup: Some(ShadowSetup { width: 512, height: 512 }) });
+    scene.add_light(Light { ty: LightType::Spotlight { direction: vector![-0.19844706, -0.27760813, -0.93997467], inner_cone_degrees: 15.0, outer_cone_degrees: 35.0 }, position: point![-9.586186, -0.38097504, 2.9570565], radius: 100.0, color: vector![0.07352942, 0.7820069, 1.0], intensity: 10.0, enabled: true, shadow_setup: Some(ShadowSetup { width: 512, height: 512 }) });
+    scene.add_light(Light { ty: LightType::Point, position: point![9.354064, -2.421008, -0.4766891], radius: 5.0, color: vector![1.0, 1.0, 1.0], intensity: 2.0, enabled: true, shadow_setup: Some(ShadowSetup { width: 512, height: 512 }) })
 }
 
 fn main() -> anyhow::Result<()> {

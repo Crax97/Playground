@@ -19,7 +19,7 @@ pub struct ScenePrimitive {
     pub transform: Matrix4<f32>,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LightType {
     Point,
     Directional {
@@ -38,13 +38,13 @@ pub enum LightType {
     },
 }
 
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ShadowSetup {
     pub width: u32,
     pub height: u32,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Light {
     pub ty: LightType,
     pub position: Point3<f32>,
