@@ -11,6 +11,10 @@ path = "src/planes.rs"
 name = "gltf_viewer"
 path = "src/gltf_viewer.rs"
 
+[[bin]]
+name = "compute"
+path = "src/compute.rs"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
