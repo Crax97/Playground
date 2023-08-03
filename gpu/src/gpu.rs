@@ -1,12 +1,14 @@
+use std::ptr::addr_of_mut;
 use std::{
     cell::RefCell,
     ffi::{c_void, CStr, CString},
     ptr::{addr_of, null},
     sync::Arc,
 };
-use std::ptr::addr_of_mut;
 
 use anyhow::{bail, Result};
+use ash::extensions::khr::DynamicRendering;
+use ash::vk::{PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR};
 use ash::{
     extensions::ext::DebugUtils,
     prelude::*,
@@ -21,17 +23,14 @@ use ash::{
         Extent2D, Extent3D, Fence, FormatFeatureFlags, FramebufferCreateFlags, Handle,
         ImageAspectFlags, ImageCreateFlags, ImageLayout, ImageSubresourceLayers,
         ImageSubresourceRange, ImageTiling, ImageType, ImageViewCreateFlags, ImageViewType,
-        InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, 
-        Offset3D, PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties,
-        PhysicalDeviceType, PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo,
-        PipelineStageFlags, Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo,
-        ShaderModuleCreateFlags, SharingMode, StructureType, SubmitInfo, WriteDescriptorSet,
-        API_VERSION_1_3,
+        InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D,
+        PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType,
+        PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo, PipelineStageFlags,
+        Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo, ShaderModuleCreateFlags,
+        SharingMode, StructureType, SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
     },
     *,
 };
-use ash::extensions::khr::DynamicRendering;
-use ash::vk::{PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR};
 
 use log::{error, trace, warn};
 use raw_window_handle::HasRawDisplayHandle;
@@ -259,8 +258,7 @@ impl Gpu {
     pub fn new(configuration: GpuConfiguration) -> Result<Self> {
         let entry = unsafe { Entry::load()? };
 
-        let mut instance_extensions =
-        if let Some(window) = configuration.window {
+        let mut instance_extensions = if let Some(window) = configuration.window {
             ash_window::enumerate_required_extensions(window.raw_display_handle())?
                 .iter()
                 .map(|c_ext| unsafe { CStr::from_ptr(*c_ext) })
@@ -273,15 +271,18 @@ impl Gpu {
         if configuration.enable_debug_utilities {
             instance_extensions.push("VK_EXT_debug_utils".into());
         }
-        
+
         Self::ensure_required_instance_extensions_are_available(&instance_extensions, &entry)?;
 
         let instance = Self::create_instance(&entry, &configuration, &instance_extensions)?;
         trace!("Created instance");
 
-        let device_extensions = vec!["VK_KHR_swapchain".into(),
-                                                "VK_KHR_dynamic_rendering".into(),];
-
+        let mut device_extensions = vec!["VK_KHR_dynamic_rendering".into()];
+    
+        if configuration.window.is_some() {
+            device_extensions.push("VK_KHR_swapchain".into());
+        }
+        
         let physical_device = Self::select_discrete_physical_device(&instance)?;
         trace!("Created physical device");
 
@@ -365,7 +366,7 @@ impl Gpu {
             Self::create_pipeline_cache(&logical_device, configuration.pipeline_cache_path)?;
 
         let dynamic_rendering = Self::create_dynamic_rendering(&instance, &logical_device)?;
-        
+
         let state = Arc::new(GpuState {
             entry,
             instance,
@@ -556,7 +557,7 @@ impl Gpu {
 
         let device_features = PhysicalDeviceFeatures {
             sampler_anisotropy: vk::TRUE,
-            
+
             ..Default::default()
         };
 
@@ -565,13 +566,13 @@ impl Gpu {
             s_type: StructureType::PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
             dynamic_rendering: vk::TRUE,
         };
-        
+
         let device_features_2 = PhysicalDeviceFeatures2KHR {
             p_next: addr_of_mut!(dynamic_state_features).cast(),
             s_type: StructureType::PHYSICAL_DEVICE_FEATURES_2_KHR,
             features: device_features,
         };
- 
+
         let create_info = DeviceCreateInfo {
             s_type: StructureType::DEVICE_CREATE_INFO,
             p_next: addr_of!(device_features_2).cast(),
@@ -643,18 +644,22 @@ impl Gpu {
         let all_extensions = unsafe {
             instance.enumerate_device_extension_properties(physical_device.physical_device)
         }?;
-        let all_supported_extensions : Vec<_> = all_extensions
+        let all_supported_extensions: Vec<_> = all_extensions
             .iter()
-            .map(|ext| 
-                unsafe { CStr::from_ptr(ext.extension_name.as_ptr()) }.to_str()
+            .map(|ext| {
+                unsafe { CStr::from_ptr(ext.extension_name.as_ptr()) }
+                    .to_str()
                     .expect("Failed to get extension name")
-                    .to_owned())
+                    .to_owned()
+            })
             .collect();
-        
-        
+
         for requested_extension in device_extensions {
             if !all_supported_extensions.contains(requested_extension) {
-                error!("Device extension {:?} is not supported", requested_extension);
+                error!(
+                    "Device extension {:?} is not supported",
+                    requested_extension
+                );
             }
         }
 
@@ -663,19 +668,19 @@ impl Gpu {
     pub fn instance(&self) -> Instance {
         self.state.instance.clone()
     }
-    
+
     pub fn dynamic_rendering(&self) -> DynamicRendering {
         self.state.dynamic_rendering.clone()
     }
-    
+
     pub fn vk_logical_device(&self) -> Device {
         self.state.logical_device.clone()
     }
-    
+
     pub fn vk_physical_device(&self) -> vk::PhysicalDevice {
         self.state.physical_device.physical_device
     }
-    
+
     pub fn command_pool(&self) -> vk::CommandPool {
         self.thread_local_state.graphics_command_pool
     }
@@ -899,8 +904,11 @@ impl Gpu {
             )
         }
     }
-    
-    fn create_dynamic_rendering(instance: &Instance, device: &Device) -> VkResult<DynamicRendering> {
+
+    fn create_dynamic_rendering(
+        instance: &Instance,
+        device: &Device,
+    ) -> VkResult<DynamicRendering> {
         let dynamic_rendering = DynamicRendering::new(instance, device);
         Ok(dynamic_rendering)
     }

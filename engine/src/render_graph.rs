@@ -18,16 +18,16 @@ use gpu::{
     BeginRenderPassInfo, BindingType, BlendState, BufferCreateInfo, BufferRange, ColorAttachment,
     ColorLoadOp, CommandBuffer, DepthAttachment, DepthLoadOp, DescriptorInfo, DescriptorSetInfo,
     FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage,
-    GpuImageView, GpuSampler, ImageCreateInfo, ImageFormat, ImageMemoryBarrier,
-    ImageViewCreateInfo, MemoryDomain, GraphicsPipeline, PipelineBarrierInfo, RenderPass,
-    RenderPassAttachment, RenderPassCommand, RenderPassDescription, StencilAttachment,
-    StencilLoadOp, SubpassDescription, ToVk, TransitionInfo,
+    GpuImageView, GpuSampler, GraphicsPipeline, ImageCreateInfo, ImageFormat, ImageMemoryBarrier,
+    ImageViewCreateInfo, MemoryDomain, PipelineBarrierInfo, RenderPass, RenderPassAttachment,
+    RenderPassCommand, RenderPassDescription, StencilAttachment, StencilLoadOp, SubpassDescription,
+    ToVk, TransitionInfo,
 };
 
 use ash::vk::PushConstantRange;
 use gpu::{
     BindingElement, CullMode, DepthStencilAttachment, DepthStencilState, FragmentStageInfo,
-    FrontFace, GlobalBinding, GpuShaderModule, LogicOp, GraphicsPipelineDescription, PolygonMode,
+    FrontFace, GlobalBinding, GpuShaderModule, GraphicsPipelineDescription, LogicOp, PolygonMode,
     PrimitiveTopology, VertexBindingDescription, VertexStageInfo,
 };
 use indexmap::IndexSet;
@@ -1719,7 +1719,10 @@ impl RenderGraph {
             .ok_or(CompileError::ResourceNotFound(*resource))
     }
 
-    pub(crate) fn get_pipeline(&self, pipeline_handle: &RenderPassHandle) -> Option<&GraphicsPipeline> {
+    pub(crate) fn get_pipeline(
+        &self,
+        pipeline_handle: &RenderPassHandle,
+    ) -> Option<&GraphicsPipeline> {
         self.render_pass_pipelines.get(pipeline_handle)
     }
 

@@ -126,9 +126,12 @@ impl Light {
     pub(crate) fn projection_matrix(&self) -> Matrix4<f32> {
         const ZNEAR: f32 = 1.0;
         match self.ty {
-            LightType::Point => {
-                Matrix4::new_perspective(1.0, 90.0f32.to_radians(), ZNEAR, self.radius.max(ZNEAR + 0.1))
-            }
+            LightType::Point => Matrix4::new_perspective(
+                1.0,
+                90.0f32.to_radians(),
+                ZNEAR,
+                self.radius.max(ZNEAR + 0.1),
+            ),
             LightType::Directional { size, .. } => Matrix4::new_orthographic(
                 -size.x * 0.5,
                 size.x * 0.5,
@@ -139,7 +142,12 @@ impl Light {
             ),
             LightType::Spotlight {
                 outer_cone_degrees, ..
-            } => Matrix4::new_perspective(1.0, outer_cone_degrees.to_radians(), ZNEAR, self.radius.max(ZNEAR + 0.1)),
+            } => Matrix4::new_perspective(
+                1.0,
+                outer_cone_degrees.to_radians(),
+                ZNEAR,
+                self.radius.max(ZNEAR + 0.1),
+            ),
             LightType::Rect { width, height, .. } => {
                 Matrix4::new_perspective(width / height, 90.0, ZNEAR, self.radius.max(ZNEAR + 0.1))
             }

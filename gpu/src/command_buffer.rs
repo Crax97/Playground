@@ -748,7 +748,12 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         }
     }
 
-    pub fn push_constant<T: Copy + Sized>(&self, pipeline: &GraphicsPipeline, data: &T, offset: u32) {
+    pub fn push_constant<T: Copy + Sized>(
+        &self,
+        pipeline: &GraphicsPipeline,
+        data: &T,
+        offset: u32,
+    ) {
         let device = self.command_buffer.gpu.vk_logical_device();
         unsafe {
             let ptr: *const u8 = data as *const T as *const u8;

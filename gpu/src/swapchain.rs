@@ -15,7 +15,9 @@ use ash::{
     Device,
 };
 use log::{info, trace, warn};
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle};
+use raw_window_handle::{
+    HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle,
+};
 use winit::window::Window;
 
 use crate::{Gpu, GpuImage, GpuImageView};

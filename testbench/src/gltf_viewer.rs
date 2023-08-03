@@ -14,6 +14,7 @@ use input::InputState;
 use winit::dpi::{PhysicalPosition, Position};
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
+use crate::input::key::Key;
 use engine::{
     AppState, Backbuffer, DeferredRenderingPipeline, Light, LightHandle, LightType,
     RenderingPipeline, Scene, ShadowSetup,
@@ -22,7 +23,6 @@ use nalgebra::*;
 use resource_map::ResourceMap;
 use winit::event::MouseButton;
 use winit::event_loop::EventLoop;
-use crate::input::key::Key;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -127,7 +127,7 @@ impl GLTFViewer {
             }
             ui.unindent();
             ui.separator();
-            
+
             if ui.button("Add new spotlight") {
                 self.gltf_loader.scene_mut().add_light(Light {
                     ty: LightType::Spotlight {
@@ -143,7 +143,7 @@ impl GLTFViewer {
                     shadow_setup: Some(ShadowSetup {
                         width: 512,
                         height: 512,
-                    })
+                    }),
                 });
             }
             if ui.button("Add new directional light") {
@@ -160,7 +160,7 @@ impl GLTFViewer {
                     shadow_setup: Some(ShadowSetup {
                         width: 512,
                         height: 512,
-                    })
+                    }),
                 });
             }
             if ui.button("Add new point light") {
@@ -174,7 +174,7 @@ impl GLTFViewer {
                     shadow_setup: Some(ShadowSetup {
                         width: 512,
                         height: 512,
-                    })
+                    }),
                 });
             }
 
@@ -296,7 +296,7 @@ impl App for GLTFViewer {
         if ui.io().want_capture_keyboard || ui.io().want_capture_mouse {
             return Ok(());
         }
-        
+
         if self.input.is_key_just_pressed(Key::P) {
             self.print_lights();
         }
@@ -305,15 +305,13 @@ impl App for GLTFViewer {
             app_state
                 .window()
                 .set_cursor_grab(winit::window::CursorGrabMode::Confined)?;
-            app_state
-                .window().set_cursor_visible(false);
+            app_state.window().set_cursor_visible(false);
         }
         if self.input.is_mouse_button_just_released(MouseButton::Right) {
             app_state
                 .window()
                 .set_cursor_grab(winit::window::CursorGrabMode::None)?;
-            app_state
-                .window().set_cursor_visible(true);
+            app_state.window().set_cursor_visible(true);
         }
 
         if self
@@ -322,11 +320,11 @@ impl App for GLTFViewer {
         {
             self.camera
                 .update(&self.input, app_state.time.delta_frame());
-            let window_size = app_state
-                .window().inner_size();
+            let window_size = app_state.window().inner_size();
 
             app_state
-                .window().set_cursor_position(Position::Physical(PhysicalPosition {
+                .window()
+                .set_cursor_position(Position::Physical(PhysicalPosition {
                     x: window_size.width as i32 / 2,
                     y: window_size.height as i32 / 2,
                 }))?;
@@ -359,10 +357,65 @@ impl App for GLTFViewer {
 }
 
 fn add_scene_lights(scene: &mut Scene) -> LightHandle {
-    scene.add_light(Light { ty: LightType::Directional { direction: vector![-0.52155536, 0.8490293, 0.08443476], size: vector![50.0, 50.0] }, position: point![9.261562, -20.304585, -1.3664505], radius: 100.0, color: vector![0.95098037, 0.90916246, 0.66661865], intensity: 9.836, enabled: true, shadow_setup: Some(ShadowSetup { width: 2048, height: 2048 }) });
-    scene.add_light(Light { ty: LightType::Spotlight { direction: vector![-0.1424134, -0.31258363, 0.9391538], inner_cone_degrees: 15.0, outer_cone_degrees: 35.0 }, position: point![-9.699096, -0.08773269, -3.9881172], radius: 100.0, color: vector![1.0, 0.3333333, 0.3333333], intensity: 10.0, enabled: true, shadow_setup: Some(ShadowSetup { width: 512, height: 512 }) });
-    scene.add_light(Light { ty: LightType::Spotlight { direction: vector![-0.19844706, -0.27760813, -0.93997467], inner_cone_degrees: 15.0, outer_cone_degrees: 35.0 }, position: point![-9.586186, -0.38097504, 2.9570565], radius: 100.0, color: vector![0.07352942, 0.7820069, 1.0], intensity: 10.0, enabled: true, shadow_setup: Some(ShadowSetup { width: 512, height: 512 }) });
-    scene.add_light(Light { ty: LightType::Point, position: point![9.354064, -2.421008, -0.4766891], radius: 5.0, color: vector![1.0, 1.0, 1.0], intensity: 2.0, enabled: true, shadow_setup: Some(ShadowSetup { width: 512, height: 512 }) })
+    scene.add_light(Light {
+        ty: LightType::Directional {
+            direction: vector![-0.52155536, 0.8490293, 0.08443476],
+            size: vector![50.0, 50.0],
+        },
+        position: point![9.261562, -20.304585, -1.3664505],
+        radius: 100.0,
+        color: vector![0.95098037, 0.90916246, 0.66661865],
+        intensity: 9.836,
+        enabled: true,
+        shadow_setup: Some(ShadowSetup {
+            width: 2048,
+            height: 2048,
+        }),
+    });
+    scene.add_light(Light {
+        ty: LightType::Spotlight {
+            direction: vector![-0.1424134, -0.31258363, 0.9391538],
+            inner_cone_degrees: 15.0,
+            outer_cone_degrees: 35.0,
+        },
+        position: point![-9.699096, -0.08773269, -3.9881172],
+        radius: 100.0,
+        color: vector![1.0, 0.3333333, 0.3333333],
+        intensity: 10.0,
+        enabled: true,
+        shadow_setup: Some(ShadowSetup {
+            width: 512,
+            height: 512,
+        }),
+    });
+    scene.add_light(Light {
+        ty: LightType::Spotlight {
+            direction: vector![-0.19844706, -0.27760813, -0.93997467],
+            inner_cone_degrees: 15.0,
+            outer_cone_degrees: 35.0,
+        },
+        position: point![-9.586186, -0.38097504, 2.9570565],
+        radius: 100.0,
+        color: vector![0.07352942, 0.7820069, 1.0],
+        intensity: 10.0,
+        enabled: true,
+        shadow_setup: Some(ShadowSetup {
+            width: 512,
+            height: 512,
+        }),
+    });
+    scene.add_light(Light {
+        ty: LightType::Point,
+        position: point![9.354064, -2.421008, -0.4766891],
+        radius: 5.0,
+        color: vector![1.0, 1.0, 1.0],
+        intensity: 2.0,
+        enabled: true,
+        shadow_setup: Some(ShadowSetup {
+            width: 512,
+            height: 512,
+        }),
+    })
 }
 
 fn main() -> anyhow::Result<()> {

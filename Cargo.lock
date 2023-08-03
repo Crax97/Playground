@@ -1739,7 +1739,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ash",
+ "bytemuck",
  "engine",
+ "engine_macros",
  "env_logger",
  "gltf",
  "gpu",

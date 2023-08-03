@@ -1,7 +1,7 @@
 use ash::prelude::VkResult;
 use ash::vk::CommandPoolResetFlags;
-use winit::window::Window;
 use gpu::{Gpu, Swapchain};
+use winit::window::Window;
 
 use crate::Time;
 
@@ -15,12 +15,12 @@ pub struct AppState {
 impl AppState {
     pub fn new(gpu: Gpu, window: Window) -> Self {
         let swapchain = Swapchain::new(&gpu, &window).expect("Failed to create swapchain!");
-        
+
         Self {
             gpu,
             time: Time::new(),
             swapchain,
-            window
+            window,
         }
     }
 
@@ -41,11 +41,10 @@ impl AppState {
     pub fn swapchain(&self) -> &Swapchain {
         &self.swapchain
     }
-    
+
     pub fn swapchain_mut(&mut self) -> &mut Swapchain {
         &mut self.swapchain
     }
-
 
     pub fn window(&self) -> &Window {
         &self.window

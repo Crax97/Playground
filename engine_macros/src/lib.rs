@@ -254,7 +254,11 @@ pub fn glsl(input: TokenStream) -> TokenStream {
 
     let spirv_bytecode = match compile_shader(info) {
         Ok(bc) => bc,
-        Err(e) => { return syn::Error::new(proc_macro2::Span::call_site(), e.to_string()).to_compile_error().into(); },
+        Err(e) => {
+            return syn::Error::new(proc_macro2::Span::call_site(), e.to_string())
+                .to_compile_error()
+                .into();
+        }
     };
 
     make_spirv_bytecode_slice(spirv_bytecode)

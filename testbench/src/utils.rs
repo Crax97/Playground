@@ -1,11 +1,9 @@
-use std::{path::Path};
+use std::path::Path;
 
 use ash::vk::ShaderModuleCreateFlags;
 use log::info;
 
-use gpu::{
-    Gpu, GpuShaderModule, ShaderModuleCreateInfo,
-};
+use gpu::{Gpu, GpuShaderModule, ShaderModuleCreateInfo};
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
     gpu: &Gpu,

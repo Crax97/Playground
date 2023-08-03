@@ -3,7 +3,7 @@ use std::{collections::HashMap, hash::Hash, mem::size_of, num::NonZeroU32};
 use ash::vk::{self, CompareOp, PushConstantRange};
 use gpu::{
     BindingElement, BindingType, CullMode, DepthStencilState, FragmentStageInfo, FrontFace,
-    GlobalBinding, Gpu, LogicOp, GraphicsPipeline, GraphicsPipelineDescription, PolygonMode,
+    GlobalBinding, Gpu, GraphicsPipeline, GraphicsPipelineDescription, LogicOp, PolygonMode,
     VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
 };
 use nalgebra::{Vector2, Vector3};
@@ -63,10 +63,7 @@ impl Resource for MasterMaterial {
 }
 
 impl MasterMaterial {
-    pub fn new(
-        gpu: &Gpu,
-        description: &MasterMaterialDescription,
-    ) -> anyhow::Result<Self> {
+    pub fn new(gpu: &Gpu, description: &MasterMaterialDescription) -> anyhow::Result<Self> {
         let pipelines = Self::create_pipelines(gpu, description)?;
         let parameter_block_size = size_of::<f32>() * 4 * description.material_parameters.len();
         Ok(MasterMaterial {
@@ -111,18 +108,12 @@ impl MasterMaterial {
         }
 
         match description.domain {
-            MaterialDomain::Surface => Self::create_surface_pipelines(
-                gpu,
-                description,
-                global_elements,
-                user_elements,
-            ),
-            MaterialDomain::PostProcess => Self::create_post_process_pipeline(
-                gpu,
-                description,
-                global_elements,
-                user_elements,
-            ),
+            MaterialDomain::Surface => {
+                Self::create_surface_pipelines(gpu, description, global_elements, user_elements)
+            }
+            MaterialDomain::PostProcess => {
+                Self::create_post_process_pipeline(gpu, description, global_elements, user_elements)
+            }
         }
     }
 

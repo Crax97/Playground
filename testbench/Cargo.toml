@@ -28,12 +28,14 @@ log = "0.4.17"
 once_cell = "1.17.1"
 memoffset = "0.8"
 image = "0.24.6"
+bytemuck = "1.13.1"
 
 env_logger = "0.10.0"
 gltf = "1.2.0"
 gpu = { path = "../gpu" }
 resource_map = { path = "../resource_map" }
 engine = { path = "../engine" }
+engine_macros = { path = "../engine_macros" }
 imgui = { version = "0.11.0", features = ["docking"] }
 imgui-rs-vulkan-renderer = { version = "1.9.0", features = ["dynamic-rendering"] }
 imgui-winit-support = "0.11.0"

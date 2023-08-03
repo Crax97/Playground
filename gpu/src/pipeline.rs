@@ -26,7 +26,7 @@ use ash::{
     },
 };
 
-use crate::{ImageFormat, ToVk};
+use crate::{get_allocation_callbacks, ImageFormat, ToVk};
 
 use super::{Gpu, GpuShaderModule, GpuState, ShaderStage};
 
@@ -376,31 +376,34 @@ pub struct GraphicsPipelineDescription<'a> {
     pub push_constant_ranges: &'a [PushConstantRange],
 }
 
-impl<'a> GraphicsPipelineDescription<'a> {
-    fn create_descriptor_set_layouts(&self, gpu: &Gpu) -> VkResult<Vec<DescriptorSetLayout>> {
-        let mut layouts: Vec<DescriptorSetLayout> = vec![];
-        for element in self.global_bindings.iter() {
-            let bindings: Vec<DescriptorSetLayoutBinding> =
-                element.elements.iter().map(|b| b.into()).collect();
+fn create_descriptor_set_layouts(
+    bindings: &[GlobalBinding],
+    gpu: &Gpu,
+) -> VkResult<Vec<DescriptorSetLayout>> {
+    let mut layouts: Vec<DescriptorSetLayout> = vec![];
+    for element in bindings.iter() {
+        let bindings: Vec<DescriptorSetLayoutBinding> =
+            element.elements.iter().map(|b| b.into()).collect();
 
-            let create_info = DescriptorSetLayoutCreateInfo {
-                s_type: StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                p_next: std::ptr::null(),
-                flags: DescriptorSetLayoutCreateFlags::empty(),
-                binding_count: bindings.len() as _,
-                p_bindings: bindings.as_ptr(),
-            };
-            unsafe {
-                let layout = gpu
-                    .state
-                    .logical_device
-                    .create_descriptor_set_layout(&create_info, None)?;
-                layouts.push(layout);
-            }
+        let create_info = DescriptorSetLayoutCreateInfo {
+            s_type: StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: DescriptorSetLayoutCreateFlags::empty(),
+            binding_count: bindings.len() as _,
+            p_bindings: bindings.as_ptr(),
+        };
+        unsafe {
+            let layout = gpu
+                .state
+                .logical_device
+                .create_descriptor_set_layout(&create_info, None)?;
+            layouts.push(layout);
         }
-        Ok(layouts)
     }
+    Ok(layouts)
+}
 
+impl<'a> GraphicsPipelineDescription<'a> {
     fn get_output_attachments(&self) -> Vec<PipelineColorBlendAttachmentState> {
         let mut pipeline_color_blend_attachment_states = vec![];
 
@@ -477,7 +480,8 @@ impl std::hash::Hash for GraphicsPipeline {
 
 impl GraphicsPipeline {
     pub fn new(gpu: &Gpu, pipeline_description: &GraphicsPipelineDescription) -> VkResult<Self> {
-        let descriptor_set_layouts = pipeline_description.create_descriptor_set_layouts(gpu)?;
+        let descriptor_set_layouts =
+            create_descriptor_set_layouts(&pipeline_description.global_bindings, gpu)?;
         let color_blend_attachments = pipeline_description.get_output_attachments();
         let mut stages = vec![];
 
@@ -744,6 +748,88 @@ impl GraphicsPipeline {
 }
 
 impl Drop for GraphicsPipeline {
+    fn drop(&mut self) {
+        unsafe {
+            self.shared_state
+                .logical_device
+                .destroy_pipeline(self.pipeline, None);
+            self.shared_state
+                .logical_device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ComputePipelineDescription<'a> {
+    pub module: &'a GpuShaderModule,
+    pub entry_point: &'a str,
+    pub bindings: &'a [GlobalBinding<'a>],
+    pub push_constant_ranges: &'a [PushConstantRange],
+}
+
+pub struct ComputePipeline {
+    pub(super) pipeline: vk::Pipeline,
+    pub(super) pipeline_layout: PipelineLayout,
+
+    shared_state: Arc<GpuState>,
+}
+impl ComputePipeline {
+    pub fn new(gpu: &Gpu, description: &ComputePipelineDescription) -> VkResult<Self> {
+        let descriptor_set_layouts = create_descriptor_set_layouts(&description.bindings, gpu)?;
+
+        let entry_point = CString::new(description.entry_point).unwrap();
+        let compute_shader_stage_crate_info = vk::PipelineShaderStageCreateInfo {
+            s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            stage: ShaderStageFlags::COMPUTE,
+            module: description.module.inner,
+            p_name: entry_point.as_ptr(),
+            p_specialization_info: std::ptr::null(),
+            flags: PipelineShaderStageCreateFlags::empty(),
+        };
+        let pipeline_layout = unsafe {
+            let layout_infos = PipelineLayoutCreateInfo {
+                s_type: StructureType::PIPELINE_LAYOUT_CREATE_INFO,
+                p_next: std::ptr::null(),
+                flags: PipelineLayoutCreateFlags::empty(),
+                set_layout_count: descriptor_set_layouts.len() as _,
+                p_set_layouts: descriptor_set_layouts.as_ptr(),
+                push_constant_range_count: description.push_constant_ranges.len() as _,
+                p_push_constant_ranges: description.push_constant_ranges.as_ptr(),
+            };
+            gpu.vk_logical_device()
+                .create_pipeline_layout(&layout_infos, None)?
+        };
+        let compute_create_info = vk::ComputePipelineCreateInfo {
+            s_type: StructureType::COMPUTE_PIPELINE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: PipelineCreateFlags::empty(),
+            base_pipeline_handle: vk::Pipeline::null(),
+            base_pipeline_index: 0,
+            stage: compute_shader_stage_crate_info,
+            layout: pipeline_layout,
+        };
+
+        let pipeline = unsafe {
+            gpu.vk_logical_device()
+                .create_compute_pipelines(
+                    gpu.state.pipeline_cache,
+                    &[compute_create_info],
+                    get_allocation_callbacks(),
+                )
+                .expect("Failed to generate pipelines")[0]
+        };
+
+        Ok(Self {
+            pipeline,
+            pipeline_layout,
+            shared_state: gpu.state.clone(),
+        })
+    }
+}
+
+impl Drop for ComputePipeline {
     fn drop(&mut self) {
         unsafe {
             self.shared_state

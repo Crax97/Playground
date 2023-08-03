@@ -50,11 +50,9 @@ pub fn app_loop<A: App + 'static>(
 ) -> anyhow::Result<ControlFlow> {
     let app_state_mut = engine::app_state_mut();
     app.on_event(&event, app_state_mut)?;
-    imgui_data.platform.handle_event(
-        imgui_data.imgui.io_mut(),
-        &app_state_mut.window(),
-        &event,
-    );
+    imgui_data
+        .platform
+        .handle_event(imgui_data.imgui.io_mut(), &app_state_mut.window(), &event);
     match event {
         winit::event::Event::NewEvents(_) => {}
         winit::event::Event::WindowEvent { event, .. } => match event {
@@ -63,10 +61,7 @@ pub fn app_loop<A: App + 'static>(
             }
             winit::event::WindowEvent::Resized(new_size) => {
                 if new_size.width > 0 && new_size.height > 0 {
-                    app_state_mut
-                        .swapchain_mut()
-                        .recreate_swapchain()
-                        .unwrap();
+                    app_state_mut.swapchain_mut().recreate_swapchain().unwrap();
                 }
             }
             _ => {}
@@ -98,12 +93,15 @@ pub fn app_loop<A: App + 'static>(
     Ok(ControlFlow::Poll)
 }
 
-fn update_loop(app: &mut dyn App, imgui_data: &mut ImguiData, app_state_mut: &mut AppState) -> anyhow::Result<()> {
+fn update_loop(
+    app: &mut dyn App,
+    imgui_data: &mut ImguiData,
+    app_state_mut: &mut AppState,
+) -> anyhow::Result<()> {
     app_state_mut.begin_frame().unwrap();
-    imgui_data.platform.prepare_frame(
-        imgui_data.imgui.io_mut(),
-        &app_state_mut.window(),
-    )?;
+    imgui_data
+        .platform
+        .prepare_frame(imgui_data.imgui.io_mut(), &app_state_mut.window())?;
     imgui_data
         .imgui
         .io_mut()
@@ -113,8 +111,7 @@ fn update_loop(app: &mut dyn App, imgui_data: &mut ImguiData, app_state_mut: &mu
 
     let window_name = app.window_name(app_state_mut);
 
-    app_state_mut.window()
-        .set_title(&window_name);
+    app_state_mut.window().set_title(&window_name);
 
     let ui = imgui_data.imgui.frame();
     app.update(app_state_mut, ui)?;
@@ -124,7 +121,8 @@ fn update_loop(app: &mut dyn App, imgui_data: &mut ImguiData, app_state_mut: &mu
 
     let swapchain_format = app_state_mut.swapchain().present_format();
     let swapchain_extents = app_state_mut.swapchain().extents();
-    let (swapchain_image, swapchain_image_view) = app_state_mut.swapchain_mut().acquire_next_image()?;
+    let (swapchain_image, swapchain_image_view) =
+        app_state_mut.swapchain_mut().acquire_next_image()?;
     let backbuffer = Backbuffer {
         size: swapchain_extents,
         format: swapchain_format,

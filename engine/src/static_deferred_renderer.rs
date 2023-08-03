@@ -1,6 +1,6 @@
 use engine_macros::glsl;
-use std::{collections::HashMap, mem::size_of};
 use std::convert::identity;
+use std::{collections::HashMap, mem::size_of};
 
 use ash::vk::{
     BufferUsageFlags, CompareOp, Extent2D, IndexType, PipelineBindPoint, PushConstantRange,
@@ -132,7 +132,15 @@ impl From<&Light> for GpuLightInfo {
     }
 }
 
-use crate::{app_state, camera::Camera, material::{MasterMaterial, MasterMaterialDescription}, Backbuffer, BufferDescription, BufferType, ClearValue, FragmentState, GpuRunner, GraphRunContext, Light, LightType, MaterialDescription, MaterialDomain, MaterialInstance, MeshPrimitive, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage, RenderingPipeline, Scene, app_state_mut};
+use crate::{
+    app_state, app_state_mut,
+    camera::Camera,
+    material::{MasterMaterial, MasterMaterialDescription},
+    Backbuffer, BufferDescription, BufferType, ClearValue, FragmentState, GpuRunner,
+    GraphRunContext, Light, LightType, MaterialDescription, MaterialDomain, MaterialInstance,
+    MeshPrimitive, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription,
+    RenderPassContext, RenderStage, RenderingPipeline, Scene,
+};
 
 use ash::vk::{
     AttachmentLoadOp, AttachmentStoreOp, BlendFactor, BlendOp, ColorComponentFlags, ImageLayout,
@@ -388,12 +396,15 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let mut x = 0.0;
         let mut y = 0.0;
         let mut shadow_caster_idx = 0;
-        let collected_active_lights : Vec<GpuLightInfo> =
-            scene.all_enabled_lights().enumerate().map(|(i, l)| {
-                let mut light : GpuLightInfo = l.into();
+        let collected_active_lights: Vec<GpuLightInfo> = scene
+            .all_enabled_lights()
+            .enumerate()
+            .map(|(i, l)| {
+                let mut light: GpuLightInfo = l.into();
                 if l.shadow_setup.is_some() {
                     light.ty_shadowcaster[1] = shadow_caster_idx;
-                    let povs = l.shadow_view_matrices()
+                    let povs = l
+                        .shadow_view_matrices()
                         .iter()
                         .map(|v| {
                             let w = l.shadow_setup.unwrap().width as f32;
@@ -421,10 +432,11 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                         .take_while(|l| l.is_some())
                         .flatten()
                         .collect::<Vec<_>>();
-                        per_frame_data.extend(povs);
-                    }
+                    per_frame_data.extend(povs);
+                }
                 light
-            }).collect();
+            })
+            .collect();
         super::app_state()
             .gpu
             .write_buffer_data_with_offset(
