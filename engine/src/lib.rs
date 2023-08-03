@@ -60,11 +60,11 @@ pub fn init(app_name: &str, window: winit::window::Window) -> anyhow::Result<()>
             app_name,
             engine_name: "Hello Engine",
             enable_debug_utilities,
-            window,
             pipeline_cache_path: Some("pipeline_cache.pso"),
+            window: Some(&window)
         })?;
 
-        let app_state = AppState::new(gpu);
+        let app_state = AppState::new(gpu, window);
         assert!(DATA.set(app_state).is_ok());
 
         STATE = GlobalState {

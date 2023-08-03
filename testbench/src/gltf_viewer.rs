@@ -222,7 +222,6 @@ impl App for GLTFViewer {
         let camera_light = add_scene_lights(gltf_loader.scene_mut());
 
         engine::app_state_mut()
-            .gpu
             .swapchain_mut()
             .select_present_mode(PresentModeKHR::IMMEDIATE)?;
 
@@ -304,19 +303,17 @@ impl App for GLTFViewer {
 
         if self.input.is_mouse_button_just_pressed(MouseButton::Right) {
             app_state
-                .gpu
-                .swapchain()
-                .window
+                .window()
                 .set_cursor_grab(winit::window::CursorGrabMode::Confined)?;
-            app_state.gpu.swapchain().window.set_cursor_visible(false);
+            app_state
+                .window().set_cursor_visible(false);
         }
         if self.input.is_mouse_button_just_released(MouseButton::Right) {
             app_state
-                .gpu
-                .swapchain()
-                .window
+                .window()
                 .set_cursor_grab(winit::window::CursorGrabMode::None)?;
-            app_state.gpu.swapchain().window.set_cursor_visible(true);
+            app_state
+                .window().set_cursor_visible(true);
         }
 
         if self
@@ -325,13 +322,11 @@ impl App for GLTFViewer {
         {
             self.camera
                 .update(&self.input, app_state.time.delta_frame());
-            let window_size = app_state.gpu.swapchain().window.inner_size();
+            let window_size = app_state
+                .window().inner_size();
 
             app_state
-                .gpu
-                .swapchain()
-                .window
-                .set_cursor_position(Position::Physical(PhysicalPosition {
+                .window().set_cursor_position(Position::Physical(PhysicalPosition {
                     x: window_size.width as i32 / 2,
                     y: window_size.height as i32 / 2,
                 }))?;

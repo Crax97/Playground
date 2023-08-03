@@ -15,10 +15,10 @@ use ash::{
     Device,
 };
 use log::{info, trace, warn};
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle};
 use winit::window::Window;
 
-use crate::{GpuImage, GpuImageView};
+use crate::{Gpu, GpuImage, GpuImageView};
 
 use super::{GPUFence, GPUSemaphore, GpuState};
 
@@ -102,18 +102,21 @@ pub struct Swapchain {
     pub(super) current_swapchain_images: Vec<GpuImage>,
     pub(super) current_swapchain_image_views: Vec<MaybeUninit<GpuImageView>>,
     pub(super) frames_in_flight: Vec<SwapchainFrame>,
-    pub window: Window,
 
     current_swapchain_index: Cell<u32>,
     state: Arc<GpuState>,
     pub current_frame: Cell<usize>,
     pub next_image_fence: GPUFence,
+
+    display_handle: RawDisplayHandle,
+    window_handle: RawWindowHandle,
 }
 
 impl Swapchain {
     pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
-    pub(crate) fn new(state: Arc<GpuState>, window: Window) -> VkResult<Self> {
+    pub fn new(gpu: &Gpu, window: &Window) -> VkResult<Self> {
+        let state = gpu.state.clone();
         let surface_extension = Surface::new(&state.entry, &state.instance);
         let swapchain_extension =
             ash::extensions::khr::Swapchain::new(&state.instance, &state.logical_device);
@@ -158,7 +161,8 @@ impl Swapchain {
             next_image_fence,
             current_frame: Cell::new(0),
             state,
-            window,
+            window_handle: window.raw_window_handle(),
+            display_handle: window.raw_display_handle(),
         };
         me.recreate_swapchain()?;
         me.log_supported_features();
@@ -265,8 +269,8 @@ impl Swapchain {
             ash_window::create_surface(
                 &self.state.entry,
                 &self.state.instance,
-                self.window.raw_display_handle(),
-                self.window.raw_window_handle(),
+                self.display_handle,
+                self.window_handle,
                 None,
             )?
         };
