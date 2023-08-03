@@ -132,15 +132,7 @@ impl From<&Light> for GpuLightInfo {
     }
 }
 
-use crate::{
-    app_state,
-    camera::Camera,
-    material::{MasterMaterial, MasterMaterialDescription},
-    Backbuffer, BufferDescription, BufferType, ClearValue, FragmentState, GpuRunner,
-    GraphRunContext, Light, LightType, MaterialDescription, MaterialDomain, MaterialInstance,
-    MeshPrimitive, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription,
-    RenderPassContext, RenderStage, RenderingPipeline, Scene,
-};
+use crate::{app_state, camera::Camera, material::{MasterMaterial, MasterMaterialDescription}, Backbuffer, BufferDescription, BufferType, ClearValue, FragmentState, GpuRunner, GraphRunContext, Light, LightType, MaterialDescription, MaterialDomain, MaterialInstance, MeshPrimitive, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage, RenderingPipeline, Scene, app_state_mut};
 
 use ash::vk::{
     AttachmentLoadOp, AttachmentStoreOp, BlendFactor, BlendOp, ColorComponentFlags, ImageLayout,
@@ -478,7 +470,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             )
             .unwrap();
 
-        app_state().gpu.begin_frame()?;
+        app_state_mut().begin_frame()?;
 
         let draw_hashmap = Self::generate_draw_calls(resource_map, scene);
 

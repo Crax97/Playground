@@ -25,7 +25,7 @@ pub enum QueueType {
 }
 impl QueueType {
     fn get_vk_command_pool(&self, gpu: &Gpu) -> ash::vk::CommandPool {
-        let thread_local_state = &gpu.thread_local_states[gpu.swapchain.current_frame.get()];
+        let thread_local_state = &gpu.thread_local_state;
         match self {
             QueueType::Graphics => thread_local_state.graphics_command_pool,
             QueueType::AsyncCompute => thread_local_state.compute_command_pool,

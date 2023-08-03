@@ -52,7 +52,7 @@ pub fn app_loop<A: App + 'static>(
     app.on_event(&event, app_state_mut)?;
     imgui_data.platform.handle_event(
         imgui_data.imgui.io_mut(),
-        &app_state_mut.gpu.swapchain().window,
+        &app_state_mut.window(),
         &event,
     );
     match event {
@@ -64,7 +64,6 @@ pub fn app_loop<A: App + 'static>(
             winit::event::WindowEvent::Resized(new_size) => {
                 if new_size.width > 0 && new_size.height > 0 {
                     app_state_mut
-                        .gpu
                         .swapchain_mut()
                         .recreate_swapchain()
                         .unwrap();
@@ -79,10 +78,10 @@ pub fn app_loop<A: App + 'static>(
         winit::event::Event::Suspended => {}
         winit::event::Event::Resumed => {}
         winit::event::Event::MainEventsCleared => {
-            app_state_mut.gpu.swapchain_mut().window.request_redraw();
+            app_state_mut.window().request_redraw();
         }
         winit::event::Event::RedrawRequested(..) => {
-            let win_size = app_state_mut.gpu.swapchain().window.inner_size();
+            let win_size = app_state_mut.window().inner_size();
             if win_size.width > 0 && win_size.height > 0 {
                 update_loop(app, imgui_data, app_state_mut)?;
             }
@@ -103,7 +102,7 @@ fn update_loop(app: &mut dyn App, imgui_data: &mut ImguiData, app_state_mut: &mu
     app_state_mut.begin_frame().unwrap();
     imgui_data.platform.prepare_frame(
         imgui_data.imgui.io_mut(),
-        &app_state_mut.gpu.swapchain().window,
+        &app_state_mut.window(),
     )?;
     imgui_data
         .imgui
@@ -114,21 +113,18 @@ fn update_loop(app: &mut dyn App, imgui_data: &mut ImguiData, app_state_mut: &mu
 
     let window_name = app.window_name(app_state_mut);
 
-    app_state_mut
-        .gpu
-        .swapchain_mut()
-        .window
+    app_state_mut.window()
         .set_title(&window_name);
 
     let ui = imgui_data.imgui.frame();
     app.update(app_state_mut, ui)?;
     imgui_data
         .platform
-        .prepare_render(ui, &engine::app_state().gpu.swapchain().window);
+        .prepare_render(ui, &engine::app_state().window());
 
-    let swapchain_format = app_state_mut.gpu.swapchain().present_format();
-    let swapchain_extents = app_state_mut.gpu.swapchain().extents();
-    let (swapchain_image, swapchain_image_view) = app_state_mut.gpu.acquire_next_image()?;
+    let swapchain_format = app_state_mut.swapchain().present_format();
+    let swapchain_extents = app_state_mut.swapchain().extents();
+    let (swapchain_image, swapchain_image_view) = app_state_mut.swapchain_mut().acquire_next_image()?;
     let backbuffer = Backbuffer {
         size: swapchain_extents,
         format: swapchain_format,
@@ -138,7 +134,7 @@ fn update_loop(app: &mut dyn App, imgui_data: &mut ImguiData, app_state_mut: &mu
     let mut command_buffer = app.draw(&backbuffer)?;
 
     draw_imgui(imgui_data, &backbuffer, &mut command_buffer)?;
-    let frame = app_state_mut.gpu.get_current_swapchain_frame();
+    let frame = app_state_mut.swapchain_mut().get_current_swapchain_frame();
     command_buffer.submit(&CommandBufferSubmitInfo {
         wait_semaphores: &[&frame.image_available_semaphore],
         wait_stages: &[PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
@@ -231,7 +227,7 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
     imgui.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
     platform.attach_window(
         imgui.io_mut(),
-        &engine::app_state().gpu.swapchain().window,
+        &engine::app_state().window(),
         HiDpiMode::Rounded,
     );
     let renderer = Renderer::with_default_allocator(
@@ -241,7 +237,7 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
         engine::app_state().gpu.graphics_queue(),
         engine::app_state().gpu.command_pool(),
         DynamicRendering {
-            color_attachment_format: engine::app_state().gpu.swapchain().present_format(),
+            color_attachment_format: engine::app_state().swapchain().present_format(),
             depth_attachment_format: None,
         },
         &mut imgui,

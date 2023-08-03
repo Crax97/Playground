@@ -173,7 +173,6 @@ impl App for PlanesApp {
         let mat_instance = resource_map.add(mat_instance);
 
         engine::app_state_mut()
-            .gpu
             .swapchain_mut()
             .select_present_mode(PresentModeKHR::MAILBOX)?;
 
