@@ -843,7 +843,7 @@ impl<'c, 'g> ComputePassCommand<'c, 'g> {
         }
     }
     
-    pub fn dispatch(&self, group_size_x: u32, group_size_y: u32, group_size_z: u32) {
+    pub fn dispatch(&mut self, group_size_x: u32, group_size_y: u32, group_size_z: u32) {
         unsafe {
             self.command_buffer.gpu.vk_logical_device()
                 .cmd_dispatch(
@@ -852,6 +852,7 @@ impl<'c, 'g> ComputePassCommand<'c, 'g> {
                     group_size_y,
                     group_size_z);
         }
+        self.command_buffer.has_recorded_anything = true;
     }
 }
 

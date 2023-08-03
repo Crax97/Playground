@@ -336,6 +336,27 @@ impl GpuBuffer {
 
         address.copy_from_slice(data);
     }
+    
+    pub fn read<T: Copy + Sized>(&self, offset: u64) -> T {
+        let data_length = std::mem::size_of::<T>();
+        assert!(
+            data_length > 0,
+            "Cannot write on a buffer with 0 data length!"
+        );
+        assert!(offset < self.allocation.size);
+        assert!(data_length as u64 + offset <= self.allocation.size);
+
+        let address = unsafe {
+            self.allocation
+                .persistent_ptr
+                .expect("Tried to write to a buffer without a persistent ptr!")
+                .as_ptr()
+                .add(offset as _)
+        } as *mut T;
+        let address = unsafe { std::slice::from_raw_parts_mut(address, data_length) };
+        
+        address[0]
+    }
 }
 
 impl_raii_wrapper_hash!(GpuBuffer);

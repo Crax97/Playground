@@ -119,10 +119,12 @@ fn main() -> anyhow::Result<()> {
         wait_semaphores: &[],
         wait_stages: &[PipelineStageFlags::COMPUTE_SHADER],
         signal_semaphores: &[],
-        fence: None,
+        fence: Some(&wait_fence),
     })?;
     
-    // gpu.wait_for_fences(&[&wait_fence], true, u64::MAX)?;
+    gpu.wait_for_fences(&[&wait_fence], true, 100000).expect("Fence not triggered!");
     
+    let output = output_buffer.read::<u32>(0);
+    println!("Output is: {output}");
     Ok(())
 }
