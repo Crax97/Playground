@@ -2214,7 +2214,6 @@ impl RenderGraphRunner for GpuRunner {
                     render_pass_command.bind_pipeline(pipeline);
                     if let Some(resource) = read_descriptor_set {
                         render_pass_command.bind_descriptor_sets(
-                            PipelineBindPoint::GRAPHICS,
                             pipeline,
                             0,
                             &[resource.resource()],

@@ -262,6 +262,19 @@ define_raii_wrapper!((struct GPUFence {}, vk::Fence, ash::Device::destroy_fence)
     }
 });
 
+impl GPUFence {
+    pub fn new(gpu: &Gpu, create_info: &FenceCreateInfo) -> VkResult<Self> {
+        Self::create(gpu.vk_logical_device(), create_info)
+    }
+}
+
+impl GPUSemaphore {
+    pub fn new(gpu: &Gpu, create_info: &SemaphoreCreateInfo) -> VkResult<Self> {
+        Self::create(gpu.vk_logical_device(), create_info)
+    }
+}
+
+
 pub struct GpuBuffer {
     device: ash::Device,
     pub(super) inner: vk::Buffer,

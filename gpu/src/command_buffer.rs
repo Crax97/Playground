@@ -16,9 +16,11 @@ use ash::{
     RawPtr,
 };
 
-use crate::{CullMode, FrontFace, GPUFence, GPUSemaphore, GpuImage, GpuImageView, ToVk};
+use crate::{CullMode, FrontFace, GPUFence, GPUSemaphore, GpuImage, GpuImageView, ToVk, ComputePipeline};
+use crate::pipeline::GpuPipeline;
 
 use super::{Gpu, GpuBuffer, GpuDescriptorSet, GraphicsPipeline, QueueType};
+
 
 #[derive(Default)]
 pub struct CommandBufferSubmitInfo<'a> {
@@ -47,6 +49,15 @@ where
     render_area: Rect2D,
     depth_bias_setup: Option<(f32, f32, f32)>,
 }
+
+
+pub struct ComputePassCommand<'c, 'g>
+    where
+        'g: 'c,
+{
+    command_buffer: &'c mut CommandBuffer<'g>,
+}
+
 pub struct MemoryBarrier {
     pub src_access_mask: vk::AccessFlags,
     pub dst_access_mask: vk::AccessFlags,
@@ -133,6 +144,31 @@ pub struct PipelineBarrierInfo<'a> {
     pub image_memory_barriers: &'a [ImageMemoryBarrier<'a>],
 }
 
+
+mod inner {
+    use ash::vk::ShaderStageFlags;
+
+    pub(super) fn push_constant<T: Copy + Sized>(
+        command_buffer: &crate::CommandBuffer,
+        pipeline: &crate::GraphicsPipeline,
+        data: &T,
+        offset: u32,
+    ) {
+        let device = command_buffer.gpu.vk_logical_device();
+        unsafe {
+            let ptr: *const u8 = data as *const T as *const u8;
+            let slice = std::slice::from_raw_parts(ptr, std::mem::size_of::<T>());
+            device.cmd_push_constants(
+                command_buffer.inner_command_buffer,
+                pipeline.pipeline_layout,
+                ShaderStageFlags::ALL,
+                offset,
+                slice,
+            );
+        }
+    }
+}
+
 impl<'g> CommandBuffer<'g> {
     pub fn new(gpu: &'g Gpu, target_queue: QueueType) -> VkResult<Self> {
         let device = gpu.vk_logical_device();
@@ -172,6 +208,12 @@ impl<'g> CommandBuffer<'g> {
     ) -> RenderPassCommand<'p, 'g> {
         RenderPassCommand::<'p, 'g>::new(self, info)
     }
+    
+    pub fn begin_compute_pass<'p>(
+        &'p mut self,
+    ) -> ComputePassCommand<'p, 'g> {
+        ComputePassCommand::<'p, 'g>::new(self)
+    }
 
     pub fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo) {
         self.has_recorded_anything = true;
@@ -204,10 +246,9 @@ impl<'g> CommandBuffer<'g> {
         };
     }
 
-    pub fn bind_descriptor_sets(
+    pub fn bind_descriptor_sets<T: GpuPipeline>(
         &self,
-        bind_point: PipelineBindPoint,
-        material: &GraphicsPipeline,
+        pipeline: &T,
         first_index: u32,
         descriptor_sets: &[&GpuDescriptorSet],
     ) {
@@ -218,8 +259,8 @@ impl<'g> CommandBuffer<'g> {
         unsafe {
             self.gpu.vk_logical_device().cmd_bind_descriptor_sets(
                 self.inner_command_buffer,
-                bind_point,
-                material.pipeline_layout,
+                T::bind_point(),
+                pipeline.vk_pipeline_layout(),
                 first_index,
                 &descriptor_sets,
                 &[],
@@ -754,18 +795,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         data: &T,
         offset: u32,
     ) {
-        let device = self.command_buffer.gpu.vk_logical_device();
-        unsafe {
-            let ptr: *const u8 = data as *const T as *const u8;
-            let slice = std::slice::from_raw_parts(ptr, std::mem::size_of::<T>());
-            device.cmd_push_constants(
-                self.command_buffer.inner_command_buffer,
-                pipeline.pipeline_layout,
-                ShaderStageFlags::ALL,
-                offset,
-                slice,
-            );
-        }
+        inner::push_constant(self, pipeline, data, offset)
     }
 }
 
@@ -792,5 +822,49 @@ impl<'c, 'g> Drop for RenderPassCommand<'c, 'g> {
                 .dynamic_rendering
                 .cmd_end_rendering(self.command_buffer.inner_command_buffer)
         };
+    }
+}
+
+impl<'c, 'g> ComputePassCommand<'c, 'g> {
+    pub fn new(command_buffer: &'c mut CommandBuffer<'g>) -> Self { 
+        Self {
+            command_buffer,
+        }
+    }
+
+    pub fn bind_pipeline(&mut self, pipeline: &ComputePipeline) {
+        let device = self.command_buffer.gpu.vk_logical_device();
+        unsafe {
+            device.cmd_bind_pipeline(
+                self.command_buffer.inner_command_buffer,
+                PipelineBindPoint::COMPUTE,
+                pipeline.pipeline,
+            )
+        }
+    }
+    
+    pub fn dispatch(&self, group_size_x: u32, group_size_y: u32, group_size_z: u32) {
+        unsafe {
+            self.command_buffer.gpu.vk_logical_device()
+                .cmd_dispatch(
+                    self.command_buffer.inner_command_buffer,
+                    group_size_x, 
+                    group_size_y,
+                    group_size_z);
+        }
+    }
+}
+
+impl<'c, 'g> AsRef<CommandBuffer<'g>> for ComputePassCommand<'c, 'g> {
+    fn as_ref(&self) -> &CommandBuffer<'g> {
+        self.command_buffer
+    }
+}
+
+impl<'c, 'g> Deref for ComputePassCommand<'c, 'g> {
+    type Target = CommandBuffer<'g>;
+
+    fn deref(&self) -> &Self::Target {
+        self.command_buffer
     }
 }

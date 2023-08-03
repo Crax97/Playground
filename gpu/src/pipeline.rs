@@ -360,6 +360,12 @@ impl RenderPass {
     }
 }
 
+pub trait GpuPipeline {
+    fn bind_point() -> PipelineBindPoint;
+    fn vk_pipeline(&self) -> vk::Pipeline;
+    fn vk_pipeline_layout(&self) -> vk::PipelineLayout;
+}
+
 #[derive(Clone, Copy, Default)]
 pub struct GraphicsPipelineDescription<'a> {
     pub global_bindings: &'a [GlobalBinding<'a>],
@@ -839,5 +845,33 @@ impl Drop for ComputePipeline {
                 .logical_device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
         }
+    }
+}
+
+impl GpuPipeline for ComputePipeline {
+    fn bind_point() -> PipelineBindPoint {
+        PipelineBindPoint::COMPUTE
+    }
+
+    fn vk_pipeline(&self) -> vk::Pipeline {
+        self.pipeline
+    }
+
+    fn vk_pipeline_layout(&self) -> vk::PipelineLayout {
+        self.pipeline_layout
+    }
+}
+
+impl GpuPipeline for GraphicsPipeline {
+    fn bind_point() -> PipelineBindPoint {
+        PipelineBindPoint::GRAPHICS
+    }
+
+    fn vk_pipeline(&self) -> vk::Pipeline {
+        self.pipeline
+    }
+
+    fn vk_pipeline_layout(&self) -> vk::PipelineLayout {
+        self.pipeline_layout
     }
 }

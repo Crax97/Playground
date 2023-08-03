@@ -282,7 +282,6 @@ impl DeferredRenderingPipeline {
                     .expect("failed to fetch pipeline {pipeline_target:?}");
                 ctx.render_pass_command.bind_pipeline(pipeline);
                 ctx.render_pass_command.bind_descriptor_sets(
-                    PipelineBindPoint::GRAPHICS,
                     pipeline,
                     0,
                     &[ctx.read_descriptor_set.expect("No descriptor set???")],
@@ -299,7 +298,6 @@ impl DeferredRenderingPipeline {
                         [0.0, 0.3, 0.4, 1.0],
                     );
                     ctx.render_pass_command.bind_descriptor_sets(
-                        PipelineBindPoint::GRAPHICS,
                         pipeline,
                         1,
                         &[&material.user_descriptor_set],

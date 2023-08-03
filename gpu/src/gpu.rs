@@ -38,10 +38,7 @@ use thiserror::Error;
 use winit::window::Window;
 
 use crate::swapchain::SwapchainFrame;
-use crate::{
-    get_allocation_callbacks, GpuFramebuffer, GpuImageView, GpuShaderModule, ImageFormat,
-    ImageMemoryBarrier, PipelineBarrierInfo, QueueType, RenderPass, Swapchain, ToVk,
-};
+use crate::{get_allocation_callbacks, GPUFence, GpuFramebuffer, GpuImageView, GpuShaderModule, ImageFormat, ImageMemoryBarrier, PipelineBarrierInfo, QueueType, RenderPass, Swapchain, ToVk};
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
 
@@ -1579,6 +1576,21 @@ impl Gpu {
             self.state.descriptor_set_allocator.clone(),
         )
     }
+    
+    pub fn wait_for_fences(&self, fences: &[&GPUFence], wait_all: bool, timeout_ns: u64) -> VkResult<()> {
+        let fences: Vec<_> = fences.iter().map(|f| f.inner).collect();
+        unsafe {
+            self.vk_logical_device().wait_for_fences(&fences, wait_all, timeout_ns)
+        }
+    }
+
+    pub fn reset_fences(&self, fences: &[&GPUFence]) -> VkResult<()>{
+        let fences: Vec<_> = fences.iter().map(|f| f.inner).collect();
+        unsafe {
+            self.vk_logical_device().reset_fences(&fences)
+        }
+    }
+    
 
     pub fn save_pipeline_cache(&self, path: &str) -> VkResult<()> {
         let cache_data = unsafe {
