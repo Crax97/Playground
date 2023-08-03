@@ -174,8 +174,7 @@ impl Drop for GpuThreadLocalState {
 
 pub struct Gpu {
     pub(crate) state: Arc<GpuState>,
-    // TODO: hide me
-    pub thread_local_state: GpuThreadLocalState,
+    pub(crate) thread_local_state: GpuThreadLocalState,
     pub(crate) staging_buffer: GpuBuffer,
 }
 

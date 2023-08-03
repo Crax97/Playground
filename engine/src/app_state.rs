@@ -26,12 +26,6 @@ impl AppState {
 
     pub fn begin_frame(&mut self) -> VkResult<()> {
         self.time.begin_frame();
-        unsafe {
-            self.gpu.vk_logical_device().reset_command_pool(
-                self.gpu.thread_local_state.graphics_command_pool,
-                CommandPoolResetFlags::empty(),
-            )?;
-        }
         Ok(())
     }
 
