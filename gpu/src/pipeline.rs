@@ -361,7 +361,7 @@ impl RenderPass {
 }
 
 #[derive(Clone, Copy, Default)]
-pub struct PipelineDescription<'a> {
+pub struct GraphicsPipelineDescription<'a> {
     pub global_bindings: &'a [GlobalBinding<'a>],
     pub vertex_inputs: &'a [VertexBindingDescription<'a>],
     pub vertex_stage: Option<VertexStageInfo<'a>>,
@@ -376,7 +376,7 @@ pub struct PipelineDescription<'a> {
     pub push_constant_ranges: &'a [PushConstantRange],
 }
 
-impl<'a> PipelineDescription<'a> {
+impl<'a> GraphicsPipelineDescription<'a> {
     fn create_descriptor_set_layouts(&self, gpu: &Gpu) -> VkResult<Vec<DescriptorSetLayout>> {
         let mut layouts: Vec<DescriptorSetLayout> = vec![];
         for element in self.global_bindings.iter() {
@@ -454,29 +454,29 @@ impl<'a> PipelineDescription<'a> {
     }
 }
 
-pub struct Pipeline {
+pub struct GraphicsPipeline {
     pub(super) pipeline: vk::Pipeline,
     pub(super) pipeline_layout: PipelineLayout,
 
     shared_state: Arc<GpuState>,
 }
 
-impl Eq for Pipeline {}
+impl Eq for GraphicsPipeline {}
 
-impl PartialEq for Pipeline {
+impl PartialEq for GraphicsPipeline {
     fn eq(&self, other: &Self) -> bool {
         self.pipeline == other.pipeline
     }
 }
 
-impl std::hash::Hash for Pipeline {
+impl std::hash::Hash for GraphicsPipeline {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.pipeline.hash(state);
     }
 }
 
-impl Pipeline {
-    pub fn new(gpu: &Gpu, pipeline_description: &PipelineDescription) -> VkResult<Self> {
+impl GraphicsPipeline {
+    pub fn new(gpu: &Gpu, pipeline_description: &GraphicsPipelineDescription) -> VkResult<Self> {
         let descriptor_set_layouts = pipeline_description.create_descriptor_set_layouts(gpu)?;
         let color_blend_attachments = pipeline_description.get_output_attachments();
         let mut stages = vec![];
@@ -743,7 +743,7 @@ impl Pipeline {
     }
 }
 
-impl Drop for Pipeline {
+impl Drop for GraphicsPipeline {
     fn drop(&mut self) {
         unsafe {
             self.shared_state

@@ -19,7 +19,7 @@ use gpu::{
     ColorLoadOp, CommandBuffer, DepthAttachment, DepthLoadOp, DescriptorInfo, DescriptorSetInfo,
     FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage,
     GpuImageView, GpuSampler, ImageCreateInfo, ImageFormat, ImageMemoryBarrier,
-    ImageViewCreateInfo, MemoryDomain, Pipeline, PipelineBarrierInfo, RenderPass,
+    ImageViewCreateInfo, MemoryDomain, GraphicsPipeline, PipelineBarrierInfo, RenderPass,
     RenderPassAttachment, RenderPassCommand, RenderPassDescription, StencilAttachment,
     StencilLoadOp, SubpassDescription, ToVk, TransitionInfo,
 };
@@ -27,7 +27,7 @@ use gpu::{
 use ash::vk::PushConstantRange;
 use gpu::{
     BindingElement, CullMode, DepthStencilAttachment, DepthStencilState, FragmentStageInfo,
-    FrontFace, GlobalBinding, GpuShaderModule, LogicOp, PipelineDescription, PolygonMode,
+    FrontFace, GlobalBinding, GpuShaderModule, LogicOp, GraphicsPipelineDescription, PolygonMode,
     PrimitiveTopology, VertexBindingDescription, VertexStageInfo,
 };
 use indexmap::IndexSet;
@@ -1093,7 +1093,7 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
     pass_info: &RenderPassInfo,
     gpu: &Gpu,
     description: &RenderGraphPipelineDescription,
-) -> anyhow::Result<Pipeline> {
+) -> anyhow::Result<GraphicsPipeline> {
     let mut set_zero_bindings = vec![];
     for (idx, read) in pass_info.shader_reads.iter().enumerate() {
         let resource = graph.get_resource_info(read)?;
@@ -1151,7 +1151,7 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
         }
     }
 
-    let description = PipelineDescription {
+    let description = GraphicsPipelineDescription {
         global_bindings: &[GlobalBinding {
             set_index: 0,
             elements: &set_zero_bindings,
@@ -1190,7 +1190,7 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
         push_constant_ranges: description.fragment_state.push_constant_ranges,
     };
 
-    Ok(Pipeline::new(gpu, &description)?)
+    Ok(GraphicsPipeline::new(gpu, &description)?)
 }
 
 pub struct RenderGraph {
@@ -1203,7 +1203,7 @@ pub struct RenderGraph {
     cached_graph_hash: u64,
     cached_graph: CompiledRenderGraph,
 
-    render_pass_pipelines: HashMap<RenderPassHandle, Pipeline>,
+    render_pass_pipelines: HashMap<RenderPassHandle, GraphicsPipeline>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -1402,7 +1402,7 @@ pub struct RenderPassContext<'p, 'g> {
     pub render_graph: &'p RenderGraph,
     pub render_pass_command: RenderPassCommand<'p, 'g>,
     pub read_descriptor_set: Option<&'p GpuDescriptorSet>,
-    pub pipeline: Option<&'p Pipeline>,
+    pub pipeline: Option<&'p GraphicsPipeline>,
 }
 pub struct EndContext<'p, 'g> {
     pub command_buffer: &'p mut CommandBuffer<'g>,
@@ -1719,7 +1719,7 @@ impl RenderGraph {
             .ok_or(CompileError::ResourceNotFound(*resource))
     }
 
-    pub(crate) fn get_pipeline(&self, pipeline_handle: &RenderPassHandle) -> Option<&Pipeline> {
+    pub(crate) fn get_pipeline(&self, pipeline_handle: &RenderPassHandle) -> Option<&GraphicsPipeline> {
         self.render_pass_pipelines.get(pipeline_handle)
     }
 

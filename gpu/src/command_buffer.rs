@@ -18,7 +18,7 @@ use ash::{
 
 use crate::{CullMode, FrontFace, GPUFence, GPUSemaphore, GpuImage, GpuImageView, ToVk};
 
-use super::{Gpu, GpuBuffer, GpuDescriptorSet, Pipeline, QueueType};
+use super::{Gpu, GpuBuffer, GpuDescriptorSet, GraphicsPipeline, QueueType};
 
 #[derive(Default)]
 pub struct CommandBufferSubmitInfo<'a> {
@@ -207,7 +207,7 @@ impl<'g> CommandBuffer<'g> {
     pub fn bind_descriptor_sets(
         &self,
         bind_point: PipelineBindPoint,
-        material: &Pipeline,
+        material: &GraphicsPipeline,
         first_index: u32,
         descriptor_sets: &[&GpuDescriptorSet],
     ) {
@@ -606,7 +606,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         }
     }
 
-    pub fn bind_pipeline(&mut self, material: &Pipeline) {
+    pub fn bind_pipeline(&mut self, material: &GraphicsPipeline) {
         let device = self.command_buffer.gpu.vk_logical_device();
         unsafe {
             device.cmd_bind_pipeline(
@@ -748,7 +748,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         }
     }
 
-    pub fn push_constant<T: Copy + Sized>(&self, pipeline: &Pipeline, data: &T, offset: u32) {
+    pub fn push_constant<T: Copy + Sized>(&self, pipeline: &GraphicsPipeline, data: &T, offset: u32) {
         let device = self.command_buffer.gpu.vk_logical_device();
         unsafe {
             let ptr: *const u8 = data as *const T as *const u8;
