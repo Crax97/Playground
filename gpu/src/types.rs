@@ -430,13 +430,13 @@ impl Deref for GpuBuffer {
 
 impl GpuBuffer {
     pub fn write_data<I: Sized + Copy>(&self, offset: u64, data: &[I]) {
-        let data_length = std::mem::size_of_val(data) as u64;
+        let data_length_bytes = std::mem::size_of_val(data) as u64;
         assert!(
-            data_length > 0,
+            data_length_bytes > 0,
             "Cannot write on a buffer with 0 data length!"
         );
         assert!(offset < self.allocation.size);
-        assert!(data_length + offset <= self.allocation.size);
+        assert!(data_length_bytes + offset <= self.allocation.size);
 
         let address = unsafe {
             self.allocation

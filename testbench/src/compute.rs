@@ -18,11 +18,11 @@ const COMPUTE_SUM: &[u32] = glsl!(
 
 layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
-layout(set = 0, binding = 0) uniform Numbers { uint nums[2]; };
+layout(set = 0, binding = 0) uniform Numbers { uint a; uint b; };
 layout(set = 0, binding = 1) buffer Output { uint o; };
 
 void main() {
-    o = nums[0] + nums[1];
+    o = a + b;
 }
 "
 );
@@ -71,7 +71,6 @@ fn main() -> anyhow::Result<()> {
         },
     )?;
 
-    let inputs = [3u32, 2];
     let output_buffer = gpu.create_buffer(
         &BufferCreateInfo {
             label: Some("test buffer"),
@@ -81,15 +80,16 @@ fn main() -> anyhow::Result<()> {
         MemoryDomain::HostVisible,
     )?;
 
+    let inputs = [5, 2];
     let input_buffer = gpu.create_buffer(
         &BufferCreateInfo {
             label: Some("test buffer"),
             size: size_of_val(&inputs),
             usage: BufferUsageFlags::UNIFORM_BUFFER,
         },
-        MemoryDomain::HostVisible,
+        MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
     )?;
-    input_buffer.write_data(0, &inputs);
+    input_buffer.write_data::<u32>(0, &inputs);
 
     let descriptor_set = gpu.create_descriptor_set(&DescriptorSetInfo {
         descriptors: &[
@@ -133,6 +133,7 @@ fn main() -> anyhow::Result<()> {
         .expect("Fence not triggered!");
 
     let output = output_buffer.read::<u32>(0);
-    println!("Output is: {output}");
+    let inputs = input_buffer.read::<[u32; 2]>(0);
+    println!("Output is: {output}, inputs are {inputs:?}");
     Ok(())
 }
