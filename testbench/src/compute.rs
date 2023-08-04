@@ -1,9 +1,14 @@
-use ash::vk::{BufferUsageFlags, PipelineBindPoint, PipelineStageFlags, ShaderModuleCreateFlags};
-use engine_macros::*;
-use gpu::{BindingElement, BindingType, BufferCreateInfo, BufferRange, CommandBuffer, CommandBufferSubmitInfo, ComputePipeline, ComputePipelineDescription, DescriptorInfo, DescriptorSetInfo, GlobalBinding, Gpu, GpuConfiguration, GPUFence, GpuShaderModule, GraphicsPipeline, GraphicsPipelineDescription, MemoryDomain, QueueType, ShaderModuleCreateInfo, ShaderStage};
-use std::mem::{size_of, size_of_val};
 use ash::vk;
+use ash::vk::PipelineStageFlags;
+use engine_macros::*;
 use gpu::DescriptorType::{StorageBuffer, UniformBuffer};
+use gpu::{
+    BindingElement, BindingType, BufferCreateInfo, BufferRange, BufferUsageFlags, CommandBuffer,
+    CommandBufferSubmitInfo, ComputePipeline, ComputePipelineDescription, DescriptorInfo,
+    DescriptorSetInfo, GPUFence, GlobalBinding, Gpu, GpuConfiguration, GraphicsPipeline,
+    GraphicsPipelineDescription, MemoryDomain, QueueType, ShaderModuleCreateInfo, ShaderStage,
+};
+use std::mem::{size_of, size_of_val};
 
 const COMPUTE_SUM: &[u32] = glsl!(
     entry_point = "main",
@@ -32,16 +37,16 @@ fn main() -> anyhow::Result<()> {
     })?;
 
     let module = gpu.create_shader_module(&ShaderModuleCreateInfo {
-        flags: ShaderModuleCreateFlags::empty(),
         code: bytemuck::cast_slice(COMPUTE_SUM),
     })?;
 
-    let wait_fence = GPUFence::new(&gpu, &ash::vk::FenceCreateInfo {
-        s_type: ash::vk::StructureType::FENCE_CREATE_INFO,
-        p_next: std::ptr::null(),
-        flags: ash::vk::FenceCreateFlags::empty(),
-    })?;
-    
+    let wait_fence = GPUFence::new(
+        &gpu,
+        &gpu::FenceCreateInfo {
+            flags: gpu::FenceCreateFlags::empty(),
+        },
+    )?;
+
     let command_pipeline = ComputePipeline::new(
         &gpu,
         &ComputePipelineDescription {
@@ -87,31 +92,33 @@ fn main() -> anyhow::Result<()> {
     input_buffer.write_data(0, &inputs);
 
     let descriptor_set = gpu.create_descriptor_set(&DescriptorSetInfo {
-        descriptors: &[DescriptorInfo {
-            binding: 0,
-            element_type: UniformBuffer(BufferRange {
-                handle: &input_buffer,
-                offset: 0,
-                size: vk::WHOLE_SIZE,
-            }),
-            binding_stage: ShaderStage::Compute,
-        },
+        descriptors: &[
             DescriptorInfo {
-            binding: 1,
-            element_type: StorageBuffer(BufferRange {
-                handle: &output_buffer,
-                offset: 0,
-                size: vk::WHOLE_SIZE,
-            }),
-            binding_stage: ShaderStage::Compute,
-        }],
+                binding: 0,
+                element_type: UniformBuffer(BufferRange {
+                    handle: &input_buffer,
+                    offset: 0,
+                    size: vk::WHOLE_SIZE,
+                }),
+                binding_stage: ShaderStage::Compute,
+            },
+            DescriptorInfo {
+                binding: 1,
+                element_type: StorageBuffer(BufferRange {
+                    handle: &output_buffer,
+                    offset: 0,
+                    size: vk::WHOLE_SIZE,
+                }),
+                binding_stage: ShaderStage::Compute,
+            },
+        ],
     })?;
-    
+
     let mut command_buffer = CommandBuffer::new(&gpu, QueueType::Graphics)?;
     {
         let mut compute_pass = command_buffer.begin_compute_pass();
         compute_pass.bind_pipeline(&command_pipeline);
-        compute_pass.bind_descriptor_sets( &command_pipeline, 0, &[&descriptor_set]);
+        compute_pass.bind_descriptor_sets(&command_pipeline, 0, &[&descriptor_set]);
         compute_pass.dispatch(1, 1, 1);
     }
 
@@ -121,9 +128,10 @@ fn main() -> anyhow::Result<()> {
         signal_semaphores: &[],
         fence: Some(&wait_fence),
     })?;
-    
-    gpu.wait_for_fences(&[&wait_fence], true, 100000).expect("Fence not triggered!");
-    
+
+    gpu.wait_for_fences(&[&wait_fence], true, 100000)
+        .expect("Fence not triggered!");
+
     let output = output_buffer.read::<u32>(0);
     println!("Output is: {output}");
     Ok(())

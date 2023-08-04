@@ -16,11 +16,12 @@ use ash::{
     RawPtr,
 };
 
-use crate::{CullMode, FrontFace, GPUFence, GPUSemaphore, GpuImage, GpuImageView, ToVk, ComputePipeline};
 use crate::pipeline::GpuPipeline;
+use crate::{
+    ComputePipeline, CullMode, FrontFace, GPUFence, GPUSemaphore, GpuImage, GpuImageView, ToVk,
+};
 
 use super::{Gpu, GpuBuffer, GpuDescriptorSet, GraphicsPipeline, QueueType};
-
 
 #[derive(Default)]
 pub struct CommandBufferSubmitInfo<'a> {
@@ -50,10 +51,9 @@ where
     depth_bias_setup: Option<(f32, f32, f32)>,
 }
 
-
 pub struct ComputePassCommand<'c, 'g>
-    where
-        'g: 'c,
+where
+    'g: 'c,
 {
     command_buffer: &'c mut CommandBuffer<'g>,
 }
@@ -144,7 +144,6 @@ pub struct PipelineBarrierInfo<'a> {
     pub image_memory_barriers: &'a [ImageMemoryBarrier<'a>],
 }
 
-
 mod inner {
     use ash::vk::ShaderStageFlags;
 
@@ -208,10 +207,8 @@ impl<'g> CommandBuffer<'g> {
     ) -> RenderPassCommand<'p, 'g> {
         RenderPassCommand::<'p, 'g>::new(self, info)
     }
-    
-    pub fn begin_compute_pass<'p>(
-        &'p mut self,
-    ) -> ComputePassCommand<'p, 'g> {
+
+    pub fn begin_compute_pass<'p>(&'p mut self) -> ComputePassCommand<'p, 'g> {
         ComputePassCommand::<'p, 'g>::new(self)
     }
 
@@ -826,10 +823,8 @@ impl<'c, 'g> Drop for RenderPassCommand<'c, 'g> {
 }
 
 impl<'c, 'g> ComputePassCommand<'c, 'g> {
-    pub fn new(command_buffer: &'c mut CommandBuffer<'g>) -> Self { 
-        Self {
-            command_buffer,
-        }
+    pub fn new(command_buffer: &'c mut CommandBuffer<'g>) -> Self {
+        Self { command_buffer }
     }
 
     pub fn bind_pipeline(&mut self, pipeline: &ComputePipeline) {
@@ -842,15 +837,15 @@ impl<'c, 'g> ComputePassCommand<'c, 'g> {
             )
         }
     }
-    
+
     pub fn dispatch(&mut self, group_size_x: u32, group_size_y: u32, group_size_z: u32) {
         unsafe {
-            self.command_buffer.gpu.vk_logical_device()
-                .cmd_dispatch(
-                    self.command_buffer.inner_command_buffer,
-                    group_size_x, 
-                    group_size_y,
-                    group_size_z);
+            self.command_buffer.gpu.vk_logical_device().cmd_dispatch(
+                self.command_buffer.inner_command_buffer,
+                group_size_x,
+                group_size_y,
+                group_size_z,
+            );
         }
         self.command_buffer.has_recorded_anything = true;
     }

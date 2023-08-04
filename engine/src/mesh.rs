@@ -1,7 +1,7 @@
-use ash::{prelude::VkResult, vk::BufferUsageFlags};
+use ash::prelude::VkResult;
 use nalgebra::{Vector2, Vector3};
 
-use gpu::{BufferCreateInfo, Gpu, GpuBuffer, MemoryDomain};
+use gpu::{BufferCreateInfo, BufferUsageFlags, Gpu, GpuBuffer, MemoryDomain};
 use resource_map::Resource;
 
 pub struct MeshPrimitiveCreateInfo {

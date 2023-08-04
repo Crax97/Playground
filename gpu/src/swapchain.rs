@@ -5,12 +5,11 @@ use ash::{
     extensions::khr::Surface,
     prelude::VkResult,
     vk::{
-        self, ComponentMapping, ComponentSwizzle, CompositeAlphaFlagsKHR, Extent2D,
-        FenceCreateFlags, FenceCreateInfo, Format, ImageAspectFlags, ImageSubresourceRange,
-        ImageUsageFlags, ImageViewCreateFlags, ImageViewType, PresentInfoKHR, PresentModeKHR,
-        SemaphoreCreateFlags, SemaphoreCreateInfo, SharingMode, StructureType,
-        SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR, SwapchainCreateFlagsKHR,
-        SwapchainCreateInfoKHR, SwapchainKHR,
+        self, ComponentMapping, ComponentSwizzle, CompositeAlphaFlagsKHR, Extent2D, Format,
+        ImageAspectFlags, ImageSubresourceRange, ImageUsageFlags, ImageViewCreateFlags,
+        ImageViewType, PresentInfoKHR, PresentModeKHR, SemaphoreCreateFlags, SemaphoreCreateInfo,
+        SharingMode, StructureType, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR,
+        SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
     },
     Device,
 };
@@ -20,7 +19,7 @@ use raw_window_handle::{
 };
 use winit::window::Window;
 
-use crate::{Gpu, GpuImage, GpuImageView};
+use crate::{FenceCreateFlags, FenceCreateInfo, Gpu, GpuImage, GpuImageView};
 
 use super::{GPUFence, GPUSemaphore, GpuState};
 
@@ -58,8 +57,6 @@ impl SwapchainFrame {
         let in_flight_fence = GPUFence::create(
             device.clone(),
             &FenceCreateInfo {
-                s_type: StructureType::FENCE_CREATE_INFO,
-                p_next: std::ptr::null(),
                 flags: FenceCreateFlags::SIGNALED,
             },
         )?;
@@ -126,8 +123,6 @@ impl Swapchain {
         let next_image_fence = GPUFence::create(
             state.logical_device.clone(),
             &FenceCreateInfo {
-                s_type: StructureType::FENCE_CREATE_INFO,
-                p_next: std::ptr::null(),
                 flags: FenceCreateFlags::empty(),
             },
         )?;

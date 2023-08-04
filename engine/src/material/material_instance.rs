@@ -1,7 +1,7 @@
-use ash::vk::{self, BufferUsageFlags, ImageLayout};
+use ash::vk::{self, ImageLayout};
 use gpu::{
-    BufferCreateInfo, BufferRange, DescriptorInfo, DescriptorSetInfo, DescriptorType, Gpu,
-    GpuBuffer, GpuDescriptorSet, MemoryDomain,
+    BufferCreateInfo, BufferRange, BufferUsageFlags, DescriptorInfo, DescriptorSetInfo,
+    DescriptorType, Gpu, GpuBuffer, GpuDescriptorSet, MemoryDomain,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 use std::collections::HashMap;

@@ -1,14 +1,18 @@
 use std::{cell::RefCell, ops::Deref, sync::Arc};
 
 use super::{allocator::GpuAllocator, gpu::Gpu};
-use ash::vk::{ImageAspectFlags, ImageLayout, ImageUsageFlags};
+use ash::vk::{
+    BufferUsageFlags as VkBufferUsageFlags, ImageAspectFlags, ImageLayout, ImageUsageFlags,
+    StructureType,
+};
 use ash::{
     prelude::*,
     vk::{
-        self, AllocationCallbacks, Buffer, Extent2D, FenceCreateInfo, SamplerCreateInfo,
-        SemaphoreCreateInfo, ShaderModuleCreateInfo,
+        self, AllocationCallbacks, Buffer, Extent2D, FenceCreateInfo as VkFenceCreateInfo,
+        SamplerCreateInfo, SemaphoreCreateInfo, ShaderModuleCreateInfo,
     },
 };
+use bitflags::bitflags;
 
 use super::{
     descriptor_set::{DescriptorSetAllocation, DescriptorSetAllocator},
@@ -23,6 +27,14 @@ pub trait ToVk {
     type Inner;
 
     fn to_vk(&self) -> Self::Inner;
+}
+
+macro_rules! case {
+    ($value: expr, $target:expr, $outer:expr, $inner:expr) => {
+        if $value.contains($outer) {
+            $target |= $inner
+        }
+    };
 }
 
 #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -186,6 +198,77 @@ impl From<vk::CompareOp> for CompareOp {
         }
     }
 }
+
+bitflags! {
+#[repr(transparent)]
+#[derive(Default, Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct BufferUsageFlags : u32 {
+        #[doc = "Can be used as a source of transfer operations"]
+        const TRANSFER_SRC = 0b1;
+        #[doc = "Can be used as a destination of transfer operations"]
+        const TRANSFER_DST = 0b10;
+        #[doc = "Can be used as TBO"]
+        const UNIFORM_TEXEL_BUFFER = 0b100;
+        #[doc = "Can be used as IBO"]
+        const STORAGE_TEXEL_BUFFER = 0b1000;
+        #[doc = "Can be used as UBO"]
+        const UNIFORM_BUFFER = 0b1_0000;
+        #[doc = "Can be used as SSBO"]
+        const STORAGE_BUFFER = 0b10_0000;
+        #[doc = "Can be used as source of fixed-function index fetch (index buffer)"]
+        const INDEX_BUFFER = 0b100_0000;
+        #[doc = "Can be used as source of fixed-function vertex fetch (VBO)"]
+        const VERTEX_BUFFER = 0b1000_0000;
+        #[doc = "Can be the source of indirect parameters (e.g. indirect buffer, parameter buffer)"]
+        const INDIRECT_BUFFER = 0b1_0000_0000;
+    }
+}
+
+impl ToVk for BufferUsageFlags {
+    type Inner = VkBufferUsageFlags;
+
+    fn to_vk(&self) -> Self::Inner {
+        let mut inner = Self::Inner::empty();
+
+        case!(self, inner, Self::TRANSFER_SRC, Self::Inner::TRANSFER_SRC);
+        case!(self, inner, Self::TRANSFER_DST, Self::Inner::TRANSFER_DST);
+        case!(
+            self,
+            inner,
+            Self::UNIFORM_TEXEL_BUFFER,
+            Self::Inner::UNIFORM_TEXEL_BUFFER
+        );
+        case!(
+            self,
+            inner,
+            Self::STORAGE_TEXEL_BUFFER,
+            Self::Inner::STORAGE_TEXEL_BUFFER
+        );
+        case!(
+            self,
+            inner,
+            Self::UNIFORM_BUFFER,
+            Self::Inner::UNIFORM_BUFFER
+        );
+        case!(
+            self,
+            inner,
+            Self::STORAGE_BUFFER,
+            Self::Inner::STORAGE_BUFFER
+        );
+        case!(self, inner, Self::INDEX_BUFFER, Self::Inner::INDEX_BUFFER);
+        case!(self, inner, Self::VERTEX_BUFFER, Self::Inner::VERTEX_BUFFER);
+        case!(
+            self,
+            inner,
+            Self::INDIRECT_BUFFER,
+            Self::Inner::INDIRECT_BUFFER
+        );
+
+        inner
+    }
+}
+
 macro_rules! impl_raii_wrapper_hash {
     ($name:ident) => {
         impl std::hash::Hash for $name {
@@ -256,9 +339,40 @@ define_raii_wrapper!((struct GPUSemaphore {}, vk::Semaphore, ash::Device::destro
     }
 });
 
+bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct FenceCreateFlags : u32 {
+        const SIGNALED = 0b00000001;
+    }
+}
+
+impl ToVk for FenceCreateFlags {
+    type Inner = vk::FenceCreateFlags;
+
+    fn to_vk(&self) -> Self::Inner {
+        let mut inner = Self::Inner::empty();
+        if self.contains(FenceCreateFlags::SIGNALED) {
+            inner |= Self::Inner::SIGNALED;
+        }
+
+        inner
+    }
+}
+
+pub struct FenceCreateInfo {
+    pub flags: FenceCreateFlags,
+}
+
 define_raii_wrapper!((struct GPUFence {}, vk::Fence, ash::Device::destroy_fence) {
     (create_info: &FenceCreateInfo,) => {
-        |device: &ash::Device| { unsafe { device.create_fence(create_info, get_allocation_callbacks()) }}
+        |device: &ash::Device| {
+        let vk_fence_create_info = VkFenceCreateInfo {
+            s_type: StructureType::FENCE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: create_info.flags.to_vk()
+
+        };
+        unsafe { device.create_fence(&vk_fence_create_info, get_allocation_callbacks()) }}
     }
 });
 
@@ -273,7 +387,6 @@ impl GPUSemaphore {
         Self::create(gpu.vk_logical_device(), create_info)
     }
 }
-
 
 pub struct GpuBuffer {
     device: ash::Device,
@@ -336,7 +449,7 @@ impl GpuBuffer {
 
         address.copy_from_slice(data);
     }
-    
+
     pub fn read<T: Copy + Sized>(&self, offset: u64) -> T {
         let data_length = std::mem::size_of::<T>();
         assert!(
@@ -354,7 +467,7 @@ impl GpuBuffer {
                 .add(offset as _)
         } as *mut T;
         let address = unsafe { std::slice::from_raw_parts_mut(address, data_length) };
-        
+
         address[0]
     }
 }

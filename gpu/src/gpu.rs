@@ -13,10 +13,10 @@ use ash::{
     extensions::ext::DebugUtils,
     prelude::*,
     vk::{
-        make_api_version, AccessFlags, ApplicationInfo, BufferCreateFlags, BufferUsageFlags,
+        make_api_version, AccessFlags, ApplicationInfo, BufferCreateFlags,
         CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
         CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo,
-        CommandPoolResetFlags, DebugUtilsMessageSeverityFlagsEXT, DebugUtilsMessageTypeFlagsEXT,
+        DebugUtilsMessageSeverityFlagsEXT, DebugUtilsMessageTypeFlagsEXT,
         DebugUtilsMessengerCreateFlagsEXT, DebugUtilsMessengerCreateInfoEXT,
         DebugUtilsObjectNameInfoEXT, DependencyFlags, DescriptorBufferInfo, DescriptorImageInfo,
         DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo,
@@ -37,16 +37,18 @@ use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 use winit::window::Window;
 
-use crate::swapchain::SwapchainFrame;
-use crate::{get_allocation_callbacks, GPUFence, GpuFramebuffer, GpuImageView, GpuShaderModule, ImageFormat, ImageMemoryBarrier, PipelineBarrierInfo, QueueType, RenderPass, Swapchain, ToVk};
+use crate::{
+    get_allocation_callbacks, GPUFence, GpuFramebuffer, GpuImageView, GpuShaderModule, ImageFormat,
+    ImageMemoryBarrier, PipelineBarrierInfo, QueueType, RenderPass, ToVk,
+};
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
 
 use super::{
     allocator::{GpuAllocator, PasstroughAllocator},
     descriptor_set::DescriptorSetAllocator,
-    AllocationRequirements, DescriptorSetInfo, GpuBuffer, GpuDescriptorSet, GpuImage, GpuSampler,
-    MemoryDomain,
+    AllocationRequirements, BufferUsageFlags, DescriptorSetInfo, GpuBuffer, GpuDescriptorSet,
+    GpuImage, GpuSampler, MemoryDomain,
 };
 
 const KHRONOS_VALIDATION_LAYER: &str = "VK_LAYER_KHRONOS_validation";
@@ -275,11 +277,11 @@ impl Gpu {
         trace!("Created instance");
 
         let mut device_extensions = vec!["VK_KHR_dynamic_rendering".into()];
-    
+
         if configuration.window.is_some() {
             device_extensions.push("VK_KHR_swapchain".into());
         }
-        
+
         let physical_device = Self::select_discrete_physical_device(&instance)?;
         trace!("Created physical device");
 
@@ -859,7 +861,7 @@ impl Gpu {
         let create_info = vk::ShaderModuleCreateInfo {
             s_type: StructureType::SHADER_MODULE_CREATE_INFO,
             p_next: std::ptr::null(),
-            flags: create_info.flags,
+            flags: ShaderModuleCreateFlags::empty(),
             code_size: create_info.code.len() as _,
             p_code,
         };
@@ -946,7 +948,7 @@ fn create_staging_buffer(state: &Arc<GpuState>) -> VkResult<GpuBuffer> {
         p_next: std::ptr::null(),
         flags: BufferCreateFlags::empty(),
         size: mb_64 as u64,
-        usage: BufferUsageFlags::TRANSFER_SRC,
+        usage: vk::BufferUsageFlags::TRANSFER_SRC,
         sharing_mode: SharingMode::CONCURRENT,
         queue_family_index_count: state.queue_families.indices.len() as _,
         p_queue_family_indices: state.queue_families.indices.as_ptr(),
@@ -1016,7 +1018,6 @@ pub struct FramebufferCreateInfo<'a> {
 }
 
 pub struct ShaderModuleCreateInfo<'a> {
-    pub flags: ShaderModuleCreateFlags,
     pub code: &'a [u8],
 }
 
@@ -1029,16 +1030,18 @@ impl Gpu {
         let size = create_info.size as u64;
         assert_ne!(size, 0, "Can't create a buffer with size 0!");
 
+        let vk_usage = create_info.usage.to_vk();
+
         let create_info_vk = vk::BufferCreateInfo {
             s_type: StructureType::BUFFER_CREATE_INFO,
             p_next: std::ptr::null(),
             flags: BufferCreateFlags::empty(),
             size,
-            usage: create_info.usage
+            usage: vk_usage
                 | if memory_domain.contains(MemoryDomain::HostVisible) {
-                    BufferUsageFlags::empty()
+                    vk::BufferUsageFlags::empty()
                 } else {
-                    BufferUsageFlags::TRANSFER_DST
+                    vk::BufferUsageFlags::TRANSFER_DST
                 },
             sharing_mode: SharingMode::CONCURRENT,
             queue_family_index_count: self.state.queue_families.indices.len() as _,
@@ -1576,21 +1579,24 @@ impl Gpu {
             self.state.descriptor_set_allocator.clone(),
         )
     }
-    
-    pub fn wait_for_fences(&self, fences: &[&GPUFence], wait_all: bool, timeout_ns: u64) -> VkResult<()> {
+
+    pub fn wait_for_fences(
+        &self,
+        fences: &[&GPUFence],
+        wait_all: bool,
+        timeout_ns: u64,
+    ) -> VkResult<()> {
         let fences: Vec<_> = fences.iter().map(|f| f.inner).collect();
         unsafe {
-            self.vk_logical_device().wait_for_fences(&fences, wait_all, timeout_ns)
+            self.vk_logical_device()
+                .wait_for_fences(&fences, wait_all, timeout_ns)
         }
     }
 
-    pub fn reset_fences(&self, fences: &[&GPUFence]) -> VkResult<()>{
+    pub fn reset_fences(&self, fences: &[&GPUFence]) -> VkResult<()> {
         let fences: Vec<_> = fences.iter().map(|f| f.inner).collect();
-        unsafe {
-            self.vk_logical_device().reset_fences(&fences)
-        }
+        unsafe { self.vk_logical_device().reset_fences(&fences) }
     }
-    
 
     pub fn save_pipeline_cache(&self, path: &str) -> VkResult<()> {
         let cache_data = unsafe {

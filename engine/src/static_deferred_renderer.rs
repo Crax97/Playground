@@ -3,13 +3,13 @@ use std::convert::identity;
 use std::{collections::HashMap, mem::size_of};
 
 use ash::vk::{
-    BufferUsageFlags, CompareOp, Extent2D, IndexType, PipelineBindPoint, PushConstantRange,
-    ShaderModuleCreateFlags, ShaderStageFlags, StencilOpState,
+    CompareOp, Extent2D, IndexType, PipelineBindPoint, PushConstantRange, ShaderModuleCreateFlags,
+    ShaderStageFlags, StencilOpState,
 };
 use gpu::{
-    BindingType, BufferCreateInfo, CommandBuffer, DepthStencilState, FragmentStageInfo, Gpu,
-    GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain, ShaderModuleCreateInfo, Swapchain, ToVk,
-    VertexStageInfo,
+    BindingType, BufferCreateInfo, BufferUsageFlags, CommandBuffer, DepthStencilState,
+    FragmentStageInfo, Gpu, GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain,
+    ShaderModuleCreateInfo, Swapchain, ToVk, VertexStageInfo,
 };
 use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -228,11 +228,9 @@ impl DeferredRenderingPipeline {
         let render_graph = RenderGraph::new();
 
         let fxaa_vs = gpu.create_shader_module(&ShaderModuleCreateInfo {
-            flags: ShaderModuleCreateFlags::empty(),
             code: bytemuck::cast_slice(FXAA_VS),
         })?;
         let fxaa_fs = gpu.create_shader_module(&ShaderModuleCreateInfo {
-            flags: ShaderModuleCreateFlags::empty(),
             code: bytemuck::cast_slice(FXAA_FS),
         })?;
 
