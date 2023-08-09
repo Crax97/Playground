@@ -10,9 +10,9 @@ use ash::vk::{
     self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor,
     BlendOp, BorderColor, ColorComponentFlags, CompareOp, ComponentMapping, DependencyFlags,
     Extent2D, Filter, ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags,
-    ImageViewType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D, SampleCountFlags,
-    SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType,
-    SubpassDependency, SubpassDescriptionFlags,
+    ImageViewType, Offset2D, PipelineBindPoint, Rect2D, SampleCountFlags, SamplerAddressMode,
+    SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency,
+    SubpassDescriptionFlags,
 };
 use gpu::{
     BeginRenderPassInfo, BindingType, BlendState, BufferCreateInfo, BufferRange, BufferUsageFlags,
@@ -27,8 +27,8 @@ use gpu::{
 use ash::vk::PushConstantRange;
 use gpu::{
     BindingElement, CullMode, DepthStencilAttachment, DepthStencilState, FragmentStageInfo,
-    FrontFace, GlobalBinding, GpuShaderModule, GraphicsPipelineDescription, LogicOp, PolygonMode,
-    PrimitiveTopology, VertexBindingDescription, VertexStageInfo,
+    FrontFace, GlobalBinding, GpuShaderModule, GraphicsPipelineDescription, LogicOp,
+    PipelineStageFlags, PolygonMode, PrimitiveTopology, VertexBindingDescription, VertexStageInfo,
 };
 use indexmap::IndexSet;
 use log::trace;
@@ -701,8 +701,8 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
             dependencies: &[SubpassDependency {
                 src_subpass: vk::SUBPASS_EXTERNAL,
                 dst_subpass: 0,
-                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT.to_vk(),
+                dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT.to_vk(),
                 src_access_mask: AccessFlags::empty(),
                 dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
                 dependency_flags: DependencyFlags::empty(),

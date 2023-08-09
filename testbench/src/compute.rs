@@ -1,12 +1,11 @@
-use ash::vk;
-use ash::vk::PipelineStageFlags;
 use engine_macros::*;
 use gpu::DescriptorType::{StorageBuffer, UniformBuffer};
 use gpu::{
     BindingElement, BindingType, BufferCreateInfo, BufferRange, BufferUsageFlags, CommandBuffer,
     CommandBufferSubmitInfo, ComputePipeline, ComputePipelineDescription, DescriptorInfo,
     DescriptorSetInfo, GPUFence, GlobalBinding, Gpu, GpuConfiguration, GraphicsPipeline,
-    GraphicsPipelineDescription, MemoryDomain, QueueType, ShaderModuleCreateInfo, ShaderStage,
+    GraphicsPipelineDescription, MemoryDomain, PipelineStageFlags, QueueType,
+    ShaderModuleCreateInfo, ShaderStage,
 };
 use std::mem::{size_of, size_of_val};
 
@@ -98,7 +97,7 @@ fn main() -> anyhow::Result<()> {
                 element_type: UniformBuffer(BufferRange {
                     handle: &input_buffer,
                     offset: 0,
-                    size: vk::WHOLE_SIZE,
+                    size: gpu::WHOLE_SIZE,
                 }),
                 binding_stage: ShaderStage::Compute,
             },
@@ -107,7 +106,7 @@ fn main() -> anyhow::Result<()> {
                 element_type: StorageBuffer(BufferRange {
                     handle: &output_buffer,
                     offset: 0,
-                    size: vk::WHOLE_SIZE,
+                    size: gpu::WHOLE_SIZE,
                 }),
                 binding_stage: ShaderStage::Compute,
             },
@@ -124,13 +123,15 @@ fn main() -> anyhow::Result<()> {
 
     command_buffer.submit(&CommandBufferSubmitInfo {
         wait_semaphores: &[],
-        wait_stages: &[PipelineStageFlags::COMPUTE_SHADER],
+        wait_stages: &[PipelineStageFlags::ALL_COMMANDS],
         signal_semaphores: &[],
         fence: Some(&wait_fence),
     })?;
 
-    gpu.wait_for_fences(&[&wait_fence], true, 100000)
+    gpu.wait_for_fences(&[&wait_fence], true, 10000000)
         .expect("Fence not triggered!");
+
+    //gpu.wait_device_idle()?;
 
     let output = output_buffer.read::<u32>(0);
     let inputs = input_buffer.read::<[u32; 2]>(0);

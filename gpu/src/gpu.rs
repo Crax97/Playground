@@ -25,9 +25,9 @@ use ash::{
         ImageSubresourceRange, ImageTiling, ImageType, ImageViewCreateFlags, ImageViewType,
         InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D,
         PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType,
-        PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo, PipelineStageFlags,
-        Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo, ShaderModuleCreateFlags,
-        SharingMode, StructureType, SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
+        PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo, Queue, QueueFlags,
+        SampleCountFlags, SamplerCreateInfo, ShaderModuleCreateFlags, SharingMode, StructureType,
+        SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
     },
     *,
 };
@@ -39,7 +39,7 @@ use winit::window::Window;
 
 use crate::{
     get_allocation_callbacks, GPUFence, GpuFramebuffer, GpuImageView, GpuShaderModule, ImageFormat,
-    ImageMemoryBarrier, PipelineBarrierInfo, QueueType, RenderPass, ToVk,
+    ImageMemoryBarrier, PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPass, ToVk,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -758,7 +758,11 @@ impl Gpu {
                 DescriptorBufferInfo {
                     buffer: buf.handle.inner,
                     offset: buf.offset,
-                    range: buf.size,
+                    range: if buf.size == crate::WHOLE_SIZE {
+                        vk::WHOLE_SIZE
+                    } else {
+                        buf.size
+                    },
                 },
                 vk::DescriptorType::UNIFORM_BUFFER,
             )),
@@ -767,7 +771,11 @@ impl Gpu {
                 DescriptorBufferInfo {
                     buffer: buf.handle.inner,
                     offset: buf.offset,
-                    range: buf.size,
+                    range: if buf.size == crate::WHOLE_SIZE {
+                        vk::WHOLE_SIZE
+                    } else {
+                        buf.size
+                    },
                 },
                 vk::DescriptorType::STORAGE_BUFFER,
             )),

@@ -10,15 +10,16 @@ use ash::{
     vk::{
         self, ClearDepthStencilValue, CommandBufferAllocateInfo, CommandBufferBeginInfo,
         CommandBufferLevel, CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags, Extent2D,
-        IndexType, Offset2D, PipelineBindPoint, PipelineStageFlags, Rect2D, ShaderStageFlags,
-        StructureType, SubmitInfo,
+        IndexType, Offset2D, PipelineBindPoint, Rect2D, ShaderStageFlags, StructureType,
+        SubmitInfo,
     },
     RawPtr,
 };
 
 use crate::pipeline::GpuPipeline;
 use crate::{
-    ComputePipeline, CullMode, FrontFace, GPUFence, GPUSemaphore, GpuImage, GpuImageView, ToVk,
+    ComputePipeline, FrontFace, GPUFence, GPUSemaphore, GpuImage, GpuImageView, PipelineStageFlags,
+    ToVk,
 };
 
 use super::{Gpu, GpuBuffer, GpuDescriptorSet, GraphicsPipeline, QueueType};
@@ -233,8 +234,8 @@ impl<'g> CommandBuffer<'g> {
         unsafe {
             device.cmd_pipeline_barrier(
                 self.inner_command_buffer,
-                barrier_info.src_stage_mask,
-                barrier_info.dst_stage_mask,
+                barrier_info.src_stage_mask.to_vk(),
+                barrier_info.dst_stage_mask.to_vk(),
                 barrier_info.dependency_flags,
                 &memory_barriers,
                 &buffer_memory_barriers,
@@ -290,6 +291,8 @@ impl<'g> CommandBuffer<'g> {
                 .map(|s| s.inner)
                 .collect();
 
+            let stage_masks: Vec<_> = submit_info.wait_stages.iter().map(|v| v.to_vk()).collect();
+
             device.queue_submit(
                 target_queue,
                 &[SubmitInfo {
@@ -297,7 +300,7 @@ impl<'g> CommandBuffer<'g> {
                     p_next: std::ptr::null(),
                     wait_semaphore_count: wait_semaphores.len() as _,
                     p_wait_semaphores: wait_semaphores.as_ptr(),
-                    p_wait_dst_stage_mask: submit_info.wait_stages.as_ptr(),
+                    p_wait_dst_stage_mask: stage_masks.as_ptr(),
                     command_buffer_count: 1,
                     p_command_buffers: [self.inner_command_buffer].as_ptr(),
                     signal_semaphore_count: signal_semaphores.len() as _,

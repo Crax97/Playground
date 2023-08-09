@@ -200,6 +200,119 @@ impl From<vk::CompareOp> for CompareOp {
 }
 
 bitflags! {
+    #[repr(transparent)]
+    #[derive(Default, Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+    pub struct PipelineStageFlags : u32 {
+        #[doc = "Before subsequent commands are processed"]
+        const TOP_OF_PIPE = 0b1;
+        #[doc = "Draw/DispatchIndirect command fetch"]
+        const DRAW_INDIRECT = 0b10;
+        #[doc = "Vertex/index fetch"]
+        const VERTEX_INPUT = 0b100;
+        #[doc = "Vertex shading"]
+        const VERTEX_SHADER = 0b1000;
+        #[doc = "Tessellation control shading"]
+        const TESSELLATION_CONTROL_SHADER = 0b1_0000;
+        #[doc = "Tessellation evaluation shading"]
+        const TESSELLATION_EVALUATION_SHADER = 0b10_0000;
+        #[doc = "Geometry shading"]
+        const GEOMETRY_SHADER = 0b100_0000;
+        #[doc = "Fragment shading"]
+        const FRAGMENT_SHADER = 0b1000_0000;
+        #[doc = "Early fragment (depth and stencil) tests"]
+        const EARLY_FRAGMENT_TESTS = 0b1_0000_0000;
+        #[doc = "Late fragment (depth and stencil) tests"]
+        const LATE_FRAGMENT_TESTS = 0b10_0000_0000;
+        #[doc = "Color attachment writes"]
+        const COLOR_ATTACHMENT_OUTPUT = 0b100_0000_0000;
+        #[doc = "Compute shading"]
+        const COMPUTE_SHADER = 0b1000_0000_0000;
+        #[doc = "Transfer/copy operations"]
+        const TRANSFER = 0b1_0000_0000_0000;
+        #[doc = "After previous commands have completed"]
+        const BOTTOM_OF_PIPE = 0b10_0000_0000_0000;
+        #[doc = "Indicates host (CPU) is a source/sink of the dependency"]
+        const HOST = 0b100_0000_0000_0000;
+        #[doc = "All stages of the graphics pipeline"]
+        const ALL_GRAPHICS = 0b1000_0000_0000_0000;
+        #[doc = "All stages supported on the queue"]
+        const ALL_COMMANDS = 0b1_0000_0000_0000_0000;
+    }
+}
+
+impl ToVk for PipelineStageFlags {
+    type Inner = vk::PipelineStageFlags;
+
+    fn to_vk(&self) -> Self::Inner {
+        let mut inner = Self::Inner::empty();
+
+        case!(self, inner, Self::TOP_OF_PIPE, Self::Inner::TOP_OF_PIPE);
+        case!(self, inner, Self::DRAW_INDIRECT, Self::Inner::DRAW_INDIRECT);
+        case!(self, inner, Self::VERTEX_SHADER, Self::Inner::VERTEX_SHADER);
+        case!(
+            self,
+            inner,
+            Self::TESSELLATION_CONTROL_SHADER,
+            Self::Inner::TESSELLATION_CONTROL_SHADER
+        );
+        case!(
+            self,
+            inner,
+            Self::TESSELLATION_EVALUATION_SHADER,
+            Self::Inner::TESSELLATION_EVALUATION_SHADER
+        );
+        case!(
+            self,
+            inner,
+            Self::GEOMETRY_SHADER,
+            Self::Inner::GEOMETRY_SHADER
+        );
+        case!(
+            self,
+            inner,
+            Self::FRAGMENT_SHADER,
+            Self::Inner::FRAGMENT_SHADER
+        );
+        case!(
+            self,
+            inner,
+            Self::EARLY_FRAGMENT_TESTS,
+            Self::Inner::EARLY_FRAGMENT_TESTS
+        );
+        case!(
+            self,
+            inner,
+            Self::LATE_FRAGMENT_TESTS,
+            Self::Inner::LATE_FRAGMENT_TESTS
+        );
+        case!(
+            self,
+            inner,
+            Self::COLOR_ATTACHMENT_OUTPUT,
+            Self::Inner::COLOR_ATTACHMENT_OUTPUT
+        );
+        case!(
+            self,
+            inner,
+            Self::COMPUTE_SHADER,
+            Self::Inner::COMPUTE_SHADER
+        );
+        case!(self, inner, Self::TRANSFER, Self::Inner::TRANSFER);
+        case!(
+            self,
+            inner,
+            Self::BOTTOM_OF_PIPE,
+            Self::Inner::BOTTOM_OF_PIPE
+        );
+        case!(self, inner, Self::HOST, Self::Inner::HOST);
+        case!(self, inner, Self::ALL_GRAPHICS, Self::Inner::ALL_GRAPHICS);
+        case!(self, inner, Self::ALL_COMMANDS, Self::Inner::ALL_COMMANDS);
+
+        inner
+    }
+}
+
+bitflags! {
 #[repr(transparent)]
 #[derive(Default, Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct BufferUsageFlags : u32 {

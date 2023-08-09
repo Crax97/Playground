@@ -16,6 +16,8 @@ use std::hash::Hash;
 pub use swapchain::Swapchain;
 pub use types::*;
 
+pub const WHOLE_SIZE: u64 = u64::MAX;
+
 #[derive(Default)]
 pub enum QueueType {
     #[default]
