@@ -21,13 +21,13 @@ use ash::{
         DebugUtilsObjectNameInfoEXT, DependencyFlags, DescriptorBufferInfo, DescriptorImageInfo,
         DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo,
         Extent2D, Extent3D, Fence, FormatFeatureFlags, FramebufferCreateFlags, Handle,
-        ImageAspectFlags, ImageCreateFlags, ImageLayout, ImageSubresourceLayers,
-        ImageSubresourceRange, ImageTiling, ImageType, ImageViewCreateFlags, ImageViewType,
-        InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D,
-        PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType,
-        PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo, Queue, QueueFlags,
-        SampleCountFlags, SamplerCreateInfo, ShaderModuleCreateFlags, SharingMode, StructureType,
-        SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
+        ImageAspectFlags, ImageCreateFlags, ImageSubresourceLayers, ImageSubresourceRange,
+        ImageTiling, ImageType, ImageViewCreateFlags, ImageViewType, InstanceCreateFlags,
+        InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D, PhysicalDevice,
+        PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType, PipelineCache,
+        PipelineCacheCreateFlags, PipelineCacheCreateInfo, Queue, QueueFlags, SampleCountFlags,
+        SamplerCreateInfo, ShaderModuleCreateFlags, SharingMode, StructureType, SubmitInfo,
+        WriteDescriptorSet, API_VERSION_1_3,
     },
     *,
 };
@@ -39,7 +39,8 @@ use winit::window::Window;
 
 use crate::{
     get_allocation_callbacks, GPUFence, GpuFramebuffer, GpuImageView, GpuShaderModule, ImageFormat,
-    ImageMemoryBarrier, PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPass, ToVk,
+    ImageLayout, ImageMemoryBarrier, PipelineBarrierInfo, PipelineStageFlags, QueueType,
+    RenderPass, ToVk,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -784,7 +785,7 @@ impl Gpu {
                 DescriptorImageInfo {
                     sampler: sam.sampler.inner,
                     image_view: sam.image_view.inner,
-                    image_layout: sam.image_layout,
+                    image_layout: sam.image_layout.to_vk(),
                 },
                 vk::DescriptorType::SAMPLER,
             )),
@@ -793,7 +794,7 @@ impl Gpu {
                 DescriptorImageInfo {
                     sampler: sam.sampler.inner,
                     image_view: sam.image_view.inner,
-                    image_layout: sam.image_layout,
+                    image_layout: sam.image_layout.to_vk(),
                 },
                 vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
             )),
@@ -1150,12 +1151,12 @@ impl Gpu {
         self.transition_image_layout(
             image,
             TransitionInfo {
-                layout: ImageLayout::UNDEFINED,
+                layout: ImageLayout::Undefined,
                 access_mask: AccessFlags::empty(),
                 stage_mask: PipelineStageFlags::TOP_OF_PIPE,
             },
             TransitionInfo {
-                layout: ImageLayout::TRANSFER_DST_OPTIMAL,
+                layout: ImageLayout::TransferDst,
                 access_mask: AccessFlags::TRANSFER_WRITE,
                 stage_mask: PipelineStageFlags::TRANSFER,
             },
@@ -1171,12 +1172,12 @@ impl Gpu {
         self.transition_image_layout(
             image,
             TransitionInfo {
-                layout: ImageLayout::TRANSFER_DST_OPTIMAL,
+                layout: ImageLayout::TransferDst,
                 access_mask: AccessFlags::TRANSFER_WRITE,
                 stage_mask: PipelineStageFlags::TRANSFER,
             },
             TransitionInfo {
-                layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                layout: ImageLayout::ShaderReadOnly,
                 access_mask: AccessFlags::SHADER_READ,
                 stage_mask: PipelineStageFlags::FRAGMENT_SHADER | PipelineStageFlags::VERTEX_SHADER,
             },
@@ -1220,7 +1221,7 @@ impl Gpu {
                 sharing_mode: SharingMode::CONCURRENT,
                 queue_family_index_count: self.state.queue_families.indices.len() as _,
                 p_queue_family_indices: self.state.queue_families.indices.as_ptr(),
-                initial_layout: ImageLayout::UNDEFINED,
+                initial_layout: ImageLayout::Undefined.to_vk(),
             };
             self.state.logical_device.create_image(&create_info, None)?
         };
@@ -1523,7 +1524,7 @@ impl Gpu {
                 command_buffer,
                 src_buffer,
                 dst_image,
-                ImageLayout::TRANSFER_DST_OPTIMAL,
+                ImageLayout::TransferDst.to_vk(),
                 &[vk::BufferImageCopy {
                     buffer_offset: 0,
                     buffer_row_length: 0,

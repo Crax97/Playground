@@ -1,9 +1,7 @@
-use ash::vk::{
-    AccessFlags, DependencyFlags, ImageAspectFlags, ImageLayout, ImageSubresourceRange, Rect2D,
-};
+use ash::vk::{AccessFlags, DependencyFlags, ImageAspectFlags, ImageSubresourceRange, Rect2D};
 use engine::{AppState, Backbuffer};
 use gpu::{
-    BeginRenderPassInfo, ColorAttachment, CommandBuffer, CommandBufferSubmitInfo,
+    BeginRenderPassInfo, ColorAttachment, CommandBuffer, CommandBufferSubmitInfo, ImageLayout,
     ImageMemoryBarrier, PipelineBarrierInfo, PipelineStageFlags,
 };
 use imgui::{Context, FontConfig, FontSource, Ui};
@@ -153,7 +151,7 @@ fn draw_imgui(
             image_view: backbuffer.image_view,
             load_op: gpu::ColorLoadOp::Load,
             store_op: gpu::AttachmentStoreOp::Store,
-            initial_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            initial_layout: ImageLayout::ColorAttachment,
         }];
         let render_imgui = command_buffer.begin_render_pass(&BeginRenderPassInfo {
             color_attachments: &color,
@@ -176,8 +174,8 @@ fn draw_imgui(
         image_memory_barriers: &[ImageMemoryBarrier {
             src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
             dst_access_mask: AccessFlags::COLOR_ATTACHMENT_READ,
-            old_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            new_layout: ImageLayout::PRESENT_SRC_KHR,
+            old_layout: ImageLayout::ColorAttachment,
+            new_layout: ImageLayout::PresentSrc,
             src_queue_family_index: ash::vk::QUEUE_FAMILY_IGNORED,
             dst_queue_family_index: ash::vk::QUEUE_FAMILY_IGNORED,
             image: backbuffer.image,

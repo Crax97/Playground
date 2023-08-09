@@ -1,7 +1,6 @@
-use ash::vk::{self, ImageLayout};
 use gpu::{
     BufferCreateInfo, BufferRange, BufferUsageFlags, DescriptorInfo, DescriptorSetInfo,
-    DescriptorType, Gpu, GpuBuffer, GpuDescriptorSet, MemoryDomain,
+    DescriptorType, Gpu, GpuBuffer, GpuDescriptorSet, ImageLayout, MemoryDomain,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 use std::collections::HashMap;
@@ -97,7 +96,7 @@ impl MaterialInstance {
                     element_type: DescriptorType::CombinedImageSampler(gpu::SamplerState {
                         sampler: &resource_map.get(&tex.sampler).0,
                         image_view: &resource_map.get(&tex.image_view).view,
-                        image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                        image_layout: ImageLayout::ShaderReadOnly,
                     }),
                     binding_stage: gpu::ShaderStage::VertexFragment,
                 }
@@ -111,7 +110,7 @@ impl MaterialInstance {
                 element_type: DescriptorType::UniformBuffer(BufferRange {
                     handle: buffer,
                     offset: 0,
-                    size: vk::WHOLE_SIZE,
+                    size: gpu::WHOLE_SIZE,
                 }),
             });
         }

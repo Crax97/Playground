@@ -1,9 +1,7 @@
 use core::panic;
 use std::{ffi::CString, ops::Deref};
 
-use ash::vk::{
-    ImageLayout, RenderingAttachmentInfoKHR, RenderingFlags, RenderingInfoKHR, ResolveModeFlags,
-};
+use ash::vk::{RenderingAttachmentInfoKHR, RenderingFlags, RenderingInfoKHR, ResolveModeFlags};
 use ash::{
     extensions::ext::DebugUtils,
     prelude::VkResult,
@@ -17,6 +15,7 @@ use ash::{
 };
 
 use crate::pipeline::GpuPipeline;
+use crate::types::ImageLayout;
 use crate::{
     ComputePipeline, FrontFace, GPUFence, GPUSemaphore, GpuImage, GpuImageView, PipelineStageFlags,
     ToVk,
@@ -108,8 +107,8 @@ impl<'a> ToVk for BufferMemoryBarrier<'a> {
 pub struct ImageMemoryBarrier<'a> {
     pub src_access_mask: vk::AccessFlags,
     pub dst_access_mask: vk::AccessFlags,
-    pub old_layout: vk::ImageLayout,
-    pub new_layout: vk::ImageLayout,
+    pub old_layout: ImageLayout,
+    pub new_layout: ImageLayout,
     pub src_queue_family_index: u32,
     pub dst_queue_family_index: u32,
     pub image: &'a GpuImage,
@@ -127,8 +126,8 @@ impl<'a> ToVk for ImageMemoryBarrier<'a> {
             dst_access_mask: self.dst_access_mask,
             src_queue_family_index: self.src_queue_family_index,
             dst_queue_family_index: self.dst_queue_family_index,
-            old_layout: self.old_layout,
-            new_layout: self.new_layout,
+            old_layout: self.old_layout.to_vk(),
+            new_layout: self.new_layout.to_vk(),
             image: self.image.inner,
             subresource_range: self.subresource_range,
         }
@@ -556,10 +555,10 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 s_type: StructureType::RENDERING_ATTACHMENT_INFO,
                 p_next: std::ptr::null(),
                 image_view: attch.image_view.inner,
-                image_layout: attch.initial_layout,
+                image_layout: attch.initial_layout.to_vk(),
                 resolve_mode: ResolveModeFlags::NONE,
                 resolve_image_view: vk::ImageView::null(),
-                resolve_image_layout: ImageLayout::UNDEFINED,
+                resolve_image_layout: ImageLayout::Undefined.to_vk(),
                 load_op: attch.load_op.to_vk(),
                 store_op: attch.store_op.to_vk(),
                 clear_value: match attch.load_op {
@@ -577,10 +576,10 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 s_type: StructureType::RENDERING_ATTACHMENT_INFO,
                 p_next: std::ptr::null(),
                 image_view: attch.image_view.inner,
-                image_layout: attch.initial_layout,
+                image_layout: attch.initial_layout.to_vk(),
                 resolve_mode: ResolveModeFlags::NONE,
                 resolve_image_view: vk::ImageView::null(),
-                resolve_image_layout: ImageLayout::UNDEFINED,
+                resolve_image_layout: ImageLayout::Undefined.to_vk(),
                 load_op: attch.load_op.to_vk(),
                 store_op: attch.store_op.to_vk(),
                 clear_value: match attch.load_op {
@@ -600,10 +599,10 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 s_type: StructureType::RENDERING_ATTACHMENT_INFO,
                 p_next: std::ptr::null(),
                 image_view: attch.image_view.inner,
-                image_layout: attch.initial_layout,
+                image_layout: attch.initial_layout.to_vk(),
                 resolve_mode: ResolveModeFlags::NONE,
                 resolve_image_view: vk::ImageView::null(),
-                resolve_image_layout: ImageLayout::UNDEFINED,
+                resolve_image_layout: ImageLayout::Undefined.to_vk(),
                 load_op: attch.load_op.to_vk(),
                 store_op: attch.store_op.to_vk(),
                 clear_value: match attch.load_op {

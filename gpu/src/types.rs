@@ -2,8 +2,7 @@ use std::{cell::RefCell, ops::Deref, sync::Arc};
 
 use super::{allocator::GpuAllocator, gpu::Gpu};
 use ash::vk::{
-    BufferUsageFlags as VkBufferUsageFlags, ImageAspectFlags, ImageLayout, ImageUsageFlags,
-    StructureType,
+    BufferUsageFlags as VkBufferUsageFlags, ImageAspectFlags, ImageUsageFlags, StructureType,
 };
 use ash::{
     prelude::*,
@@ -82,37 +81,37 @@ impl ImageFormat {
     }
     pub fn preferred_attachment_read_layout(&self) -> ImageLayout {
         if self.is_color() {
-            ImageLayout::SHADER_READ_ONLY_OPTIMAL
+            ImageLayout::ShaderReadOnly
         } else if self.is_depth() {
-            ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL
+            ImageLayout::DepthStencilReadOnly
         } else {
             unreachable!()
         }
     }
     pub fn preferred_attachment_write_layout(&self) -> ImageLayout {
         if self.is_color() {
-            ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+            ImageLayout::ColorAttachment
         } else if self.is_depth() {
-            ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+            ImageLayout::DepthStencilAttachment
         } else {
             unreachable!()
         }
     }
 
-    pub fn preferred_shader_read_layout(&self) -> vk::ImageLayout {
+    pub fn preferred_shader_read_layout(&self) -> ImageLayout {
         if self.is_color() {
-            ImageLayout::SHADER_READ_ONLY_OPTIMAL
+            ImageLayout::ShaderReadOnly
         } else if self.is_depth() {
-            ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL
+            ImageLayout::DepthStencilReadOnly
         } else {
             unreachable!()
         }
     }
     pub fn preferred_shader_write_layout(&self) -> ImageLayout {
         if self.is_color() {
-            ImageLayout::SHADER_READ_ONLY_OPTIMAL
+            ImageLayout::ShaderReadOnly
         } else if self.is_depth() {
-            ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+            ImageLayout::DepthStencilAttachment
         } else {
             unreachable!()
         }
@@ -195,6 +194,40 @@ impl From<vk::CompareOp> for CompareOp {
             vk::CompareOp::GREATER => CompareOp::Greater,
             vk::CompareOp::GREATER_OR_EQUAL => CompareOp::GreatereEqual,
             _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug)]
+pub enum ImageLayout {
+    Undefined,
+    General,
+    ColorAttachment,
+    DepthStencilAttachment,
+    DepthStencilReadOnly,
+    ShaderReadOnly,
+    TransferSrc,
+    TransferDst,
+    PreinitializedByCpu,
+
+    PresentSrc,
+}
+
+impl ToVk for ImageLayout {
+    type Inner = vk::ImageLayout;
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            ImageLayout::Undefined => Self::Inner::UNDEFINED,
+            ImageLayout::General => Self::Inner::GENERAL,
+            ImageLayout::ColorAttachment => Self::Inner::COLOR_ATTACHMENT_OPTIMAL,
+            ImageLayout::DepthStencilAttachment => Self::Inner::DEPTH_ATTACHMENT_OPTIMAL,
+            ImageLayout::DepthStencilReadOnly => Self::Inner::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+            ImageLayout::ShaderReadOnly => Self::Inner::SHADER_READ_ONLY_OPTIMAL,
+            ImageLayout::TransferSrc => Self::Inner::TRANSFER_SRC_OPTIMAL,
+            ImageLayout::TransferDst => Self::Inner::TRANSFER_DST_OPTIMAL,
+            ImageLayout::PreinitializedByCpu => Self::Inner::PREINITIALIZED,
+
+            ImageLayout::PresentSrc => Self::Inner::PRESENT_SRC_KHR,
         }
     }
 }

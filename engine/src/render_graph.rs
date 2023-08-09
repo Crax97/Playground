@@ -8,10 +8,10 @@ use std::{
 
 use ash::vk::{
     self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor,
-    BlendOp, BorderColor, ColorComponentFlags, CompareOp, ComponentMapping, DependencyFlags,
-    Extent2D, Filter, ImageAspectFlags, ImageLayout, ImageSubresourceRange, ImageUsageFlags,
-    ImageViewType, Offset2D, PipelineBindPoint, Rect2D, SampleCountFlags, SamplerAddressMode,
-    SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency,
+    BlendOp, BorderColor, ColorComponentFlags, ComponentMapping, DependencyFlags, Extent2D, Filter,
+    ImageAspectFlags, ImageSubresourceRange, ImageUsageFlags, ImageViewType, Offset2D,
+    PipelineBindPoint, Rect2D, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags,
+    SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency,
     SubpassDescriptionFlags,
 };
 use gpu::{
@@ -27,7 +27,7 @@ use gpu::{
 use ash::vk::PushConstantRange;
 use gpu::{
     BindingElement, CullMode, DepthStencilAttachment, DepthStencilState, FragmentStageInfo,
-    FrontFace, GlobalBinding, GpuShaderModule, GraphicsPipelineDescription, LogicOp,
+    FrontFace, GlobalBinding, GpuShaderModule, GraphicsPipelineDescription, ImageLayout, LogicOp,
     PipelineStageFlags, PolygonMode, PrimitiveTopology, VertexBindingDescription, VertexStageInfo,
 };
 use indexmap::IndexSet;
@@ -557,12 +557,12 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
             let resource_usage = create_info.pass_info.resource_usage(write);
 
             let final_layout = match resource_usage.output {
-                ResourceLayout::Unknown => ImageLayout::GENERAL,
-                ResourceLayout::ShaderRead => ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                ResourceLayout::Unknown => ImageLayout::General,
+                ResourceLayout::ShaderRead => ImageLayout::ShaderReadOnly,
                 ResourceLayout::AttachmentRead => {
                     image_desc.format.preferred_attachment_read_layout()
                 }
-                ResourceLayout::Present => ImageLayout::PRESENT_SRC_KHR,
+                ResourceLayout::Present => ImageLayout::PresentSrc,
                 _ => unreachable!(),
             };
             let attachment = RenderPassAttachment {
@@ -580,7 +580,7 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: match resource_usage.input {
-                    ResourceLayout::Unknown => ImageLayout::UNDEFINED,
+                    ResourceLayout::Unknown => ImageLayout::Undefined,
                     ResourceLayout::ShaderWrite => {
                         image_desc.format.preferred_shader_write_layout()
                     }
@@ -588,8 +588,9 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
                         image_desc.format.preferred_attachment_write_layout()
                     }
                     _ => unreachable!(),
-                },
-                final_layout,
+                }
+                .to_vk(),
+                final_layout: final_layout.to_vk(),
                 blend_state: if let Some(state) = create_info.pass_info.blend_state {
                     state
                 } else {
@@ -610,12 +611,12 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
             if image_desc.format.is_color() {
                 color_attachments.push(AttachmentReference {
                     attachment: index as _,
-                    layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                    layout: ImageLayout::ColorAttachment.to_vk(),
                 });
             } else {
                 depth_attachments.push(AttachmentReference {
                     attachment: index as _,
-                    layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    layout: ImageLayout::DepthStencilAttachment.to_vk(),
                 });
             }
 
@@ -638,7 +639,7 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
                 stencil_load_op: AttachmentLoadOp::DONT_CARE,
                 stencil_store_op: AttachmentStoreOp::DONT_CARE,
                 initial_layout: match resource_usage.input {
-                    ResourceLayout::Unknown => ImageLayout::UNDEFINED,
+                    ResourceLayout::Unknown => ImageLayout::Undefined,
                     ResourceLayout::ShaderWrite => {
                         image_desc.format.preferred_shader_write_layout()
                     }
@@ -646,16 +647,18 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
                         image_desc.format.preferred_attachment_write_layout()
                     }
                     _ => unreachable!(),
-                },
+                }
+                .to_vk(),
                 final_layout: match resource_usage.output {
-                    ResourceLayout::Unknown => ImageLayout::GENERAL,
-                    ResourceLayout::ShaderRead => ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    ResourceLayout::Unknown => ImageLayout::General,
+                    ResourceLayout::ShaderRead => ImageLayout::ShaderReadOnly,
                     ResourceLayout::AttachmentRead => {
                         image_desc.format.preferred_attachment_read_layout()
                     }
-                    ResourceLayout::Present => ImageLayout::PRESENT_SRC_KHR,
+                    ResourceLayout::Present => ImageLayout::PresentSrc,
                     _ => unreachable!(),
-                },
+                }
+                .to_vk(),
                 blend_state: if let Some(state) = create_info.pass_info.blend_state {
                     state
                 } else {
@@ -676,12 +679,12 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
             if image_desc.format.is_color() {
                 color_attachments.push(AttachmentReference {
                     attachment: index as _,
-                    layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                    layout: ImageLayout::ColorAttachment.to_vk(),
                 });
             } else {
                 depth_attachments.push(AttachmentReference {
                     attachment: index as _,
-                    layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    layout: ImageLayout::DepthStencilAttachment.to_vk(),
                 });
             }
             index += 1;
@@ -1133,8 +1136,8 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
                         store_op: AttachmentStoreOp::STORE,
                         stencil_load_op: AttachmentLoadOp::DONT_CARE,
                         stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                        initial_layout: ImageLayout::UNDEFINED,
-                        final_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                        initial_layout: ImageLayout::Undefined.to_vk(),
+                        final_layout: ImageLayout::ColorAttachment.to_vk(),
                         blend_state: if let Some(state) = pass_info.blend_state {
                             state
                         } else {
@@ -1880,7 +1883,7 @@ impl RenderGraphRunner for GpuRunner {
                         };
                         let old_layout =
                             *self.resource_states.entry(*read).or_insert(TransitionInfo {
-                                layout: ImageLayout::UNDEFINED,
+                                layout: ImageLayout::Undefined,
                                 access_mask: AccessFlags::empty(),
                                 stage_mask: if image_desc.format.is_color() {
                                     PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
@@ -1890,7 +1893,7 @@ impl RenderGraphRunner for GpuRunner {
                             });
 
                         let new_layout = TransitionInfo {
-                            layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                            layout: ImageLayout::ShaderReadOnly,
                             access_mask: AccessFlags::SHADER_READ,
                             stage_mask: PipelineStageFlags::FRAGMENT_SHADER
                                 | PipelineStageFlags::VERTEX_SHADER,
@@ -1977,7 +1980,7 @@ impl RenderGraphRunner for GpuRunner {
                         };
                         let old_layout =
                             *self.resource_states.entry(*read).or_insert(TransitionInfo {
-                                layout: ImageLayout::UNDEFINED,
+                                layout: ImageLayout::Undefined,
                                 access_mask: AccessFlags::empty(),
                                 stage_mask: if image_desc.format.is_color() {
                                     PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
@@ -1988,11 +1991,11 @@ impl RenderGraphRunner for GpuRunner {
 
                         let new_layout = TransitionInfo {
                             layout: if image_desc.present {
-                                ImageLayout::PRESENT_SRC_KHR
+                                ImageLayout::PresentSrc
                             } else if image_desc.format.is_color() {
-                                ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                                ImageLayout::ColorAttachment
                             } else {
-                                ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                                ImageLayout::DepthStencilAttachment
                             },
                             access_mask: if image_desc.format.is_color() {
                                 AccessFlags::COLOR_ATTACHMENT_WRITE
@@ -2084,7 +2087,7 @@ impl RenderGraphRunner for GpuRunner {
                         };
                         let old_layout =
                             *self.resource_states.entry(*read).or_insert(TransitionInfo {
-                                layout: ImageLayout::UNDEFINED,
+                                layout: ImageLayout::Undefined,
                                 access_mask: AccessFlags::empty(),
                                 stage_mask: if image_desc.format.is_color() {
                                     PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
@@ -2095,9 +2098,9 @@ impl RenderGraphRunner for GpuRunner {
 
                         let new_layout = TransitionInfo {
                             layout: if image_desc.format.is_color() {
-                                ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                                ImageLayout::ColorAttachment
                             } else {
-                                ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                                ImageLayout::DepthStencilReadOnly
                             },
                             access_mask: if image_desc.format.is_color() {
                                 AccessFlags::COLOR_ATTACHMENT_READ
@@ -2383,21 +2386,21 @@ where
                 image_view: view,
                 load_op: image_desc.clear_value.color_op(),
                 store_op: gpu::AttachmentStoreOp::Store,
-                initial_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                initial_layout: ImageLayout::ColorAttachment,
             });
         } else if view.format().is_depth() {
             depth = Some(DepthAttachment {
                 image_view: view,
                 load_op: image_desc.clear_value.depth_op(),
                 store_op: gpu::AttachmentStoreOp::Store,
-                initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                initial_layout: ImageLayout::DepthStencilAttachment,
             });
         } else {
             stencil = Some(StencilAttachment {
                 image_view: view,
                 load_op: image_desc.clear_value.stencil_op(),
                 store_op: gpu::AttachmentStoreOp::Store,
-                initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                initial_layout: ImageLayout::DepthStencilAttachment,
             });
         }
     }
@@ -2418,21 +2421,21 @@ where
                 image_view: view,
                 load_op: ColorLoadOp::Load,
                 store_op: gpu::AttachmentStoreOp::Store,
-                initial_layout: ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                initial_layout: ImageLayout::ColorAttachment,
             });
         } else if view.format().is_depth() {
             depth = Some(DepthAttachment {
                 image_view: view,
                 load_op: DepthLoadOp::Load,
                 store_op: gpu::AttachmentStoreOp::Store,
-                initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                initial_layout: ImageLayout::DepthStencilAttachment,
             });
         } else {
             stencil = Some(StencilAttachment {
                 image_view: view,
                 load_op: StencilLoadOp::Load,
                 store_op: gpu::AttachmentStoreOp::Store,
-                initial_layout: ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                initial_layout: ImageLayout::DepthStencilAttachment,
             });
         }
     }
@@ -2469,7 +2472,7 @@ fn resolve_input_descriptor_set<'a>(
                     element_type: gpu::DescriptorType::CombinedImageSampler(gpu::SamplerState {
                         sampler: sampler_allocator.get_unchecked(read).resource(),
                         image_view: view,
-                        image_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                        image_layout: ImageLayout::ShaderReadOnly,
                     }),
                     binding_stage: gpu::ShaderStage::VertexFragment,
                 })
