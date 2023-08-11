@@ -1,7 +1,7 @@
 use std::ptr::addr_of;
 use std::{ffi::CString, sync::Arc};
 
-use ash::vk::{CullModeFlags, Format, PipelineRenderingCreateInfoKHR};
+use ash::vk::{CullModeFlags, DependencyFlags, Format, PipelineRenderingCreateInfoKHR};
 use ash::{
     prelude::VkResult,
     vk::{
@@ -26,7 +26,7 @@ use ash::{
     },
 };
 
-use crate::{get_allocation_callbacks, ImageFormat, ToVk};
+use crate::{get_allocation_callbacks, AccessFlags, ImageFormat, PipelineStageFlags, ToVk};
 
 use super::{Gpu, GpuShaderModule, GpuState, ShaderStage};
 
@@ -266,12 +266,27 @@ pub struct SubpassDescription<'a> {
     pub preserve_attachments: &'a [u32],
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct SubpassDependency {
+    pub src_subpass: u32,
+    pub dst_subpass: u32,
+    pub src_stage_mask: PipelineStageFlags,
+    pub dst_stage_mask: PipelineStageFlags,
+    pub src_access_mask: AccessFlags,
+    pub dst_access_mask: AccessFlags,
+}
+
+impl SubpassDependency {
+    pub const EXTERNAL: u32 = u32::MAX;
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RenderPassDescription<'a> {
     pub attachments: &'a [RenderPassAttachment],
     pub subpasses: &'a [SubpassDescription<'a>],
-    pub dependencies: &'a [vk::SubpassDependency],
+    pub dependencies: &'a [SubpassDependency],
 }
+
 impl<'a> RenderPassDescription<'a> {
     fn get_output_attachments(&self) -> Vec<AttachmentDescription> {
         let mut attachment_descriptions = vec![];
@@ -309,6 +324,29 @@ impl<'a> RenderPassDescription<'a> {
             })
             .collect()
     }
+
+    pub fn get_subpass_dependencies(&self) -> Vec<vk::SubpassDependency> {
+        self.dependencies
+            .iter()
+            .map(|d| vk::SubpassDependency {
+                src_subpass: if d.src_subpass == SubpassDependency::EXTERNAL {
+                    vk::SUBPASS_EXTERNAL
+                } else {
+                    d.src_subpass
+                },
+                dst_subpass: if d.dst_subpass == SubpassDependency::EXTERNAL {
+                    vk::SUBPASS_EXTERNAL
+                } else {
+                    d.dst_subpass
+                },
+                src_stage_mask: d.src_stage_mask.to_vk(),
+                dst_stage_mask: d.dst_stage_mask.to_vk(),
+                src_access_mask: d.src_access_mask.to_vk(),
+                dst_access_mask: d.dst_access_mask.to_vk(),
+                dependency_flags: DependencyFlags::empty(),
+            })
+            .collect()
+    }
 }
 
 fn p_or_null<T>(slice: &[T]) -> *const T {
@@ -337,6 +375,7 @@ impl RenderPass {
     pub fn new(gpu: &Gpu, pass_description: &RenderPassDescription) -> VkResult<Self> {
         let output_attachments = pass_description.get_output_attachments();
         let subpasses = pass_description.get_subpasses();
+        let subpass_dependencies = pass_description.get_subpass_dependencies();
         let pass_info = RenderPassCreateInfo {
             s_type: StructureType::RENDER_PASS_CREATE_INFO,
             p_next: std::ptr::null(),
@@ -346,7 +385,7 @@ impl RenderPass {
             subpass_count: subpasses.len() as _,
             p_subpasses: subpasses.as_ptr(),
             dependency_count: pass_description.dependencies.len() as _,
-            p_dependencies: pass_description.dependencies.as_ptr(),
+            p_dependencies: subpass_dependencies.as_ptr(),
         };
         let render_pass = unsafe {
             gpu.vk_logical_device()

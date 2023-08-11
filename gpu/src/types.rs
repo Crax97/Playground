@@ -118,40 +118,6 @@ impl ImageFormat {
     }
 }
 
-impl ToVk for ImageFormat {
-    type Inner = vk::Format;
-    fn to_vk(&self) -> Self::Inner {
-        match self {
-            ImageFormat::Rgba8 => vk::Format::R8G8B8A8_UNORM,
-            ImageFormat::SRgba8 => vk::Format::R8G8B8A8_SRGB,
-            ImageFormat::Rgb8 => vk::Format::R8G8B8_UNORM,
-            ImageFormat::RgbaFloat => vk::Format::R32G32B32A32_SFLOAT,
-            ImageFormat::Depth => vk::Format::D32_SFLOAT,
-            ImageFormat::Bgra8 => vk::Format::B8G8R8A8_UNORM,
-        }
-    }
-}
-
-impl From<&vk::Format> for ImageFormat {
-    fn from(value: &vk::Format) -> Self {
-        match *value {
-            vk::Format::R8G8B8A8_UNORM => ImageFormat::Rgba8,
-            vk::Format::R8G8B8A8_SRGB => ImageFormat::SRgba8,
-            vk::Format::R8G8B8_UNORM => ImageFormat::Rgb8,
-            vk::Format::D32_SFLOAT => ImageFormat::Depth,
-            vk::Format::R32G32B32A32_SFLOAT => ImageFormat::RgbaFloat,
-            vk::Format::B8G8R8A8_UNORM => ImageFormat::Bgra8,
-            _ => panic!("ImageFormat::from(vk::Format): cannot convert {:?} to ImageFormat, most likely a bug: report it", value)
-        }
-    }
-}
-
-impl From<vk::Format> for ImageFormat {
-    fn from(value: vk::Format) -> Self {
-        From::<&vk::Format>::from(&value)
-    }
-}
-
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum CompareOp {
     #[default]
@@ -163,23 +129,6 @@ pub enum CompareOp {
     LessEqual,
     Greater,
     GreatereEqual,
-}
-
-impl ToVk for CompareOp {
-    type Inner = vk::CompareOp;
-
-    fn to_vk(&self) -> Self::Inner {
-        match self {
-            CompareOp::Always => vk::CompareOp::ALWAYS,
-            CompareOp::Never => vk::CompareOp::NEVER,
-            CompareOp::Equal => vk::CompareOp::EQUAL,
-            CompareOp::NotEqual => vk::CompareOp::NOT_EQUAL,
-            CompareOp::Less => vk::CompareOp::LESS,
-            CompareOp::LessEqual => vk::CompareOp::LESS_OR_EQUAL,
-            CompareOp::Greater => vk::CompareOp::GREATER,
-            CompareOp::GreatereEqual => vk::CompareOp::GREATER_OR_EQUAL,
-        }
-    }
 }
 
 impl From<vk::CompareOp> for CompareOp {
@@ -211,25 +160,6 @@ pub enum ImageLayout {
     PreinitializedByCpu,
 
     PresentSrc,
-}
-
-impl ToVk for ImageLayout {
-    type Inner = vk::ImageLayout;
-    fn to_vk(&self) -> Self::Inner {
-        match self {
-            ImageLayout::Undefined => Self::Inner::UNDEFINED,
-            ImageLayout::General => Self::Inner::GENERAL,
-            ImageLayout::ColorAttachment => Self::Inner::COLOR_ATTACHMENT_OPTIMAL,
-            ImageLayout::DepthStencilAttachment => Self::Inner::DEPTH_ATTACHMENT_OPTIMAL,
-            ImageLayout::DepthStencilReadOnly => Self::Inner::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-            ImageLayout::ShaderReadOnly => Self::Inner::SHADER_READ_ONLY_OPTIMAL,
-            ImageLayout::TransferSrc => Self::Inner::TRANSFER_SRC_OPTIMAL,
-            ImageLayout::TransferDst => Self::Inner::TRANSFER_DST_OPTIMAL,
-            ImageLayout::PreinitializedByCpu => Self::Inner::PREINITIALIZED,
-
-            ImageLayout::PresentSrc => Self::Inner::PRESENT_SRC_KHR,
-        }
-    }
 }
 
 bitflags! {
@@ -270,6 +200,194 @@ bitflags! {
         const ALL_GRAPHICS = 0b1000_0000_0000_0000;
         #[doc = "All stages supported on the queue"]
         const ALL_COMMANDS = 0b1_0000_0000_0000_0000;
+    }
+}
+bitflags! {
+    #[repr(transparent)]
+    #[derive(Default, Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+    pub struct AccessFlags : u64 {
+        const NONE = 0;
+        const INDIRECT_COMMAND_READ = 0x00000001;
+        const INDEX_READ = 0x00000002;
+        const VERTEX_ATTRIBUTE_READ = 0x00000004;
+        const UNIFORM_READ = 0x00000008;
+        const INPUT_ATTACHMENT_READ = 0x00000010;
+        const SHADER_READ = 0x00000020;
+        const SHADER_WRITE = 0x00000040;
+        const COLOR_ATTACHMENT_READ = 0x00000080;
+        const COLOR_ATTACHMENT_WRITE = 0x00000100;
+        const DEPTH_STENCIL_ATTACHMENT_READ = 0x00000200;
+        const DEPTH_STENCIL_ATTACHMENT_WRITE = 0x00000400;
+        const TRANSFER_READ = 0x00000800;
+        const TRANSFER_WRITE = 0x00001000;
+        const HOST_READ = 0x00002000;
+        const HOST_WRITE = 0x00004000;
+        const MEMORY_READ = 0x00008000;
+        const MEMORY_WRITE = 0x00010000;
+    }
+}
+
+bitflags! {
+#[repr(transparent)]
+#[derive(Default, Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct BufferUsageFlags : u32 {
+        #[doc = "Can be used as a source of transfer operations"]
+        const TRANSFER_SRC = 0b1;
+        #[doc = "Can be used as a destination of transfer operations"]
+        const TRANSFER_DST = 0b10;
+        #[doc = "Can be used as TBO"]
+        const UNIFORM_TEXEL_BUFFER = 0b100;
+        #[doc = "Can be used as IBO"]
+        const STORAGE_TEXEL_BUFFER = 0b1000;
+        #[doc = "Can be used as UBO"]
+        const UNIFORM_BUFFER = 0b1_0000;
+        #[doc = "Can be used as SSBO"]
+        const STORAGE_BUFFER = 0b10_0000;
+        #[doc = "Can be used as source of fixed-function index fetch (index buffer)"]
+        const INDEX_BUFFER = 0b100_0000;
+        #[doc = "Can be used as source of fixed-function vertex fetch (VBO)"]
+        const VERTEX_BUFFER = 0b1000_0000;
+        #[doc = "Can be the source of indirect parameters (e.g. indirect buffer, parameter buffer)"]
+        const INDIRECT_BUFFER = 0b1_0000_0000;
+    }
+}
+
+impl ToVk for ImageFormat {
+    type Inner = vk::Format;
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            ImageFormat::Rgba8 => vk::Format::R8G8B8A8_UNORM,
+            ImageFormat::SRgba8 => vk::Format::R8G8B8A8_SRGB,
+            ImageFormat::Rgb8 => vk::Format::R8G8B8_UNORM,
+            ImageFormat::RgbaFloat => vk::Format::R32G32B32A32_SFLOAT,
+            ImageFormat::Depth => vk::Format::D32_SFLOAT,
+            ImageFormat::Bgra8 => vk::Format::B8G8R8A8_UNORM,
+        }
+    }
+}
+
+impl From<&vk::Format> for ImageFormat {
+    fn from(value: &vk::Format) -> Self {
+        match *value {
+            vk::Format::R8G8B8A8_UNORM => ImageFormat::Rgba8,
+            vk::Format::R8G8B8A8_SRGB => ImageFormat::SRgba8,
+            vk::Format::R8G8B8_UNORM => ImageFormat::Rgb8,
+            vk::Format::D32_SFLOAT => ImageFormat::Depth,
+            vk::Format::R32G32B32A32_SFLOAT => ImageFormat::RgbaFloat,
+            vk::Format::B8G8R8A8_UNORM => ImageFormat::Bgra8,
+            _ => panic!("ImageFormat::from(vk::Format): cannot convert {:?} to ImageFormat, most likely a bug: report it", value)
+        }
+    }
+}
+
+impl From<vk::Format> for ImageFormat {
+    fn from(value: vk::Format) -> Self {
+        From::<&vk::Format>::from(&value)
+    }
+}
+
+impl ToVk for CompareOp {
+    type Inner = vk::CompareOp;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            CompareOp::Always => vk::CompareOp::ALWAYS,
+            CompareOp::Never => vk::CompareOp::NEVER,
+            CompareOp::Equal => vk::CompareOp::EQUAL,
+            CompareOp::NotEqual => vk::CompareOp::NOT_EQUAL,
+            CompareOp::Less => vk::CompareOp::LESS,
+            CompareOp::LessEqual => vk::CompareOp::LESS_OR_EQUAL,
+            CompareOp::Greater => vk::CompareOp::GREATER,
+            CompareOp::GreatereEqual => vk::CompareOp::GREATER_OR_EQUAL,
+        }
+    }
+}
+
+impl ToVk for ImageLayout {
+    type Inner = vk::ImageLayout;
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            ImageLayout::Undefined => Self::Inner::UNDEFINED,
+            ImageLayout::General => Self::Inner::GENERAL,
+            ImageLayout::ColorAttachment => Self::Inner::COLOR_ATTACHMENT_OPTIMAL,
+            ImageLayout::DepthStencilAttachment => Self::Inner::DEPTH_ATTACHMENT_OPTIMAL,
+            ImageLayout::DepthStencilReadOnly => Self::Inner::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+            ImageLayout::ShaderReadOnly => Self::Inner::SHADER_READ_ONLY_OPTIMAL,
+            ImageLayout::TransferSrc => Self::Inner::TRANSFER_SRC_OPTIMAL,
+            ImageLayout::TransferDst => Self::Inner::TRANSFER_DST_OPTIMAL,
+            ImageLayout::PreinitializedByCpu => Self::Inner::PREINITIALIZED,
+
+            ImageLayout::PresentSrc => Self::Inner::PRESENT_SRC_KHR,
+        }
+    }
+}
+
+impl ToVk for AccessFlags {
+    type Inner = vk::AccessFlags;
+
+    fn to_vk(&self) -> Self::Inner {
+        let mut inner = Self::Inner::empty();
+
+        case!(self, inner, Self::NONE, Self::Inner::NONE);
+        case!(
+            self,
+            inner,
+            Self::INDIRECT_COMMAND_READ,
+            Self::Inner::INDIRECT_COMMAND_READ
+        );
+        case!(self, inner, Self::INDEX_READ, Self::Inner::INDEX_READ);
+        case!(
+            self,
+            inner,
+            Self::VERTEX_ATTRIBUTE_READ,
+            Self::Inner::VERTEX_ATTRIBUTE_READ
+        );
+        case!(self, inner, Self::UNIFORM_READ, Self::Inner::UNIFORM_READ);
+        case!(
+            self,
+            inner,
+            Self::INPUT_ATTACHMENT_READ,
+            Self::Inner::INPUT_ATTACHMENT_READ
+        );
+        case!(self, inner, Self::SHADER_READ, Self::Inner::SHADER_READ);
+        case!(self, inner, Self::SHADER_WRITE, Self::Inner::SHADER_WRITE);
+        case!(
+            self,
+            inner,
+            Self::COLOR_ATTACHMENT_READ,
+            Self::Inner::COLOR_ATTACHMENT_READ
+        );
+        case!(
+            self,
+            inner,
+            Self::COLOR_ATTACHMENT_WRITE,
+            Self::Inner::COLOR_ATTACHMENT_WRITE
+        );
+        case!(
+            self,
+            inner,
+            Self::DEPTH_STENCIL_ATTACHMENT_READ,
+            Self::Inner::DEPTH_STENCIL_ATTACHMENT_READ
+        );
+        case!(
+            self,
+            inner,
+            Self::DEPTH_STENCIL_ATTACHMENT_WRITE,
+            Self::Inner::DEPTH_STENCIL_ATTACHMENT_WRITE
+        );
+        case!(self, inner, Self::TRANSFER_READ, Self::Inner::TRANSFER_READ);
+        case!(
+            self,
+            inner,
+            Self::TRANSFER_WRITE,
+            Self::Inner::TRANSFER_WRITE
+        );
+        case!(self, inner, Self::HOST_READ, Self::Inner::HOST_READ);
+        case!(self, inner, Self::HOST_WRITE, Self::Inner::HOST_WRITE);
+        case!(self, inner, Self::MEMORY_READ, Self::Inner::MEMORY_READ);
+        case!(self, inner, Self::MEMORY_WRITE, Self::Inner::MEMORY_WRITE);
+
+        inner
     }
 }
 
@@ -344,32 +462,6 @@ impl ToVk for PipelineStageFlags {
         inner
     }
 }
-
-bitflags! {
-#[repr(transparent)]
-#[derive(Default, Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct BufferUsageFlags : u32 {
-        #[doc = "Can be used as a source of transfer operations"]
-        const TRANSFER_SRC = 0b1;
-        #[doc = "Can be used as a destination of transfer operations"]
-        const TRANSFER_DST = 0b10;
-        #[doc = "Can be used as TBO"]
-        const UNIFORM_TEXEL_BUFFER = 0b100;
-        #[doc = "Can be used as IBO"]
-        const STORAGE_TEXEL_BUFFER = 0b1000;
-        #[doc = "Can be used as UBO"]
-        const UNIFORM_BUFFER = 0b1_0000;
-        #[doc = "Can be used as SSBO"]
-        const STORAGE_BUFFER = 0b10_0000;
-        #[doc = "Can be used as source of fixed-function index fetch (index buffer)"]
-        const INDEX_BUFFER = 0b100_0000;
-        #[doc = "Can be used as source of fixed-function vertex fetch (VBO)"]
-        const VERTEX_BUFFER = 0b1000_0000;
-        #[doc = "Can be the source of indirect parameters (e.g. indirect buffer, parameter buffer)"]
-        const INDIRECT_BUFFER = 0b1_0000_0000;
-    }
-}
-
 impl ToVk for BufferUsageFlags {
     type Inner = VkBufferUsageFlags;
 

@@ -13,21 +13,21 @@ use ash::{
     extensions::ext::DebugUtils,
     prelude::*,
     vk::{
-        make_api_version, AccessFlags, ApplicationInfo, BufferCreateFlags,
-        CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
-        CommandBufferUsageFlags, CommandPoolCreateFlags, CommandPoolCreateInfo,
-        DebugUtilsMessageSeverityFlagsEXT, DebugUtilsMessageTypeFlagsEXT,
-        DebugUtilsMessengerCreateFlagsEXT, DebugUtilsMessengerCreateInfoEXT,
-        DebugUtilsObjectNameInfoEXT, DependencyFlags, DescriptorBufferInfo, DescriptorImageInfo,
-        DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo,
-        Extent2D, Extent3D, Fence, FormatFeatureFlags, FramebufferCreateFlags, Handle,
-        ImageAspectFlags, ImageCreateFlags, ImageSubresourceLayers, ImageSubresourceRange,
-        ImageTiling, ImageType, ImageViewCreateFlags, ImageViewType, InstanceCreateFlags,
-        InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D, PhysicalDevice,
-        PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType, PipelineCache,
-        PipelineCacheCreateFlags, PipelineCacheCreateInfo, Queue, QueueFlags, SampleCountFlags,
-        SamplerCreateInfo, ShaderModuleCreateFlags, SharingMode, StructureType, SubmitInfo,
-        WriteDescriptorSet, API_VERSION_1_3,
+        make_api_version, ApplicationInfo, BufferCreateFlags, CommandBufferAllocateInfo,
+        CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags,
+        CommandPoolCreateFlags, CommandPoolCreateInfo, DebugUtilsMessageSeverityFlagsEXT,
+        DebugUtilsMessageTypeFlagsEXT, DebugUtilsMessengerCreateFlagsEXT,
+        DebugUtilsMessengerCreateInfoEXT, DebugUtilsObjectNameInfoEXT, DependencyFlags,
+        DescriptorBufferInfo, DescriptorImageInfo, DeviceCreateFlags, DeviceCreateInfo,
+        DeviceQueueCreateFlags, DeviceQueueCreateInfo, Extent2D, Extent3D, Fence,
+        FormatFeatureFlags, FramebufferCreateFlags, Handle, ImageAspectFlags, ImageCreateFlags,
+        ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType,
+        ImageViewCreateFlags, ImageViewType, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap,
+        MemoryHeapFlags, Offset3D, PhysicalDevice, PhysicalDeviceFeatures,
+        PhysicalDeviceProperties, PhysicalDeviceType, PipelineCache, PipelineCacheCreateFlags,
+        PipelineCacheCreateInfo, Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo,
+        ShaderModuleCreateFlags, SharingMode, StructureType, SubmitInfo, WriteDescriptorSet,
+        API_VERSION_1_3,
     },
     *,
 };
@@ -48,8 +48,8 @@ use super::descriptor_set::PooledDescriptorSetAllocator;
 use super::{
     allocator::{GpuAllocator, PasstroughAllocator},
     descriptor_set::DescriptorSetAllocator,
-    AllocationRequirements, BufferUsageFlags, DescriptorSetInfo, GpuBuffer, GpuDescriptorSet,
-    GpuImage, GpuSampler, MemoryDomain,
+    AccessFlags, AllocationRequirements, BufferUsageFlags, DescriptorSetInfo, GpuBuffer,
+    GpuDescriptorSet, GpuImage, GpuSampler, MemoryDomain,
 };
 
 const KHRONOS_VALIDATION_LAYER: &str = "VK_LAYER_KHRONOS_validation";
@@ -1472,7 +1472,6 @@ impl Gpu {
         command_buffer.pipeline_barrier(&PipelineBarrierInfo {
             src_stage_mask: old_layout.stage_mask,
             dst_stage_mask: new_layout.stage_mask,
-            dependency_flags: DependencyFlags::empty(),
             image_memory_barriers: &[memory_barrier],
             ..Default::default()
         });

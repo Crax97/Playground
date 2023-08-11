@@ -7,29 +7,27 @@ use std::{
 };
 
 use ash::vk::{
-    self, AccessFlags, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor,
-    BlendOp, BorderColor, ColorComponentFlags, ComponentMapping, DependencyFlags, Extent2D, Filter,
+    self, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
+    BorderColor, ColorComponentFlags, ComponentMapping, DependencyFlags, Extent2D, Filter,
     ImageAspectFlags, ImageSubresourceRange, ImageUsageFlags, ImageViewType, Offset2D,
     PipelineBindPoint, Rect2D, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags,
-    SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDependency,
-    SubpassDescriptionFlags,
+    SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDescriptionFlags,
 };
 use gpu::{
-    BeginRenderPassInfo, BindingType, BlendState, BufferCreateInfo, BufferRange, BufferUsageFlags,
-    ColorAttachment, ColorLoadOp, CommandBuffer, DepthAttachment, DepthLoadOp, DescriptorInfo,
-    DescriptorSetInfo, FramebufferCreateInfo, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer,
-    GpuImage, GpuImageView, GpuSampler, GraphicsPipeline, ImageCreateInfo, ImageFormat,
-    ImageMemoryBarrier, ImageViewCreateInfo, MemoryDomain, PipelineBarrierInfo, RenderPass,
+    AccessFlags, BeginRenderPassInfo, BindingElement, BindingType, BlendState, BufferCreateInfo,
+    BufferRange, BufferUsageFlags, ColorAttachment, ColorLoadOp, CommandBuffer, CullMode,
+    DepthAttachment, DepthLoadOp, DepthStencilAttachment, DepthStencilState, DescriptorInfo,
+    DescriptorSetInfo, FragmentStageInfo, FramebufferCreateInfo, FrontFace, GlobalBinding, Gpu,
+    GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView, GpuSampler,
+    GpuShaderModule, GraphicsPipeline, GraphicsPipelineDescription, ImageCreateInfo, ImageFormat,
+    ImageLayout, ImageMemoryBarrier, ImageViewCreateInfo, LogicOp, MemoryDomain,
+    PipelineBarrierInfo, PipelineStageFlags, PolygonMode, PrimitiveTopology, RenderPass,
     RenderPassAttachment, RenderPassCommand, RenderPassDescription, StencilAttachment,
-    StencilLoadOp, SubpassDescription, ToVk, TransitionInfo,
+    StencilLoadOp, SubpassDependency, SubpassDescription, ToVk, TransitionInfo,
+    VertexBindingDescription, VertexStageInfo,
 };
 
 use ash::vk::PushConstantRange;
-use gpu::{
-    BindingElement, CullMode, DepthStencilAttachment, DepthStencilState, FragmentStageInfo,
-    FrontFace, GlobalBinding, GpuShaderModule, GraphicsPipelineDescription, ImageLayout, LogicOp,
-    PipelineStageFlags, PolygonMode, PrimitiveTopology, VertexBindingDescription, VertexStageInfo,
-};
 use indexmap::IndexSet;
 use log::trace;
 
@@ -702,13 +700,12 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
                 preserve_attachments: &[],
             }],
             dependencies: &[SubpassDependency {
-                src_subpass: vk::SUBPASS_EXTERNAL,
+                src_subpass: SubpassDependency::EXTERNAL,
                 dst_subpass: 0,
-                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT.to_vk(),
-                dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT.to_vk(),
+                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                 src_access_mask: AccessFlags::empty(),
                 dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                dependency_flags: DependencyFlags::empty(),
             }],
         };
         let pass = RenderPass::new(gpu, &description)?;
@@ -1948,7 +1945,6 @@ impl RenderGraphRunner for GpuRunner {
                             src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                             dst_stage_mask: PipelineStageFlags::VERTEX_SHADER
                                 | PipelineStageFlags::FRAGMENT_SHADER,
-                            dependency_flags: Default::default(),
                             memory_barriers: &[],
                             buffer_memory_barriers: &[],
                             image_memory_barriers: &color_transitions,
@@ -1959,7 +1955,6 @@ impl RenderGraphRunner for GpuRunner {
                             src_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
                             dst_stage_mask: PipelineStageFlags::VERTEX_SHADER
                                 | PipelineStageFlags::FRAGMENT_SHADER,
-                            dependency_flags: Default::default(),
                             memory_barriers: &[],
                             buffer_memory_barriers: &[],
                             image_memory_barriers: &depth_stencil_transitions,
@@ -2056,7 +2051,6 @@ impl RenderGraphRunner for GpuRunner {
                         ctx.command_buffer.pipeline_barrier(&PipelineBarrierInfo {
                             src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                             dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                            dependency_flags: Default::default(),
                             memory_barriers: &[],
                             buffer_memory_barriers: &[],
                             image_memory_barriers: &color_transitions,
@@ -2066,7 +2060,6 @@ impl RenderGraphRunner for GpuRunner {
                         ctx.command_buffer.pipeline_barrier(&PipelineBarrierInfo {
                             src_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
                             dst_stage_mask: PipelineStageFlags::LATE_FRAGMENT_TESTS,
-                            dependency_flags: Default::default(),
                             memory_barriers: &[],
                             buffer_memory_barriers: &[],
                             image_memory_barriers: &depth_stencil_transitions,
@@ -2161,7 +2154,6 @@ impl RenderGraphRunner for GpuRunner {
                         ctx.command_buffer.pipeline_barrier(&PipelineBarrierInfo {
                             src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                             dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                            dependency_flags: Default::default(),
                             memory_barriers: &[],
                             buffer_memory_barriers: &[],
                             image_memory_barriers: &color_transitions,
@@ -2171,7 +2163,6 @@ impl RenderGraphRunner for GpuRunner {
                         ctx.command_buffer.pipeline_barrier(&PipelineBarrierInfo {
                             src_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
                             dst_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
-                            dependency_flags: Default::default(),
                             memory_barriers: &[],
                             buffer_memory_barriers: &[],
                             image_memory_barriers: &depth_stencil_transitions,

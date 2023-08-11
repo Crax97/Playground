@@ -7,9 +7,8 @@ use ash::{
     prelude::VkResult,
     vk::{
         self, ClearDepthStencilValue, CommandBufferAllocateInfo, CommandBufferBeginInfo,
-        CommandBufferLevel, CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags, Extent2D,
-        IndexType, Offset2D, PipelineBindPoint, Rect2D, ShaderStageFlags, StructureType,
-        SubmitInfo,
+        CommandBufferLevel, CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags,
+        IndexType, Offset2D, PipelineBindPoint, Rect2D, StructureType, SubmitInfo,
     },
     RawPtr,
 };
@@ -17,8 +16,8 @@ use ash::{
 use crate::pipeline::GpuPipeline;
 use crate::types::ImageLayout;
 use crate::{
-    ComputePipeline, FrontFace, GPUFence, GPUSemaphore, GpuImage, GpuImageView, PipelineStageFlags,
-    ToVk,
+    AccessFlags, ComputePipeline, GPUFence, GPUSemaphore, GpuImage, GpuImageView,
+    PipelineStageFlags, ToVk,
 };
 
 use super::{Gpu, GpuBuffer, GpuDescriptorSet, GraphicsPipeline, QueueType};
@@ -59,8 +58,8 @@ where
 }
 
 pub struct MemoryBarrier {
-    pub src_access_mask: vk::AccessFlags,
-    pub dst_access_mask: vk::AccessFlags,
+    pub src_access_mask: AccessFlags,
+    pub dst_access_mask: AccessFlags,
 }
 
 impl ToVk for MemoryBarrier {
@@ -70,15 +69,15 @@ impl ToVk for MemoryBarrier {
         Self::Inner {
             s_type: StructureType::MEMORY_BARRIER,
             p_next: std::ptr::null(),
-            src_access_mask: self.src_access_mask,
-            dst_access_mask: self.dst_access_mask,
+            src_access_mask: self.src_access_mask.to_vk(),
+            dst_access_mask: self.dst_access_mask.to_vk(),
         }
     }
 }
 
 pub struct BufferMemoryBarrier<'a> {
-    pub src_access_mask: vk::AccessFlags,
-    pub dst_access_mask: vk::AccessFlags,
+    pub src_access_mask: AccessFlags,
+    pub dst_access_mask: AccessFlags,
     pub src_queue_family_index: u32,
     pub dst_queue_family_index: u32,
     pub buffer: &'a GpuBuffer,
@@ -93,8 +92,8 @@ impl<'a> ToVk for BufferMemoryBarrier<'a> {
         Self::Inner {
             s_type: StructureType::BUFFER_MEMORY_BARRIER,
             p_next: std::ptr::null(),
-            src_access_mask: self.src_access_mask,
-            dst_access_mask: self.dst_access_mask,
+            src_access_mask: self.src_access_mask.to_vk(),
+            dst_access_mask: self.dst_access_mask.to_vk(),
             src_queue_family_index: self.src_queue_family_index,
             dst_queue_family_index: self.dst_queue_family_index,
             buffer: self.buffer.inner,
@@ -105,8 +104,8 @@ impl<'a> ToVk for BufferMemoryBarrier<'a> {
 }
 
 pub struct ImageMemoryBarrier<'a> {
-    pub src_access_mask: vk::AccessFlags,
-    pub dst_access_mask: vk::AccessFlags,
+    pub src_access_mask: AccessFlags,
+    pub dst_access_mask: AccessFlags,
     pub old_layout: ImageLayout,
     pub new_layout: ImageLayout,
     pub src_queue_family_index: u32,
@@ -122,8 +121,8 @@ impl<'a> ToVk for ImageMemoryBarrier<'a> {
         Self::Inner {
             s_type: StructureType::IMAGE_MEMORY_BARRIER,
             p_next: std::ptr::null(),
-            src_access_mask: self.src_access_mask,
-            dst_access_mask: self.dst_access_mask,
+            src_access_mask: self.src_access_mask.to_vk(),
+            dst_access_mask: self.dst_access_mask.to_vk(),
             src_queue_family_index: self.src_queue_family_index,
             dst_queue_family_index: self.dst_queue_family_index,
             old_layout: self.old_layout.to_vk(),
@@ -138,7 +137,6 @@ impl<'a> ToVk for ImageMemoryBarrier<'a> {
 pub struct PipelineBarrierInfo<'a> {
     pub src_stage_mask: PipelineStageFlags,
     pub dst_stage_mask: PipelineStageFlags,
-    pub dependency_flags: DependencyFlags,
     pub memory_barriers: &'a [MemoryBarrier],
     pub buffer_memory_barriers: &'a [BufferMemoryBarrier<'a>],
     pub image_memory_barriers: &'a [ImageMemoryBarrier<'a>],
@@ -235,7 +233,7 @@ impl<'g> CommandBuffer<'g> {
                 self.inner_command_buffer,
                 barrier_info.src_stage_mask.to_vk(),
                 barrier_info.dst_stage_mask.to_vk(),
-                barrier_info.dependency_flags,
+                DependencyFlags::empty(),
                 &memory_barriers,
                 &buffer_memory_barriers,
                 &image_memory_barriers,

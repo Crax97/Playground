@@ -1,8 +1,8 @@
-use ash::vk::{AccessFlags, DependencyFlags, ImageAspectFlags, ImageSubresourceRange, Rect2D};
+use ash::vk::{ImageAspectFlags, ImageSubresourceRange, Rect2D};
 use engine::{AppState, Backbuffer};
 use gpu::{
-    BeginRenderPassInfo, ColorAttachment, CommandBuffer, CommandBufferSubmitInfo, ImageLayout,
-    ImageMemoryBarrier, PipelineBarrierInfo, PipelineStageFlags,
+    AccessFlags, BeginRenderPassInfo, ColorAttachment, CommandBuffer, CommandBufferSubmitInfo,
+    ImageLayout, ImageMemoryBarrier, PipelineBarrierInfo, PipelineStageFlags,
 };
 use imgui::{Context, FontConfig, FontSource, Ui};
 use imgui_rs_vulkan_renderer::{DynamicRendering, Options, Renderer};
@@ -168,7 +168,6 @@ fn draw_imgui(
     command_buffer.pipeline_barrier(&PipelineBarrierInfo {
         src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
         dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-        dependency_flags: DependencyFlags::empty(),
         memory_barriers: &[],
         buffer_memory_barriers: &[],
         image_memory_barriers: &[ImageMemoryBarrier {
