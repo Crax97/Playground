@@ -1,7 +1,5 @@
-use std::path::Path;
-
-use ash::vk::ShaderModuleCreateFlags;
 use log::info;
+use std::path::Path;
 
 use gpu::{Gpu, GpuShaderModule, ShaderModuleCreateInfo};
 

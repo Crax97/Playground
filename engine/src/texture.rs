@@ -1,14 +1,13 @@
 use ash::{
     prelude::VkResult,
     vk::{
-        self, BorderColor, CompareOp, ComponentMapping, Filter, Format, ImageUsageFlags,
-        ImageViewType, SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo,
+        self, CompareOp, ComponentMapping, Format, ImageUsageFlags, ImageViewType,
         SamplerMipmapMode, StructureType,
     },
 };
 use gpu::{
-    Gpu, GpuImage, GpuImageView, GpuSampler, ImageAspectFlags, ImageCreateInfo,
-    ImageSubresourceRange, MemoryDomain,
+    Filter, Gpu, GpuImage, GpuImageView, GpuSampler, ImageAspectFlags, ImageCreateInfo,
+    ImageSubresourceRange, MemoryDomain, SamplerAddressMode, SamplerCreateInfo,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 
@@ -75,27 +74,16 @@ impl Texture {
         })?;
 
         let sampler = gpu.create_sampler(&SamplerCreateInfo {
-            s_type: StructureType::SAMPLER_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: SamplerCreateFlags::empty(),
-            mag_filter: Filter::LINEAR,
-            min_filter: Filter::LINEAR,
-            mipmap_mode: SamplerMipmapMode::LINEAR,
-            address_mode_u: SamplerAddressMode::REPEAT,
-            address_mode_v: SamplerAddressMode::REPEAT,
-            address_mode_w: SamplerAddressMode::REPEAT,
+            mag_filter: Filter::Linear,
+            min_filter: Filter::Linear,
+            address_u: SamplerAddressMode::Repeat,
+            address_v: SamplerAddressMode::Repeat,
+            address_w: SamplerAddressMode::Repeat,
             mip_lod_bias: 0.0,
-            anisotropy_enable: vk::TRUE,
-            max_anisotropy: gpu
-                .physical_device_properties()
-                .limits
-                .max_sampler_anisotropy,
-            compare_enable: vk::FALSE,
-            compare_op: CompareOp::ALWAYS,
+            compare_function: None,
             min_lod: 0.0,
             max_lod: 0.0,
-            border_color: BorderColor::default(),
-            unnormalized_coordinates: vk::FALSE,
+            border_color: [0.0; 4],
         })?;
         Ok((image, rgba_view, sampler))
     }

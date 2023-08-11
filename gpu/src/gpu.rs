@@ -24,8 +24,8 @@ use ash::{
         ImageViewType, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags,
         Offset3D, PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties,
         PhysicalDeviceType, PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo,
-        Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo, ShaderModuleCreateFlags,
-        SharingMode, StructureType, SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
+        Queue, QueueFlags, SampleCountFlags, ShaderModuleCreateFlags, SharingMode, StructureType,
+        SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
     },
     *,
 };
@@ -38,7 +38,7 @@ use winit::window::Window;
 use crate::{
     get_allocation_callbacks, Extent2D, GPUFence, GpuFramebuffer, GpuImageView, GpuShaderModule,
     ImageAspectFlags, ImageFormat, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
-    PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPass, ToVk,
+    PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPass, SamplerCreateInfo, ToVk,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;

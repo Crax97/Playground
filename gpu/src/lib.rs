@@ -35,6 +35,36 @@ pub struct Rect2D {
     pub extent: Extent2D,
 }
 
+#[derive(Default, Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SamplerAddressMode {
+    #[default]
+    ClampToBorder,
+    ClampToEdge,
+    Repeat,
+    MirroredRepeat,
+}
+
+#[derive(Default, Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Filter {
+    #[default]
+    Linear,
+    Nearest,
+}
+
+#[derive(Default, Clone, Debug, Copy, PartialEq, PartialOrd)]
+pub struct SamplerCreateInfo {
+    pub mag_filter: Filter,
+    pub min_filter: Filter,
+    pub address_u: SamplerAddressMode,
+    pub address_v: SamplerAddressMode,
+    pub address_w: SamplerAddressMode,
+    pub mip_lod_bias: f32,
+    pub compare_function: Option<CompareOp>,
+    pub min_lod: f32,
+    pub max_lod: f32,
+    pub border_color: [f32; 4],
+}
+
 #[derive(Default)]
 pub enum QueueType {
     #[default]
@@ -113,4 +143,14 @@ pub struct DescriptorInfo<'a> {
 #[derive(Clone, Hash)]
 pub struct DescriptorSetInfo<'a> {
     pub descriptors: &'a [DescriptorInfo<'a>],
+}
+
+#[derive(Clone, Copy, Hash, Debug, PartialEq, Ord, PartialOrd, Eq)]
+pub enum PresentMode {
+    #[doc = "Present images immediately"]
+    Immediate,
+    #[doc = "Wait for next vsync, new images are discarded"]
+    Fifo,
+    #[doc = "May not be supported, wait for next vsync, discard old images in queue in favour for new images"]
+    Mailbox,
 }

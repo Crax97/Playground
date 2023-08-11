@@ -20,7 +20,7 @@ use winit::window::Window;
 
 use crate::{
     Extent2D, FenceCreateFlags, FenceCreateInfo, Gpu, GpuImage, GpuImageView, ImageAspectFlags,
-    ImageSubresourceRange, ToVk,
+    ImageSubresourceRange, PresentMode, ToVk,
 };
 
 use super::{GPUFence, GPUSemaphore, GpuState};
@@ -497,8 +497,8 @@ impl Swapchain {
         self.drop_swapchain_structs();
     }
 
-    pub fn select_present_mode(&mut self, present_mode: PresentModeKHR) -> VkResult<()> {
-        self.present_mode = present_mode;
+    pub fn select_present_mode(&mut self, present_mode: PresentMode) -> VkResult<()> {
+        self.present_mode = present_mode.to_vk();
         self.recreate_swapchain()
     }
 
@@ -508,6 +508,18 @@ impl Swapchain {
 
     pub fn present_format(&self) -> Format {
         self.present_format.format
+    }
+}
+
+impl ToVk for PresentMode {
+    type Inner = PresentModeKHR;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            PresentMode::Immediate => PresentModeKHR::IMMEDIATE,
+            PresentMode::Fifo => PresentModeKHR::FIFO,
+            PresentMode::Mailbox => PresentModeKHR::MAILBOX,
+        }
     }
 }
 

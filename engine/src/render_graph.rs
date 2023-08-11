@@ -8,22 +8,22 @@ use std::{
 
 use ash::vk::{
     self, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
-    BorderColor, ColorComponentFlags, ComponentMapping, Filter, ImageUsageFlags, ImageViewType,
-    PipelineBindPoint, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo,
-    SamplerMipmapMode, StructureType, SubpassDescriptionFlags,
+    ColorComponentFlags, ComponentMapping, ImageUsageFlags, ImageViewType, PipelineBindPoint,
+    SampleCountFlags, SubpassDescriptionFlags,
 };
 use gpu::{
     AccessFlags, BeginRenderPassInfo, BindingElement, BindingType, BlendState, BufferCreateInfo,
     BufferRange, BufferUsageFlags, ColorAttachment, ColorLoadOp, CommandBuffer, CullMode,
     DepthAttachment, DepthLoadOp, DepthStencilAttachment, DepthStencilState, DescriptorInfo,
-    DescriptorSetInfo, Extent2D, FragmentStageInfo, FramebufferCreateInfo, FrontFace,
+    DescriptorSetInfo, Extent2D, Filter, FragmentStageInfo, FramebufferCreateInfo, FrontFace,
     GlobalBinding, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView,
     GpuSampler, GpuShaderModule, GraphicsPipeline, GraphicsPipelineDescription, ImageAspectFlags,
     ImageCreateInfo, ImageFormat, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
     ImageViewCreateInfo, LogicOp, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags,
     PolygonMode, PrimitiveTopology, Rect2D, RenderPass, RenderPassAttachment, RenderPassCommand,
-    RenderPassDescription, StencilAttachment, StencilLoadOp, SubpassDependency, SubpassDescription,
-    ToVk, TransitionInfo, VertexBindingDescription, VertexStageInfo,
+    RenderPassDescription, SamplerAddressMode, SamplerCreateInfo, StencilAttachment, StencilLoadOp,
+    SubpassDependency, SubpassDescription, ToVk, TransitionInfo, VertexBindingDescription,
+    VertexStageInfo,
 };
 
 use ash::vk::PushConstantRange;
@@ -363,31 +363,16 @@ impl<'a> CreateFrom<'a, SamplerState> for GraphSampler {
     fn create(gpu: &Gpu, samp: &'a SamplerState) -> anyhow::Result<Self> {
         let sam = gpu
             .create_sampler(&SamplerCreateInfo {
-                s_type: StructureType::SAMPLER_CREATE_INFO,
-                p_next: std::ptr::null(),
-                flags: SamplerCreateFlags::empty(),
-                mag_filter: Filter::LINEAR,
-                min_filter: Filter::LINEAR,
-                mipmap_mode: SamplerMipmapMode::LINEAR,
-                address_mode_u: SamplerAddressMode::REPEAT,
-                address_mode_v: SamplerAddressMode::REPEAT,
-                address_mode_w: SamplerAddressMode::REPEAT,
+                mag_filter: Filter::Linear,
+                min_filter: Filter::Linear,
+                address_u: SamplerAddressMode::Repeat,
+                address_v: SamplerAddressMode::Repeat,
+                address_w: SamplerAddressMode::Repeat,
                 mip_lod_bias: 0.0,
-                anisotropy_enable: vk::TRUE,
-                max_anisotropy: gpu
-                    .physical_device_properties()
-                    .limits
-                    .max_sampler_anisotropy,
-                compare_enable: if samp.compare_op.is_some() {
-                    vk::TRUE
-                } else {
-                    vk::FALSE
-                },
-                compare_op: samp.compare_op.map(|s| s.to_vk()).unwrap_or_default(),
+                compare_function: samp.compare_op,
                 min_lod: 0.0,
                 max_lod: 0.0,
-                border_color: BorderColor::default(),
-                unnormalized_coordinates: vk::FALSE,
+                border_color: [0.0; 4],
             })
             .expect("Failed to create image resource");
         Ok(GraphSampler::construct(sam, *samp))

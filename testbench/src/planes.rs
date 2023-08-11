@@ -5,14 +5,13 @@ use std::collections::HashMap;
 use std::io::BufReader;
 
 use app::{bootstrap, App};
-use ash::vk::PresentModeKHR;
 
 use engine::{
     Backbuffer, Camera, DeferredRenderingPipeline, MaterialDescription, MaterialDomain,
     MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo,
     RenderingPipeline, Scene, ScenePrimitive, Texture, TextureInput,
 };
-use gpu::CommandBuffer;
+use gpu::{CommandBuffer, PresentMode};
 use imgui::Ui;
 use nalgebra::*;
 use resource_map::ResourceMap;
@@ -174,7 +173,7 @@ impl App for PlanesApp {
 
         engine::app_state_mut()
             .swapchain_mut()
-            .select_present_mode(PresentModeKHR::MAILBOX)?;
+            .select_present_mode(PresentMode::Mailbox)?;
 
         let mut scene = Scene::new();
 

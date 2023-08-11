@@ -1,12 +1,15 @@
 use std::{cell::RefCell, ops::Deref, sync::Arc};
 
 use super::{allocator::GpuAllocator, gpu::Gpu};
-use crate::{Extent2D, Offset2D, Rect2D};
-use ash::vk::{BufferUsageFlags as VkBufferUsageFlags, ImageUsageFlags, StructureType};
+use crate::{Extent2D, Filter, Offset2D, Rect2D, SamplerAddressMode, SamplerCreateInfo};
+use ash::vk::{
+    BufferUsageFlags as VkBufferUsageFlags, ImageUsageFlags, SamplerCreateFlags, SamplerMipmapMode,
+    StructureType,
+};
 use ash::{
     prelude::*,
     vk::{
-        self, AllocationCallbacks, Buffer, FenceCreateInfo as VkFenceCreateInfo, SamplerCreateInfo,
+        self, AllocationCallbacks, Buffer, FenceCreateInfo as VkFenceCreateInfo,
         SemaphoreCreateInfo, ShaderModuleCreateInfo,
     },
 };
@@ -883,7 +886,7 @@ impl_raii_wrapper_to_vk!(GpuDescriptorSet, vk::DescriptorSet);
 
 define_raii_wrapper!((struct GpuSampler {}, vk::Sampler, ash::Device::destroy_sampler) {
     (create_info: &SamplerCreateInfo,) => {
-        |device: &ash::Device| { unsafe { device.create_sampler(create_info, get_allocation_callbacks()) }}
+        |device: &ash::Device| { unsafe { device.create_sampler(&create_info.to_vk(), get_allocation_callbacks()) }}
     }
 });
 define_raii_wrapper!((struct GpuShaderModule {}, vk::ShaderModule, ash::Device::destroy_shader_module) {
@@ -930,6 +933,60 @@ impl ToVk for Rect2D {
         Self::Inner {
             offset: self.offset.to_vk(),
             extent: self.extent.to_vk(),
+        }
+    }
+}
+
+impl ToVk for Filter {
+    type Inner = vk::Filter;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            Filter::Nearest => vk::Filter::LINEAR,
+            Filter::Linear => vk::Filter::NEAREST,
+        }
+    }
+}
+
+impl ToVk for SamplerAddressMode {
+    type Inner = vk::SamplerAddressMode;
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            SamplerAddressMode::Repeat => Self::Inner::REPEAT,
+            SamplerAddressMode::MirroredRepeat => Self::Inner::MIRRORED_REPEAT,
+            SamplerAddressMode::ClampToEdge => Self::Inner::CLAMP_TO_EDGE,
+            SamplerAddressMode::ClampToBorder => Self::Inner::CLAMP_TO_BORDER,
+        }
+    }
+}
+
+impl ToVk for SamplerCreateInfo {
+    type Inner = vk::SamplerCreateInfo;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            s_type: StructureType::SAMPLER_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: SamplerCreateFlags::empty(),
+            mag_filter: self.mag_filter.to_vk(),
+            min_filter: self.min_filter.to_vk(),
+            mipmap_mode: SamplerMipmapMode::default(),
+            address_mode_u: self.address_u.to_vk(),
+            address_mode_v: self.address_v.to_vk(),
+            address_mode_w: self.address_w.to_vk(),
+            mip_lod_bias: self.mip_lod_bias,
+            anisotropy_enable: vk::FALSE,
+            max_anisotropy: 0.0,
+            compare_enable: if self.compare_function.is_some() {
+                vk::TRUE
+            } else {
+                vk::FALSE
+            },
+            compare_op: self.compare_function.unwrap_or_default().to_vk(),
+            min_lod: self.min_lod,
+            max_lod: self.max_lod,
+            border_color: vk::BorderColor::FLOAT_OPAQUE_WHITE, // TODO: use VK_EXT_custom_border_color
+            unnormalized_coordinates: vk::FALSE,
         }
     }
 }

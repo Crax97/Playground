@@ -5,10 +5,9 @@ mod input;
 mod utils;
 
 use app::{bootstrap, App};
-use ash::vk::PresentModeKHR;
 
 use fps_camera::FpsCamera;
-use gpu::CommandBuffer;
+use gpu::{CommandBuffer, PresentMode};
 use imgui::{TreeNodeFlags, Ui};
 use input::InputState;
 use winit::dpi::{PhysicalPosition, Position};
@@ -223,7 +222,7 @@ impl App for GLTFViewer {
 
         engine::app_state_mut()
             .swapchain_mut()
-            .select_present_mode(PresentModeKHR::IMMEDIATE)?;
+            .select_present_mode(PresentMode::Immediate)?;
 
         Ok(Self {
             resource_map,

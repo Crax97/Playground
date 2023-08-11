@@ -1,7 +1,5 @@
 ﻿use crate::utils;
-use ash::vk::{
-    ComponentMapping, Filter, ImageUsageFlags, ImageViewType, SamplerAddressMode, SamplerCreateInfo,
-};
+use ash::vk::{ComponentMapping, ImageUsageFlags, ImageViewType};
 use engine::{
     ImageResource, MasterMaterial, MaterialDescription, MaterialDomain, MaterialInstance,
     MaterialInstanceDescription, MaterialParameterOffsetSize, Mesh, MeshCreateInfo,
@@ -11,8 +9,8 @@ use engine::{
 use gltf::image::Data;
 use gltf::Document;
 use gpu::{
-    Gpu, ImageAspectFlags, ImageCreateInfo, ImageSubresourceRange, ImageViewCreateInfo,
-    MemoryDomain, ToVk,
+    Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageSubresourceRange, ImageViewCreateInfo,
+    MemoryDomain, SamplerAddressMode, SamplerCreateInfo, ToVk,
 };
 use nalgebra::{vector, Matrix4, Quaternion, UnitQuaternion, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -335,55 +333,54 @@ impl GltfLoader {
     ) -> anyhow::Result<Vec<ResourceHandle<SamplerResource>>> {
         let mut allocated_samplers = vec![];
         for sampler in document.samplers() {
-            let builder = SamplerCreateInfo::builder()
-                .address_mode_u(match &sampler.wrap_s() {
-                    gltf::texture::WrappingMode::ClampToEdge => SamplerAddressMode::CLAMP_TO_EDGE,
+            let sam_desc = SamplerCreateInfo {
+                address_u: match &sampler.wrap_s() {
+                    gltf::texture::WrappingMode::ClampToEdge => SamplerAddressMode::ClampToEdge,
                     gltf::texture::WrappingMode::MirroredRepeat => {
-                        SamplerAddressMode::MIRRORED_REPEAT
+                        SamplerAddressMode::MirroredRepeat
                     }
-                    gltf::texture::WrappingMode::Repeat => SamplerAddressMode::REPEAT,
-                })
-                .address_mode_v(match &sampler.wrap_t() {
-                    gltf::texture::WrappingMode::ClampToEdge => SamplerAddressMode::CLAMP_TO_EDGE,
+                    gltf::texture::WrappingMode::Repeat => SamplerAddressMode::Repeat,
+                },
+                address_v: match &sampler.wrap_t() {
+                    gltf::texture::WrappingMode::ClampToEdge => SamplerAddressMode::ClampToEdge,
                     gltf::texture::WrappingMode::MirroredRepeat => {
-                        SamplerAddressMode::MIRRORED_REPEAT
+                        SamplerAddressMode::MirroredRepeat
                     }
-                    gltf::texture::WrappingMode::Repeat => SamplerAddressMode::REPEAT,
-                })
-                .mag_filter(
-                    match sampler
-                        .mag_filter()
-                        .unwrap_or(gltf::texture::MagFilter::Nearest)
-                    {
-                        gltf::texture::MagFilter::Nearest => Filter::NEAREST,
-                        gltf::texture::MagFilter::Linear => Filter::LINEAR,
-                    },
-                )
-                .min_filter(
-                    match sampler
-                        .min_filter()
-                        .unwrap_or(gltf::texture::MinFilter::Nearest)
-                    {
-                        gltf::texture::MinFilter::Nearest => Filter::NEAREST,
-                        gltf::texture::MinFilter::Linear => Filter::LINEAR,
-                        x => {
-                            log::warn!("glTF: unsupported filter! {:?}", x);
-                            Filter::LINEAR
-                        }
-                    },
-                );
-            let sam = gpu.create_sampler(&builder.build())?;
+                    gltf::texture::WrappingMode::Repeat => SamplerAddressMode::Repeat,
+                },
+                mag_filter: match sampler
+                    .mag_filter()
+                    .unwrap_or(gltf::texture::MagFilter::Nearest)
+                {
+                    gltf::texture::MagFilter::Nearest => Filter::Nearest,
+                    gltf::texture::MagFilter::Linear => Filter::Linear,
+                },
+                min_filter: match sampler
+                    .min_filter()
+                    .unwrap_or(gltf::texture::MinFilter::Nearest)
+                {
+                    gltf::texture::MinFilter::Nearest => Filter::Nearest,
+                    gltf::texture::MinFilter::Linear => Filter::Linear,
+                    x => {
+                        log::warn!("glTF: unsupported filter! {:?}", x);
+                        Filter::Linear
+                    }
+                },
+                ..Default::default()
+            };
+            let sam = gpu.create_sampler(&sam_desc)?;
             allocated_samplers.push(resource_map.add(SamplerResource(sam)))
         }
 
         if allocated_samplers.is_empty() {
             // add default sampler
-            let builder = SamplerCreateInfo::builder()
-                .address_mode_u(SamplerAddressMode::REPEAT)
-                .address_mode_v(SamplerAddressMode::REPEAT)
-                .mag_filter(Filter::LINEAR)
-                .min_filter(Filter::LINEAR);
-            let sam = gpu.create_sampler(&builder.build())?;
+            let sam = gpu.create_sampler(&SamplerCreateInfo {
+                address_u: SamplerAddressMode::Repeat,
+                address_v: SamplerAddressMode::Repeat,
+                mag_filter: Filter::Linear,
+                min_filter: Filter::Linear,
+                ..Default::default()
+            })?;
             allocated_samplers.push(resource_map.add(SamplerResource(sam)))
         }
 
