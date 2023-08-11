@@ -1,5 +1,3 @@
-use ash::prelude::VkResult;
-use ash::vk::CommandPoolResetFlags;
 use gpu::{Gpu, Swapchain};
 use winit::window::Window;
 
@@ -24,12 +22,12 @@ impl AppState {
         }
     }
 
-    pub fn begin_frame(&mut self) -> VkResult<()> {
+    pub fn begin_frame(&mut self) -> anyhow::Result<()> {
         self.time.begin_frame();
         Ok(())
     }
 
-    pub fn end_frame(&mut self) -> VkResult<()> {
+    pub fn end_frame(&mut self) -> anyhow::Result<()> {
         self.swapchain.present()?;
         self.time.end_frame();
         Ok(())

@@ -1,12 +1,15 @@
 use ash::{
     prelude::VkResult,
     vk::{
-        self, BorderColor, CompareOp, ComponentMapping, Filter, Format, ImageAspectFlags,
-        ImageSubresourceRange, ImageUsageFlags, ImageViewType, SamplerAddressMode,
-        SamplerCreateFlags, SamplerCreateInfo, SamplerMipmapMode, StructureType,
+        self, BorderColor, CompareOp, ComponentMapping, Filter, Format, ImageUsageFlags,
+        ImageViewType, SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo,
+        SamplerMipmapMode, StructureType,
     },
 };
-use gpu::{Gpu, GpuImage, GpuImageView, GpuSampler, ImageCreateInfo, MemoryDomain};
+use gpu::{
+    Gpu, GpuImage, GpuImageView, GpuSampler, ImageAspectFlags, ImageCreateInfo,
+    ImageSubresourceRange, MemoryDomain,
+};
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 
 pub struct ImageResource(pub GpuImage);

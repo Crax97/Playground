@@ -8,23 +8,22 @@ use std::{
 
 use ash::vk::{
     self, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
-    BorderColor, ColorComponentFlags, ComponentMapping, DependencyFlags, Extent2D, Filter,
-    ImageAspectFlags, ImageSubresourceRange, ImageUsageFlags, ImageViewType, Offset2D,
-    PipelineBindPoint, Rect2D, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags,
-    SamplerCreateInfo, SamplerMipmapMode, StructureType, SubpassDescriptionFlags,
+    BorderColor, ColorComponentFlags, ComponentMapping, Filter, ImageUsageFlags, ImageViewType,
+    PipelineBindPoint, SampleCountFlags, SamplerAddressMode, SamplerCreateFlags, SamplerCreateInfo,
+    SamplerMipmapMode, StructureType, SubpassDescriptionFlags,
 };
 use gpu::{
     AccessFlags, BeginRenderPassInfo, BindingElement, BindingType, BlendState, BufferCreateInfo,
     BufferRange, BufferUsageFlags, ColorAttachment, ColorLoadOp, CommandBuffer, CullMode,
     DepthAttachment, DepthLoadOp, DepthStencilAttachment, DepthStencilState, DescriptorInfo,
-    DescriptorSetInfo, FragmentStageInfo, FramebufferCreateInfo, FrontFace, GlobalBinding, Gpu,
-    GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView, GpuSampler,
-    GpuShaderModule, GraphicsPipeline, GraphicsPipelineDescription, ImageCreateInfo, ImageFormat,
-    ImageLayout, ImageMemoryBarrier, ImageViewCreateInfo, LogicOp, MemoryDomain,
-    PipelineBarrierInfo, PipelineStageFlags, PolygonMode, PrimitiveTopology, RenderPass,
-    RenderPassAttachment, RenderPassCommand, RenderPassDescription, StencilAttachment,
-    StencilLoadOp, SubpassDependency, SubpassDescription, ToVk, TransitionInfo,
-    VertexBindingDescription, VertexStageInfo,
+    DescriptorSetInfo, Extent2D, FragmentStageInfo, FramebufferCreateInfo, FrontFace,
+    GlobalBinding, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView,
+    GpuSampler, GpuShaderModule, GraphicsPipeline, GraphicsPipelineDescription, ImageAspectFlags,
+    ImageCreateInfo, ImageFormat, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
+    ImageViewCreateInfo, LogicOp, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags,
+    PolygonMode, PrimitiveTopology, Rect2D, RenderPass, RenderPassAttachment, RenderPassCommand,
+    RenderPassDescription, StencilAttachment, StencilLoadOp, SubpassDependency, SubpassDescription,
+    ToVk, TransitionInfo, VertexBindingDescription, VertexStageInfo,
 };
 
 use ash::vk::PushConstantRange;
@@ -1912,7 +1911,7 @@ impl RenderGraphRunner for GpuRunner {
                                 src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
                                 dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
                                 image,
-                                subresource_range: vk::ImageSubresourceRange {
+                                subresource_range: ImageSubresourceRange {
                                     aspect_mask: ImageAspectFlags::COLOR,
                                     base_mip_level: 0,
                                     level_count: 1,
@@ -1929,7 +1928,7 @@ impl RenderGraphRunner for GpuRunner {
                                 src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
                                 dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
                                 image,
-                                subresource_range: vk::ImageSubresourceRange {
+                                subresource_range: ImageSubresourceRange {
                                     aspect_mask: ImageAspectFlags::DEPTH,
                                     base_mip_level: 0,
                                     level_count: 1,
@@ -2019,7 +2018,7 @@ impl RenderGraphRunner for GpuRunner {
                                 src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
                                 dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
                                 image,
-                                subresource_range: vk::ImageSubresourceRange {
+                                subresource_range: ImageSubresourceRange {
                                     aspect_mask: ImageAspectFlags::COLOR,
                                     base_mip_level: 0,
                                     level_count: 1,
@@ -2036,7 +2035,7 @@ impl RenderGraphRunner for GpuRunner {
                                 src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
                                 dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
                                 image,
-                                subresource_range: vk::ImageSubresourceRange {
+                                subresource_range: ImageSubresourceRange {
                                     aspect_mask: ImageAspectFlags::DEPTH,
                                     base_mip_level: 0,
                                     level_count: 1,
@@ -2122,7 +2121,7 @@ impl RenderGraphRunner for GpuRunner {
                                 src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
                                 dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
                                 image,
-                                subresource_range: vk::ImageSubresourceRange {
+                                subresource_range: ImageSubresourceRange {
                                     aspect_mask: ImageAspectFlags::COLOR,
                                     base_mip_level: 0,
                                     level_count: 1,
@@ -2139,7 +2138,7 @@ impl RenderGraphRunner for GpuRunner {
                                 src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
                                 dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
                                 image,
-                                subresource_range: vk::ImageSubresourceRange {
+                                subresource_range: ImageSubresourceRange {
                                     aspect_mask: ImageAspectFlags::DEPTH,
                                     base_mip_level: 0,
                                     level_count: 1,

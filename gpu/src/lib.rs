@@ -17,6 +17,24 @@ pub use types::*;
 
 pub const WHOLE_SIZE: u64 = u64::MAX;
 
+#[derive(Default, Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Offset2D {
+    pub x: i32,
+    pub y: i32,
+}
+
+#[derive(Default, Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Extent2D {
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Default, Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Rect2D {
+    pub offset: Offset2D,
+    pub extent: Extent2D,
+}
+
 #[derive(Default)]
 pub enum QueueType {
     #[default]

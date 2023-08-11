@@ -1,7 +1,6 @@
 ﻿use crate::utils;
 use ash::vk::{
-    ComponentMapping, Filter, ImageAspectFlags, ImageSubresourceRange, ImageUsageFlags,
-    ImageViewType, SamplerAddressMode, SamplerCreateInfo,
+    ComponentMapping, Filter, ImageUsageFlags, ImageViewType, SamplerAddressMode, SamplerCreateInfo,
 };
 use engine::{
     ImageResource, MasterMaterial, MaterialDescription, MaterialDomain, MaterialInstance,
@@ -11,7 +10,10 @@ use engine::{
 };
 use gltf::image::Data;
 use gltf::Document;
-use gpu::{Gpu, ImageCreateInfo, ImageViewCreateInfo, MemoryDomain, ToVk};
+use gpu::{
+    Gpu, ImageAspectFlags, ImageCreateInfo, ImageSubresourceRange, ImageViewCreateInfo,
+    MemoryDomain, ToVk,
+};
 use nalgebra::{vector, Matrix4, Quaternion, UnitQuaternion, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
 use std::collections::HashMap;

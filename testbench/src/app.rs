@@ -1,8 +1,8 @@
-use ash::vk::{ImageAspectFlags, ImageSubresourceRange, Rect2D};
 use engine::{AppState, Backbuffer};
 use gpu::{
     AccessFlags, BeginRenderPassInfo, ColorAttachment, CommandBuffer, CommandBufferSubmitInfo,
-    ImageLayout, ImageMemoryBarrier, PipelineBarrierInfo, PipelineStageFlags,
+    ImageAspectFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, Offset2D,
+    PipelineBarrierInfo, PipelineStageFlags, Rect2D,
 };
 use imgui::{Context, FontConfig, FontSource, Ui};
 use imgui_rs_vulkan_renderer::{DynamicRendering, Options, Renderer};
@@ -158,7 +158,7 @@ fn draw_imgui(
             depth_attachment: None,
             stencil_attachment: None,
             render_area: Rect2D {
-                offset: ash::vk::Offset2D { x: 0, y: 0 },
+                offset: Offset2D { x: 0, y: 0 },
                 extent: backbuffer.size,
             },
         });

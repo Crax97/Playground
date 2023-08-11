@@ -8,7 +8,7 @@ use ash::{
     vk::{
         self, ClearDepthStencilValue, CommandBufferAllocateInfo, CommandBufferBeginInfo,
         CommandBufferLevel, CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags,
-        IndexType, Offset2D, PipelineBindPoint, Rect2D, StructureType, SubmitInfo,
+        IndexType, PipelineBindPoint, StructureType, SubmitInfo,
     },
     RawPtr,
 };
@@ -16,8 +16,8 @@ use ash::{
 use crate::pipeline::GpuPipeline;
 use crate::types::ImageLayout;
 use crate::{
-    AccessFlags, ComputePipeline, GPUFence, GPUSemaphore, GpuImage, GpuImageView,
-    PipelineStageFlags, ToVk,
+    AccessFlags, ComputePipeline, GPUFence, GPUSemaphore, GpuImage, GpuImageView, ImageAspectFlags,
+    Offset2D, PipelineStageFlags, Rect2D, ToVk,
 };
 
 use super::{Gpu, GpuBuffer, GpuDescriptorSet, GraphicsPipeline, QueueType};
@@ -103,6 +103,28 @@ impl<'a> ToVk for BufferMemoryBarrier<'a> {
     }
 }
 
+pub struct ImageSubresourceRange {
+    pub aspect_mask: ImageAspectFlags,
+    pub base_mip_level: u32,
+    pub level_count: u32,
+    pub base_array_layer: u32,
+    pub layer_count: u32,
+}
+
+impl ToVk for ImageSubresourceRange {
+    type Inner = vk::ImageSubresourceRange;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            aspect_mask: self.aspect_mask.to_vk(),
+            base_mip_level: self.base_mip_level,
+            level_count: self.level_count,
+            base_array_layer: self.base_array_layer,
+            layer_count: self.layer_count,
+        }
+    }
+}
+
 pub struct ImageMemoryBarrier<'a> {
     pub src_access_mask: AccessFlags,
     pub dst_access_mask: AccessFlags,
@@ -111,7 +133,7 @@ pub struct ImageMemoryBarrier<'a> {
     pub src_queue_family_index: u32,
     pub dst_queue_family_index: u32,
     pub image: &'a GpuImage,
-    pub subresource_range: vk::ImageSubresourceRange,
+    pub subresource_range: ImageSubresourceRange,
 }
 
 impl<'a> ToVk for ImageMemoryBarrier<'a> {
@@ -128,7 +150,7 @@ impl<'a> ToVk for ImageMemoryBarrier<'a> {
             old_layout: self.old_layout.to_vk(),
             new_layout: self.new_layout.to_vk(),
             image: self.image.inner,
-            subresource_range: self.subresource_range,
+            subresource_range: self.subresource_range.to_vk(),
         }
     }
 }
@@ -620,7 +642,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
             flags: RenderingFlags::empty(),
             layer_count: 1,
             view_mask: 0,
-            render_area: info.render_area,
+            render_area: info.render_area.to_vk(),
             color_attachment_count: color_attachments.len() as _,
             p_color_attachments: color_attachments.as_ptr(),
             p_depth_attachment: depth_attachment.as_ref().as_raw_ptr(),
@@ -746,7 +768,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 depth_slope,
             );
             device.cmd_set_viewport(self.command_buffer.inner(), 0, &[viewport.to_vk()]);
-            device.cmd_set_scissor(self.command_buffer.inner(), 0, &[scissor]);
+            device.cmd_set_scissor(self.command_buffer.inner(), 0, &[scissor.to_vk()]);
         }
     }
 

@@ -1,14 +1,13 @@
 use std::{cell::RefCell, ops::Deref, sync::Arc};
 
 use super::{allocator::GpuAllocator, gpu::Gpu};
-use ash::vk::{
-    BufferUsageFlags as VkBufferUsageFlags, ImageAspectFlags, ImageUsageFlags, StructureType,
-};
+use crate::{Extent2D, Offset2D, Rect2D};
+use ash::vk::{BufferUsageFlags as VkBufferUsageFlags, ImageUsageFlags, StructureType};
 use ash::{
     prelude::*,
     vk::{
-        self, AllocationCallbacks, Buffer, Extent2D, FenceCreateInfo as VkFenceCreateInfo,
-        SamplerCreateInfo, SemaphoreCreateInfo, ShaderModuleCreateInfo,
+        self, AllocationCallbacks, Buffer, FenceCreateInfo as VkFenceCreateInfo, SamplerCreateInfo,
+        SemaphoreCreateInfo, ShaderModuleCreateInfo,
     },
 };
 use bitflags::bitflags;
@@ -34,6 +33,15 @@ macro_rules! case {
             $target |= $inner
         }
     };
+}
+
+bitflags! {
+    #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+    pub struct ImageAspectFlags : u32 {
+        const COLOR = 0b1;
+        const DEPTH = 0b10;
+        const STENCIL = 0b100;
+    }
 }
 
 #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -249,6 +257,18 @@ pub struct BufferUsageFlags : u32 {
         const VERTEX_BUFFER = 0b1000_0000;
         #[doc = "Can be the source of indirect parameters (e.g. indirect buffer, parameter buffer)"]
         const INDIRECT_BUFFER = 0b1_0000_0000;
+    }
+}
+
+impl ToVk for ImageAspectFlags {
+    type Inner = vk::ImageAspectFlags;
+
+    fn to_vk(&self) -> Self::Inner {
+        let mut inner = Self::Inner::empty();
+        case!(self, inner, Self::COLOR, Self::Inner::COLOR);
+        case!(self, inner, Self::DEPTH, Self::Inner::DEPTH);
+        case!(self, inner, Self::STENCIL, Self::Inner::STENCIL);
+        inner
     }
 }
 
@@ -880,3 +900,36 @@ define_raii_wrapper!((struct GpuFramebuffer {}, vk::Framebuffer, ash::Device::de
             }
         }
 );
+
+impl ToVk for Offset2D {
+    type Inner = vk::Offset2D;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            x: self.x,
+            y: self.y,
+        }
+    }
+}
+
+impl ToVk for Extent2D {
+    type Inner = vk::Extent2D;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            width: self.width,
+            height: self.height,
+        }
+    }
+}
+
+impl ToVk for Rect2D {
+    type Inner = vk::Rect2D;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            offset: self.offset.to_vk(),
+            extent: self.extent.to_vk(),
+        }
+    }
+}

@@ -1,13 +1,9 @@
 use engine_macros::glsl;
-use std::convert::identity;
 use std::{collections::HashMap, mem::size_of};
 
-use ash::vk::{
-    CompareOp, Extent2D, IndexType, PipelineBindPoint, PushConstantRange, ShaderModuleCreateFlags,
-    ShaderStageFlags, StencilOpState,
-};
+use ash::vk::{CompareOp, IndexType, PushConstantRange, ShaderStageFlags, StencilOpState};
 use gpu::{
-    BindingType, BufferCreateInfo, BufferUsageFlags, CommandBuffer, DepthStencilState,
+    BindingType, BufferCreateInfo, BufferUsageFlags, CommandBuffer, DepthStencilState, Extent2D,
     FragmentStageInfo, Gpu, GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain,
     ShaderModuleCreateInfo, Swapchain, ToVk, VertexStageInfo,
 };

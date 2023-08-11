@@ -17,17 +17,15 @@ use ash::{
         CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags,
         CommandPoolCreateFlags, CommandPoolCreateInfo, DebugUtilsMessageSeverityFlagsEXT,
         DebugUtilsMessageTypeFlagsEXT, DebugUtilsMessengerCreateFlagsEXT,
-        DebugUtilsMessengerCreateInfoEXT, DebugUtilsObjectNameInfoEXT, DependencyFlags,
-        DescriptorBufferInfo, DescriptorImageInfo, DeviceCreateFlags, DeviceCreateInfo,
-        DeviceQueueCreateFlags, DeviceQueueCreateInfo, Extent2D, Extent3D, Fence,
-        FormatFeatureFlags, FramebufferCreateFlags, Handle, ImageAspectFlags, ImageCreateFlags,
-        ImageSubresourceLayers, ImageSubresourceRange, ImageTiling, ImageType,
-        ImageViewCreateFlags, ImageViewType, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap,
-        MemoryHeapFlags, Offset3D, PhysicalDevice, PhysicalDeviceFeatures,
-        PhysicalDeviceProperties, PhysicalDeviceType, PipelineCache, PipelineCacheCreateFlags,
-        PipelineCacheCreateInfo, Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo,
-        ShaderModuleCreateFlags, SharingMode, StructureType, SubmitInfo, WriteDescriptorSet,
-        API_VERSION_1_3,
+        DebugUtilsMessengerCreateInfoEXT, DebugUtilsObjectNameInfoEXT, DescriptorBufferInfo,
+        DescriptorImageInfo, DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags,
+        DeviceQueueCreateInfo, Extent3D, Fence, FormatFeatureFlags, FramebufferCreateFlags, Handle,
+        ImageCreateFlags, ImageSubresourceLayers, ImageTiling, ImageType, ImageViewCreateFlags,
+        ImageViewType, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags,
+        Offset3D, PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties,
+        PhysicalDeviceType, PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo,
+        Queue, QueueFlags, SampleCountFlags, SamplerCreateInfo, ShaderModuleCreateFlags,
+        SharingMode, StructureType, SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
     },
     *,
 };
@@ -38,9 +36,9 @@ use thiserror::Error;
 use winit::window::Window;
 
 use crate::{
-    get_allocation_callbacks, GPUFence, GpuFramebuffer, GpuImageView, GpuShaderModule, ImageFormat,
-    ImageLayout, ImageMemoryBarrier, PipelineBarrierInfo, PipelineStageFlags, QueueType,
-    RenderPass, ToVk,
+    get_allocation_callbacks, Extent2D, GPUFence, GpuFramebuffer, GpuImageView, GpuShaderModule,
+    ImageAspectFlags, ImageFormat, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
+    PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPass, ToVk,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -1303,7 +1301,7 @@ impl Gpu {
             view_type: create_info.view_type,
             format,
             components: create_info.components,
-            subresource_range: create_info.subresource_range,
+            subresource_range: create_info.subresource_range.to_vk(),
         };
         GpuImageView::create(
             self.vk_logical_device(),
@@ -1529,7 +1527,7 @@ impl Gpu {
                     buffer_row_length: 0,
                     buffer_image_height: 0,
                     image_subresource: ImageSubresourceLayers {
-                        aspect_mask: ImageAspectFlags::COLOR,
+                        aspect_mask: ImageAspectFlags::COLOR.to_vk(),
                         mip_level: 0,
                         layer_count: 1,
                         base_array_layer: 0,

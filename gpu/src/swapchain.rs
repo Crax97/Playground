@@ -5,11 +5,10 @@ use ash::{
     extensions::khr::Surface,
     prelude::VkResult,
     vk::{
-        self, ComponentMapping, ComponentSwizzle, CompositeAlphaFlagsKHR, Extent2D, Format,
-        ImageAspectFlags, ImageSubresourceRange, ImageUsageFlags, ImageViewCreateFlags,
-        ImageViewType, PresentInfoKHR, PresentModeKHR, SemaphoreCreateFlags, SemaphoreCreateInfo,
-        SharingMode, StructureType, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR,
-        SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
+        self, ComponentMapping, ComponentSwizzle, CompositeAlphaFlagsKHR, Format, ImageUsageFlags,
+        ImageViewCreateFlags, ImageViewType, PresentInfoKHR, PresentModeKHR, SemaphoreCreateFlags,
+        SemaphoreCreateInfo, SharingMode, StructureType, SurfaceCapabilitiesKHR, SurfaceFormatKHR,
+        SurfaceKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
     },
     Device,
 };
@@ -19,7 +18,10 @@ use raw_window_handle::{
 };
 use winit::window::Window;
 
-use crate::{FenceCreateFlags, FenceCreateInfo, Gpu, GpuImage, GpuImageView};
+use crate::{
+    Extent2D, FenceCreateFlags, FenceCreateInfo, Gpu, GpuImage, GpuImageView, ImageAspectFlags,
+    ImageSubresourceRange, ToVk,
+};
 
 use super::{GPUFence, GPUSemaphore, GpuState};
 
@@ -306,7 +308,7 @@ impl Swapchain {
             min_image_count: self.swapchain_image_count.get(),
             image_format: self.present_format.format,
             image_color_space: self.present_format.color_space,
-            image_extent: self.present_extent,
+            image_extent: self.present_extent.to_vk(),
             image_array_layers: 1,
             image_usage: ImageUsageFlags::COLOR_ATTACHMENT,
             image_sharing_mode: SharingMode::EXCLUSIVE,
@@ -441,7 +443,8 @@ impl Swapchain {
                     level_count: 1,
                     base_array_layer: 0,
                     layer_count: 1,
-                },
+                }
+                .to_vk(),
             };
             self.current_swapchain_image_views[i] = MaybeUninit::new(GpuImageView::create(
                 self.state.logical_device.clone(),
