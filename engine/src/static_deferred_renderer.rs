@@ -391,7 +391,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let collected_active_lights: Vec<GpuLightInfo> = scene
             .all_enabled_lights()
             .enumerate()
-            .map(|(i, l)| {
+            .map(|(_, l)| {
                 let mut light: GpuLightInfo = l.into();
                 if l.shadow_setup.is_some() {
                     light.ty_shadowcaster[1] = shadow_caster_idx;

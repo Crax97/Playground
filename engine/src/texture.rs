@@ -1,13 +1,11 @@
 use ash::{
     prelude::VkResult,
-    vk::{
-        self, CompareOp, ComponentMapping, Format, ImageUsageFlags, ImageViewType,
-        SamplerMipmapMode, StructureType,
-    },
+    vk::{ComponentMapping, ImageViewType},
 };
 use gpu::{
     Filter, Gpu, GpuImage, GpuImageView, GpuSampler, ImageAspectFlags, ImageCreateInfo,
-    ImageSubresourceRange, MemoryDomain, SamplerAddressMode, SamplerCreateInfo,
+    ImageFormat, ImageSubresourceRange, ImageUsageFlags, MemoryDomain, SamplerAddressMode,
+    SamplerCreateInfo,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 
@@ -52,7 +50,7 @@ impl Texture {
                 label,
                 width,
                 height,
-                format: vk::Format::R8G8B8A8_UNORM,
+                format: ImageFormat::Rgba8,
                 usage: ImageUsageFlags::TRANSFER_DST | ImageUsageFlags::SAMPLED,
             },
             MemoryDomain::DeviceLocal,
@@ -62,7 +60,7 @@ impl Texture {
         let rgba_view = gpu.create_image_view(&gpu::ImageViewCreateInfo {
             image: &image,
             view_type: ImageViewType::TYPE_2D,
-            format: Format::R8G8B8A8_UNORM,
+            format: ImageFormat::Rgba8,
             components: ComponentMapping::default(),
             subresource_range: ImageSubresourceRange {
                 aspect_mask: ImageAspectFlags::COLOR,

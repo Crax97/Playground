@@ -1,5 +1,5 @@
 ﻿use crate::utils;
-use ash::vk::{ComponentMapping, ImageUsageFlags, ImageViewType};
+use ash::vk::{ComponentMapping, ImageViewType};
 use engine::{
     ImageResource, MasterMaterial, MaterialDescription, MaterialDomain, MaterialInstance,
     MaterialInstanceDescription, MaterialParameterOffsetSize, Mesh, MeshCreateInfo,
@@ -9,8 +9,8 @@ use engine::{
 use gltf::image::Data;
 use gltf::Document;
 use gpu::{
-    Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageSubresourceRange, ImageViewCreateInfo,
-    MemoryDomain, SamplerAddressMode, SamplerCreateInfo, ToVk,
+    Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageSubresourceRange, ImageUsageFlags,
+    ImageViewCreateInfo, MemoryDomain, SamplerAddressMode, SamplerCreateInfo,
 };
 use nalgebra::{vector, Matrix4, Quaternion, UnitQuaternion, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -242,10 +242,10 @@ impl GltfLoader {
         let mut allocated_images = vec![];
         let mut allocated_image_views = vec![];
         for (index, gltf_image) in images.iter_mut().enumerate() {
-            let vk_format = match gltf_image.format {
-                gltf::image::Format::R8G8B8A8 => gpu::ImageFormat::Rgba8.to_vk(),
-                gltf::image::Format::R8G8B8 => gpu::ImageFormat::Rgb8.to_vk(),
-                gltf::image::Format::R32G32B32A32FLOAT => gpu::ImageFormat::RgbaFloat.to_vk(),
+            let format = match gltf_image.format {
+                gltf::image::Format::R8G8B8A8 => gpu::ImageFormat::Rgba8,
+                gltf::image::Format::R8G8B8 => gpu::ImageFormat::Rgb8,
+                gltf::image::Format::R32G32B32A32FLOAT => gpu::ImageFormat::RgbaFloat,
                 f => panic!("Unsupported format! {:?}", f),
             };
             let label = format!("glTF Image #{}", index);
@@ -253,7 +253,7 @@ impl GltfLoader {
                 label: Some(&label),
                 width: gltf_image.width,
                 height: gltf_image.height,
-                format: vk_format,
+                format,
                 usage: ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST,
             };
             let gpu_image = gpu.create_image(
@@ -265,7 +265,7 @@ impl GltfLoader {
             let gpu_image_view = gpu.create_image_view(&ImageViewCreateInfo {
                 image: &gpu_image,
                 view_type: ImageViewType::TYPE_2D,
-                format: vk_format,
+                format,
                 components: ComponentMapping::default(),
                 subresource_range: ImageSubresourceRange {
                     aspect_mask: ImageAspectFlags::COLOR,

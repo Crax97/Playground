@@ -38,7 +38,8 @@ use winit::window::Window;
 use crate::{
     get_allocation_callbacks, Extent2D, GPUFence, GpuFramebuffer, GpuImageView, GpuShaderModule,
     ImageAspectFlags, ImageFormat, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
-    PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPass, SamplerCreateInfo, ToVk,
+    ImageUsageFlags, PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPass,
+    SamplerCreateInfo, ToVk,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -384,7 +385,7 @@ impl Gpu {
             dynamic_rendering,
         });
 
-        let mut thread_local_state = GpuThreadLocalState::new(state.clone())?;
+        let thread_local_state = GpuThreadLocalState::new(state.clone())?;
 
         let staging_buffer = create_staging_buffer(&state)?;
         Ok(Gpu {
@@ -992,14 +993,14 @@ pub struct ImageCreateInfo<'a> {
     pub label: Option<&'a str>,
     pub width: u32,
     pub height: u32,
-    pub format: vk::Format,
-    pub usage: vk::ImageUsageFlags,
+    pub format: ImageFormat,
+    pub usage: ImageUsageFlags,
 }
 
 pub struct ImageViewCreateInfo<'a> {
     pub image: &'a GpuImage,
     pub view_type: ImageViewType,
-    pub format: vk::Format,
+    pub format: ImageFormat,
     pub components: vk::ComponentMapping,
     pub subresource_range: ImageSubresourceRange,
 }
@@ -1191,8 +1192,8 @@ impl Gpu {
         data: Option<&[u8]>,
     ) -> VkResult<GpuImage> {
         let mut format = create_info.format;
-        if format == ImageFormat::Rgb8.to_vk() && !self.state.features.supports_rgb_images {
-            format = ImageFormat::Rgba8.to_vk();
+        if format == ImageFormat::Rgb8 && !self.state.features.supports_rgb_images {
+            format = ImageFormat::Rgba8;
         }
 
         let image = unsafe {
@@ -1201,7 +1202,7 @@ impl Gpu {
                 p_next: std::ptr::null(),
                 flags: ImageCreateFlags::empty(),
                 image_type: ImageType::TYPE_2D,
-                format,
+                format: format.to_vk(),
                 extent: Extent3D {
                     width: create_info.width,
                     height: create_info.height,
@@ -1215,7 +1216,7 @@ impl Gpu {
                 } else {
                     ImageTiling::OPTIMAL
                 },
-                usage: create_info.usage,
+                usage: create_info.usage.to_vk(),
                 sharing_mode: SharingMode::CONCURRENT,
                 queue_family_index_count: self.state.queue_families.indices.len() as _,
                 p_queue_family_indices: self.state.queue_families.indices.as_ptr(),
@@ -1257,9 +1258,7 @@ impl Gpu {
         )?;
 
         if let Some(data) = data {
-            if create_info.format == ImageFormat::Rgb8.to_vk()
-                && !self.state.features.supports_rgb_images
-            {
+            if create_info.format == ImageFormat::Rgb8 && !self.state.features.supports_rgb_images {
                 let mut rgba_data = vec![];
                 let rgba_size = create_info.width * create_info.height * 4;
                 rgba_data.reserve(rgba_size as _);
@@ -1290,7 +1289,7 @@ impl Gpu {
                 "Creating an image view of an image with a different format: Requested {:?} but image uses {:?}! Using Image format",
             gpu_view_format,
             create_info.image.format);
-            create_info.image.format.to_vk()
+            create_info.image.format
         };
 
         let vk_create_info = vk::ImageViewCreateInfo {
@@ -1299,7 +1298,7 @@ impl Gpu {
             flags: ImageViewCreateFlags::empty(),
             image,
             view_type: create_info.view_type,
-            format,
+            format: format.to_vk(),
             components: create_info.components,
             subresource_range: create_info.subresource_range.to_vk(),
         };

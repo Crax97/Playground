@@ -3,9 +3,8 @@ use gpu::DescriptorType::{StorageBuffer, UniformBuffer};
 use gpu::{
     BindingElement, BindingType, BufferCreateInfo, BufferRange, BufferUsageFlags, CommandBuffer,
     CommandBufferSubmitInfo, ComputePipeline, ComputePipelineDescription, DescriptorInfo,
-    DescriptorSetInfo, GPUFence, GlobalBinding, Gpu, GpuConfiguration, GraphicsPipeline,
-    GraphicsPipelineDescription, MemoryDomain, PipelineStageFlags, QueueType,
-    ShaderModuleCreateInfo, ShaderStage,
+    DescriptorSetInfo, GPUFence, GlobalBinding, Gpu, GpuConfiguration, MemoryDomain,
+    PipelineStageFlags, QueueType, ShaderModuleCreateInfo, ShaderStage,
 };
 use std::mem::{size_of, size_of_val};
 

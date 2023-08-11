@@ -8,8 +8,8 @@ use std::{
 
 use ash::vk::{
     self, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
-    ColorComponentFlags, ComponentMapping, ImageUsageFlags, ImageViewType, PipelineBindPoint,
-    SampleCountFlags, SubpassDescriptionFlags,
+    ColorComponentFlags, ComponentMapping, ImageViewType, PipelineBindPoint, SampleCountFlags,
+    SubpassDescriptionFlags,
 };
 use gpu::{
     AccessFlags, BeginRenderPassInfo, BindingElement, BindingType, BlendState, BufferCreateInfo,
@@ -19,11 +19,11 @@ use gpu::{
     GlobalBinding, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView,
     GpuSampler, GpuShaderModule, GraphicsPipeline, GraphicsPipelineDescription, ImageAspectFlags,
     ImageCreateInfo, ImageFormat, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
-    ImageViewCreateInfo, LogicOp, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags,
-    PolygonMode, PrimitiveTopology, Rect2D, RenderPass, RenderPassAttachment, RenderPassCommand,
-    RenderPassDescription, SamplerAddressMode, SamplerCreateInfo, StencilAttachment, StencilLoadOp,
-    SubpassDependency, SubpassDescription, ToVk, TransitionInfo, VertexBindingDescription,
-    VertexStageInfo,
+    ImageUsageFlags, ImageViewCreateInfo, LogicOp, MemoryDomain, Offset2D, PipelineBarrierInfo,
+    PipelineStageFlags, PolygonMode, PrimitiveTopology, Rect2D, RenderPass, RenderPassAttachment,
+    RenderPassCommand, RenderPassDescription, SamplerAddressMode, SamplerCreateInfo,
+    StencilAttachment, StencilLoadOp, SubpassDependency, SubpassDescription, ToVk, TransitionInfo,
+    VertexBindingDescription, VertexStageInfo,
 };
 
 use ash::vk::PushConstantRange;
@@ -310,7 +310,7 @@ impl<'a> CreateFrom<'a, ImageDescription> for GraphImage {
                     label: None,
                     width: desc.width,
                     height: desc.height,
-                    format: desc.format.to_vk(),
+                    format: desc.format,
                     usage: desc.format.default_usage_flags()
                         | ImageUsageFlags::INPUT_ATTACHMENT
                         | ImageUsageFlags::SAMPLED,
@@ -419,7 +419,7 @@ impl<'a> CreateFrom<'a, GraphImageViewCreateInfo<'_>> for GraphImageView {
             .create_image_view(&ImageViewCreateInfo {
                 image: desc.image,
                 view_type: ImageViewType::TYPE_2D,
-                format: desc.desc.format.to_vk(),
+                format: desc.desc.format,
                 components: ComponentMapping::default(),
                 subresource_range: ImageSubresourceRange {
                     aspect_mask: desc.desc.format.aspect_mask(),
@@ -2311,7 +2311,7 @@ fn ensure_graph_allocated_samplers_exists(
                 AllocationType::Buffer { .. } => panic!("A buffer cannot have a sampler! Bug?"),
             };
 
-            let sampler_description = resource_allocator.samplers.get(
+            let _ = resource_allocator.samplers.get(
                 ctx,
                 &desc.sampler_state.unwrap_or_default(),
                 writes,

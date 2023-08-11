@@ -3,8 +3,7 @@ use std::{cell::RefCell, ops::Deref, sync::Arc};
 use super::{allocator::GpuAllocator, gpu::Gpu};
 use crate::{Extent2D, Filter, Offset2D, Rect2D, SamplerAddressMode, SamplerCreateInfo};
 use ash::vk::{
-    BufferUsageFlags as VkBufferUsageFlags, ImageUsageFlags, SamplerCreateFlags, SamplerMipmapMode,
-    StructureType,
+    BufferUsageFlags as VkBufferUsageFlags, SamplerCreateFlags, SamplerMipmapMode, StructureType,
 };
 use ash::{
     prelude::*,
@@ -263,6 +262,29 @@ pub struct BufferUsageFlags : u32 {
     }
 }
 
+bitflags! {
+#[repr(transparent)]
+#[derive(Default, Copy, Clone, Debug, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct ImageUsageFlags : u32 {
+        #[doc = "Can be used as a source of transfer operations"]
+        const TRANSFER_SRC = 0b1;
+        #[doc = "Can be used as a destination of transfer operations"]
+        const TRANSFER_DST = 0b10;
+        #[doc = "Can be sampled from (SAMPLED_IMAGE and COMBINED_IMAGE_SAMPLER descriptor types)"]
+        const SAMPLED = 0b100;
+        #[doc = "Can be used as storage image (STORAGE_IMAGE descriptor type)"]
+        const STORAGE = 0b1000;
+        #[doc = "Can be used as framebuffer color attachment"]
+        const COLOR_ATTACHMENT = 0b1_0000;
+        #[doc = "Can be used as framebuffer depth/stencil attachment"]
+        const DEPTH_STENCIL_ATTACHMENT = 0b10_0000;
+        #[doc = "Image data not needed outside of rendering"]
+        const TRANSIENT_ATTACHMENT = 0b100_0000;
+        #[doc = "Can be used as framebuffer input attachment"]
+        const INPUT_ATTACHMENT = 0b1000_0000;
+    }
+}
+
 impl ToVk for ImageAspectFlags {
     type Inner = vk::ImageAspectFlags;
 
@@ -481,6 +503,44 @@ impl ToVk for PipelineStageFlags {
         case!(self, inner, Self::HOST, Self::Inner::HOST);
         case!(self, inner, Self::ALL_GRAPHICS, Self::Inner::ALL_GRAPHICS);
         case!(self, inner, Self::ALL_COMMANDS, Self::Inner::ALL_COMMANDS);
+
+        inner
+    }
+}
+
+impl ToVk for ImageUsageFlags {
+    type Inner = vk::ImageUsageFlags;
+
+    fn to_vk(&self) -> Self::Inner {
+        let mut inner = Self::Inner::empty();
+
+        case!(self, inner, Self::TRANSFER_SRC, Self::Inner::TRANSFER_SRC);
+        case!(self, inner, Self::TRANSFER_DST, Self::Inner::TRANSFER_DST);
+        case!(self, inner, Self::SAMPLED, Self::Inner::SAMPLED);
+        case!(
+            self,
+            inner,
+            Self::COLOR_ATTACHMENT,
+            Self::Inner::COLOR_ATTACHMENT
+        );
+        case!(
+            self,
+            inner,
+            Self::DEPTH_STENCIL_ATTACHMENT,
+            Self::Inner::DEPTH_STENCIL_ATTACHMENT
+        );
+        case!(
+            self,
+            inner,
+            Self::TRANSIENT_ATTACHMENT,
+            Self::Inner::TRANSIENT_ATTACHMENT
+        );
+        case!(
+            self,
+            inner,
+            Self::INPUT_ATTACHMENT,
+            Self::Inner::INPUT_ATTACHMENT
+        );
 
         inner
     }
