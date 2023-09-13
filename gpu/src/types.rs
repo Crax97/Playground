@@ -171,6 +171,56 @@ impl From<vk::ImageViewType> for ImageViewType {
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum ComponentSwizzle {
+    #[default]
+    Identity,
+    Zero,
+    One,
+    R,
+    G,
+    B,
+    A,
+}
+
+
+impl ToVk for ComponentSwizzle {
+    type Inner = vk::ComponentSwizzle;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            ComponentSwizzle::Identity => Self::Inner::IDENTITY,
+            ComponentSwizzle::Zero => Self::Inner::ZERO,
+            ComponentSwizzle::One => Self::Inner::ONE,
+            ComponentSwizzle::R => Self::Inner::R,
+            ComponentSwizzle::G => Self::Inner::G,
+            ComponentSwizzle::B => Self::Inner::B,
+            ComponentSwizzle::A => Self::Inner::A,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct ComponentMapping {
+    pub r: ComponentSwizzle,
+    pub g: ComponentSwizzle,
+    pub b: ComponentSwizzle,
+    pub a: ComponentSwizzle,
+}
+
+impl ToVk for ComponentMapping {
+    type Inner = vk::ComponentMapping;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            r: self.r.to_vk(),
+            g: self.g.to_vk(),
+            b: self.b.to_vk(),
+            a: self.a.to_vk(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum CompareOp {
     #[default]
     Always,

@@ -39,7 +39,7 @@ use crate::{
     get_allocation_callbacks, Extent2D, GPUFence, GpuFramebuffer, GpuImageView, GpuShaderModule,
     ImageAspectFlags, ImageFormat, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
     ImageUsageFlags, PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPass,
-    SamplerCreateInfo, ToVk, ImageViewType,
+    SamplerCreateInfo, ToVk, ImageViewType, ComponentMapping
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -1001,7 +1001,7 @@ pub struct ImageViewCreateInfo<'a> {
     pub image: &'a GpuImage,
     pub view_type: ImageViewType,
     pub format: ImageFormat,
-    pub components: vk::ComponentMapping,
+    pub components: ComponentMapping,
     pub subresource_range: ImageSubresourceRange,
 }
 pub struct BufferCreateInfo<'a> {
@@ -1292,6 +1292,7 @@ impl Gpu {
             create_info.image.format
         };
 
+        // TODO: implement ToVk for ImageViewCreateInfo
         let vk_create_info = vk::ImageViewCreateInfo {
             s_type: StructureType::IMAGE_VIEW_CREATE_INFO,
             p_next: std::ptr::null(),
@@ -1299,7 +1300,7 @@ impl Gpu {
             image,
             view_type: create_info.view_type.to_vk(),
             format: format.to_vk(),
-            components: create_info.components,
+            components: create_info.components.to_vk(),
             subresource_range: create_info.subresource_range.to_vk(),
         };
         GpuImageView::create(

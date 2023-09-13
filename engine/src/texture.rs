@@ -1,11 +1,8 @@
-use ash::{
-    prelude::VkResult,
-    vk::ComponentMapping,
-};
+use ash::prelude::VkResult;
 use gpu::{
     Filter, Gpu, GpuImage, GpuImageView, GpuSampler, ImageAspectFlags, ImageCreateInfo,
     ImageFormat, ImageSubresourceRange, ImageUsageFlags, MemoryDomain, SamplerAddressMode,
-    SamplerCreateInfo, ImageViewType
+    SamplerCreateInfo, ImageViewType, ComponentMapping
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 

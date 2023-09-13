@@ -8,7 +8,7 @@ use std::{
 
 use ash::vk::{
     self, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
-    ColorComponentFlags, ComponentMapping, PipelineBindPoint, SampleCountFlags,
+    ColorComponentFlags, PipelineBindPoint, SampleCountFlags,
     SubpassDescriptionFlags,
 };
 use gpu::{
@@ -23,7 +23,7 @@ use gpu::{
     PipelineStageFlags, PolygonMode, PrimitiveTopology, Rect2D, RenderPass, RenderPassAttachment,
     RenderPassCommand, RenderPassDescription, SamplerAddressMode, SamplerCreateInfo,
     StencilAttachment, StencilLoadOp, SubpassDependency, SubpassDescription, ToVk, TransitionInfo,
-    VertexBindingDescription, VertexStageInfo, ImageViewType
+    VertexBindingDescription, VertexStageInfo, ImageViewType, ComponentMapping, 
 };
 
 use ash::vk::PushConstantRange;

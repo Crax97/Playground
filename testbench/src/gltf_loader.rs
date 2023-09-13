@@ -1,5 +1,4 @@
 ﻿use crate::utils;
-use ash::vk::ComponentMapping;
 use engine::{
     ImageResource, MasterMaterial, MaterialDescription, MaterialDomain, MaterialInstance,
     MaterialInstanceDescription, MaterialParameterOffsetSize, Mesh, MeshCreateInfo,
@@ -10,7 +9,8 @@ use gltf::image::Data;
 use gltf::Document;
 use gpu::{
     Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageSubresourceRange, ImageUsageFlags,
-    ImageViewCreateInfo, MemoryDomain, SamplerAddressMode, SamplerCreateInfo, ImageViewType
+    ImageViewCreateInfo, MemoryDomain, SamplerAddressMode, SamplerCreateInfo, ImageViewType, ComponentMapping
+
 };
 use nalgebra::{vector, Matrix4, Quaternion, UnitQuaternion, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
