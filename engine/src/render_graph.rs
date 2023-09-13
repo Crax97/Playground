@@ -8,7 +8,7 @@ use std::{
 
 use ash::vk::{
     self, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
-    ColorComponentFlags, ComponentMapping, ImageViewType, PipelineBindPoint, SampleCountFlags,
+    ColorComponentFlags, ComponentMapping, PipelineBindPoint, SampleCountFlags,
     SubpassDescriptionFlags,
 };
 use gpu::{
@@ -23,7 +23,7 @@ use gpu::{
     PipelineStageFlags, PolygonMode, PrimitiveTopology, Rect2D, RenderPass, RenderPassAttachment,
     RenderPassCommand, RenderPassDescription, SamplerAddressMode, SamplerCreateInfo,
     StencilAttachment, StencilLoadOp, SubpassDependency, SubpassDescription, ToVk, TransitionInfo,
-    VertexBindingDescription, VertexStageInfo,
+    VertexBindingDescription, VertexStageInfo, ImageViewType
 };
 
 use ash::vk::PushConstantRange;
@@ -418,7 +418,7 @@ impl<'a> CreateFrom<'a, GraphImageViewCreateInfo<'_>> for GraphImageView {
         let view = gpu
             .create_image_view(&ImageViewCreateInfo {
                 image: desc.image,
-                view_type: ImageViewType::TYPE_2D,
+                view_type: ImageViewType::Type2D,
                 format: desc.desc.format,
                 components: ComponentMapping::default(),
                 subresource_range: ImageSubresourceRange {

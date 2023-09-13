@@ -8,8 +8,8 @@
             "type": "lldb",
             "request": "launch",
             "name": "Launch Planes",
-            "program": "${workspaceFolder}/target/debug/planes.exe",
-            "preLaunchTask": "build-debug",
+            "program": "${workspaceFolder}/target/debug/planes",
+//            "preLaunchTask": "build-debug",
             "args": [],
             "cwd": "${workspaceFolder}",
             "env": {
@@ -21,8 +21,8 @@
             "type": "lldb",
             "request": "launch",
             "name": "Launch GLTF Viewer debug",
-            "program": "${workspaceFolder}/target/debug/gltf_viewer.exe",
-            "preLaunchTask": "build-debug",
+            "program": "${workspaceFolder}/target/debug/gltf_viewer",
+ //           "preLaunchTask": "build-debug",
             "args": [],
             "cwd": "${workspaceFolder}",
             "env": {
@@ -34,8 +34,8 @@
             "type": "lldb",
             "request": "launch",
             "name": "Launch GLTF Viewer release",
-            "program": "${workspaceFolder}/target/release/gltf_viewer.exe",
-            "preLaunchTask": "build-release",
+            "program": "${workspaceFolder}/target/release/gltf_viewer",
+  //          "preLaunchTask": "build-release",
             "args": [],
             "cwd": "${workspaceFolder}",
             "env": {

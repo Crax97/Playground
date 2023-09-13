@@ -1,16 +1,16 @@
 ﻿use crate::utils;
-use ash::vk::{ComponentMapping, ImageViewType};
+use ash::vk::ComponentMapping;
 use engine::{
     ImageResource, MasterMaterial, MaterialDescription, MaterialDomain, MaterialInstance,
     MaterialInstanceDescription, MaterialParameterOffsetSize, Mesh, MeshCreateInfo,
     MeshPrimitiveCreateInfo, RenderingPipeline, SamplerResource, Scene, ScenePrimitive, Texture,
-    TextureImageView, TextureInput,
+    TextureImageView, TextureInput, 
 };
 use gltf::image::Data;
 use gltf::Document;
 use gpu::{
     Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageSubresourceRange, ImageUsageFlags,
-    ImageViewCreateInfo, MemoryDomain, SamplerAddressMode, SamplerCreateInfo,
+    ImageViewCreateInfo, MemoryDomain, SamplerAddressMode, SamplerCreateInfo, ImageViewType
 };
 use nalgebra::{vector, Matrix4, Quaternion, UnitQuaternion, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -264,7 +264,7 @@ impl GltfLoader {
 
             let gpu_image_view = gpu.create_image_view(&ImageViewCreateInfo {
                 image: &gpu_image,
-                view_type: ImageViewType::TYPE_2D,
+                view_type: ImageViewType::Type2D,
                 format,
                 components: ComponentMapping::default(),
                 subresource_range: ImageSubresourceRange {

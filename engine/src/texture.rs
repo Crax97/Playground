@@ -1,11 +1,11 @@
 use ash::{
     prelude::VkResult,
-    vk::{ComponentMapping, ImageViewType},
+    vk::ComponentMapping,
 };
 use gpu::{
     Filter, Gpu, GpuImage, GpuImageView, GpuSampler, ImageAspectFlags, ImageCreateInfo,
     ImageFormat, ImageSubresourceRange, ImageUsageFlags, MemoryDomain, SamplerAddressMode,
-    SamplerCreateInfo,
+    SamplerCreateInfo, ImageViewType
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 
@@ -59,7 +59,7 @@ impl Texture {
 
         let rgba_view = gpu.create_image_view(&gpu::ImageViewCreateInfo {
             image: &image,
-            view_type: ImageViewType::TYPE_2D,
+            view_type: ImageViewType::Type2D,
             format: ImageFormat::Rgba8,
             components: ComponentMapping::default(),
             subresource_range: ImageSubresourceRange {

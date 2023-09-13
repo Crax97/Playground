@@ -21,7 +21,7 @@ use ash::{
         DescriptorImageInfo, DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags,
         DeviceQueueCreateInfo, Extent3D, Fence, FormatFeatureFlags, FramebufferCreateFlags, Handle,
         ImageCreateFlags, ImageSubresourceLayers, ImageTiling, ImageType, ImageViewCreateFlags,
-        ImageViewType, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags,
+        InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags,
         Offset3D, PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties,
         PhysicalDeviceType, PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo,
         Queue, QueueFlags, SampleCountFlags, ShaderModuleCreateFlags, SharingMode, StructureType,
@@ -39,7 +39,7 @@ use crate::{
     get_allocation_callbacks, Extent2D, GPUFence, GpuFramebuffer, GpuImageView, GpuShaderModule,
     ImageAspectFlags, ImageFormat, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
     ImageUsageFlags, PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPass,
-    SamplerCreateInfo, ToVk,
+    SamplerCreateInfo, ToVk, ImageViewType,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -1297,7 +1297,7 @@ impl Gpu {
             p_next: std::ptr::null(),
             flags: ImageViewCreateFlags::empty(),
             image,
-            view_type: create_info.view_type,
+            view_type: create_info.view_type.to_vk(),
             format: format.to_vk(),
             components: create_info.components,
             subresource_range: create_info.subresource_range.to_vk(),

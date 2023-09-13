@@ -128,6 +128,48 @@ impl ImageFormat {
     }
 }
 
+#[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ImageViewType {
+   Type1D,
+   Type2D,
+   Type3D,
+   Cube,
+   Type1DArray,
+   Type2DArray,
+   TypeCubeArray,
+}
+
+impl ToVk for ImageViewType {
+    type Inner = vk::ImageViewType;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            ImageViewType::Type1D => Self::Inner::TYPE_1D,
+            ImageViewType::Type2D => Self::Inner::TYPE_2D,
+            ImageViewType::Type3D => Self::Inner::TYPE_3D,
+            ImageViewType::Cube => Self::Inner::CUBE,
+            ImageViewType::Type1DArray => Self::Inner::TYPE_1D_ARRAY,
+            ImageViewType::Type2DArray => Self::Inner::TYPE_2D_ARRAY,
+            ImageViewType::TypeCubeArray => Self::Inner::CUBE_ARRAY,
+        }
+    }
+}
+
+impl From<vk::ImageViewType> for ImageViewType {
+    fn from(value: vk::ImageViewType) -> Self {
+        match value {
+            vk::ImageViewType::TYPE_1D => ImageViewType::Type1D,
+            vk::ImageViewType::TYPE_2D => ImageViewType::Type2D,
+            vk::ImageViewType::TYPE_3D => ImageViewType::Type3D,
+            vk::ImageViewType::CUBE => ImageViewType::Cube,
+            vk::ImageViewType::TYPE_1D_ARRAY => ImageViewType::Type1DArray,
+            vk::ImageViewType::TYPE_2D_ARRAY => ImageViewType::Type2DArray,
+            vk::ImageViewType::CUBE_ARRAY => ImageViewType::TypeCubeArray,
+            _ => unreachable!()
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum CompareOp {
     #[default]
