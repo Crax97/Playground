@@ -23,10 +23,9 @@ use gpu::{
     PipelineStageFlags, PolygonMode, PrimitiveTopology, Rect2D, RenderPass, RenderPassAttachment,
     RenderPassCommand, RenderPassDescription, SamplerAddressMode, SamplerCreateInfo,
     StencilAttachment, StencilLoadOp, SubpassDependency, SubpassDescription, ToVk, TransitionInfo,
-    VertexBindingDescription, VertexStageInfo, ImageViewType, ComponentMapping, 
+    VertexBindingDescription, VertexStageInfo, ImageViewType, ComponentMapping, PushConstantRange
 };
 
-use ash::vk::PushConstantRange;
 use indexmap::IndexSet;
 use log::trace;
 
@@ -1087,7 +1086,7 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
                 AllocationType::Buffer(d) => d.ty.into(),
             },
             index: idx as _,
-            stage: gpu::ShaderStage::VertexFragment,
+            stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
         });
     }
 
@@ -2449,7 +2448,7 @@ fn resolve_input_descriptor_set<'a>(
                         image_view: view,
                         image_layout: ImageLayout::ShaderReadOnly,
                     }),
-                    binding_stage: gpu::ShaderStage::VertexFragment,
+                    binding_stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
                 })
             }
             AllocationType::Buffer(desc) => {
@@ -2471,7 +2470,7 @@ fn resolve_input_descriptor_set<'a>(
                     } else {
                         gpu::DescriptorType::StorageBuffer(range)
                     },
-                    binding_stage: gpu::ShaderStage::VertexFragment,
+                    binding_stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
                 })
             }
         }

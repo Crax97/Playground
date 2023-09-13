@@ -1,11 +1,11 @@
 use engine_macros::glsl;
 use std::{collections::HashMap, mem::size_of};
 
-use ash::vk::{CompareOp, IndexType, PushConstantRange, ShaderStageFlags, StencilOpState};
+use ash::vk::{CompareOp, IndexType, StencilOpState};
 use gpu::{
     BindingType, BufferCreateInfo, BufferUsageFlags, CommandBuffer, DepthStencilState, Extent2D,
     FragmentStageInfo, Gpu, GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain,
-    ShaderModuleCreateInfo, Swapchain, ToVk, VertexStageInfo,
+    ShaderModuleCreateInfo, Swapchain, ToVk, VertexStageInfo, PushConstantRange, ShaderStage
 };
 use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -825,7 +825,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     },
                     logic_op: None,
                     push_constant_ranges: &[PushConstantRange {
-                        stage_flags: ShaderStageFlags::ALL,
+                        stage_flags: ShaderStage::ALL,
                         offset: 0,
                         size: std::mem::size_of::<FxaaShaderParams>() as _,
                     }],
@@ -1105,7 +1105,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             cull_mode: gpu::CullMode::Back,
             front_face: gpu::FrontFace::CounterClockWise,
             push_constant_ranges: &[PushConstantRange {
-                stage_flags: ShaderStageFlags::ALL,
+                stage_flags: ShaderStage::ALL,
                 offset: 0,
                 size: std::mem::size_of::<ObjectDrawInfo>() as u32,
             }],

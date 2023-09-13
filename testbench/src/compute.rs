@@ -56,12 +56,12 @@ fn main() -> anyhow::Result<()> {
                     BindingElement {
                         binding_type: BindingType::Uniform,
                         index: 0,
-                        stage: ShaderStage::Compute,
+                        stage: ShaderStage::COMPUTE,
                     },
                     BindingElement {
                         binding_type: BindingType::Storage,
                         index: 1,
-                        stage: ShaderStage::Compute,
+                        stage: ShaderStage::COMPUTE,
                     },
                 ],
             }],
@@ -98,7 +98,7 @@ fn main() -> anyhow::Result<()> {
                     offset: 0,
                     size: gpu::WHOLE_SIZE,
                 }),
-                binding_stage: ShaderStage::Compute,
+                binding_stage: ShaderStage::COMPUTE,
             },
             DescriptorInfo {
                 binding: 1,
@@ -107,7 +107,7 @@ fn main() -> anyhow::Result<()> {
                     offset: 0,
                     size: gpu::WHOLE_SIZE,
                 }),
-                binding_stage: ShaderStage::Compute,
+                binding_stage: ShaderStage::COMPUTE,
             },
         ],
     })?;

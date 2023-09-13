@@ -98,7 +98,7 @@ impl MaterialInstance {
                         image_view: &resource_map.get(&tex.image_view).view,
                         image_layout: ImageLayout::ShaderReadOnly,
                     }),
-                    binding_stage: gpu::ShaderStage::VertexFragment,
+                    binding_stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
                 }
             })
             .collect();
@@ -106,7 +106,7 @@ impl MaterialInstance {
         if let Some(buffer) = &param_buffer {
             descriptors.push(DescriptorInfo {
                 binding: descriptors.len() as _,
-                binding_stage: gpu::ShaderStage::VertexFragment,
+                binding_stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
                 element_type: DescriptorType::UniformBuffer(BufferRange {
                     handle: buffer,
                     offset: 0,

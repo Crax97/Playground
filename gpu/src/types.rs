@@ -46,6 +46,56 @@ bitflags! {
     }
 }
 
+bitflags! {
+    #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+    pub struct ShaderStage : u32{
+        const VERTEX = 0b1;
+        const TESSELLATION_CONTROL = 0b10;
+        const TESSELLATION_EVALUATION = 0b100;
+        const GEOMETRY = 0b1000;
+        const FRAGMENT = 0b1_0000;
+        const COMPUTE = 0b10_0000;
+        const ALL_GRAPHICS = 0x0000_001F;
+        const ALL = 0x7FFF_FFFF;
+    }
+}
+
+impl ToVk for ShaderStage {
+    type Inner = vk::ShaderStageFlags;
+
+    fn to_vk(&self) -> Self::Inner {
+        let mut result = Self::Inner::default(); 
+        case!(self, result, Self::VERTEX, Self::Inner::VERTEX); 
+        case!(self, result, Self::TESSELLATION_CONTROL, Self::Inner::TESSELLATION_CONTROL); 
+        case!(self, result, Self::TESSELLATION_EVALUATION, Self::Inner::TESSELLATION_EVALUATION); 
+        case!(self, result, Self::GEOMETRY, Self::Inner::GEOMETRY); 
+        case!(self, result, Self::FRAGMENT, Self::Inner::FRAGMENT); 
+        case!(self, result, Self::COMPUTE, Self::Inner::COMPUTE);
+        case!(self, result, Self::ALL_GRAPHICS, Self::Inner::ALL_GRAPHICS); 
+        case!(self, result, Self::ALL, Self::Inner::ALL); 
+        result
+    }
+}
+
+#[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PushConstantRange {
+    pub stage_flags: ShaderStage,
+    pub offset: u32,
+    pub size: u32,
+}
+
+impl ToVk for PushConstantRange {
+    type Inner = vk::PushConstantRange;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            stage_flags: self.stage_flags.to_vk(),
+            offset: self.offset,
+            size: self.size,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ImageFormat {
     Rgba8,

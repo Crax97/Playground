@@ -124,15 +124,6 @@ impl<'a> Debug for DescriptorType<'a> {
     }
 }
 
-#[derive(Clone, Copy, Hash, Debug, PartialEq, Ord, PartialOrd, Eq)]
-pub enum ShaderStage {
-    Vertex,
-    Fragment,
-    VertexFragment,
-    Compute,
-    All,
-}
-
 #[derive(Clone, Hash, Debug)]
 pub struct DescriptorInfo<'a> {
     pub binding: u32,

@@ -19,7 +19,7 @@ use ash::{
         PipelineShaderStageCreateFlags, PipelineShaderStageCreateInfo,
         PipelineTessellationStateCreateFlags, PipelineTessellationStateCreateInfo,
         PipelineVertexInputStateCreateFlags, PipelineVertexInputStateCreateInfo,
-        PipelineViewportStateCreateFlags, PipelineViewportStateCreateInfo, PushConstantRange,
+        PipelineViewportStateCreateFlags, PipelineViewportStateCreateInfo, 
         RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags,
         StructureType, SubpassDescriptionFlags, VertexInputAttributeDescription,
         VertexInputBindingDescription,
@@ -28,7 +28,7 @@ use ash::{
 
 use crate::{get_allocation_callbacks, AccessFlags, ImageFormat, PipelineStageFlags, ToVk};
 
-use super::{Gpu, GpuShaderModule, GpuState, ShaderStage};
+use super::{Gpu, GpuShaderModule, GpuState, ShaderStage, PushConstantRange};
 
 fn vk_bool(b: bool) -> u32 {
     if b {
@@ -70,15 +70,7 @@ impl From<&BindingElement> for DescriptorSetLayoutBinding {
                 BindingType::CombinedImageSampler => DescriptorType::COMBINED_IMAGE_SAMPLER,
             },
             descriptor_count: 1,
-            stage_flags: match b.stage {
-                ShaderStage::Vertex => ShaderStageFlags::VERTEX,
-                ShaderStage::Fragment => ShaderStageFlags::FRAGMENT,
-                ShaderStage::Compute => ShaderStageFlags::COMPUTE,
-                ShaderStage::VertexFragment => {
-                    ShaderStageFlags::VERTEX | ShaderStageFlags::FRAGMENT
-                }
-                ShaderStage::All => ShaderStageFlags::ALL_GRAPHICS,
-            },
+            stage_flags: b.stage.to_vk(),
             p_immutable_samplers: std::ptr::null(),
         }
     }
@@ -570,6 +562,7 @@ impl GraphicsPipeline {
             pipeline_description.get_input_bindings_and_attributes();
 
         let pipeline_layout = unsafe {
+            let vk_constant_ranges = pipeline_description.push_constant_ranges.iter().map(|r| r.to_vk()).collect::<Vec<_>>();
             let layout_infos = PipelineLayoutCreateInfo {
                 s_type: StructureType::PIPELINE_LAYOUT_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -577,7 +570,7 @@ impl GraphicsPipeline {
                 set_layout_count: descriptor_set_layouts.len() as _,
                 p_set_layouts: descriptor_set_layouts.as_ptr(),
                 push_constant_range_count: pipeline_description.push_constant_ranges.len() as _,
-                p_push_constant_ranges: pipeline_description.push_constant_ranges.as_ptr(),
+                p_push_constant_ranges: vk_constant_ranges.as_ptr(),
             };
             gpu.vk_logical_device()
                 .create_pipeline_layout(&layout_infos, None)?
@@ -834,6 +827,7 @@ impl ComputePipeline {
             flags: PipelineShaderStageCreateFlags::empty(),
         };
         let pipeline_layout = unsafe {
+            let vk_constant_ranges = description.push_constant_ranges.iter().map(|r| r.to_vk()).collect::<Vec<_>>();
             let layout_infos = PipelineLayoutCreateInfo {
                 s_type: StructureType::PIPELINE_LAYOUT_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -841,7 +835,7 @@ impl ComputePipeline {
                 set_layout_count: descriptor_set_layouts.len() as _,
                 p_set_layouts: descriptor_set_layouts.as_ptr(),
                 push_constant_range_count: description.push_constant_ranges.len() as _,
-                p_push_constant_ranges: description.push_constant_ranges.as_ptr(),
+                p_push_constant_ranges: vk_constant_ranges.as_ptr(),
             };
             gpu.vk_logical_device()
                 .create_pipeline_layout(&layout_infos, None)?

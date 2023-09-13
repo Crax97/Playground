@@ -9,11 +9,13 @@ use ash::{
     vk::{
         self, DescriptorPool, DescriptorPoolCreateFlags, DescriptorPoolCreateInfo,
         DescriptorPoolSize, DescriptorSetLayout, DescriptorSetLayoutBinding,
-        DescriptorSetLayoutCreateFlags, DescriptorType, ShaderStageFlags, StructureType,
+        DescriptorSetLayoutCreateFlags, DescriptorType, StructureType,
     },
     Device,
 };
 use log::trace;
+
+use crate::ToVk;
 
 use super::DescriptorSetInfo;
 
@@ -110,15 +112,7 @@ impl PooledDescriptorSetAllocator {
     ) -> VkResult<DescriptorSetLayout> {
         let mut descriptor_set_bindings = vec![];
         for descriptor_info in info.descriptors {
-            let stage_flags = match descriptor_info.binding_stage {
-                super::ShaderStage::Vertex => ShaderStageFlags::VERTEX,
-                super::ShaderStage::Fragment => ShaderStageFlags::FRAGMENT,
-                super::ShaderStage::Compute => ShaderStageFlags::COMPUTE,
-                crate::ShaderStage::VertexFragment => {
-                    ShaderStageFlags::VERTEX | ShaderStageFlags::FRAGMENT
-                }
-                crate::ShaderStage::All => ShaderStageFlags::ALL_GRAPHICS,
-            };
+            let stage_flags = descriptor_info.binding_stage.to_vk();
             let descriptor_type = match descriptor_info.element_type {
                 super::DescriptorType::UniformBuffer(_) => DescriptorType::UNIFORM_BUFFER,
                 super::DescriptorType::StorageBuffer(_) => DescriptorType::STORAGE_BUFFER,

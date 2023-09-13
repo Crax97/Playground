@@ -1,10 +1,10 @@
 use std::{collections::HashMap, hash::Hash, mem::size_of, num::NonZeroU32};
 
-use ash::vk::{self, CompareOp, PushConstantRange};
+use ash::vk::{self, CompareOp};
 use gpu::{
     BindingElement, BindingType, CullMode, DepthStencilState, FragmentStageInfo, FrontFace,
     GlobalBinding, Gpu, GraphicsPipeline, GraphicsPipelineDescription, LogicOp, PolygonMode,
-    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo,
+    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo, PushConstantRange, ToVk
 };
 use nalgebra::{Vector2, Vector3};
 use resource_map::Resource;
@@ -86,7 +86,7 @@ impl MasterMaterial {
             .map(|(i, d)| BindingElement {
                 binding_type: *d,
                 index: i as _,
-                stage: gpu::ShaderStage::VertexFragment,
+                stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
             })
             .collect();
         let mut user_elements: Vec<_> = description
@@ -96,14 +96,14 @@ impl MasterMaterial {
             .map(|(i, _)| BindingElement {
                 binding_type: BindingType::CombinedImageSampler,
                 index: i as _,
-                stage: gpu::ShaderStage::VertexFragment,
+                stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
             })
             .collect();
         if !description.material_parameters.is_empty() {
             user_elements.push(BindingElement {
                 binding_type: BindingType::Uniform,
                 index: user_elements.len() as _,
-                stage: gpu::ShaderStage::VertexFragment,
+                stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
             })
         }
 
