@@ -5,5 +5,9 @@
 
 /shaders
 
+.vscode
+.idea
+.vs
+
 pipeline_cache.pso
 imgui.ini
