@@ -6,6 +6,7 @@ mod pipeline;
 mod swapchain;
 mod types;
 
+pub use bitflags::bitflags;
 pub use crate::gpu::*;
 pub use allocator::*;
 pub use command_buffer::*;
@@ -49,6 +50,53 @@ pub enum Filter {
     #[default]
     Linear,
     Nearest,
+}
+
+#[derive(Default, Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum BlendMode {
+    #[default]
+    Zero,
+    One,
+    SrcColor,
+    OneMinusSrcColor,
+    DstColor,
+    OneMinusDstColor,
+    SrcAlpha,
+    OneMinusSrcAlpha,
+    DstAlpha,
+    OneMinusDstAlpha,
+    ConstantColor,
+    OneMinusConstantColor,
+    ConstantAlpha,
+    OneMinusConstantAlpha,
+    SrcAlphaSaturate,
+    Src1Color,
+    OneMinusSrc1Color,
+    Src1Alpha,
+    OneMinusSrc1Alpha,
+}
+
+#[derive(Default, Clone, Debug, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
+pub enum BlendOp {
+    #[default]
+    Add,
+    Subtract,
+    ReverseSubtract,
+    Min,
+    Max,
+}
+
+bitflags! {
+#[derive(Default, Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ColorComponentFlags : u32 {
+    const R = 0b1;
+    const G = 0b10;
+    const B = 0b100;
+    const A = 0b1000;
+}}
+
+impl ColorComponentFlags {
+    pub const RGBA : Self = Self::from_bits_truncate(Self::R.bits() | Self::G.bits() | Self::B.bits() | Self::A.bits());
 }
 
 #[derive(Default, Clone, Debug, Copy, PartialEq, PartialOrd)]

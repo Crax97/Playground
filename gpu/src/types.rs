@@ -1193,3 +1193,58 @@ impl ToVk for SamplerCreateInfo {
         }
     }
 }
+
+impl ToVk for super::BlendMode {
+    type Inner = vk::BlendFactor;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            Self::Zero => Self::Inner::ZERO,
+            Self::One => Self::Inner::ONE,
+            Self::SrcColor => Self::Inner::SRC_COLOR,
+            Self::OneMinusSrcColor => Self::Inner::ONE_MINUS_SRC_COLOR,
+            Self::DstColor => Self::Inner::DST_COLOR,
+            Self::OneMinusDstColor => Self::Inner::ONE_MINUS_DST_COLOR,
+            Self::SrcAlpha => Self::Inner::SRC_ALPHA,
+            Self::OneMinusSrcAlpha => Self::Inner::ONE_MINUS_SRC_ALPHA,
+            Self::DstAlpha => Self::Inner::DST_ALPHA,
+            Self::OneMinusDstAlpha => Self::Inner::ONE_MINUS_DST_ALPHA,
+            Self::ConstantColor => Self::Inner::CONSTANT_COLOR,
+            Self::OneMinusConstantColor => Self::Inner::ONE_MINUS_CONSTANT_COLOR,
+            Self::ConstantAlpha => Self::Inner::CONSTANT_ALPHA,
+            Self::OneMinusConstantAlpha => Self::Inner::ONE_MINUS_CONSTANT_ALPHA,
+            Self::SrcAlphaSaturate => Self::Inner::SRC_ALPHA_SATURATE,
+            Self::Src1Color => Self::Inner::SRC1_COLOR,
+            Self::OneMinusSrc1Color => Self::Inner::ONE_MINUS_SRC1_COLOR,
+            Self::Src1Alpha => Self::Inner::SRC1_ALPHA,
+            Self::OneMinusSrc1Alpha => Self::Inner::ONE_MINUS_SRC1_ALPHA,
+        }
+    }
+}
+
+impl ToVk for super::BlendOp {
+    type Inner = vk::BlendOp;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            Self::Add => Self::Inner::ADD,
+            Self::Subtract => Self::Inner::SUBTRACT,
+            Self::ReverseSubtract => Self::Inner::REVERSE_SUBTRACT,
+            Self::Min => Self::Inner::MIN,
+            Self::Max => Self::Inner::MAX,
+        }
+    }
+}
+
+impl ToVk for super::ColorComponentFlags {
+    type Inner = vk::ColorComponentFlags;
+
+    fn to_vk(&self) -> Self::Inner {
+        let mut res = vk::ColorComponentFlags::default();
+        case!(self, res, Self::R, Self::Inner::R);
+        case!(self, res, Self::G, Self::Inner::G);
+        case!(self, res, Self::B, Self::Inner::B);
+        case!(self, res, Self::A, Self::Inner::A);
+        res
+    }
+}

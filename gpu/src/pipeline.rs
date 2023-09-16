@@ -26,9 +26,10 @@ use ash::{
     },
 };
 
-use crate::{get_allocation_callbacks, AccessFlags, ImageFormat, PipelineStageFlags, ToVk, AttachmentStoreOp, ImageLayout, ColorLoadOp, StencilLoadOp};
+use crate::{get_allocation_callbacks, AccessFlags, ImageFormat, PipelineStageFlags, ToVk, AttachmentStoreOp, ImageLayout, 
+            ColorLoadOp, StencilLoadOp, BlendMode, BlendOp};
 
-use super::{Gpu, GpuShaderModule, GpuState, ShaderStage, PushConstantRange};
+use super::{Gpu, GpuShaderModule, GpuState, ShaderStage, PushConstantRange, ColorComponentFlags};
 
 fn vk_bool(b: bool) -> u32 {
     if b {
@@ -106,13 +107,13 @@ pub struct VertexStageInfo<'a> {
 #[derive(Clone, Copy, Debug, Default, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct BlendState {
     pub blend_enable: bool,
-    pub src_color_blend_factor: vk::BlendFactor,
-    pub dst_color_blend_factor: vk::BlendFactor,
-    pub color_blend_op: vk::BlendOp,
-    pub src_alpha_blend_factor: vk::BlendFactor,
-    pub dst_alpha_blend_factor: vk::BlendFactor,
-    pub alpha_blend_op: vk::BlendOp,
-    pub color_write_mask: vk::ColorComponentFlags,
+    pub src_color_blend_factor: BlendMode,
+    pub dst_color_blend_factor: BlendMode,
+    pub color_blend_op: BlendOp,
+    pub src_alpha_blend_factor: BlendMode,
+    pub dst_alpha_blend_factor: BlendMode,
+    pub alpha_blend_op: BlendOp,
+    pub color_write_mask: ColorComponentFlags,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -448,13 +449,13 @@ impl<'a> GraphicsPipelineDescription<'a> {
             for attachment in fs.color_attachments.iter() {
                 pipeline_color_blend_attachment_states.push(PipelineColorBlendAttachmentState {
                     blend_enable: vk_bool(attachment.blend_state.blend_enable),
-                    src_color_blend_factor: attachment.blend_state.src_color_blend_factor,
-                    dst_color_blend_factor: attachment.blend_state.dst_color_blend_factor,
-                    color_blend_op: attachment.blend_state.color_blend_op,
-                    src_alpha_blend_factor: attachment.blend_state.src_alpha_blend_factor,
-                    dst_alpha_blend_factor: attachment.blend_state.dst_alpha_blend_factor,
-                    alpha_blend_op: attachment.blend_state.alpha_blend_op,
-                    color_write_mask: attachment.blend_state.color_write_mask,
+                    src_color_blend_factor: attachment.blend_state.src_color_blend_factor.to_vk(),
+                    dst_color_blend_factor: attachment.blend_state.dst_color_blend_factor.to_vk(),
+                    color_blend_op: attachment.blend_state.color_blend_op.to_vk(),
+                    src_alpha_blend_factor: attachment.blend_state.src_alpha_blend_factor.to_vk(),
+                    dst_alpha_blend_factor: attachment.blend_state.dst_alpha_blend_factor.to_vk(),
+                    alpha_blend_op: attachment.blend_state.alpha_blend_op.to_vk(),
+                    color_write_mask: attachment.blend_state.color_write_mask.to_vk(),
                 })
             }
         }

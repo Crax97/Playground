@@ -6,7 +6,7 @@ use gpu::{
     BindingType, BufferCreateInfo, BufferUsageFlags, CommandBuffer, DepthStencilState, Extent2D,
     FragmentStageInfo, Gpu, GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain,
     ShaderModuleCreateInfo, Swapchain, ToVk, VertexStageInfo, PushConstantRange, ShaderStage,
-    AttachmentStoreOp, ColorLoadOp, StencilLoadOp, ImageLayout,
+    AttachmentStoreOp, ColorLoadOp, StencilLoadOp, ImageLayout, ColorComponentFlags,
 };
 use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -136,13 +136,11 @@ use crate::{
     Backbuffer, BufferDescription, BufferType, ClearValue, FragmentState, GpuRunner,
     GraphRunContext, Light, LightType, MaterialDescription, MaterialDomain, MaterialInstance,
     MeshPrimitive, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription,
-    RenderPassContext, RenderStage, RenderingPipeline, Scene,
+    RenderPassContext, RenderStage, RenderingPipeline, Scene, 
 };
 
-use ash::vk::{
-    BlendFactor, BlendOp, ColorComponentFlags, SampleCountFlags,
-};
-use gpu::{BlendState, RenderPassAttachment};
+use ash::vk::SampleCountFlags;
+use gpu::{BlendState, RenderPassAttachment, BlendOp, BlendMode,};
 
 struct FrameBuffers {
     camera_buffer: GpuBuffer,
@@ -627,12 +625,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .mark_external()
             .with_blend_state(BlendState {
                 blend_enable: false,
-                src_color_blend_factor: BlendFactor::ONE,
-                dst_color_blend_factor: BlendFactor::ZERO,
-                color_blend_op: BlendOp::ADD,
-                src_alpha_blend_factor: BlendFactor::ONE,
-                dst_alpha_blend_factor: BlendFactor::ZERO,
-                alpha_blend_op: BlendOp::ADD,
+                src_color_blend_factor: BlendMode::One,
+                dst_color_blend_factor: BlendMode::Zero,
+                color_blend_op: BlendOp::Add,
+                src_alpha_blend_factor: BlendMode::One,
+                dst_alpha_blend_factor: BlendMode::Zero,
+                alpha_blend_op: BlendOp::Add,
                 color_write_mask: ColorComponentFlags::RGBA,
             })
             .commit();
@@ -653,12 +651,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             ])
             .with_blend_state(BlendState {
                 blend_enable: false,
-                src_color_blend_factor: BlendFactor::ONE,
-                dst_color_blend_factor: BlendFactor::ZERO,
-                color_blend_op: BlendOp::ADD,
-                src_alpha_blend_factor: BlendFactor::ONE,
-                dst_alpha_blend_factor: BlendFactor::ZERO,
-                alpha_blend_op: BlendOp::ADD,
+                src_color_blend_factor: BlendMode::One,
+                dst_color_blend_factor: BlendMode::Zero,
+                color_blend_op: BlendOp::Add,
+                src_alpha_blend_factor: BlendMode::One,
+                dst_alpha_blend_factor: BlendMode::Zero,
+                alpha_blend_op: BlendOp::Add,
                 color_write_mask: ColorComponentFlags::RGBA,
             })
             .commit();
@@ -670,12 +668,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .writes_attachments(&[tonemap_output])
             .with_blend_state(BlendState {
                 blend_enable: false,
-                src_color_blend_factor: BlendFactor::ONE,
-                dst_color_blend_factor: BlendFactor::ZERO,
-                color_blend_op: BlendOp::ADD,
-                src_alpha_blend_factor: BlendFactor::ONE,
-                dst_alpha_blend_factor: BlendFactor::ZERO,
-                alpha_blend_op: BlendOp::ADD,
+                src_color_blend_factor: BlendMode::One,
+                dst_color_blend_factor: BlendMode::Zero,
+                color_blend_op: BlendOp::Add,
+                src_alpha_blend_factor: BlendMode::One,
+                dst_alpha_blend_factor: BlendMode::Zero,
+                alpha_blend_op: BlendOp::Add,
                 color_write_mask: ColorComponentFlags::RGBA,
             })
             .commit();
@@ -686,12 +684,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .writes_attachments(&[fxaa_output])
             .with_blend_state(BlendState {
                 blend_enable: false,
-                src_color_blend_factor: BlendFactor::ONE,
-                dst_color_blend_factor: BlendFactor::ZERO,
-                color_blend_op: BlendOp::ADD,
-                src_alpha_blend_factor: BlendFactor::ONE,
-                dst_alpha_blend_factor: BlendFactor::ZERO,
-                alpha_blend_op: BlendOp::ADD,
+                src_color_blend_factor: BlendMode::One,
+                dst_color_blend_factor: BlendMode::Zero,
+                color_blend_op: BlendOp::Add,
+                src_alpha_blend_factor: BlendMode::One,
+                dst_alpha_blend_factor: BlendMode::Zero,
+                alpha_blend_op: BlendOp::Add,
                 color_write_mask: ColorComponentFlags::RGBA,
             })
             .commit();
@@ -703,12 +701,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .writes_attachments(&[swapchain_image])
             .with_blend_state(BlendState {
                 blend_enable: false,
-                src_color_blend_factor: BlendFactor::ONE,
-                dst_color_blend_factor: BlendFactor::ZERO,
-                color_blend_op: BlendOp::ADD,
-                src_alpha_blend_factor: BlendFactor::ONE,
-                dst_alpha_blend_factor: BlendFactor::ZERO,
-                alpha_blend_op: BlendOp::ADD,
+                src_color_blend_factor: BlendMode::One,
+                dst_color_blend_factor: BlendMode::Zero,
+                color_blend_op: BlendOp::Add,
+                src_alpha_blend_factor: BlendMode::One,
+                dst_alpha_blend_factor: BlendMode::Zero,
+                alpha_blend_op: BlendOp::Add,
                 color_write_mask: ColorComponentFlags::RGBA,
             })
             .commit();
@@ -981,12 +979,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 final_layout: ImageLayout::ShaderReadOnly,
                 blend_state: BlendState {
                     blend_enable: true,
-                    src_color_blend_factor: BlendFactor::ONE,
-                    dst_color_blend_factor: BlendFactor::ZERO,
-                    color_blend_op: BlendOp::ADD,
-                    src_alpha_blend_factor: BlendFactor::ONE,
-                    dst_alpha_blend_factor: BlendFactor::ZERO,
-                    alpha_blend_op: BlendOp::ADD,
+                    src_color_blend_factor: BlendMode::One,
+                    dst_color_blend_factor: BlendMode::Zero,
+                    color_blend_op: BlendOp::Add,
+                    src_alpha_blend_factor: BlendMode::One,
+                    dst_alpha_blend_factor: BlendMode::Zero,
+                    alpha_blend_op: BlendOp::Add,
                     color_write_mask: ColorComponentFlags::RGBA,
                 },
             },
@@ -1002,12 +1000,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 final_layout: ImageLayout::ShaderReadOnly,
                 blend_state: BlendState {
                     blend_enable: true,
-                    src_color_blend_factor: BlendFactor::ONE,
-                    dst_color_blend_factor: BlendFactor::ZERO,
-                    color_blend_op: BlendOp::ADD,
-                    src_alpha_blend_factor: BlendFactor::ONE,
-                    dst_alpha_blend_factor: BlendFactor::ZERO,
-                    alpha_blend_op: BlendOp::ADD,
+                    src_color_blend_factor: BlendMode::One,
+                    dst_color_blend_factor: BlendMode::Zero,
+                    color_blend_op: BlendOp::Add,
+                    src_alpha_blend_factor: BlendMode::One,
+                    dst_alpha_blend_factor: BlendMode::Zero,
+                    alpha_blend_op: BlendOp::Add,
                     color_write_mask: ColorComponentFlags::RGBA,
                 },
             },
@@ -1023,12 +1021,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 final_layout: ImageLayout::ShaderReadOnly,
                 blend_state: BlendState {
                     blend_enable: true,
-                    src_color_blend_factor: BlendFactor::ONE,
-                    dst_color_blend_factor: BlendFactor::ZERO,
-                    color_blend_op: BlendOp::ADD,
-                    src_alpha_blend_factor: BlendFactor::ONE,
-                    dst_alpha_blend_factor: BlendFactor::ZERO,
-                    alpha_blend_op: BlendOp::ADD,
+                    src_color_blend_factor: BlendMode::One,
+                    dst_color_blend_factor: BlendMode::Zero,
+                    color_blend_op: BlendOp::Add,
+                    src_alpha_blend_factor: BlendMode::One,
+                    dst_alpha_blend_factor: BlendMode::Zero,
+                    alpha_blend_op: BlendOp::Add,
                     color_write_mask: ColorComponentFlags::RGBA,
                 },
             },
@@ -1044,12 +1042,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 final_layout: ImageLayout::ShaderReadOnly,
                 blend_state: BlendState {
                     blend_enable: true,
-                    src_color_blend_factor: BlendFactor::ONE,
-                    dst_color_blend_factor: BlendFactor::ZERO,
-                    color_blend_op: BlendOp::ADD,
-                    src_alpha_blend_factor: BlendFactor::ONE,
-                    dst_alpha_blend_factor: BlendFactor::ZERO,
-                    alpha_blend_op: BlendOp::ADD,
+                    src_color_blend_factor: BlendMode::One,
+                    dst_color_blend_factor: BlendMode::Zero,
+                    color_blend_op: BlendOp::Add,
+                    src_alpha_blend_factor: BlendMode::One,
+                    dst_alpha_blend_factor: BlendMode::Zero,
+                    alpha_blend_op: BlendOp::Add,
                     color_write_mask: ColorComponentFlags::RGBA,
                 },
             },
@@ -1065,12 +1063,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 final_layout: ImageLayout::ShaderReadOnly,
                 blend_state: BlendState {
                     blend_enable: true,
-                    src_color_blend_factor: BlendFactor::ONE,
-                    dst_color_blend_factor: BlendFactor::ZERO,
-                    color_blend_op: BlendOp::ADD,
-                    src_alpha_blend_factor: BlendFactor::ONE,
-                    dst_alpha_blend_factor: BlendFactor::ZERO,
-                    alpha_blend_op: BlendOp::ADD,
+                    src_color_blend_factor: BlendMode::One,
+                    dst_color_blend_factor: BlendMode::Zero,
+                    color_blend_op: BlendOp::Add,
+                    src_alpha_blend_factor: BlendMode::One,
+                    dst_alpha_blend_factor: BlendMode::Zero,
+                    alpha_blend_op: BlendOp::Add,
                     color_write_mask: ColorComponentFlags::RGBA,
                 },
             },

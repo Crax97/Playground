@@ -7,8 +7,7 @@ use std::{
 };
 
 use ash::vk::{
-    self, AttachmentReference, BlendFactor, BlendOp,
-    ColorComponentFlags, PipelineBindPoint, SampleCountFlags,
+    self, AttachmentReference, PipelineBindPoint, SampleCountFlags,
     SubpassDescriptionFlags,
 };
 use gpu::{
@@ -23,7 +22,7 @@ use gpu::{
     PipelineStageFlags, PolygonMode, PrimitiveTopology, Rect2D, RenderPass, RenderPassAttachment,
     RenderPassCommand, RenderPassDescription, SamplerAddressMode, SamplerCreateInfo,
     StencilAttachment, StencilLoadOp, SubpassDependency, SubpassDescription, ToVk, TransitionInfo,
-    VertexBindingDescription, VertexStageInfo, ImageViewType, ComponentMapping, PushConstantRange, AttachmentStoreOp
+    VertexBindingDescription, VertexStageInfo, ImageViewType, ComponentMapping, PushConstantRange, AttachmentStoreOp, BlendOp, BlendMode, ColorComponentFlags
 };
 
 use indexmap::IndexSet;
@@ -569,18 +568,19 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
                     }
                     _ => unreachable!(),
                 },
+
                 final_layout,
                 blend_state: if let Some(state) = create_info.pass_info.blend_state {
                     state
                 } else {
                     BlendState {
                         blend_enable: true,
-                        src_color_blend_factor: BlendFactor::ONE,
-                        dst_color_blend_factor: BlendFactor::ZERO,
-                        color_blend_op: BlendOp::ADD,
-                        src_alpha_blend_factor: BlendFactor::ONE,
-                        dst_alpha_blend_factor: BlendFactor::ZERO,
-                        alpha_blend_op: BlendOp::ADD,
+                        src_color_blend_factor: BlendMode::One,
+                        dst_color_blend_factor: BlendMode::Zero,
+                        color_blend_op: BlendOp::Add,
+                        src_alpha_blend_factor: BlendMode::One,
+                        dst_alpha_blend_factor: BlendMode::Zero,
+                        alpha_blend_op: BlendOp::Add,
                         color_write_mask: ColorComponentFlags::RGBA,
                     }
                 },
@@ -641,12 +641,12 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
                 } else {
                     BlendState {
                         blend_enable: true,
-                        src_color_blend_factor: BlendFactor::ONE,
-                        dst_color_blend_factor: BlendFactor::ZERO,
-                        color_blend_op: BlendOp::ADD,
-                        src_alpha_blend_factor: BlendFactor::ONE,
-                        dst_alpha_blend_factor: BlendFactor::ZERO,
-                        alpha_blend_op: BlendOp::ADD,
+                        src_color_blend_factor: BlendMode::One,
+                        dst_color_blend_factor: BlendMode::Zero,
+                        color_blend_op: BlendOp::Add,
+                        src_alpha_blend_factor: BlendMode::One,
+                        dst_alpha_blend_factor: BlendMode::Zero,
+                        alpha_blend_op: BlendOp::Add,
                         color_write_mask: ColorComponentFlags::RGBA,
                     }
                 },
