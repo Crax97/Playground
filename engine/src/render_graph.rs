@@ -7,7 +7,7 @@ use std::{
 };
 
 use ash::vk::{
-    self, AttachmentLoadOp, AttachmentReference, AttachmentStoreOp, BlendFactor, BlendOp,
+    self, AttachmentReference, BlendFactor, BlendOp,
     ColorComponentFlags, PipelineBindPoint, SampleCountFlags,
     SubpassDescriptionFlags,
 };
@@ -23,7 +23,7 @@ use gpu::{
     PipelineStageFlags, PolygonMode, PrimitiveTopology, Rect2D, RenderPass, RenderPassAttachment,
     RenderPassCommand, RenderPassDescription, SamplerAddressMode, SamplerCreateInfo,
     StencilAttachment, StencilLoadOp, SubpassDependency, SubpassDescription, ToVk, TransitionInfo,
-    VertexBindingDescription, VertexStageInfo, ImageViewType, ComponentMapping, PushConstantRange
+    VertexBindingDescription, VertexStageInfo, ImageViewType, ComponentMapping, PushConstantRange, AttachmentStoreOp
 };
 
 use indexmap::IndexSet;
@@ -550,16 +550,15 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
                 format: image_desc.format.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
                 load_op: match resource_usage.input {
-                    ResourceLayout::Unknown => AttachmentLoadOp::DONT_CARE,
-
-                    _ => AttachmentLoadOp::CLEAR,
+                    ResourceLayout::Unknown => ColorLoadOp::DontCare,
+                    _ => ColorLoadOp::Clear([0.0;4]),
                 },
                 store_op: match resource_usage.output {
-                    ResourceLayout::Unknown => AttachmentStoreOp::DONT_CARE,
-                    _ => AttachmentStoreOp::STORE,
+                    ResourceLayout::Unknown => AttachmentStoreOp::DontCare,
+                    _ => AttachmentStoreOp::Store,
                 },
-                stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                stencil_load_op: StencilLoadOp::DontCare,
+                stencil_store_op: AttachmentStoreOp::DontCare,
                 initial_layout: match resource_usage.input {
                     ResourceLayout::Unknown => ImageLayout::Undefined,
                     ResourceLayout::ShaderWrite => {
@@ -569,9 +568,8 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
                         image_desc.format.preferred_attachment_write_layout()
                     }
                     _ => unreachable!(),
-                }
-                .to_vk(),
-                final_layout: final_layout.to_vk(),
+                },
+                final_layout,
                 blend_state: if let Some(state) = create_info.pass_info.blend_state {
                     state
                 } else {
@@ -615,10 +613,10 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
             let attachment = RenderPassAttachment {
                 format: image_desc.format.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::LOAD,
-                store_op: AttachmentStoreOp::NONE,
-                stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: AttachmentStoreOp::DONT_CARE,
+                load_op: ColorLoadOp::Load,
+                store_op: AttachmentStoreOp::DontCare,
+                stencil_load_op: StencilLoadOp::DontCare,
+                stencil_store_op: AttachmentStoreOp::DontCare,
                 initial_layout: match resource_usage.input {
                     ResourceLayout::Unknown => ImageLayout::Undefined,
                     ResourceLayout::ShaderWrite => {
@@ -628,8 +626,7 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
                         image_desc.format.preferred_attachment_write_layout()
                     }
                     _ => unreachable!(),
-                }
-                .to_vk(),
+                },
                 final_layout: match resource_usage.output {
                     ResourceLayout::Unknown => ImageLayout::General,
                     ResourceLayout::ShaderRead => ImageLayout::ShaderReadOnly,
@@ -638,8 +635,7 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
                     }
                     ResourceLayout::Present => ImageLayout::PresentSrc,
                     _ => unreachable!(),
-                }
-                .to_vk(),
+                },
                 blend_state: if let Some(state) = create_info.pass_info.blend_state {
                     state
                 } else {
@@ -1112,12 +1108,12 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
                     color_attachments.push(RenderPassAttachment {
                         format,
                         samples,
-                        load_op: AttachmentLoadOp::DONT_CARE,
-                        store_op: AttachmentStoreOp::STORE,
-                        stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                        stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                        initial_layout: ImageLayout::Undefined.to_vk(),
-                        final_layout: ImageLayout::ColorAttachment.to_vk(),
+                        load_op: ColorLoadOp::DontCare,
+                        store_op: AttachmentStoreOp::Store,
+                        stencil_load_op: StencilLoadOp::DontCare,
+                        stencil_store_op: AttachmentStoreOp::DontCare,
+                        initial_layout: ImageLayout::Undefined,
+                        final_layout: ImageLayout::ColorAttachment,
                         blend_state: if let Some(state) = pass_info.blend_state {
                             state
                         } else {

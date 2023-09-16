@@ -26,7 +26,7 @@ use ash::{
     },
 };
 
-use crate::{get_allocation_callbacks, AccessFlags, ImageFormat, PipelineStageFlags, ToVk};
+use crate::{get_allocation_callbacks, AccessFlags, ImageFormat, PipelineStageFlags, ToVk, AttachmentStoreOp, ImageLayout, ColorLoadOp, StencilLoadOp};
 
 use super::{Gpu, GpuShaderModule, GpuState, ShaderStage, PushConstantRange};
 
@@ -117,14 +117,14 @@ pub struct BlendState {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RenderPassAttachment {
-    pub format: vk::Format,
+    pub format: Format,
     pub samples: SampleCountFlags,
-    pub load_op: vk::AttachmentLoadOp,
-    pub store_op: vk::AttachmentStoreOp,
-    pub stencil_load_op: vk::AttachmentLoadOp,
-    pub stencil_store_op: vk::AttachmentStoreOp,
-    pub initial_layout: vk::ImageLayout,
-    pub final_layout: vk::ImageLayout,
+    pub load_op: ColorLoadOp,
+    pub store_op: AttachmentStoreOp,
+    pub stencil_load_op: StencilLoadOp,
+    pub stencil_store_op: AttachmentStoreOp,
+    pub initial_layout: ImageLayout,
+    pub final_layout: ImageLayout,
     pub blend_state: BlendState,
 }
 
@@ -288,12 +288,12 @@ impl<'a> RenderPassDescription<'a> {
                 flags: AttachmentDescriptionFlags::empty(),
                 format: attachment.format,
                 samples: attachment.samples,
-                load_op: attachment.load_op,
-                store_op: attachment.store_op,
-                stencil_load_op: attachment.stencil_load_op,
-                stencil_store_op: attachment.stencil_store_op,
-                initial_layout: attachment.initial_layout,
-                final_layout: attachment.final_layout,
+                load_op: attachment.load_op.to_vk(),
+                store_op: attachment.store_op.to_vk(),
+                stencil_load_op: attachment.stencil_load_op.to_vk(),
+                stencil_store_op: attachment.stencil_store_op.to_vk(),
+                initial_layout: attachment.initial_layout.to_vk(),
+                final_layout: attachment.final_layout.to_vk(),
             });
         }
         attachment_descriptions

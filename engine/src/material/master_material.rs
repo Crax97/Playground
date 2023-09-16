@@ -4,7 +4,7 @@ use ash::vk::{self, CompareOp};
 use gpu::{
     BindingElement, BindingType, CullMode, DepthStencilState, FragmentStageInfo, FrontFace,
     GlobalBinding, Gpu, GraphicsPipeline, GraphicsPipelineDescription, LogicOp, PolygonMode,
-    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo, PushConstantRange, ToVk
+    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo, PushConstantRange, 
 };
 use nalgebra::{Vector2, Vector3};
 use resource_map::Resource;

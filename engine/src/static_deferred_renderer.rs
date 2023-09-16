@@ -5,7 +5,8 @@ use ash::vk::{CompareOp, IndexType, StencilOpState};
 use gpu::{
     BindingType, BufferCreateInfo, BufferUsageFlags, CommandBuffer, DepthStencilState, Extent2D,
     FragmentStageInfo, Gpu, GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain,
-    ShaderModuleCreateInfo, Swapchain, ToVk, VertexStageInfo, PushConstantRange, ShaderStage
+    ShaderModuleCreateInfo, Swapchain, ToVk, VertexStageInfo, PushConstantRange, ShaderStage,
+    AttachmentStoreOp, ColorLoadOp, StencilLoadOp, ImageLayout,
 };
 use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -139,8 +140,7 @@ use crate::{
 };
 
 use ash::vk::{
-    AttachmentLoadOp, AttachmentStoreOp, BlendFactor, BlendOp, ColorComponentFlags, ImageLayout,
-    SampleCountFlags,
+    BlendFactor, BlendOp, ColorComponentFlags, SampleCountFlags,
 };
 use gpu::{BlendState, RenderPassAttachment};
 
@@ -973,12 +973,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             RenderPassAttachment {
                 format: ImageFormat::RgbaFloat.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::CLEAR,
-                store_op: AttachmentStoreOp::STORE,
-                stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                load_op: ColorLoadOp::Load,
+                store_op: AttachmentStoreOp::Store,
+                stencil_load_op: StencilLoadOp::DontCare,
+                stencil_store_op: AttachmentStoreOp::Store,
+                initial_layout: ImageLayout::Undefined,
+                final_layout: ImageLayout::ShaderReadOnly,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -994,12 +994,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             RenderPassAttachment {
                 format: ImageFormat::Rgba8.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::CLEAR,
-                store_op: AttachmentStoreOp::STORE,
-                stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                load_op: ColorLoadOp::Clear([0.0;4]),
+                store_op: AttachmentStoreOp::Store,
+                stencil_load_op: StencilLoadOp::DontCare,
+                stencil_store_op: AttachmentStoreOp::DontCare,
+                initial_layout: ImageLayout::Undefined,
+                final_layout: ImageLayout::ShaderReadOnly,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -1015,12 +1015,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             RenderPassAttachment {
                 format: ImageFormat::Rgba8.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::CLEAR,
-                store_op: AttachmentStoreOp::STORE,
-                stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                load_op: ColorLoadOp::Clear([0.0;4]),
+                store_op: AttachmentStoreOp::Store,
+                stencil_load_op: StencilLoadOp::DontCare,
+                stencil_store_op: AttachmentStoreOp::Store,
+                initial_layout: ImageLayout::Undefined,
+                final_layout: ImageLayout::ShaderReadOnly,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -1036,12 +1036,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             RenderPassAttachment {
                 format: ImageFormat::Rgba8.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::CLEAR,
-                store_op: AttachmentStoreOp::STORE,
-                stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                load_op: ColorLoadOp::Clear([0.0;4]),
+                store_op: AttachmentStoreOp::Store,
+                stencil_load_op: StencilLoadOp::DontCare,
+                stencil_store_op: AttachmentStoreOp::DontCare,
+                initial_layout: ImageLayout::Undefined,
+                final_layout: ImageLayout::ShaderReadOnly,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,
@@ -1057,12 +1057,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             RenderPassAttachment {
                 format: ImageFormat::Rgba8.to_vk(),
                 samples: SampleCountFlags::TYPE_1,
-                load_op: AttachmentLoadOp::CLEAR,
-                store_op: AttachmentStoreOp::STORE,
-                stencil_load_op: AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: AttachmentStoreOp::DONT_CARE,
-                initial_layout: ImageLayout::UNDEFINED,
-                final_layout: ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                load_op: ColorLoadOp::Clear([0.0;4]),
+                store_op: AttachmentStoreOp::Store,
+                stencil_load_op: StencilLoadOp::DontCare,
+                stencil_store_op: AttachmentStoreOp::DontCare,
+                initial_layout: ImageLayout::Undefined,
+                final_layout: ImageLayout::ShaderReadOnly,
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendFactor::ONE,

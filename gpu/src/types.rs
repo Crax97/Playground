@@ -299,8 +299,9 @@ impl From<vk::CompareOp> for CompareOp {
     }
 }
 
-#[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug)]
+#[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug, Default)]
 pub enum ImageLayout {
+    #[default]
     Undefined,
     General,
     ColorAttachment,

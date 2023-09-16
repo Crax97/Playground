@@ -433,21 +433,24 @@ impl<'g> Drop for CommandBuffer<'g> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum ColorLoadOp {
+    #[default]
     DontCare,
     Load,
     Clear([f32; 4]),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum DepthLoadOp {
+    #[default]
     DontCare,
     Load,
     Clear(f32),
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum StencilLoadOp {
+    #[default]
     DontCare,
     Load,
     Clear(u8),
@@ -492,8 +495,9 @@ impl ToVk for StencilLoadOp {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum AttachmentStoreOp {
+    #[default]
     DontCare,
     Store,
 }
