@@ -1,5 +1,4 @@
-use ash::vk::Format;
-use gpu::{CommandBuffer, Extent2D, Gpu, GpuImage, GpuImageView};
+use gpu::{CommandBuffer, Extent2D, Gpu, GpuImage, GpuImageView, ImageFormat};
 use nalgebra::{vector, Matrix4, Point3, Vector2, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
 
@@ -213,7 +212,7 @@ impl Scene {
 
 pub struct Backbuffer<'a> {
     pub size: Extent2D,
-    pub format: Format,
+    pub format: ImageFormat,
     pub image: &'a GpuImage,
     pub image_view: &'a GpuImageView,
 }
@@ -296,7 +295,7 @@ pub struct ForwardRendererMaterialContext {
 }
 
 impl ForwardRendererMaterialContext {
-    pub fn new(gpu: &Gpu, swapchain: &Swapchain) -> VkResult<Self> {
+    pub fn new(gpu: &Gpu, swapchain: &Swapchain) -> anyhow::Result<Self> {
         let mut render_passes: HashMap<MaterialDomain, RenderPass> = HashMap::new();
 
         let attachments = &[
@@ -384,7 +383,7 @@ impl ForwardRendererMaterialContext {
         &self,
         gpu: &Gpu,
         material_description: &'a MaterialDescription<'a>,
-    ) -> VkResult<Pipeline> {
+    ) -> anyhow::Result<Pipeline> {
         let texture_bindings: Vec<_> = material_description
             .input_textures
             .iter()
@@ -529,7 +528,7 @@ impl MaterialContext for ForwardRendererMaterialContext {
         gpu: &Gpu,
         resource_map: &ResourceMap,
         material_description: MaterialDescription,
-    ) -> VkResult<Material> {
+    ) -> anyhow::Result<Material> {
         let pipeline = self.create_surface_material_pipeline(gpu, &material_description)?;
 
         let mut pipelines = HashMap::new();

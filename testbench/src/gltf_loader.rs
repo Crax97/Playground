@@ -245,7 +245,7 @@ impl GltfLoader {
             let format = match gltf_image.format {
                 gltf::image::Format::R8G8B8A8 => gpu::ImageFormat::Rgba8,
                 gltf::image::Format::R8G8B8 => gpu::ImageFormat::Rgb8,
-                gltf::image::Format::R32G32B32A32FLOAT => gpu::ImageFormat::RgbaFloat,
+                gltf::image::Format::R32G32B32A32FLOAT => gpu::ImageFormat::RgbaFloat32,
                 f => panic!("Unsupported format! {:?}", f),
             };
             let label = format!("glTF Image #{}", index);

@@ -1,4 +1,3 @@
-use ash::prelude::VkResult;
 use nalgebra::{Vector2, Vector3};
 
 use gpu::{BufferCreateInfo, BufferUsageFlags, Gpu, GpuBuffer, MemoryDomain};
@@ -34,8 +33,8 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub fn new(gpu: &Gpu, mesh_create_info: &MeshCreateInfo) -> VkResult<Self> {
-        let primitives: Vec<VkResult<MeshPrimitive>> = mesh_create_info
+    pub fn new(gpu: &Gpu, mesh_create_info: &MeshCreateInfo) -> anyhow::Result<Self> {
+        let primitives: Vec<anyhow::Result<MeshPrimitive>> = mesh_create_info
             .primitives
             .iter()
             .enumerate()

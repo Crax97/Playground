@@ -1,4 +1,3 @@
-use ash::prelude::VkResult;
 use gpu::{
     Filter, Gpu, GpuImage, GpuImageView, GpuSampler, ImageAspectFlags, ImageCreateInfo,
     ImageFormat, ImageSubresourceRange, ImageUsageFlags, MemoryDomain, SamplerAddressMode,
@@ -41,7 +40,7 @@ impl Texture {
         height: u32,
         data: Option<&[u8]>,
         label: Option<&str>,
-    ) -> VkResult<(GpuImage, GpuImageView, GpuSampler)> {
+    ) -> anyhow::Result<(GpuImage, GpuImageView, GpuSampler)> {
         let image = gpu.create_image(
             &ImageCreateInfo {
                 label,
@@ -89,7 +88,7 @@ impl Texture {
         width: u32,
         height: u32,
         label: Option<&str>,
-    ) -> VkResult<Self> {
+    ) -> anyhow::Result<Self> {
         let (image, view, sampler) = Self::new_impl(gpu, width, height, None, label)?;
         let image = resource_map.add(ImageResource(image));
         let image_view = TextureImageView { image, view };
@@ -107,7 +106,7 @@ impl Texture {
         height: u32,
         data: &[u8],
         label: Option<&str>,
-    ) -> VkResult<Self> {
+    ) -> anyhow::Result<Self> {
         let (image, view, sampler) = Self::new_impl(gpu, width, height, Some(data), label)?;
 
         let image = resource_map.add(ImageResource(image));

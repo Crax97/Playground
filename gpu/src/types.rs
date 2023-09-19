@@ -1,7 +1,8 @@
 use std::{cell::RefCell, ops::Deref, sync::Arc};
 
 use super::{allocator::GpuAllocator, gpu::Gpu};
-use crate::{Extent2D, Filter, Offset2D, Rect2D, SamplerAddressMode, SamplerCreateInfo, PipelineBindPoint};
+use crate::{Extent2D, Filter, Offset2D, Rect2D, SamplerAddressMode, SamplerCreateInfo, PipelineBindPoint,
+    IndexType, StencilOpState, StencilOp};
 use ash::vk::{
     BufferUsageFlags as VkBufferUsageFlags, SamplerCreateFlags, SamplerMipmapMode, StructureType,
 };
@@ -60,6 +61,51 @@ bitflags! {
     }
 }
 
+impl ToVk for IndexType {
+    type Inner = vk::IndexType;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            IndexType::Uint16 => Self::Inner::UINT16,
+            IndexType::Uint32 => Self::Inner::UINT32,
+            IndexType::Uint64 => todo!(),
+        }
+    }
+}
+
+impl ToVk for StencilOp {
+    type Inner = vk::StencilOp;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            StencilOp::Keep => Self::Inner::KEEP,
+            StencilOp::Zero => Self::Inner::ZERO,
+            StencilOp::Replace(_) => Self::Inner::REPLACE,
+            StencilOp::ClampedIncrement => Self::Inner::INCREMENT_AND_CLAMP,
+            StencilOp::ClampedDecrement => Self::Inner::DECREMENT_AND_CLAMP,
+            StencilOp::Invert => Self::Inner::INVERT,
+            StencilOp::WrappedIncrement => Self::Inner::INCREMENT_AND_WRAP,
+            StencilOp::WrappedDecrement => Self::Inner::DECREMENT_AND_WRAP,
+        }
+    }
+}
+
+impl ToVk for StencilOpState {
+    type Inner = vk::StencilOpState;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+           fail_op: self.fail.to_vk(),
+           pass_op: self.pass.to_vk(),
+           depth_fail_op: self.depth_fail.to_vk(),
+           compare_op: self.compare.to_vk(),
+           compare_mask: self.compare_mask,
+           write_mask: self.write_mask,
+           reference: self.reference,
+        }
+    }
+}
+
 impl ToVk for ShaderStage {
     type Inner = vk::ShaderStageFlags;
 
@@ -103,7 +149,10 @@ pub enum ImageFormat {
     Bgra8,
     SRgba8,
     Rgb8,
-    RgbaFloat,
+    RFloat32,
+    RgFloat32,
+    RgbFloat32,
+    RgbaFloat32,
     Depth,
 }
 
@@ -114,7 +163,10 @@ impl ImageFormat {
             | ImageFormat::Bgra8
             | ImageFormat::SRgba8
             | ImageFormat::Rgb8
-            | ImageFormat::RgbaFloat => true,
+            | ImageFormat::RFloat32
+            | ImageFormat::RgFloat32
+            | ImageFormat::RgbFloat32
+            | ImageFormat::RgbaFloat32 => true,
             ImageFormat::Depth => false,
         }
     }
@@ -448,7 +500,10 @@ impl ToVk for ImageFormat {
             ImageFormat::Rgba8 => vk::Format::R8G8B8A8_UNORM,
             ImageFormat::SRgba8 => vk::Format::R8G8B8A8_SRGB,
             ImageFormat::Rgb8 => vk::Format::R8G8B8_UNORM,
-            ImageFormat::RgbaFloat => vk::Format::R32G32B32A32_SFLOAT,
+            ImageFormat::RFloat32 => vk::Format::R32_SFLOAT,
+            ImageFormat::RgFloat32 => vk::Format::R32G32_SFLOAT,
+            ImageFormat::RgbFloat32 => vk::Format::R32G32B32_SFLOAT,
+            ImageFormat::RgbaFloat32 => vk::Format::R32G32B32A32_SFLOAT,
             ImageFormat::Depth => vk::Format::D32_SFLOAT,
             ImageFormat::Bgra8 => vk::Format::B8G8R8A8_UNORM,
         }
@@ -461,8 +516,11 @@ impl From<&vk::Format> for ImageFormat {
             vk::Format::R8G8B8A8_UNORM => ImageFormat::Rgba8,
             vk::Format::R8G8B8A8_SRGB => ImageFormat::SRgba8,
             vk::Format::R8G8B8_UNORM => ImageFormat::Rgb8,
+            vk::Format::R32_SFLOAT => ImageFormat::RFloat32,
+            vk::Format::R32G32_SFLOAT => ImageFormat::RgFloat32,
+            vk::Format::R32G32B32_SFLOAT => ImageFormat::RgbFloat32,
             vk::Format::D32_SFLOAT => ImageFormat::Depth,
-            vk::Format::R32G32B32A32_SFLOAT => ImageFormat::RgbaFloat,
+            vk::Format::R32G32B32A32_SFLOAT => ImageFormat::RgbaFloat32,
             vk::Format::B8G8R8A8_UNORM => ImageFormat::Bgra8,
             _ => panic!("ImageFormat::from(vk::Format): cannot convert {:?} to ImageFormat, most likely a bug: report it", value)
         }
@@ -589,8 +647,6 @@ impl ToVk for PipelineBindPoint {
             PipelineBindPoint::Compute => Self::Inner::COMPUTE,
         }
     }
-
-
 }
 
 

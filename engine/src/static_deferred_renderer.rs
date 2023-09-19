@@ -1,13 +1,12 @@
 use engine_macros::glsl;
 use std::{collections::HashMap, mem::size_of};
 
-use ash::vk::{CompareOp, IndexType, StencilOpState};
 use gpu::{
     BindingType, BufferCreateInfo, BufferUsageFlags, CommandBuffer, DepthStencilState, Extent2D,
     FragmentStageInfo, Gpu, GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain,
     ShaderModuleCreateInfo, Swapchain, VertexStageInfo, PushConstantRange, ShaderStage,
     AttachmentStoreOp, ColorLoadOp, StencilLoadOp, ImageLayout, ColorComponentFlags,
-    SampleCount
+    SampleCount, IndexType, CompareOp, StencilOpState
 };
 use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -297,7 +296,7 @@ impl DeferredRenderingPipeline {
                     ctx.render_pass_command.bind_index_buffer(
                         &draw_call.prim.index_buffer,
                         0,
-                        IndexType::UINT32,
+                        IndexType::Uint32,
                     );
                     ctx.render_pass_command.bind_vertex_buffer(
                         0,
@@ -498,7 +497,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let framebuffer_vector_desc = crate::ImageDescription {
             width: backbuffer.size.width,
             height: backbuffer.size.height,
-            format: ImageFormat::RgbaFloat,
+            format: ImageFormat::RgbaFloat32,
             samples: 1,
             present: false,
             clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
@@ -738,7 +737,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     depth_stencil_state: DepthStencilState {
                         depth_test_enable: false,
                         depth_write_enable: false,
-                        depth_compare_op: CompareOp::ALWAYS,
+                        depth_compare_op: CompareOp::Always,
                         stencil_test_enable: false,
                         front: StencilOpState::default(),
                         back: StencilOpState::default(),
@@ -776,7 +775,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     depth_stencil_state: DepthStencilState {
                         depth_test_enable: false,
                         depth_write_enable: false,
-                        depth_compare_op: CompareOp::ALWAYS,
+                        depth_compare_op: CompareOp::Always,
                         stencil_test_enable: false,
                         front: StencilOpState::default(),
                         back: StencilOpState::default(),
@@ -814,7 +813,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     depth_stencil_state: DepthStencilState {
                         depth_test_enable: false,
                         depth_write_enable: false,
-                        depth_compare_op: CompareOp::ALWAYS,
+                        depth_compare_op: CompareOp::Always,
                         stencil_test_enable: false,
                         front: StencilOpState::default(),
                         back: StencilOpState::default(),
@@ -855,7 +854,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     depth_stencil_state: DepthStencilState {
                         depth_test_enable: false,
                         depth_write_enable: false,
-                        depth_compare_op: CompareOp::ALWAYS,
+                        depth_compare_op: CompareOp::Always,
                         stencil_test_enable: false,
                         front: StencilOpState::default(),
                         back: StencilOpState::default(),
@@ -969,7 +968,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let color_attachments = &[
             // Position
             RenderPassAttachment {
-                format: ImageFormat::RgbaFloat,
+                format: ImageFormat::RgbaFloat32,
                 samples: SampleCount::Sample1,
                 load_op: ColorLoadOp::Load,
                 store_op: AttachmentStoreOp::Store,

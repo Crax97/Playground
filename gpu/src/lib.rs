@@ -20,6 +20,38 @@ pub const WHOLE_SIZE: u64 = u64::MAX;
 pub const QUEUE_FAMILY_IGNORED: u32 = u32::MAX;
 
 #[derive(Default, Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IndexType {
+    #[default]
+    Uint16,
+    Uint32,
+    Uint64,
+}
+
+#[derive(Default, Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum StencilOp {
+   #[default]
+    Keep,
+    Zero,
+    Replace(u32),
+    ClampedIncrement,
+    ClampedDecrement,
+    Invert,
+    WrappedIncrement,
+    WrappedDecrement,
+}
+
+#[derive(Default, Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct StencilOpState {
+    fail: StencilOp,
+    pass: StencilOp,
+    depth_fail: StencilOp,
+    compare: CompareOp,
+    compare_mask: u32,
+    write_mask: u32,
+    reference: u32,
+}
+
+#[derive(Default, Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Offset2D {
     pub x: i32,
     pub y: i32,

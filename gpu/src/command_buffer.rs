@@ -8,7 +8,7 @@ use ash::{
     vk::{
         self, ClearDepthStencilValue, CommandBufferAllocateInfo, CommandBufferBeginInfo,
         CommandBufferLevel, CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags,
-        IndexType, PipelineBindPoint, StructureType, SubmitInfo,
+        PipelineBindPoint, StructureType, SubmitInfo,
     },
     RawPtr,
 };
@@ -16,7 +16,7 @@ use ash::{
 use crate::pipeline::GpuPipeline;
 use crate::types::ImageLayout;
 use crate::{
-    AccessFlags, ComputePipeline, GPUFence, GPUSemaphore, GpuImage, GpuImageView, ImageAspectFlags,
+    IndexType, AccessFlags, ComputePipeline, GPUFence, GPUSemaphore, GpuImage, GpuImageView, ImageAspectFlags,
     Offset2D, PipelineStageFlags, Rect2D, ToVk,
 };
 
@@ -779,7 +779,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
     pub fn bind_index_buffer(
         &self,
         buffer: &GpuBuffer,
-        offset: vk::DeviceSize,
+        offset: u64,
         index_type: IndexType,
     ) {
         let device = self.command_buffer.gpu.vk_logical_device();
@@ -789,7 +789,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
                 self.command_buffer.inner_command_buffer,
                 index_buffer,
                 offset,
-                index_type,
+                index_type.to_vk(),
             );
         }
     }
@@ -797,7 +797,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         &self,
         first_binding: u32,
         buffers: &[&GpuBuffer],
-        offsets: &[vk::DeviceSize],
+        offsets: &[u64],
     ) {
         assert!(buffers.len() == offsets.len());
         let device = self.command_buffer.gpu.vk_logical_device();

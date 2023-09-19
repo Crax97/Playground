@@ -27,10 +27,10 @@ use ash::{
 };
 
 use crate::{get_allocation_callbacks, AccessFlags, ImageFormat, PipelineStageFlags, ToVk, AttachmentStoreOp, ImageLayout, 
-            ColorLoadOp, StencilLoadOp, BlendMode, BlendOp};
+            ColorLoadOp, StencilLoadOp, BlendMode, BlendOp, CompareOp, StencilOpState};
 
 use super::{Gpu, GpuShaderModule, GpuState, ShaderStage, PushConstantRange, ColorComponentFlags, AttachmentReference, SampleCount,
-            PipelineBindPoint };
+            PipelineBindPoint};
 
 fn vk_bool(b: bool) -> u32 {
     if b {
@@ -87,7 +87,7 @@ pub enum InputRate {
 #[derive(Clone, Copy, Debug, Hash)]
 pub struct VertexAttributeDescription {
     pub location: u32,
-    pub format: vk::Format,
+    pub format: ImageFormat,
     pub offset: u32,
 }
 
@@ -197,10 +197,10 @@ impl ToVk for FrontFace {
 pub struct DepthStencilState {
     pub depth_test_enable: bool,
     pub depth_write_enable: bool,
-    pub depth_compare_op: vk::CompareOp,
+    pub depth_compare_op: CompareOp,
     pub stencil_test_enable: bool,
-    pub front: vk::StencilOpState,
-    pub back: vk::StencilOpState,
+    pub front: StencilOpState,
+    pub back: StencilOpState,
     pub min_depth_bounds: f32,
     pub max_depth_bounds: f32,
 }
@@ -491,7 +491,7 @@ impl<'a> GraphicsPipelineDescription<'a> {
                 attribute_bindings.push(VertexInputAttributeDescription {
                     location: attribute.location,
                     binding: binding.binding,
-                    format: attribute.format,
+                    format: attribute.format.to_vk(),
                     offset: attribute.offset,
                 });
             }
@@ -682,13 +682,13 @@ impl GraphicsPipeline {
                 depth_write_enable: vk_bool(
                     pipeline_description.depth_stencil_state.depth_write_enable,
                 ),
-                depth_compare_op: pipeline_description.depth_stencil_state.depth_compare_op,
+                depth_compare_op: pipeline_description.depth_stencil_state.depth_compare_op.to_vk(),
                 depth_bounds_test_enable: vk::FALSE,
                 stencil_test_enable: vk_bool(
                     pipeline_description.depth_stencil_state.stencil_test_enable,
                 ),
-                front: pipeline_description.depth_stencil_state.front,
-                back: pipeline_description.depth_stencil_state.back,
+                front: pipeline_description.depth_stencil_state.front.to_vk(),
+                back: pipeline_description.depth_stencil_state.back.to_vk(),
                 min_depth_bounds: pipeline_description.depth_stencil_state.min_depth_bounds,
                 max_depth_bounds: pipeline_description.depth_stencil_state.max_depth_bounds,
             };

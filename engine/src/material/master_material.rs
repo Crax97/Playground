@@ -1,10 +1,10 @@
 use std::{collections::HashMap, hash::Hash, mem::size_of, num::NonZeroU32};
 
-use ash::vk::{self, CompareOp};
 use gpu::{
     BindingElement, BindingType, CullMode, DepthStencilState, FragmentStageInfo, FrontFace,
     GlobalBinding, Gpu, GraphicsPipeline, GraphicsPipelineDescription, LogicOp, PolygonMode,
-    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo, PushConstantRange, 
+    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo, PushConstantRange,
+    CompareOp, StencilOpState, ImageFormat
 };
 use nalgebra::{Vector2, Vector3};
 use resource_map::Resource;
@@ -127,7 +127,7 @@ impl MasterMaterial {
                 stride: size_of::<Vector3<f32>>() as u32,
                 attributes: &[VertexAttributeDescription {
                     location: 0,
-                    format: vk::Format::R32G32B32_SFLOAT,
+                    format: ImageFormat::RgbFloat32,
                     offset: 0,
                 }],
             },
@@ -137,7 +137,7 @@ impl MasterMaterial {
                 stride: size_of::<Vector3<f32>>() as u32,
                 attributes: &[VertexAttributeDescription {
                     location: 1,
-                    format: vk::Format::R32G32B32_SFLOAT,
+                    format: ImageFormat::RgbFloat32,
                     offset: 0,
                 }],
             },
@@ -147,7 +147,7 @@ impl MasterMaterial {
                 stride: size_of::<Vector3<f32>>() as u32,
                 attributes: &[VertexAttributeDescription {
                     location: 2,
-                    format: vk::Format::R32G32B32_SFLOAT,
+                    format: ImageFormat::RgbFloat32,
                     offset: 0,
                 }],
             },
@@ -157,7 +157,7 @@ impl MasterMaterial {
                 stride: size_of::<Vector3<f32>>() as u32,
                 attributes: &[VertexAttributeDescription {
                     location: 3,
-                    format: vk::Format::R32G32B32_SFLOAT,
+                    format: ImageFormat::RgbFloat32,
                     offset: 0,
                 }],
             },
@@ -167,7 +167,7 @@ impl MasterMaterial {
                 stride: size_of::<Vector2<f32>>() as u32,
                 attributes: &[VertexAttributeDescription {
                     location: 4,
-                    format: vk::Format::R32G32_SFLOAT,
+                    format: ImageFormat::RgFloat32,
                     offset: 0,
                 }],
             },
@@ -224,10 +224,10 @@ impl MasterMaterial {
                             DepthStencilState {
                                 depth_test_enable: true,
                                 depth_write_enable: false,
-                                depth_compare_op: CompareOp::EQUAL,
+                                depth_compare_op: CompareOp::Equal,
                                 stencil_test_enable: false,
-                                front: vk::StencilOpState::default(),
-                                back: vk::StencilOpState::default(),
+                                front: StencilOpState::default(),
+                                back: StencilOpState::default(),
                                 min_depth_bounds: 0.0,
                                 max_depth_bounds: 1.0,
                             }
@@ -235,10 +235,10 @@ impl MasterMaterial {
                         PipelineTarget::DepthOnly => DepthStencilState {
                             depth_test_enable: true,
                             depth_write_enable: true,
-                            depth_compare_op: CompareOp::LESS,
+                            depth_compare_op: CompareOp::Less,
                             stencil_test_enable: false,
-                            front: vk::StencilOpState::default(),
-                            back: vk::StencilOpState::default(),
+                            front: StencilOpState::default(),
+                            back: StencilOpState::default(),
                             min_depth_bounds: 0.0,
                             max_depth_bounds: 1.0,
                         },
@@ -283,10 +283,10 @@ impl MasterMaterial {
                 depth_stencil_state: DepthStencilState {
                     depth_test_enable: true,
                     depth_write_enable: false,
-                    depth_compare_op: CompareOp::EQUAL,
+                    depth_compare_op: CompareOp::Equal,
                     stencil_test_enable: false,
-                    front: vk::StencilOpState::default(),
-                    back: vk::StencilOpState::default(),
+                    front: StencilOpState::default(),
+                    back: StencilOpState::default(),
                     min_depth_bounds: 0.0,
                     max_depth_bounds: 1.0,
                 },

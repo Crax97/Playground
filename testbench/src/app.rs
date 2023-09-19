@@ -122,7 +122,7 @@ fn update_loop(
         app_state_mut.swapchain_mut().acquire_next_image()?;
     let backbuffer = Backbuffer {
         size: swapchain_extents,
-        format: swapchain_format,
+        format: swapchain_format.into(),
         image: swapchain_image,
         image_view: swapchain_image_view,
     };
