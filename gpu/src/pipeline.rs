@@ -5,7 +5,7 @@ use ash::vk::{CullModeFlags, DependencyFlags, Format, PipelineRenderingCreateInf
 use ash::{
     prelude::VkResult,
     vk::{
-        self, AttachmentDescription, AttachmentDescriptionFlags, AttachmentReference,
+        self, AttachmentDescription, AttachmentDescriptionFlags, 
         DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
         DescriptorSetLayoutCreateInfo, DescriptorType, DynamicState, GraphicsPipelineCreateInfo,
         PipelineBindPoint, PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
@@ -29,7 +29,7 @@ use ash::{
 use crate::{get_allocation_callbacks, AccessFlags, ImageFormat, PipelineStageFlags, ToVk, AttachmentStoreOp, ImageLayout, 
             ColorLoadOp, StencilLoadOp, BlendMode, BlendOp};
 
-use super::{Gpu, GpuShaderModule, GpuState, ShaderStage, PushConstantRange, ColorComponentFlags};
+use super::{Gpu, GpuShaderModule, GpuState, ShaderStage, PushConstantRange, ColorComponentFlags, AttachmentReference, SampleCount};
 
 fn vk_bool(b: bool) -> u32 {
     if b {
@@ -118,8 +118,8 @@ pub struct BlendState {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RenderPassAttachment {
-    pub format: Format,
-    pub samples: SampleCountFlags,
+    pub format: ImageFormat,
+    pub samples: SampleCount,
     pub load_op: ColorLoadOp,
     pub store_op: AttachmentStoreOp,
     pub stencil_load_op: StencilLoadOp,
@@ -287,8 +287,8 @@ impl<'a> RenderPassDescription<'a> {
         for attachment in self.attachments.iter() {
             attachment_descriptions.push(AttachmentDescription {
                 flags: AttachmentDescriptionFlags::empty(),
-                format: attachment.format,
-                samples: attachment.samples,
+                format: attachment.format.to_vk(),
+                samples: attachment.samples.to_vk(),
                 load_op: attachment.load_op.to_vk(),
                 store_op: attachment.store_op.to_vk(),
                 stencil_load_op: attachment.stencil_load_op.to_vk(),
@@ -303,18 +303,24 @@ impl<'a> RenderPassDescription<'a> {
     fn get_subpasses(&self) -> Vec<vk::SubpassDescription> {
         self.subpasses
             .iter()
-            .map(|s| vk::SubpassDescription {
+            .map(|s| { 
+
+                 let input_attachments = s.input_attachments.iter().map(|a| a.to_vk()).collect::<Vec<_>>();
+                 let color_attachments = s.color_attachments.iter().map(|a| a.to_vk()).collect::<Vec<_>>();
+                 let resolve_attachments = s.resolve_attachments.iter().map(|a| a.to_vk()).collect::<Vec<_>>();
+                 let depth_stencil_attachment = s.depth_stencil_attachment.iter().map(|a| a.to_vk()).collect::<Vec<_>>();
+                 vk::SubpassDescription {
                 flags: s.flags,
                 pipeline_bind_point: s.pipeline_bind_point,
                 input_attachment_count: s.input_attachments.len() as _,
-                p_input_attachments: p_or_null(s.input_attachments),
+                p_input_attachments: p_or_null(&input_attachments),
                 color_attachment_count: s.color_attachments.len() as _,
-                p_color_attachments: p_or_null(s.color_attachments),
-                p_resolve_attachments: p_or_null(s.resolve_attachments),
-                p_depth_stencil_attachment: p_or_null(s.depth_stencil_attachment),
+                p_color_attachments: p_or_null(&color_attachments),
+                p_resolve_attachments: p_or_null(&resolve_attachments),
+                p_depth_stencil_attachment: p_or_null(&depth_stencil_attachment),
                 preserve_attachment_count: s.preserve_attachments.len() as _,
                 p_preserve_attachments: p_or_null(s.preserve_attachments),
-            })
+            }})
             .collect()
     }
 
@@ -720,8 +726,9 @@ impl GraphicsPipeline {
 
             let color_attachment = pipeline_description
                 .fragment_stage
-                .map(|frag| (frag.color_attachments.iter().map(|c| c.format).collect()))
+                .map(|frag| (frag.color_attachments.iter().map(|c| c.format.to_vk()).collect()))
                 .unwrap_or(vec![]);
+
 
             let rendering_ext_info = PipelineRenderingCreateInfoKHR {
                 s_type: StructureType::PIPELINE_RENDERING_CREATE_INFO_KHR,

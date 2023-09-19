@@ -5,8 +5,9 @@ use ash::vk::{CompareOp, IndexType, StencilOpState};
 use gpu::{
     BindingType, BufferCreateInfo, BufferUsageFlags, CommandBuffer, DepthStencilState, Extent2D,
     FragmentStageInfo, Gpu, GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain,
-    ShaderModuleCreateInfo, Swapchain, ToVk, VertexStageInfo, PushConstantRange, ShaderStage,
+    ShaderModuleCreateInfo, Swapchain, VertexStageInfo, PushConstantRange, ShaderStage,
     AttachmentStoreOp, ColorLoadOp, StencilLoadOp, ImageLayout, ColorComponentFlags,
+    SampleCount
 };
 use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -969,8 +970,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let color_attachments = &[
             // Position
             RenderPassAttachment {
-                format: ImageFormat::RgbaFloat.to_vk(),
-                samples: SampleCountFlags::TYPE_1,
+                format: ImageFormat::RgbaFloat,
+                samples: SampleCount::Sample1,
                 load_op: ColorLoadOp::Load,
                 store_op: AttachmentStoreOp::Store,
                 stencil_load_op: StencilLoadOp::DontCare,
@@ -990,8 +991,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             },
             // Normals
             RenderPassAttachment {
-                format: ImageFormat::Rgba8.to_vk(),
-                samples: SampleCountFlags::TYPE_1,
+                format: ImageFormat::Rgba8,
+                samples: SampleCount::Sample1,
                 load_op: ColorLoadOp::Clear([0.0;4]),
                 store_op: AttachmentStoreOp::Store,
                 stencil_load_op: StencilLoadOp::DontCare,
@@ -1011,8 +1012,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             },
             // Diffuse
             RenderPassAttachment {
-                format: ImageFormat::Rgba8.to_vk(),
-                samples: SampleCountFlags::TYPE_1,
+                format: ImageFormat::Rgba8,
+                samples: SampleCount::Sample1,
                 load_op: ColorLoadOp::Clear([0.0;4]),
                 store_op: AttachmentStoreOp::Store,
                 stencil_load_op: StencilLoadOp::DontCare,
@@ -1032,8 +1033,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             },
             // Emissive
             RenderPassAttachment {
-                format: ImageFormat::Rgba8.to_vk(),
-                samples: SampleCountFlags::TYPE_1,
+                format: ImageFormat::Rgba8,
+                samples: SampleCount::Sample1,
                 load_op: ColorLoadOp::Clear([0.0;4]),
                 store_op: AttachmentStoreOp::Store,
                 stencil_load_op: StencilLoadOp::DontCare,
@@ -1053,8 +1054,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             },
             // Metal/Roughness
             RenderPassAttachment {
-                format: ImageFormat::Rgba8.to_vk(),
-                samples: SampleCountFlags::TYPE_1,
+                format: ImageFormat::Rgba8,
+                samples: SampleCount::Sample1,
                 load_op: ColorLoadOp::Clear([0.0;4]),
                 store_op: AttachmentStoreOp::Store,
                 stencil_load_op: StencilLoadOp::DontCare,

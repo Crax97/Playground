@@ -86,6 +86,18 @@ pub enum BlendOp {
     Max,
 }
 
+#[derive(Default, Clone, Debug, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
+pub enum SampleCount {
+    #[default]
+    Sample1,
+    Sample2,
+    Sample4,
+    Sample8,
+    Sample16,
+    Sample32,
+    Sample64
+}
+
 bitflags! {
 #[derive(Default, Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ColorComponentFlags : u32 {
@@ -184,6 +196,11 @@ pub struct DescriptorSetInfo<'a> {
     pub descriptors: &'a [DescriptorInfo<'a>],
 }
 
+#[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub struct AttachmentReference {
+    pub attachment: u32,
+    pub layout: ImageLayout,
+}
 #[derive(Clone, Copy, Hash, Debug, PartialEq, Ord, PartialOrd, Eq)]
 pub enum PresentMode {
     #[doc = "Present images immediately"]

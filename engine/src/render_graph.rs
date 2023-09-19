@@ -7,8 +7,7 @@ use std::{
 };
 
 use ash::vk::{
-    self, AttachmentReference, PipelineBindPoint, SampleCountFlags,
-    SubpassDescriptionFlags,
+    self, PipelineBindPoint, SubpassDescriptionFlags,
 };
 use gpu::{
     AccessFlags, BeginRenderPassInfo, BindingElement, BindingType, BlendState, BufferCreateInfo,
@@ -21,8 +20,9 @@ use gpu::{
     ImageUsageFlags, ImageViewCreateInfo, LogicOp, MemoryDomain, Offset2D, PipelineBarrierInfo,
     PipelineStageFlags, PolygonMode, PrimitiveTopology, Rect2D, RenderPass, RenderPassAttachment,
     RenderPassCommand, RenderPassDescription, SamplerAddressMode, SamplerCreateInfo,
-    StencilAttachment, StencilLoadOp, SubpassDependency, SubpassDescription, ToVk, TransitionInfo,
-    VertexBindingDescription, VertexStageInfo, ImageViewType, ComponentMapping, PushConstantRange, AttachmentStoreOp, BlendOp, BlendMode, ColorComponentFlags
+    StencilAttachment, StencilLoadOp, SubpassDependency, SubpassDescription, TransitionInfo,
+    VertexBindingDescription, VertexStageInfo, ImageViewType, ComponentMapping, PushConstantRange,
+    AttachmentStoreOp, BlendOp, BlendMode, ColorComponentFlags, AttachmentReference, SampleCount
 };
 
 use indexmap::IndexSet;
@@ -546,8 +546,8 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
                 _ => unreachable!(),
             };
             let attachment = RenderPassAttachment {
-                format: image_desc.format.to_vk(),
-                samples: SampleCountFlags::TYPE_1,
+                format: image_desc.format,
+                samples: SampleCount::Sample1,
                 load_op: match resource_usage.input {
                     ResourceLayout::Unknown => ColorLoadOp::DontCare,
                     _ => ColorLoadOp::Clear([0.0;4]),
@@ -590,12 +590,12 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
             if image_desc.format.is_color() {
                 color_attachments.push(AttachmentReference {
                     attachment: index as _,
-                    layout: ImageLayout::ColorAttachment.to_vk(),
+                    layout: ImageLayout::ColorAttachment,
                 });
             } else {
                 depth_attachments.push(AttachmentReference {
                     attachment: index as _,
-                    layout: ImageLayout::DepthStencilAttachment.to_vk(),
+                    layout: ImageLayout::DepthStencilAttachment,
                 });
             }
 
@@ -611,8 +611,8 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
             };
             let resource_usage = create_info.pass_info.resource_usage(read);
             let attachment = RenderPassAttachment {
-                format: image_desc.format.to_vk(),
-                samples: SampleCountFlags::TYPE_1,
+                format: image_desc.format,
+                samples: SampleCount::Sample1,
                 load_op: ColorLoadOp::Load,
                 store_op: AttachmentStoreOp::DontCare,
                 stencil_load_op: StencilLoadOp::DontCare,
@@ -656,12 +656,12 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
             if image_desc.format.is_color() {
                 color_attachments.push(AttachmentReference {
                     attachment: index as _,
-                    layout: ImageLayout::ColorAttachment.to_vk(),
+                    layout: ImageLayout::ColorAttachment,
                 });
             } else {
                 depth_attachments.push(AttachmentReference {
                     attachment: index as _,
-                    layout: ImageLayout::DepthStencilAttachment.to_vk(),
+                    layout: ImageLayout::DepthStencilAttachment,
                 });
             }
             index += 1;
@@ -1093,15 +1093,15 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
 
         match resource.ty {
             AllocationType::Image(desc) => {
-                let format = desc.format.to_vk();
+                let format = desc.format;
                 let samples = match desc.samples {
-                    1 => SampleCountFlags::TYPE_1,
-                    2 => SampleCountFlags::TYPE_2,
-                    4 => SampleCountFlags::TYPE_4,
-                    8 => SampleCountFlags::TYPE_8,
-                    16 => SampleCountFlags::TYPE_16,
-                    32 => SampleCountFlags::TYPE_32,
-                    64 => SampleCountFlags::TYPE_64,
+                    1 => SampleCount::Sample1,
+                    2 => SampleCount::Sample2,
+                    4 => SampleCount::Sample4,
+                    8 => SampleCount::Sample8,
+                    16 => SampleCount::Sample16,
+                    32 => SampleCount::Sample32,
+                    64 => SampleCount::Sample64,
                     _ => panic!("Invalid sample count! {}", desc.samples),
                 };
                 if desc.format.is_color() {

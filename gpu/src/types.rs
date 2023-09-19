@@ -96,8 +96,9 @@ impl ToVk for PushConstantRange {
     }
 }
 
-#[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum ImageFormat {
+    #[default]
     Rgba8,
     Bgra8,
     SRgba8,
@@ -1246,5 +1247,31 @@ impl ToVk for super::ColorComponentFlags {
         case!(self, res, Self::B, Self::Inner::B);
         case!(self, res, Self::A, Self::Inner::A);
         res
+    }
+}
+
+impl ToVk for super::AttachmentReference {
+    type Inner = vk::AttachmentReference;
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            attachment: self.attachment,
+            layout: self.layout.to_vk()
+        }
+    }
+}
+
+impl ToVk for super::SampleCount {
+    type Inner = vk::SampleCountFlags;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            super::SampleCount::Sample1 => Self::Inner::TYPE_1,
+            super::SampleCount::Sample2 => Self::Inner::TYPE_2,
+            super::SampleCount::Sample4 => Self::Inner::TYPE_4,
+            super::SampleCount::Sample8 => Self::Inner::TYPE_8,
+            super::SampleCount::Sample16 => Self::Inner::TYPE_16,
+            super::SampleCount::Sample32 => Self::Inner::TYPE_32,
+            super::SampleCount::Sample64 => Self::Inner::TYPE_64,
+        }
     }
 }
