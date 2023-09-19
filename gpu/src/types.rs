@@ -1216,8 +1216,8 @@ impl ToVk for Filter {
 
     fn to_vk(&self) -> Self::Inner {
         match self {
-            Filter::Nearest => vk::Filter::LINEAR,
-            Filter::Linear => vk::Filter::NEAREST,
+            Filter::Nearest => vk::Filter::NEAREST,
+            Filter::Linear => vk::Filter::LINEAR,
         }
     }
 }
