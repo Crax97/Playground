@@ -8,7 +8,7 @@ use ash::{
         self, AttachmentDescription, AttachmentDescriptionFlags, 
         DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
         DescriptorSetLayoutCreateInfo, DescriptorType, DynamicState, GraphicsPipelineCreateInfo,
-        PipelineBindPoint, PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
+        PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
         PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
         PipelineDepthStencilStateCreateFlags, PipelineDepthStencilStateCreateInfo,
         PipelineDynamicStateCreateFlags, PipelineDynamicStateCreateInfo,
@@ -29,7 +29,8 @@ use ash::{
 use crate::{get_allocation_callbacks, AccessFlags, ImageFormat, PipelineStageFlags, ToVk, AttachmentStoreOp, ImageLayout, 
             ColorLoadOp, StencilLoadOp, BlendMode, BlendOp};
 
-use super::{Gpu, GpuShaderModule, GpuState, ShaderStage, PushConstantRange, ColorComponentFlags, AttachmentReference, SampleCount};
+use super::{Gpu, GpuShaderModule, GpuState, ShaderStage, PushConstantRange, ColorComponentFlags, AttachmentReference, SampleCount,
+            PipelineBindPoint };
 
 fn vk_bool(b: bool) -> u32 {
     if b {
@@ -250,7 +251,6 @@ impl From<LogicOp> for vk::LogicOp {
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SubpassDescription<'a> {
-    pub flags: SubpassDescriptionFlags,
     pub pipeline_bind_point: PipelineBindPoint,
     pub input_attachments: &'a [AttachmentReference],
     pub color_attachments: &'a [AttachmentReference],
@@ -310,16 +310,16 @@ impl<'a> RenderPassDescription<'a> {
                  let resolve_attachments = s.resolve_attachments.iter().map(|a| a.to_vk()).collect::<Vec<_>>();
                  let depth_stencil_attachment = s.depth_stencil_attachment.iter().map(|a| a.to_vk()).collect::<Vec<_>>();
                  vk::SubpassDescription {
-                flags: s.flags,
-                pipeline_bind_point: s.pipeline_bind_point,
-                input_attachment_count: s.input_attachments.len() as _,
-                p_input_attachments: p_or_null(&input_attachments),
-                color_attachment_count: s.color_attachments.len() as _,
-                p_color_attachments: p_or_null(&color_attachments),
-                p_resolve_attachments: p_or_null(&resolve_attachments),
-                p_depth_stencil_attachment: p_or_null(&depth_stencil_attachment),
-                preserve_attachment_count: s.preserve_attachments.len() as _,
-                p_preserve_attachments: p_or_null(s.preserve_attachments),
+                    flags: SubpassDescriptionFlags::empty(),
+                    pipeline_bind_point: s.pipeline_bind_point.to_vk(),
+                    input_attachment_count: s.input_attachments.len() as _,
+                    p_input_attachments: p_or_null(&input_attachments),
+                    color_attachment_count: s.color_attachments.len() as _,
+                    p_color_attachments: p_or_null(&color_attachments),
+                    p_resolve_attachments: p_or_null(&resolve_attachments),
+                    p_depth_stencil_attachment: p_or_null(&depth_stencil_attachment),
+                    preserve_attachment_count: s.preserve_attachments.len() as _,
+                    p_preserve_attachments: p_or_null(s.preserve_attachments),
             }})
             .collect()
     }
@@ -891,7 +891,7 @@ impl Drop for ComputePipeline {
 
 impl GpuPipeline for ComputePipeline {
     fn bind_point() -> PipelineBindPoint {
-        PipelineBindPoint::COMPUTE
+        PipelineBindPoint::Compute
     }
 
     fn vk_pipeline(&self) -> vk::Pipeline {
@@ -905,7 +905,7 @@ impl GpuPipeline for ComputePipeline {
 
 impl GpuPipeline for GraphicsPipeline {
     fn bind_point() -> PipelineBindPoint {
-        PipelineBindPoint::GRAPHICS
+        PipelineBindPoint::Graphics
     }
 
     fn vk_pipeline(&self) -> vk::Pipeline {

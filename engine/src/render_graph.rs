@@ -6,9 +6,6 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use ash::vk::{
-    self, PipelineBindPoint, SubpassDescriptionFlags,
-};
 use gpu::{
     AccessFlags, BeginRenderPassInfo, BindingElement, BindingType, BlendState, BufferCreateInfo,
     BufferRange, BufferUsageFlags, ColorAttachment, ColorLoadOp, CommandBuffer, CullMode,
@@ -22,7 +19,8 @@ use gpu::{
     RenderPassCommand, RenderPassDescription, SamplerAddressMode, SamplerCreateInfo,
     StencilAttachment, StencilLoadOp, SubpassDependency, SubpassDescription, TransitionInfo,
     VertexBindingDescription, VertexStageInfo, ImageViewType, ComponentMapping, PushConstantRange,
-    AttachmentStoreOp, BlendOp, BlendMode, ColorComponentFlags, AttachmentReference, SampleCount
+    AttachmentStoreOp, BlendOp, BlendMode, ColorComponentFlags, AttachmentReference, SampleCount,
+    PipelineBindPoint
 };
 
 use indexmap::IndexSet;
@@ -670,8 +668,7 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
         let description = RenderPassDescription {
             attachments: &all_attachments,
             subpasses: &[SubpassDescription {
-                pipeline_bind_point: PipelineBindPoint::GRAPHICS,
-                flags: SubpassDescriptionFlags::empty(),
+                pipeline_bind_point: PipelineBindPoint::Graphics,
                 input_attachments: &[],
                 color_attachments: &color_attachments,
                 resolve_attachments: &[],
@@ -1888,8 +1885,8 @@ impl RenderGraphRunner for GpuRunner {
                                 dst_access_mask: new_layout.access_mask,
                                 old_layout: old_layout.layout,
                                 new_layout: new_layout.layout,
-                                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+                                dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
                                 image,
                                 subresource_range: ImageSubresourceRange {
                                     aspect_mask: ImageAspectFlags::COLOR,
@@ -1905,8 +1902,8 @@ impl RenderGraphRunner for GpuRunner {
                                 dst_access_mask: new_layout.access_mask,
                                 old_layout: old_layout.layout,
                                 new_layout: new_layout.layout,
-                                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+                                dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
                                 image,
                                 subresource_range: ImageSubresourceRange {
                                     aspect_mask: ImageAspectFlags::DEPTH,
@@ -1995,8 +1992,8 @@ impl RenderGraphRunner for GpuRunner {
                                 dst_access_mask: new_layout.access_mask,
                                 old_layout: old_layout.layout,
                                 new_layout: new_layout.layout,
-                                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+                                dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
                                 image,
                                 subresource_range: ImageSubresourceRange {
                                     aspect_mask: ImageAspectFlags::COLOR,
@@ -2012,8 +2009,8 @@ impl RenderGraphRunner for GpuRunner {
                                 dst_access_mask: new_layout.access_mask,
                                 old_layout: old_layout.layout,
                                 new_layout: new_layout.layout,
-                                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+                                dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
                                 image,
                                 subresource_range: ImageSubresourceRange {
                                     aspect_mask: ImageAspectFlags::DEPTH,
@@ -2098,8 +2095,8 @@ impl RenderGraphRunner for GpuRunner {
                                 dst_access_mask: new_layout.access_mask,
                                 old_layout: old_layout.layout,
                                 new_layout: new_layout.layout,
-                                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+                                dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
                                 image,
                                 subresource_range: ImageSubresourceRange {
                                     aspect_mask: ImageAspectFlags::COLOR,
@@ -2115,8 +2112,8 @@ impl RenderGraphRunner for GpuRunner {
                                 dst_access_mask: new_layout.access_mask,
                                 old_layout: old_layout.layout,
                                 new_layout: new_layout.layout,
-                                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                                src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+                                dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
                                 image,
                                 subresource_range: ImageSubresourceRange {
                                     aspect_mask: ImageAspectFlags::DEPTH,
@@ -2457,7 +2454,7 @@ fn resolve_input_descriptor_set<'a>(
                 let range = BufferRange {
                     handle: buffer,
                     offset: 0,
-                    size: vk::WHOLE_SIZE,
+                    size: gpu::WHOLE_SIZE,
                 };
                 descriptors.push(DescriptorInfo {
                     binding: idx as _,
@@ -2488,8 +2485,7 @@ fn resolve_input_descriptor_set<'a>(
 
 #[cfg(test)]
 mod test {
-    use ash::vk::Extent2D;
-
+    use gpu::Extent2D;
     use crate::ClearValue::{Color, DontCare};
     use crate::{CompileError, ResourceId, ResourceLayout};
 

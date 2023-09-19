@@ -276,7 +276,7 @@ impl<'g> CommandBuffer<'g> {
         unsafe {
             self.gpu.vk_logical_device().cmd_bind_descriptor_sets(
                 self.inner_command_buffer,
-                T::bind_point(),
+                T::bind_point().to_vk(),
                 pipeline.vk_pipeline_layout(),
                 first_index,
                 &descriptor_sets,

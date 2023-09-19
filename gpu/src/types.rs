@@ -1,7 +1,7 @@
 use std::{cell::RefCell, ops::Deref, sync::Arc};
 
 use super::{allocator::GpuAllocator, gpu::Gpu};
-use crate::{Extent2D, Filter, Offset2D, Rect2D, SamplerAddressMode, SamplerCreateInfo};
+use crate::{Extent2D, Filter, Offset2D, Rect2D, SamplerAddressMode, SamplerCreateInfo, PipelineBindPoint};
 use ash::vk::{
     BufferUsageFlags as VkBufferUsageFlags, SamplerCreateFlags, SamplerMipmapMode, StructureType,
 };
@@ -579,6 +579,20 @@ impl ToVk for AccessFlags {
         inner
     }
 }
+
+impl ToVk for PipelineBindPoint {
+    type Inner = vk::PipelineBindPoint;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            PipelineBindPoint::Graphics => Self::Inner::GRAPHICS,
+            PipelineBindPoint::Compute => Self::Inner::COMPUTE,
+        }
+    }
+
+
+}
+
 
 impl ToVk for PipelineStageFlags {
     type Inner = vk::PipelineStageFlags;

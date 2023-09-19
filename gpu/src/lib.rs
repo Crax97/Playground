@@ -17,6 +17,7 @@ pub use swapchain::Swapchain;
 pub use types::*;
 
 pub const WHOLE_SIZE: u64 = u64::MAX;
+pub const QUEUE_FAMILY_IGNORED: u32 = u32::MAX;
 
 #[derive(Default, Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Offset2D {
@@ -123,6 +124,13 @@ pub struct SamplerCreateInfo {
     pub min_lod: f32,
     pub max_lod: f32,
     pub border_color: [f32; 4],
+}
+
+#[derive(Default, Clone, Debug, Copy, PartialEq, PartialOrd)]
+pub enum PipelineBindPoint {
+    #[default]
+    Graphics,
+    Compute,
 }
 
 #[derive(Default)]
