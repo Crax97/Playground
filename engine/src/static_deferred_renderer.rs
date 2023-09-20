@@ -870,7 +870,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         //#endregion
 
         let mut graphics_command_buffer =
-            CommandBuffer::new(&crate::app_state().gpu, gpu::QueueType::Graphics)?;
+            app_state().gpu.create_command_buffer(gpu::QueueType::Graphics)?;
         let mut context = GraphRunContext::new(
             &crate::app_state().gpu,
             &mut graphics_command_buffer,

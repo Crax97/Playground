@@ -14,10 +14,7 @@ use ash::{
 };
 
 use crate::pipeline::GpuPipeline;
-use crate::{
-    IndexType, AccessFlags, ComputePipeline, GPUFence, GPUSemaphore, GpuImage, GpuImageView, ImageAspectFlags,
-    Offset2D, PipelineStageFlags, Rect2D, ImageLayout, ToVk,
-};
+use crate::*;
 
 use super::{Gpu, GpuBuffer, GpuDescriptorSet, GraphicsPipeline, QueueType};
 
@@ -56,24 +53,6 @@ where
     command_buffer: &'c mut CommandBuffer<'g>,
 }
 
-pub struct MemoryBarrier {
-    pub src_access_mask: AccessFlags,
-    pub dst_access_mask: AccessFlags,
-}
-
-impl ToVk for MemoryBarrier {
-    type Inner = vk::MemoryBarrier;
-
-    fn to_vk(&self) -> Self::Inner {
-        Self::Inner {
-            s_type: StructureType::MEMORY_BARRIER,
-            p_next: std::ptr::null(),
-            src_access_mask: self.src_access_mask.to_vk(),
-            dst_access_mask: self.dst_access_mask.to_vk(),
-        }
-    }
-}
-
 pub struct BufferMemoryBarrier<'a> {
     pub src_access_mask: AccessFlags,
     pub dst_access_mask: AccessFlags,
@@ -98,28 +77,6 @@ impl<'a> ToVk for BufferMemoryBarrier<'a> {
             buffer: self.buffer.inner,
             offset: self.offset,
             size: self.size,
-        }
-    }
-}
-
-pub struct ImageSubresourceRange {
-    pub aspect_mask: ImageAspectFlags,
-    pub base_mip_level: u32,
-    pub level_count: u32,
-    pub base_array_layer: u32,
-    pub layer_count: u32,
-}
-
-impl ToVk for ImageSubresourceRange {
-    type Inner = vk::ImageSubresourceRange;
-
-    fn to_vk(&self) -> Self::Inner {
-        Self::Inner {
-            aspect_mask: self.aspect_mask.to_vk(),
-            base_mip_level: self.base_mip_level,
-            level_count: self.level_count,
-            base_array_layer: self.base_array_layer,
-            layer_count: self.layer_count,
         }
     }
 }
@@ -188,7 +145,7 @@ mod inner {
 }
 
 impl<'g> CommandBuffer<'g> {
-    pub fn new(gpu: &'g Gpu, target_queue: QueueType) -> VkResult<Self> {
+    pub(crate) fn new(gpu: &'g Gpu, target_queue: QueueType) -> VkResult<Self> {
         let device = gpu.vk_logical_device();
         let inner_command_buffer = unsafe {
             device.allocate_command_buffers(&CommandBufferAllocateInfo {
@@ -848,7 +805,7 @@ impl<'c, 'g> Drop for RenderPassCommand<'c, 'g> {
 }
 
 impl<'c, 'g> ComputePassCommand<'c, 'g> {
-    pub fn new(command_buffer: &'c mut CommandBuffer<'g>) -> Self {
+    fn new(command_buffer: &'c mut CommandBuffer<'g>) -> Self {
         Self { command_buffer }
     }
 

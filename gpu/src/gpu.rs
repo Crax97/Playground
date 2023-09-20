@@ -39,8 +39,8 @@ use crate::{
     get_allocation_callbacks, Extent2D, GPUFence, GpuFramebuffer, GpuImageView, GpuShaderModule,
     ImageAspectFlags, ImageFormat, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
     ImageUsageFlags, PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPass,
-    SamplerCreateInfo, ToVk, ImageViewType, ComponentMapping, GraphicsPipeline, GraphicsPipelineDescription, ComputePipeline, ComputePipelineDescription, RenderPassDescription
-};
+    SamplerCreateInfo, ToVk, ImageViewType, ComponentMapping, GraphicsPipeline, GraphicsPipelineDescription,
+    ComputePipeline, ComputePipelineDescription, RenderPassDescription, CommandBuffer};
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
 
@@ -1614,6 +1614,10 @@ impl Gpu {
     
     pub fn create_compute_pipeline(&self, description: &ComputePipelineDescription) -> VkResult<ComputePipeline> {
         ComputePipeline::new(self, description)
+    }
+
+    pub fn create_command_buffer(&self, queue_type: QueueType) -> VkResult<CommandBuffer> {
+        CommandBuffer::new(self, queue_type)
     }
 
     pub fn save_pipeline_cache(&self, path: &str) -> VkResult<()> {

@@ -1069,5 +1069,31 @@ impl ToVk for FrontFace {
     }
 }
 
+impl ToVk for MemoryBarrier {
+    type Inner = vk::MemoryBarrier;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            s_type: StructureType::MEMORY_BARRIER,
+            p_next: std::ptr::null(),
+            src_access_mask: self.src_access_mask.to_vk(),
+            dst_access_mask: self.dst_access_mask.to_vk(),
+        }
+    }
+}
+
+impl ToVk for ImageSubresourceRange {
+    type Inner = vk::ImageSubresourceRange;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            aspect_mask: self.aspect_mask.to_vk(),
+            base_mip_level: self.base_mip_level,
+            level_count: self.level_count,
+            base_array_layer: self.base_array_layer,
+            layer_count: self.layer_count,
+        }
+    }
+}
 
 

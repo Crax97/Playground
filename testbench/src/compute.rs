@@ -1,7 +1,7 @@
 use engine_macros::*;
 use gpu::DescriptorType::{StorageBuffer, UniformBuffer};
 use gpu::{
-    BindingElement, BindingType, BufferCreateInfo, BufferRange, BufferUsageFlags, CommandBuffer,
+    BindingElement, BindingType, BufferCreateInfo, BufferRange, BufferUsageFlags, 
     CommandBufferSubmitInfo, ComputePipelineDescription, DescriptorInfo,
     DescriptorSetInfo, GPUFence, GlobalBinding, Gpu, GpuConfiguration, MemoryDomain,
     PipelineStageFlags, QueueType, ShaderModuleCreateInfo, ShaderStage,
@@ -110,7 +110,7 @@ fn main() -> anyhow::Result<()> {
         ],
     })?;
 
-    let mut command_buffer = CommandBuffer::new(&gpu, QueueType::Graphics)?;
+    let mut command_buffer = gpu.create_command_buffer(QueueType::Graphics)?;
     {
         let mut compute_pass = command_buffer.begin_compute_pass();
         compute_pass.bind_pipeline(&command_pipeline);
