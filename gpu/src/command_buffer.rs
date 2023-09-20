@@ -14,10 +14,9 @@ use ash::{
 };
 
 use crate::pipeline::GpuPipeline;
-use crate::types::ImageLayout;
 use crate::{
     IndexType, AccessFlags, ComputePipeline, GPUFence, GPUSemaphore, GpuImage, GpuImageView, ImageAspectFlags,
-    Offset2D, PipelineStageFlags, Rect2D, ToVk,
+    Offset2D, PipelineStageFlags, Rect2D, ImageLayout, ToVk,
 };
 
 use super::{Gpu, GpuBuffer, GpuDescriptorSet, GraphicsPipeline, QueueType};
