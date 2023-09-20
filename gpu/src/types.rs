@@ -1044,3 +1044,30 @@ impl ToVk for super::SampleCount {
         }
     }
 }
+
+impl ToVk for CullMode {
+    type Inner = vk::CullModeFlags;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            CullMode::Back => Self::Inner::BACK,
+            CullMode::Front => Self::Inner::FRONT,
+            CullMode::None => Self::Inner::NONE,
+            CullMode::FrontAndBack => Self::Inner::FRONT_AND_BACK,
+        }
+    }
+}
+
+impl ToVk for FrontFace {
+    type Inner = vk::FrontFace;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            FrontFace::CounterClockWise => vk::FrontFace::COUNTER_CLOCKWISE,
+            FrontFace::ClockWise => vk::FrontFace::CLOCKWISE,
+        }
+    }
+}
+
+
+

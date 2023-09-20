@@ -557,3 +557,210 @@ pub enum PresentMode {
     #[doc = "May not be supported, wait for next vsync, discard old images in queue in favour for new images"]
     Mailbox,
 }
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SubpassDescription<'a> {
+    pub pipeline_bind_point: PipelineBindPoint,
+    pub input_attachments: &'a [AttachmentReference],
+    pub color_attachments: &'a [AttachmentReference],
+    pub resolve_attachments: &'a [AttachmentReference],
+    pub depth_stencil_attachment: &'a [AttachmentReference],
+    pub preserve_attachments: &'a [u32],
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SubpassDependency {
+    pub src_subpass: u32,
+    pub dst_subpass: u32,
+    pub src_stage_mask: PipelineStageFlags,
+    pub dst_stage_mask: PipelineStageFlags,
+    pub src_access_mask: AccessFlags,
+    pub dst_access_mask: AccessFlags,
+}
+
+impl SubpassDependency {
+    pub const EXTERNAL: u32 = u32::MAX;
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RenderPassDescription<'a> {
+    pub attachments: &'a [RenderPassAttachment],
+    pub subpasses: &'a [SubpassDescription<'a>],
+    pub dependencies: &'a [SubpassDependency],
+}
+
+
+#[derive(Copy, Clone, Default)]
+pub struct DepthStencilState {
+    pub depth_test_enable: bool,
+    pub depth_write_enable: bool,
+    pub depth_compare_op: CompareOp,
+    pub stencil_test_enable: bool,
+    pub front: StencilOpState,
+    pub back: StencilOpState,
+    pub min_depth_bounds: f32,
+    pub max_depth_bounds: f32,
+}
+
+#[derive(Copy, Clone, Default, Hash)]
+pub enum LogicOp {
+    #[default]
+    Clear,
+    And,
+    AndReverse,
+    Copy,
+    AndInverted,
+    NoOp,
+    Xor,
+    Or,
+    Nor,
+    Equivalent,
+    Invert,
+    OrReverse,
+    CopyInverted,
+    OrInverted,
+    Nand,
+    Set,
+}
+
+
+#[derive(Clone, Copy, Debug, Default, Hash)]
+pub enum FrontFace {
+    #[default]
+    CounterClockWise,
+    ClockWise,
+}
+
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum InputRate {
+    PerVertex,
+    PerInstance,
+}
+
+#[derive(Clone, Copy, Debug, Hash)]
+pub struct VertexAttributeDescription {
+    pub location: u32,
+    pub format: ImageFormat,
+    pub offset: u32,
+}
+
+#[derive(Clone, Copy, Debug, Hash)]
+pub struct VertexBindingDescription<'a> {
+    pub binding: u32,
+    pub input_rate: InputRate,
+    pub stride: u32,
+    pub attributes: &'a [VertexAttributeDescription],
+}
+
+#[derive(Clone, Copy)]
+pub struct VertexStageInfo<'a> {
+    pub entry_point: &'a str,
+    pub module: &'a GpuShaderModule,
+}
+
+#[derive(Clone, Copy, Debug, Default, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub struct BlendState {
+    pub blend_enable: bool,
+    pub src_color_blend_factor: BlendMode,
+    pub dst_color_blend_factor: BlendMode,
+    pub color_blend_op: BlendOp,
+    pub src_alpha_blend_factor: BlendMode,
+    pub dst_alpha_blend_factor: BlendMode,
+    pub alpha_blend_op: BlendOp,
+    pub color_write_mask: ColorComponentFlags,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RenderPassAttachment {
+    pub format: ImageFormat,
+    pub samples: SampleCount,
+    pub load_op: ColorLoadOp,
+    pub store_op: AttachmentStoreOp,
+    pub stencil_load_op: StencilLoadOp,
+    pub stencil_store_op: AttachmentStoreOp,
+    pub initial_layout: ImageLayout,
+    pub final_layout: ImageLayout,
+    pub blend_state: BlendState,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct DepthStencilAttachment {}
+#[derive(Clone, Copy)]
+pub struct FragmentStageInfo<'a> {
+    pub entry_point: &'a str,
+    pub module: &'a GpuShaderModule,
+    pub color_attachments: &'a [RenderPassAttachment],
+    pub depth_stencil_attachments: &'a [DepthStencilAttachment],
+}
+
+#[derive(Clone, Copy, Debug, Default, Hash)]
+pub enum PrimitiveTopology {
+    #[default]
+    TriangleList,
+    TriangleStrip,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub enum PolygonMode {
+    #[default]
+    Fill,
+    Line(f32),
+    Point,
+}
+
+#[derive(Clone, Copy, Debug, Default, Hash)]
+pub enum CullMode {
+    #[default]
+    Back,
+    Front,
+    None,
+    FrontAndBack,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum BindingType {
+    Uniform,
+    Storage,
+    Sampler,
+    CombinedImageSampler,
+}
+
+#[derive(Clone, Copy)]
+pub struct BindingElement {
+    pub binding_type: BindingType,
+    pub index: u32,
+    pub stage: ShaderStage,
+}
+
+#[derive(Clone)]
+pub struct GlobalBinding<'a> {
+    pub set_index: u32,
+    pub elements: &'a [BindingElement],
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct GraphicsPipelineDescription<'a> {
+    pub global_bindings: &'a [GlobalBinding<'a>],
+    pub vertex_inputs: &'a [VertexBindingDescription<'a>],
+    pub vertex_stage: Option<VertexStageInfo<'a>>,
+    pub fragment_stage: Option<FragmentStageInfo<'a>>,
+    pub input_topology: PrimitiveTopology,
+    pub primitive_restart: bool,
+    pub polygon_mode: PolygonMode,
+    pub cull_mode: CullMode,
+    pub front_face: FrontFace,
+    pub depth_stencil_state: DepthStencilState,
+    pub logic_op: Option<LogicOp>,
+    pub push_constant_ranges: &'a [PushConstantRange],
+}
+
+#[derive(Clone, Copy)]
+pub struct ComputePipelineDescription<'a> {
+    pub module: &'a GpuShaderModule,
+    pub entry_point: &'a str,
+    pub bindings: &'a [GlobalBinding<'a>],
+    pub push_constant_ranges: &'a [PushConstantRange],
+}
+
+
