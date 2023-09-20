@@ -684,7 +684,7 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
                 dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
             }],
         };
-        let pass = RenderPass::new(gpu, &description)?;
+        let pass = gpu.create_render_pass(&description)?;
 
         Ok(GraphPass::construct(pass, create_info.pass_info.clone()))
     }
@@ -1166,7 +1166,7 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
         push_constant_ranges: description.fragment_state.push_constant_ranges,
     };
 
-    Ok(GraphicsPipeline::new(gpu, &description)?)
+    Ok(gpu.create_graphics_pipeline(&description)?)
 }
 
 pub struct RenderGraph {

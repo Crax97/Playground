@@ -193,8 +193,7 @@ impl MasterMaterial {
     ) -> anyhow::Result<HashMap<PipelineTarget, GraphicsPipeline>> {
         let mut pipelines = HashMap::new();
         for target in [PipelineTarget::ColorAndDepth, PipelineTarget::DepthOnly] {
-            let pipeline = GraphicsPipeline::new(
-                gpu,
+            let pipeline = gpu.create_graphics_pipeline(
                 &GraphicsPipelineDescription {
                     global_bindings: &[
                         GlobalBinding {
@@ -245,8 +244,7 @@ impl MasterMaterial {
                     },
                     logic_op: description.logic_op,
                     push_constant_ranges: description.push_constant_ranges,
-                },
-            )?;
+                })?;
             pipelines.insert(target, pipeline);
         }
 
@@ -259,9 +257,7 @@ impl MasterMaterial {
         user_elements: Vec<BindingElement>,
     ) -> anyhow::Result<HashMap<PipelineTarget, GraphicsPipeline>> {
         let mut pipelines = HashMap::new();
-        let pipeline = GraphicsPipeline::new(
-            gpu,
-            &GraphicsPipelineDescription {
+        let pipeline = gpu.create_graphics_pipeline(&GraphicsPipelineDescription {
                 global_bindings: &[
                     GlobalBinding {
                         set_index: 0,

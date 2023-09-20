@@ -2,7 +2,7 @@ use engine_macros::*;
 use gpu::DescriptorType::{StorageBuffer, UniformBuffer};
 use gpu::{
     BindingElement, BindingType, BufferCreateInfo, BufferRange, BufferUsageFlags, CommandBuffer,
-    CommandBufferSubmitInfo, ComputePipeline, ComputePipelineDescription, DescriptorInfo,
+    CommandBufferSubmitInfo, ComputePipelineDescription, DescriptorInfo,
     DescriptorSetInfo, GPUFence, GlobalBinding, Gpu, GpuConfiguration, MemoryDomain,
     PipelineStageFlags, QueueType, ShaderModuleCreateInfo, ShaderStage,
 };
@@ -45,9 +45,7 @@ fn main() -> anyhow::Result<()> {
         },
     )?;
 
-    let command_pipeline = ComputePipeline::new(
-        &gpu,
-        &ComputePipelineDescription {
+    let command_pipeline = gpu.create_compute_pipeline(&ComputePipelineDescription {
             module: &module,
             entry_point: "main",
             bindings: &[GlobalBinding {
@@ -68,7 +66,7 @@ fn main() -> anyhow::Result<()> {
             push_constant_ranges: &[],
         },
     )?;
-
+            
     let output_buffer = gpu.create_buffer(
         &BufferCreateInfo {
             label: Some("test buffer"),

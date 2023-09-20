@@ -39,7 +39,7 @@ use crate::{
     get_allocation_callbacks, Extent2D, GPUFence, GpuFramebuffer, GpuImageView, GpuShaderModule,
     ImageAspectFlags, ImageFormat, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
     ImageUsageFlags, PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPass,
-    SamplerCreateInfo, ToVk, ImageViewType, ComponentMapping
+    SamplerCreateInfo, ToVk, ImageViewType, ComponentMapping, GraphicsPipeline, GraphicsPipelineDescription, ComputePipeline, ComputePipelineDescription, RenderPassDescription
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -1602,6 +1602,18 @@ impl Gpu {
     pub fn reset_fences(&self, fences: &[&GPUFence]) -> VkResult<()> {
         let fences: Vec<_> = fences.iter().map(|f| f.inner).collect();
         unsafe { self.vk_logical_device().reset_fences(&fences) }
+    }
+
+    pub fn create_render_pass(&self, description: &RenderPassDescription) -> VkResult<RenderPass> {
+        RenderPass::new(self, description)
+    }
+
+    pub fn create_graphics_pipeline(&self, description: &GraphicsPipelineDescription) -> VkResult<GraphicsPipeline> {
+        GraphicsPipeline::new(self, description)
+    }
+    
+    pub fn create_compute_pipeline(&self, description: &ComputePipelineDescription) -> VkResult<ComputePipeline> {
+        ComputePipeline::new(self, description)
     }
 
     pub fn save_pipeline_cache(&self, path: &str) -> VkResult<()> {

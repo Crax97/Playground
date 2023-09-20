@@ -1,7 +1,7 @@
 use std::ptr::addr_of;
 use std::{ffi::CString, sync::Arc};
 
-use ash::vk::{CullModeFlags, DependencyFlags, Format, PipelineRenderingCreateInfoKHR};
+use ash::vk::{DependencyFlags, Format, PipelineRenderingCreateInfoKHR};
 use ash::{
     prelude::VkResult,
     vk::{
@@ -167,7 +167,7 @@ impl Drop for RenderPass {
     }
 }
 impl RenderPass {
-    pub fn new(gpu: &Gpu, pass_description: &RenderPassDescription) -> VkResult<Self> {
+    pub(crate) fn new(gpu: &Gpu, pass_description: &RenderPassDescription) -> VkResult<Self> {
         let output_attachments = pass_description.get_output_attachments();
         let subpasses = pass_description.get_subpasses();
         let subpass_dependencies = pass_description.get_subpass_dependencies();
@@ -303,7 +303,7 @@ impl std::hash::Hash for GraphicsPipeline {
 }
 
 impl GraphicsPipeline {
-    pub fn new(gpu: &Gpu, pipeline_description: &GraphicsPipelineDescription) -> VkResult<Self> {
+    pub(crate) fn new(gpu: &Gpu, pipeline_description: &GraphicsPipelineDescription) -> VkResult<Self> {
         let descriptor_set_layouts =
             create_descriptor_set_layouts(&pipeline_description.global_bindings, gpu)?;
         let color_blend_attachments = pipeline_description.get_output_attachments();
@@ -593,7 +593,7 @@ pub struct ComputePipeline {
     shared_state: Arc<GpuState>,
 }
 impl ComputePipeline {
-    pub fn new(gpu: &Gpu, description: &ComputePipelineDescription) -> VkResult<Self> {
+    pub(crate) fn new(gpu: &Gpu, description: &ComputePipelineDescription) -> VkResult<Self> {
         let descriptor_set_layouts = create_descriptor_set_layouts(&description.bindings, gpu)?;
 
         let entry_point = CString::new(description.entry_point).unwrap();
