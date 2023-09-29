@@ -1,10 +1,10 @@
 use std::{collections::HashMap, hash::Hash, mem::size_of, num::NonZeroU32};
 
 use gpu::{
-    BindingElement, BindingType, CullMode, DepthStencilState, FragmentStageInfo, FrontFace,
-    GlobalBinding, Gpu, GraphicsPipeline, GraphicsPipelineDescription, LogicOp, PolygonMode,
-    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo, PushConstantRange,
-    CompareOp, StencilOpState, ImageFormat
+    BindingElement, BindingType, CompareOp, CullMode, DepthStencilState, FragmentStageInfo,
+    FrontFace, GlobalBinding, Gpu, GraphicsPipeline, GraphicsPipelineDescription, ImageFormat,
+    LogicOp, PolygonMode, PushConstantRange, StencilOpState, VertexAttributeDescription,
+    VertexBindingDescription, VertexStageInfo,
 };
 use nalgebra::{Vector2, Vector3};
 use resource_map::Resource;
@@ -193,58 +193,57 @@ impl MasterMaterial {
     ) -> anyhow::Result<HashMap<PipelineTarget, GraphicsPipeline>> {
         let mut pipelines = HashMap::new();
         for target in [PipelineTarget::ColorAndDepth, PipelineTarget::DepthOnly] {
-            let pipeline = gpu.create_graphics_pipeline(
-                &GraphicsPipelineDescription {
-                    global_bindings: &[
-                        GlobalBinding {
-                            set_index: 0,
-                            elements: &global_elements,
-                        },
-                        GlobalBinding {
-                            set_index: 1,
-                            elements: &user_elements,
-                        },
-                    ],
-                    vertex_inputs: Self::get_inputs_for_material_domain(&description.domain),
-                    vertex_stage: Some(*description.vertex_info),
-                    fragment_stage: match target {
-                        PipelineTarget::ColorAndDepth | PipelineTarget::PostProcess => {
-                            Some(*description.fragment_info)
-                        }
-                        PipelineTarget::DepthOnly => None,
+            let pipeline = gpu.create_graphics_pipeline(&GraphicsPipelineDescription {
+                global_bindings: &[
+                    GlobalBinding {
+                        set_index: 0,
+                        elements: &global_elements,
                     },
-                    input_topology: gpu::PrimitiveTopology::TriangleList,
-                    primitive_restart: description.primitive_restart,
-                    polygon_mode: description.polygon_mode,
-                    cull_mode: description.cull_mode,
-                    front_face: description.front_face,
-                    depth_stencil_state: match target {
-                        PipelineTarget::ColorAndDepth | PipelineTarget::PostProcess => {
-                            DepthStencilState {
-                                depth_test_enable: true,
-                                depth_write_enable: false,
-                                depth_compare_op: CompareOp::Equal,
-                                stencil_test_enable: false,
-                                front: StencilOpState::default(),
-                                back: StencilOpState::default(),
-                                min_depth_bounds: 0.0,
-                                max_depth_bounds: 1.0,
-                            }
-                        }
-                        PipelineTarget::DepthOnly => DepthStencilState {
+                    GlobalBinding {
+                        set_index: 1,
+                        elements: &user_elements,
+                    },
+                ],
+                vertex_inputs: Self::get_inputs_for_material_domain(&description.domain),
+                vertex_stage: Some(*description.vertex_info),
+                fragment_stage: match target {
+                    PipelineTarget::ColorAndDepth | PipelineTarget::PostProcess => {
+                        Some(*description.fragment_info)
+                    }
+                    PipelineTarget::DepthOnly => None,
+                },
+                input_topology: gpu::PrimitiveTopology::TriangleList,
+                primitive_restart: description.primitive_restart,
+                polygon_mode: description.polygon_mode,
+                cull_mode: description.cull_mode,
+                front_face: description.front_face,
+                depth_stencil_state: match target {
+                    PipelineTarget::ColorAndDepth | PipelineTarget::PostProcess => {
+                        DepthStencilState {
                             depth_test_enable: true,
-                            depth_write_enable: true,
-                            depth_compare_op: CompareOp::Less,
+                            depth_write_enable: false,
+                            depth_compare_op: CompareOp::Equal,
                             stencil_test_enable: false,
                             front: StencilOpState::default(),
                             back: StencilOpState::default(),
                             min_depth_bounds: 0.0,
                             max_depth_bounds: 1.0,
-                        },
+                        }
+                    }
+                    PipelineTarget::DepthOnly => DepthStencilState {
+                        depth_test_enable: true,
+                        depth_write_enable: true,
+                        depth_compare_op: CompareOp::Less,
+                        stencil_test_enable: false,
+                        front: StencilOpState::default(),
+                        back: StencilOpState::default(),
+                        min_depth_bounds: 0.0,
+                        max_depth_bounds: 1.0,
                     },
-                    logic_op: description.logic_op,
-                    push_constant_ranges: description.push_constant_ranges,
-                })?;
+                },
+                logic_op: description.logic_op,
+                push_constant_ranges: description.push_constant_ranges,
+            })?;
             pipelines.insert(target, pipeline);
         }
 
@@ -258,38 +257,37 @@ impl MasterMaterial {
     ) -> anyhow::Result<HashMap<PipelineTarget, GraphicsPipeline>> {
         let mut pipelines = HashMap::new();
         let pipeline = gpu.create_graphics_pipeline(&GraphicsPipelineDescription {
-                global_bindings: &[
-                    GlobalBinding {
-                        set_index: 0,
-                        elements: &global_elements,
-                    },
-                    GlobalBinding {
-                        set_index: 1,
-                        elements: &user_elements,
-                    },
-                ],
-                vertex_inputs: Self::get_inputs_for_material_domain(&description.domain),
-                vertex_stage: Some(*description.vertex_info),
-                fragment_stage: Some(*description.fragment_info),
-                input_topology: gpu::PrimitiveTopology::TriangleList,
-                primitive_restart: description.primitive_restart,
-                polygon_mode: description.polygon_mode,
-                cull_mode: description.cull_mode,
-                front_face: description.front_face,
-                depth_stencil_state: DepthStencilState {
-                    depth_test_enable: true,
-                    depth_write_enable: false,
-                    depth_compare_op: CompareOp::Equal,
-                    stencil_test_enable: false,
-                    front: StencilOpState::default(),
-                    back: StencilOpState::default(),
-                    min_depth_bounds: 0.0,
-                    max_depth_bounds: 1.0,
+            global_bindings: &[
+                GlobalBinding {
+                    set_index: 0,
+                    elements: &global_elements,
                 },
-                logic_op: description.logic_op,
-                push_constant_ranges: description.push_constant_ranges,
+                GlobalBinding {
+                    set_index: 1,
+                    elements: &user_elements,
+                },
+            ],
+            vertex_inputs: Self::get_inputs_for_material_domain(&description.domain),
+            vertex_stage: Some(*description.vertex_info),
+            fragment_stage: Some(*description.fragment_info),
+            input_topology: gpu::PrimitiveTopology::TriangleList,
+            primitive_restart: description.primitive_restart,
+            polygon_mode: description.polygon_mode,
+            cull_mode: description.cull_mode,
+            front_face: description.front_face,
+            depth_stencil_state: DepthStencilState {
+                depth_test_enable: true,
+                depth_write_enable: false,
+                depth_compare_op: CompareOp::Equal,
+                stencil_test_enable: false,
+                front: StencilOpState::default(),
+                back: StencilOpState::default(),
+                min_depth_bounds: 0.0,
+                max_depth_bounds: 1.0,
             },
-        )?;
+            logic_op: description.logic_op,
+            push_constant_ranges: description.push_constant_ranges,
+        })?;
         pipelines.insert(PipelineTarget::PostProcess, pipeline);
 
         Ok(pipelines)

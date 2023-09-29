@@ -520,12 +520,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         }
     }
 
-    pub fn bind_index_buffer(
-        &self,
-        buffer: &GpuBuffer,
-        offset: u64,
-        index_type: IndexType,
-    ) {
+    pub fn bind_index_buffer(&self, buffer: &GpuBuffer, offset: u64, index_type: IndexType) {
         let device = self.command_buffer.gpu.vk_logical_device();
         let index_buffer = buffer.inner;
         unsafe {
@@ -537,12 +532,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
             );
         }
     }
-    pub fn bind_vertex_buffer(
-        &self,
-        first_binding: u32,
-        buffers: &[&GpuBuffer],
-        offsets: &[u64],
-    ) {
+    pub fn bind_vertex_buffer(&self, first_binding: u32, buffers: &[&GpuBuffer], offsets: &[u64]) {
         assert!(buffers.len() == offsets.len());
         let device = self.command_buffer.gpu.vk_logical_device();
         let vertex_buffers: Vec<_> = buffers.iter().map(|b| b.inner).collect();

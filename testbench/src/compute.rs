@@ -1,10 +1,10 @@
 use engine_macros::*;
 use gpu::DescriptorType::{StorageBuffer, UniformBuffer};
 use gpu::{
-    BindingElement, BindingType, BufferCreateInfo, BufferRange, BufferUsageFlags, 
-    CommandBufferSubmitInfo, ComputePipelineDescription, DescriptorInfo,
-    DescriptorSetInfo, GPUFence, GlobalBinding, Gpu, GpuConfiguration, MemoryDomain,
-    PipelineStageFlags, QueueType, ShaderModuleCreateInfo, ShaderStage,
+    BindingElement, BindingType, BufferCreateInfo, BufferRange, BufferUsageFlags,
+    CommandBufferSubmitInfo, ComputePipelineDescription, DescriptorInfo, DescriptorSetInfo,
+    GPUFence, GlobalBinding, Gpu, GpuConfiguration, MemoryDomain, PipelineStageFlags, QueueType,
+    ShaderModuleCreateInfo, ShaderStage,
 };
 use std::mem::{size_of, size_of_val};
 
@@ -46,27 +46,26 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     let command_pipeline = gpu.create_compute_pipeline(&ComputePipelineDescription {
-            module: &module,
-            entry_point: "main",
-            bindings: &[GlobalBinding {
-                set_index: 0,
-                elements: &[
-                    BindingElement {
-                        binding_type: BindingType::Uniform,
-                        index: 0,
-                        stage: ShaderStage::COMPUTE,
-                    },
-                    BindingElement {
-                        binding_type: BindingType::Storage,
-                        index: 1,
-                        stage: ShaderStage::COMPUTE,
-                    },
-                ],
-            }],
-            push_constant_ranges: &[],
-        },
-    )?;
-            
+        module: &module,
+        entry_point: "main",
+        bindings: &[GlobalBinding {
+            set_index: 0,
+            elements: &[
+                BindingElement {
+                    binding_type: BindingType::Uniform,
+                    index: 0,
+                    stage: ShaderStage::COMPUTE,
+                },
+                BindingElement {
+                    binding_type: BindingType::Storage,
+                    index: 1,
+                    stage: ShaderStage::COMPUTE,
+                },
+            ],
+        }],
+        push_constant_ranges: &[],
+    })?;
+
     let output_buffer = gpu.create_buffer(
         &BufferCreateInfo {
             label: Some("test buffer"),

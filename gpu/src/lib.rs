@@ -6,9 +6,9 @@ mod pipeline;
 mod swapchain;
 mod types;
 
-pub use bitflags::bitflags;
 pub use crate::gpu::*;
 pub use allocator::*;
+pub use bitflags::bitflags;
 pub use command_buffer::*;
 pub use pipeline::*;
 use std::fmt::{Debug, Formatter};
@@ -25,7 +25,6 @@ bitflags! {
         const SIGNALED = 0b00000001;
     }
 }
-
 
 #[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug, Default)]
 pub enum ImageLayout {
@@ -156,7 +155,6 @@ pub struct ImageUsageFlags : u32 {
     }
 }
 
-
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum CompareOp {
     #[default]
@@ -170,7 +168,6 @@ pub enum CompareOp {
     GreatereEqual,
 }
 
-
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct ComponentMapping {
     pub r: ComponentSwizzle,
@@ -178,7 +175,6 @@ pub struct ComponentMapping {
     pub b: ComponentSwizzle,
     pub a: ComponentSwizzle,
 }
-
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum ComponentSwizzle {
@@ -191,7 +187,6 @@ pub enum ComponentSwizzle {
     B,
     A,
 }
-
 
 #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum ImageFormat {
@@ -284,15 +279,14 @@ impl ImageFormat {
 
 #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ImageViewType {
-   Type1D,
-   Type2D,
-   Type3D,
-   Cube,
-   Type1DArray,
-   Type2DArray,
-   TypeCubeArray,
+    Type1D,
+    Type2D,
+    Type3D,
+    Cube,
+    Type1DArray,
+    Type2DArray,
+    TypeCubeArray,
 }
-
 
 #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PushConstantRange {
@@ -300,7 +294,6 @@ pub struct PushConstantRange {
     pub offset: u32,
     pub size: u32,
 }
-
 
 bitflags! {
     #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -325,7 +318,6 @@ bitflags! {
     }
 }
 
-
 #[derive(Default, Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum IndexType {
     #[default]
@@ -336,7 +328,7 @@ pub enum IndexType {
 
 #[derive(Default, Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum StencilOp {
-   #[default]
+    #[default]
     Keep,
     Zero,
     Replace(u32),
@@ -435,7 +427,7 @@ pub enum SampleCount {
     Sample8,
     Sample16,
     Sample32,
-    Sample64
+    Sample64,
 }
 
 bitflags! {
@@ -448,7 +440,8 @@ pub struct ColorComponentFlags : u32 {
 }}
 
 impl ColorComponentFlags {
-    pub const RGBA : Self = Self::from_bits_truncate(Self::R.bits() | Self::G.bits() | Self::B.bits() | Self::A.bits());
+    pub const RGBA: Self =
+        Self::from_bits_truncate(Self::R.bits() | Self::G.bits() | Self::B.bits() | Self::A.bits());
 }
 
 #[derive(Default, Clone, Debug, Copy, PartialEq, PartialOrd)]
@@ -589,7 +582,6 @@ pub struct RenderPassDescription<'a> {
     pub dependencies: &'a [SubpassDependency],
 }
 
-
 #[derive(Copy, Clone, Default)]
 pub struct DepthStencilState {
     pub depth_test_enable: bool,
@@ -623,14 +615,12 @@ pub enum LogicOp {
     Set,
 }
 
-
 #[derive(Clone, Copy, Debug, Default, Hash)]
 pub enum FrontFace {
     #[default]
     CounterClockWise,
     ClockWise,
 }
-
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum InputRate {
@@ -763,7 +753,6 @@ pub struct ComputePipelineDescription<'a> {
     pub push_constant_ranges: &'a [PushConstantRange],
 }
 
-
 pub struct MemoryBarrier {
     pub src_access_mask: AccessFlags,
     pub dst_access_mask: AccessFlags,
@@ -886,4 +875,3 @@ pub struct Viewport {
     pub min_depth: f32,
     pub max_depth: f32,
 }
-

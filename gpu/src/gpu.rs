@@ -21,11 +21,11 @@ use ash::{
         DescriptorImageInfo, DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags,
         DeviceQueueCreateInfo, Extent3D, Fence, FormatFeatureFlags, FramebufferCreateFlags, Handle,
         ImageCreateFlags, ImageSubresourceLayers, ImageTiling, ImageType, ImageViewCreateFlags,
-        InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags,
-        Offset3D, PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties,
-        PhysicalDeviceType, PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo,
-        Queue, QueueFlags, SampleCountFlags, ShaderModuleCreateFlags, SharingMode, StructureType,
-        SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
+        InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D,
+        PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType,
+        PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo, Queue, QueueFlags,
+        SampleCountFlags, ShaderModuleCreateFlags, SharingMode, StructureType, SubmitInfo,
+        WriteDescriptorSet, API_VERSION_1_3,
     },
     *,
 };
@@ -36,11 +36,12 @@ use thiserror::Error;
 use winit::window::Window;
 
 use crate::{
-    get_allocation_callbacks, Extent2D, GPUFence, GpuFramebuffer, GpuImageView, GpuShaderModule,
-    ImageAspectFlags, ImageFormat, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
-    ImageUsageFlags, PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPass,
-    SamplerCreateInfo, ToVk, ImageViewType, ComponentMapping, GraphicsPipeline, GraphicsPipelineDescription,
-    ComputePipeline, ComputePipelineDescription, RenderPassDescription, CommandBuffer};
+    get_allocation_callbacks, CommandBuffer, ComponentMapping, ComputePipeline,
+    ComputePipelineDescription, Extent2D, GPUFence, GpuFramebuffer, GpuImageView, GpuShaderModule,
+    GraphicsPipeline, GraphicsPipelineDescription, ImageAspectFlags, ImageFormat, ImageLayout,
+    ImageMemoryBarrier, ImageSubresourceRange, ImageUsageFlags, ImageViewType, PipelineBarrierInfo,
+    PipelineStageFlags, QueueType, RenderPass, RenderPassDescription, SamplerCreateInfo, ToVk,
+};
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
 
@@ -1608,11 +1609,17 @@ impl Gpu {
         RenderPass::new(self, description)
     }
 
-    pub fn create_graphics_pipeline(&self, description: &GraphicsPipelineDescription) -> VkResult<GraphicsPipeline> {
+    pub fn create_graphics_pipeline(
+        &self,
+        description: &GraphicsPipelineDescription,
+    ) -> VkResult<GraphicsPipeline> {
         GraphicsPipeline::new(self, description)
     }
-    
-    pub fn create_compute_pipeline(&self, description: &ComputePipelineDescription) -> VkResult<ComputePipeline> {
+
+    pub fn create_compute_pipeline(
+        &self,
+        description: &ComputePipelineDescription,
+    ) -> VkResult<ComputePipeline> {
         ComputePipeline::new(self, description)
     }
 

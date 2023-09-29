@@ -7,20 +7,20 @@ use std::{
 };
 
 use gpu::{
-    AccessFlags, BeginRenderPassInfo, BindingElement, BindingType, BlendState, BufferCreateInfo,
-    BufferRange, BufferUsageFlags, ColorAttachment, ColorLoadOp, CommandBuffer, CullMode,
+    AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, BindingElement,
+    BindingType, BlendMode, BlendOp, BlendState, BufferCreateInfo, BufferRange, BufferUsageFlags,
+    ColorAttachment, ColorComponentFlags, ColorLoadOp, CommandBuffer, ComponentMapping, CullMode,
     DepthAttachment, DepthLoadOp, DepthStencilAttachment, DepthStencilState, DescriptorInfo,
     DescriptorSetInfo, Extent2D, Filter, FragmentStageInfo, FramebufferCreateInfo, FrontFace,
     GlobalBinding, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView,
     GpuSampler, GpuShaderModule, GraphicsPipeline, GraphicsPipelineDescription, ImageAspectFlags,
     ImageCreateInfo, ImageFormat, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
-    ImageUsageFlags, ImageViewCreateInfo, LogicOp, MemoryDomain, Offset2D, PipelineBarrierInfo,
-    PipelineStageFlags, PolygonMode, PrimitiveTopology, Rect2D, RenderPass, RenderPassAttachment,
-    RenderPassCommand, RenderPassDescription, SamplerAddressMode, SamplerCreateInfo,
-    StencilAttachment, StencilLoadOp, SubpassDependency, SubpassDescription, TransitionInfo,
-    VertexBindingDescription, VertexStageInfo, ImageViewType, ComponentMapping, PushConstantRange,
-    AttachmentStoreOp, BlendOp, BlendMode, ColorComponentFlags, AttachmentReference, SampleCount,
-    PipelineBindPoint
+    ImageUsageFlags, ImageViewCreateInfo, ImageViewType, LogicOp, MemoryDomain, Offset2D,
+    PipelineBarrierInfo, PipelineBindPoint, PipelineStageFlags, PolygonMode, PrimitiveTopology,
+    PushConstantRange, Rect2D, RenderPass, RenderPassAttachment, RenderPassCommand,
+    RenderPassDescription, SampleCount, SamplerAddressMode, SamplerCreateInfo, StencilAttachment,
+    StencilLoadOp, SubpassDependency, SubpassDescription, TransitionInfo, VertexBindingDescription,
+    VertexStageInfo,
 };
 
 use indexmap::IndexSet;
@@ -548,7 +548,7 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
                 samples: SampleCount::Sample1,
                 load_op: match resource_usage.input {
                     ResourceLayout::Unknown => ColorLoadOp::DontCare,
-                    _ => ColorLoadOp::Clear([0.0;4]),
+                    _ => ColorLoadOp::Clear([0.0; 4]),
                 },
                 store_op: match resource_usage.output {
                     ResourceLayout::Unknown => AttachmentStoreOp::DontCare,
@@ -2485,9 +2485,9 @@ fn resolve_input_descriptor_set<'a>(
 
 #[cfg(test)]
 mod test {
-    use gpu::Extent2D;
     use crate::ClearValue::{Color, DontCare};
     use crate::{CompileError, ResourceId, ResourceLayout};
+    use gpu::Extent2D;
 
     use super::{ImageDescription, RenderGraph};
 

@@ -1,7 +1,7 @@
 use gpu::{
-    Filter, Gpu, GpuImage, GpuImageView, GpuSampler, ImageAspectFlags, ImageCreateInfo,
-    ImageFormat, ImageSubresourceRange, ImageUsageFlags, MemoryDomain, SamplerAddressMode,
-    SamplerCreateInfo, ImageViewType, ComponentMapping
+    ComponentMapping, Filter, Gpu, GpuImage, GpuImageView, GpuSampler, ImageAspectFlags,
+    ImageCreateInfo, ImageFormat, ImageSubresourceRange, ImageUsageFlags, ImageViewType,
+    MemoryDomain, SamplerAddressMode, SamplerCreateInfo,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 

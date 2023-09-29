@@ -1,16 +1,16 @@
-﻿use crate::utils;
+use crate::utils;
 use engine::{
     ImageResource, MasterMaterial, MaterialDescription, MaterialDomain, MaterialInstance,
     MaterialInstanceDescription, MaterialParameterOffsetSize, Mesh, MeshCreateInfo,
     MeshPrimitiveCreateInfo, RenderingPipeline, SamplerResource, Scene, ScenePrimitive, Texture,
-    TextureImageView, TextureInput, 
+    TextureImageView, TextureInput,
 };
 use gltf::image::Data;
 use gltf::Document;
 use gpu::{
-    Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageSubresourceRange, ImageUsageFlags,
-    ImageViewCreateInfo, MemoryDomain, SamplerAddressMode, SamplerCreateInfo, ImageViewType, ComponentMapping
-
+    ComponentMapping, Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageSubresourceRange,
+    ImageUsageFlags, ImageViewCreateInfo, ImageViewType, MemoryDomain, SamplerAddressMode,
+    SamplerCreateInfo,
 };
 use nalgebra::{vector, Matrix4, Quaternion, UnitQuaternion, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};

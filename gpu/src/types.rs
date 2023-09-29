@@ -1,8 +1,10 @@
 use std::{cell::RefCell, ops::Deref, sync::Arc};
 
 use super::{allocator::GpuAllocator, gpu::*};
-use crate::{Extent2D, Filter, Offset2D, Rect2D, SamplerAddressMode, SamplerCreateInfo, PipelineBindPoint,
-    IndexType, StencilOpState, StencilOp, *};
+use crate::{
+    Extent2D, Filter, IndexType, Offset2D, PipelineBindPoint, Rect2D, SamplerAddressMode,
+    SamplerCreateInfo, StencilOp, StencilOpState, *,
+};
 use ash::vk::{
     BufferUsageFlags as VkBufferUsageFlags, SamplerCreateFlags, SamplerMipmapMode, StructureType,
 };
@@ -71,13 +73,13 @@ impl ToVk for StencilOpState {
 
     fn to_vk(&self) -> Self::Inner {
         Self::Inner {
-           fail_op: self.fail.to_vk(),
-           pass_op: self.pass.to_vk(),
-           depth_fail_op: self.depth_fail.to_vk(),
-           compare_op: self.compare.to_vk(),
-           compare_mask: self.compare_mask,
-           write_mask: self.write_mask,
-           reference: self.reference,
+            fail_op: self.fail.to_vk(),
+            pass_op: self.pass.to_vk(),
+            depth_fail_op: self.depth_fail.to_vk(),
+            compare_op: self.compare.to_vk(),
+            compare_mask: self.compare_mask,
+            write_mask: self.write_mask,
+            reference: self.reference,
         }
     }
 }
@@ -86,15 +88,25 @@ impl ToVk for ShaderStage {
     type Inner = vk::ShaderStageFlags;
 
     fn to_vk(&self) -> Self::Inner {
-        let mut result = Self::Inner::default(); 
-        case!(self, result, Self::VERTEX, Self::Inner::VERTEX); 
-        case!(self, result, Self::TESSELLATION_CONTROL, Self::Inner::TESSELLATION_CONTROL); 
-        case!(self, result, Self::TESSELLATION_EVALUATION, Self::Inner::TESSELLATION_EVALUATION); 
-        case!(self, result, Self::GEOMETRY, Self::Inner::GEOMETRY); 
-        case!(self, result, Self::FRAGMENT, Self::Inner::FRAGMENT); 
+        let mut result = Self::Inner::default();
+        case!(self, result, Self::VERTEX, Self::Inner::VERTEX);
+        case!(
+            self,
+            result,
+            Self::TESSELLATION_CONTROL,
+            Self::Inner::TESSELLATION_CONTROL
+        );
+        case!(
+            self,
+            result,
+            Self::TESSELLATION_EVALUATION,
+            Self::Inner::TESSELLATION_EVALUATION
+        );
+        case!(self, result, Self::GEOMETRY, Self::Inner::GEOMETRY);
+        case!(self, result, Self::FRAGMENT, Self::Inner::FRAGMENT);
         case!(self, result, Self::COMPUTE, Self::Inner::COMPUTE);
-        case!(self, result, Self::ALL_GRAPHICS, Self::Inner::ALL_GRAPHICS); 
-        case!(self, result, Self::ALL, Self::Inner::ALL); 
+        case!(self, result, Self::ALL_GRAPHICS, Self::Inner::ALL_GRAPHICS);
+        case!(self, result, Self::ALL, Self::Inner::ALL);
         result
     }
 }
@@ -137,7 +149,7 @@ impl From<vk::ImageViewType> for ImageViewType {
             vk::ImageViewType::TYPE_1D_ARRAY => ImageViewType::Type1DArray,
             vk::ImageViewType::TYPE_2D_ARRAY => ImageViewType::Type2DArray,
             vk::ImageViewType::CUBE_ARRAY => ImageViewType::TypeCubeArray,
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 }
@@ -354,7 +366,6 @@ impl ToVk for PipelineBindPoint {
         }
     }
 }
-
 
 impl ToVk for PipelineStageFlags {
     type Inner = vk::PipelineStageFlags;
@@ -1024,7 +1035,7 @@ impl ToVk for super::AttachmentReference {
     fn to_vk(&self) -> Self::Inner {
         Self::Inner {
             attachment: self.attachment,
-            layout: self.layout.to_vk()
+            layout: self.layout.to_vk(),
         }
     }
 }
@@ -1183,7 +1194,6 @@ impl ToVk for AttachmentStoreOp {
     }
 }
 
-
 impl ToVk for Viewport {
     type Inner = vk::Viewport;
 
@@ -1198,4 +1208,3 @@ impl ToVk for Viewport {
         }
     }
 }
-

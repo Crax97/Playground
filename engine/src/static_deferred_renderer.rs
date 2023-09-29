@@ -2,11 +2,11 @@ use engine_macros::glsl;
 use std::{collections::HashMap, mem::size_of};
 
 use gpu::{
-    BindingType, BufferCreateInfo, BufferUsageFlags, CommandBuffer, DepthStencilState, Extent2D,
-    FragmentStageInfo, Gpu, GpuBuffer, GpuShaderModule, ImageFormat, MemoryDomain,
-    ShaderModuleCreateInfo, Swapchain, VertexStageInfo, PushConstantRange, ShaderStage,
-    AttachmentStoreOp, ColorLoadOp, StencilLoadOp, ImageLayout, ColorComponentFlags,
-    SampleCount, IndexType, CompareOp, StencilOpState
+    AttachmentStoreOp, BindingType, BufferCreateInfo, BufferUsageFlags, ColorComponentFlags,
+    ColorLoadOp, CommandBuffer, CompareOp, DepthStencilState, Extent2D, FragmentStageInfo, Gpu,
+    GpuBuffer, GpuShaderModule, ImageFormat, ImageLayout, IndexType, MemoryDomain,
+    PushConstantRange, SampleCount, ShaderModuleCreateInfo, ShaderStage, StencilLoadOp,
+    StencilOpState, Swapchain, VertexStageInfo,
 };
 use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -136,10 +136,10 @@ use crate::{
     Backbuffer, BufferDescription, BufferType, ClearValue, FragmentState, GpuRunner,
     GraphRunContext, Light, LightType, MaterialDescription, MaterialDomain, MaterialInstance,
     MeshPrimitive, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription,
-    RenderPassContext, RenderStage, RenderingPipeline, Scene, 
+    RenderPassContext, RenderStage, RenderingPipeline, Scene,
 };
 
-use gpu::{BlendState, RenderPassAttachment, BlendOp, BlendMode,};
+use gpu::{BlendMode, BlendOp, BlendState, RenderPassAttachment};
 
 struct FrameBuffers {
     camera_buffer: GpuBuffer,
@@ -869,8 +869,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         //#endregion
 
-        let mut graphics_command_buffer =
-            app_state().gpu.create_command_buffer(gpu::QueueType::Graphics)?;
+        let mut graphics_command_buffer = app_state()
+            .gpu
+            .create_command_buffer(gpu::QueueType::Graphics)?;
         let mut context = GraphRunContext::new(
             &crate::app_state().gpu,
             &mut graphics_command_buffer,
@@ -991,7 +992,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             RenderPassAttachment {
                 format: ImageFormat::Rgba8,
                 samples: SampleCount::Sample1,
-                load_op: ColorLoadOp::Clear([0.0;4]),
+                load_op: ColorLoadOp::Clear([0.0; 4]),
                 store_op: AttachmentStoreOp::Store,
                 stencil_load_op: StencilLoadOp::DontCare,
                 stencil_store_op: AttachmentStoreOp::DontCare,
@@ -1012,7 +1013,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             RenderPassAttachment {
                 format: ImageFormat::Rgba8,
                 samples: SampleCount::Sample1,
-                load_op: ColorLoadOp::Clear([0.0;4]),
+                load_op: ColorLoadOp::Clear([0.0; 4]),
                 store_op: AttachmentStoreOp::Store,
                 stencil_load_op: StencilLoadOp::DontCare,
                 stencil_store_op: AttachmentStoreOp::Store,
@@ -1033,7 +1034,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             RenderPassAttachment {
                 format: ImageFormat::Rgba8,
                 samples: SampleCount::Sample1,
-                load_op: ColorLoadOp::Clear([0.0;4]),
+                load_op: ColorLoadOp::Clear([0.0; 4]),
                 store_op: AttachmentStoreOp::Store,
                 stencil_load_op: StencilLoadOp::DontCare,
                 stencil_store_op: AttachmentStoreOp::DontCare,
@@ -1054,7 +1055,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             RenderPassAttachment {
                 format: ImageFormat::Rgba8,
                 samples: SampleCount::Sample1,
-                load_op: ColorLoadOp::Clear([0.0;4]),
+                load_op: ColorLoadOp::Clear([0.0; 4]),
                 store_op: AttachmentStoreOp::Store,
                 stencil_load_op: StencilLoadOp::DontCare,
                 stencil_store_op: AttachmentStoreOp::DontCare,

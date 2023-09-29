@@ -5,9 +5,9 @@ use ash::vk::{DependencyFlags, Format, PipelineRenderingCreateInfoKHR};
 use ash::{
     prelude::VkResult,
     vk::{
-        self, AttachmentDescription, AttachmentDescriptionFlags, 
-        DescriptorSetLayout, DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags,
-        DescriptorSetLayoutCreateInfo, DescriptorType, DynamicState, GraphicsPipelineCreateInfo,
+        self, AttachmentDescription, AttachmentDescriptionFlags, DescriptorSetLayout,
+        DescriptorSetLayoutBinding, DescriptorSetLayoutCreateFlags, DescriptorSetLayoutCreateInfo,
+        DescriptorType, DynamicState, GraphicsPipelineCreateInfo,
         PipelineColorBlendAttachmentState, PipelineColorBlendStateCreateFlags,
         PipelineColorBlendStateCreateInfo, PipelineCreateFlags,
         PipelineDepthStencilStateCreateFlags, PipelineDepthStencilStateCreateInfo,
@@ -19,10 +19,9 @@ use ash::{
         PipelineShaderStageCreateFlags, PipelineShaderStageCreateInfo,
         PipelineTessellationStateCreateFlags, PipelineTessellationStateCreateInfo,
         PipelineVertexInputStateCreateFlags, PipelineVertexInputStateCreateInfo,
-        PipelineViewportStateCreateFlags, PipelineViewportStateCreateInfo, 
-        RenderPassCreateFlags, RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags,
-        StructureType, SubpassDescriptionFlags, VertexInputAttributeDescription,
-        VertexInputBindingDescription,
+        PipelineViewportStateCreateFlags, PipelineViewportStateCreateInfo, RenderPassCreateFlags,
+        RenderPassCreateInfo, SampleCountFlags, ShaderStageFlags, StructureType,
+        SubpassDescriptionFlags, VertexInputAttributeDescription, VertexInputBindingDescription,
     },
 };
 
@@ -99,13 +98,28 @@ impl<'a> RenderPassDescription<'a> {
     fn get_subpasses(&self) -> Vec<vk::SubpassDescription> {
         self.subpasses
             .iter()
-            .map(|s| { 
-
-                 let input_attachments = s.input_attachments.iter().map(|a| a.to_vk()).collect::<Vec<_>>();
-                 let color_attachments = s.color_attachments.iter().map(|a| a.to_vk()).collect::<Vec<_>>();
-                 let resolve_attachments = s.resolve_attachments.iter().map(|a| a.to_vk()).collect::<Vec<_>>();
-                 let depth_stencil_attachment = s.depth_stencil_attachment.iter().map(|a| a.to_vk()).collect::<Vec<_>>();
-                 vk::SubpassDescription {
+            .map(|s| {
+                let input_attachments = s
+                    .input_attachments
+                    .iter()
+                    .map(|a| a.to_vk())
+                    .collect::<Vec<_>>();
+                let color_attachments = s
+                    .color_attachments
+                    .iter()
+                    .map(|a| a.to_vk())
+                    .collect::<Vec<_>>();
+                let resolve_attachments = s
+                    .resolve_attachments
+                    .iter()
+                    .map(|a| a.to_vk())
+                    .collect::<Vec<_>>();
+                let depth_stencil_attachment = s
+                    .depth_stencil_attachment
+                    .iter()
+                    .map(|a| a.to_vk())
+                    .collect::<Vec<_>>();
+                vk::SubpassDescription {
                     flags: SubpassDescriptionFlags::empty(),
                     pipeline_bind_point: s.pipeline_bind_point.to_vk(),
                     input_attachment_count: s.input_attachments.len() as _,
@@ -116,7 +130,8 @@ impl<'a> RenderPassDescription<'a> {
                     p_depth_stencil_attachment: p_or_null(&depth_stencil_attachment),
                     preserve_attachment_count: s.preserve_attachments.len() as _,
                     p_preserve_attachments: p_or_null(s.preserve_attachments),
-            }})
+                }
+            })
             .collect()
     }
 
@@ -303,7 +318,10 @@ impl std::hash::Hash for GraphicsPipeline {
 }
 
 impl GraphicsPipeline {
-    pub(crate) fn new(gpu: &Gpu, pipeline_description: &GraphicsPipelineDescription) -> VkResult<Self> {
+    pub(crate) fn new(
+        gpu: &Gpu,
+        pipeline_description: &GraphicsPipelineDescription,
+    ) -> VkResult<Self> {
         let descriptor_set_layouts =
             create_descriptor_set_layouts(&pipeline_description.global_bindings, gpu)?;
         let color_blend_attachments = pipeline_description.get_output_attachments();
@@ -349,7 +367,11 @@ impl GraphicsPipeline {
             pipeline_description.get_input_bindings_and_attributes();
 
         let pipeline_layout = unsafe {
-            let vk_constant_ranges = pipeline_description.push_constant_ranges.iter().map(|r| r.to_vk()).collect::<Vec<_>>();
+            let vk_constant_ranges = pipeline_description
+                .push_constant_ranges
+                .iter()
+                .map(|r| r.to_vk())
+                .collect::<Vec<_>>();
             let layout_infos = PipelineLayoutCreateInfo {
                 s_type: StructureType::PIPELINE_LAYOUT_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -462,7 +484,10 @@ impl GraphicsPipeline {
                 depth_write_enable: vk_bool(
                     pipeline_description.depth_stencil_state.depth_write_enable,
                 ),
-                depth_compare_op: pipeline_description.depth_stencil_state.depth_compare_op.to_vk(),
+                depth_compare_op: pipeline_description
+                    .depth_stencil_state
+                    .depth_compare_op
+                    .to_vk(),
                 depth_bounds_test_enable: vk::FALSE,
                 stencil_test_enable: vk_bool(
                     pipeline_description.depth_stencil_state.stencil_test_enable,
@@ -506,9 +531,14 @@ impl GraphicsPipeline {
 
             let color_attachment = pipeline_description
                 .fragment_stage
-                .map(|frag| (frag.color_attachments.iter().map(|c| c.format.to_vk()).collect()))
+                .map(|frag| {
+                    frag
+                        .color_attachments
+                        .iter()
+                        .map(|c| c.format.to_vk())
+                        .collect()
+                })
                 .unwrap_or(vec![]);
-
 
             let rendering_ext_info = PipelineRenderingCreateInfoKHR {
                 s_type: StructureType::PIPELINE_RENDERING_CREATE_INFO_KHR,
@@ -607,7 +637,11 @@ impl ComputePipeline {
             flags: PipelineShaderStageCreateFlags::empty(),
         };
         let pipeline_layout = unsafe {
-            let vk_constant_ranges = description.push_constant_ranges.iter().map(|r| r.to_vk()).collect::<Vec<_>>();
+            let vk_constant_ranges = description
+                .push_constant_ranges
+                .iter()
+                .map(|r| r.to_vk())
+                .collect::<Vec<_>>();
             let layout_infos = PipelineLayoutCreateInfo {
                 s_type: StructureType::PIPELINE_LAYOUT_CREATE_INFO,
                 p_next: std::ptr::null(),
