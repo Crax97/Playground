@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use strum::EnumCount;
 use winit::event::ModifiersState;
 
