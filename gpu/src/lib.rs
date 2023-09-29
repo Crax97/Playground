@@ -777,4 +777,113 @@ pub struct ImageSubresourceRange {
     pub layer_count: u32,
 }
 
+#[derive(Default)]
+pub struct CommandBufferSubmitInfo<'a> {
+    pub wait_semaphores: &'a [&'a GPUSemaphore],
+    pub wait_stages: &'a [PipelineStageFlags],
+    pub signal_semaphores: &'a [&'a GPUSemaphore],
+    pub fence: Option<&'a GPUFence>,
+}
+
+pub struct BufferMemoryBarrier<'a> {
+    pub src_access_mask: AccessFlags,
+    pub dst_access_mask: AccessFlags,
+    pub src_queue_family_index: u32,
+    pub dst_queue_family_index: u32,
+    pub buffer: &'a GpuBuffer,
+    pub offset: u64,
+    pub size: u64,
+}
+
+pub struct ImageMemoryBarrier<'a> {
+    pub src_access_mask: AccessFlags,
+    pub dst_access_mask: AccessFlags,
+    pub old_layout: ImageLayout,
+    pub new_layout: ImageLayout,
+    pub src_queue_family_index: u32,
+    pub dst_queue_family_index: u32,
+    pub image: &'a GpuImage,
+    pub subresource_range: ImageSubresourceRange,
+}
+
+#[derive(Default)]
+pub struct PipelineBarrierInfo<'a> {
+    pub src_stage_mask: PipelineStageFlags,
+    pub dst_stage_mask: PipelineStageFlags,
+    pub memory_barriers: &'a [MemoryBarrier],
+    pub buffer_memory_barriers: &'a [BufferMemoryBarrier<'a>],
+    pub image_memory_barriers: &'a [ImageMemoryBarrier<'a>],
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub enum ColorLoadOp {
+    #[default]
+    DontCare,
+    Load,
+    Clear([f32; 4]),
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub enum DepthLoadOp {
+    #[default]
+    DontCare,
+    Load,
+    Clear(f32),
+}
+#[derive(Clone, Copy, Debug, Default)]
+pub enum StencilLoadOp {
+    #[default]
+    DontCare,
+    Load,
+    Clear(u8),
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub enum AttachmentStoreOp {
+    #[default]
+    DontCare,
+    Store,
+}
+
+#[derive(Clone, Copy)]
+pub struct ColorAttachment<'a> {
+    pub image_view: &'a GpuImageView,
+    pub load_op: ColorLoadOp,
+    pub store_op: AttachmentStoreOp,
+    pub initial_layout: ImageLayout,
+}
+
+#[derive(Clone, Copy)]
+pub struct DepthAttachment<'a> {
+    pub image_view: &'a GpuImageView,
+    pub load_op: DepthLoadOp,
+    pub store_op: AttachmentStoreOp,
+    pub initial_layout: ImageLayout,
+}
+
+#[derive(Clone, Copy)]
+pub struct StencilAttachment<'a> {
+    pub image_view: &'a GpuImageView,
+    pub load_op: StencilLoadOp,
+    pub store_op: AttachmentStoreOp,
+    pub initial_layout: ImageLayout,
+}
+
+#[derive(Clone, Copy)]
+pub struct BeginRenderPassInfo<'a> {
+    pub color_attachments: &'a [ColorAttachment<'a>],
+    pub depth_attachment: Option<DepthAttachment<'a>>,
+    pub stencil_attachment: Option<StencilAttachment<'a>>,
+    pub render_area: Rect2D,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub struct Viewport {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub min_depth: f32,
+    pub max_depth: f32,
+}
 

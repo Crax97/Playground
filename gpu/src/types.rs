@@ -1096,4 +1096,106 @@ impl ToVk for ImageSubresourceRange {
     }
 }
 
+impl<'a> ToVk for BufferMemoryBarrier<'a> {
+    type Inner = vk::BufferMemoryBarrier;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            s_type: StructureType::BUFFER_MEMORY_BARRIER,
+            p_next: std::ptr::null(),
+            src_access_mask: self.src_access_mask.to_vk(),
+            dst_access_mask: self.dst_access_mask.to_vk(),
+            src_queue_family_index: self.src_queue_family_index,
+            dst_queue_family_index: self.dst_queue_family_index,
+            buffer: self.buffer.inner,
+            offset: self.offset,
+            size: self.size,
+        }
+    }
+}
+
+impl<'a> ToVk for ImageMemoryBarrier<'a> {
+    type Inner = vk::ImageMemoryBarrier;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            s_type: StructureType::IMAGE_MEMORY_BARRIER,
+            p_next: std::ptr::null(),
+            src_access_mask: self.src_access_mask.to_vk(),
+            dst_access_mask: self.dst_access_mask.to_vk(),
+            src_queue_family_index: self.src_queue_family_index,
+            dst_queue_family_index: self.dst_queue_family_index,
+            old_layout: self.old_layout.to_vk(),
+            new_layout: self.new_layout.to_vk(),
+            image: self.image.inner,
+            subresource_range: self.subresource_range.to_vk(),
+        }
+    }
+}
+
+impl ToVk for ColorLoadOp {
+    type Inner = vk::AttachmentLoadOp;
+
+    fn to_vk(&self) -> Self::Inner {
+        use ColorLoadOp::{Clear, DontCare, Load};
+        match self {
+            DontCare => Self::Inner::DONT_CARE,
+            Load => Self::Inner::LOAD,
+            Clear(_) => Self::Inner::CLEAR,
+        }
+    }
+}
+
+impl ToVk for DepthLoadOp {
+    type Inner = vk::AttachmentLoadOp;
+
+    fn to_vk(&self) -> Self::Inner {
+        use DepthLoadOp::{Clear, DontCare, Load};
+        match self {
+            DontCare => Self::Inner::DONT_CARE,
+            Load => Self::Inner::LOAD,
+            Clear(_) => Self::Inner::CLEAR,
+        }
+    }
+}
+
+impl ToVk for StencilLoadOp {
+    type Inner = vk::AttachmentLoadOp;
+
+    fn to_vk(&self) -> Self::Inner {
+        use StencilLoadOp::{Clear, DontCare, Load};
+        match self {
+            DontCare => Self::Inner::DONT_CARE,
+            Load => Self::Inner::LOAD,
+            Clear(_) => Self::Inner::CLEAR,
+        }
+    }
+}
+
+impl ToVk for AttachmentStoreOp {
+    type Inner = vk::AttachmentStoreOp;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            AttachmentStoreOp::DontCare => Self::Inner::DONT_CARE,
+            AttachmentStoreOp::Store => Self::Inner::STORE,
+        }
+    }
+}
+
+
+impl ToVk for Viewport {
+    type Inner = vk::Viewport;
+
+    fn to_vk(&self) -> Self::Inner {
+        vk::Viewport {
+            x: self.x,
+            y: self.y,
+            width: self.width,
+            height: self.height,
+            min_depth: self.min_depth,
+            max_depth: self.max_depth,
+        }
+    }
+}
 
