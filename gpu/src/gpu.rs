@@ -35,13 +35,13 @@ use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 
 use crate::{
-    get_allocation_callbacks, BufferCreateInfo, ComputePipelineDescription, Extent2D,
-    FramebufferCreateInfo, GPUFence, GpuConfiguration, GraphicsPipelineDescription,
-    ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageLayout, ImageMemoryBarrier,
-    ImageSubresourceRange, ImageViewCreateInfo, PipelineBarrierInfo, PipelineStageFlags, QueueType,
-    RenderPassDescription, SamplerCreateInfo, ShaderModuleCreateInfo, ToVk, TransitionInfo,
-    VkCommandBuffer, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView,
-    VkRenderPass, VkShaderModule,
+    get_allocation_callbacks, BufferCreateInfo, CommandBufferSubmitInfo,
+    ComputePipelineDescription, Extent2D, FramebufferCreateInfo, GPUFence, GpuConfiguration,
+    GraphicsPipelineDescription, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageLayout,
+    ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, PipelineBarrierInfo,
+    PipelineStageFlags, QueueType, RenderPassDescription, SamplerCreateInfo,
+    ShaderModuleCreateInfo, ToVk, TransitionInfo, VkCommandBuffer, VkComputePipeline,
+    VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass, VkShaderModule,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -1277,80 +1277,11 @@ impl VkGpu {
         dest_offset: u64,
         size: usize,
     ) -> VkResult<()> {
-        unsafe {
-            let command_pool = self.state.logical_device.create_command_pool(
-                &CommandPoolCreateInfo {
-                    s_type: StructureType::COMMAND_POOL_CREATE_INFO,
-                    p_next: std::ptr::null(),
-                    flags: CommandPoolCreateFlags::empty(),
-                    queue_family_index: self.graphics_queue_family_index(),
-                },
-                None,
-            )?;
+        let mut command_buffer = self.create_command_buffer(QueueType::Transfer)?;
 
-            let command_buffer =
-                self.state
-                    .logical_device
-                    .allocate_command_buffers(&CommandBufferAllocateInfo {
-                        s_type: StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
-                        p_next: std::ptr::null(),
-                        command_pool,
-                        level: CommandBufferLevel::PRIMARY,
-                        command_buffer_count: 1,
-                    })?[0];
-
-            self.state.logical_device.begin_command_buffer(
-                command_buffer,
-                &CommandBufferBeginInfo {
-                    s_type: StructureType::COMMAND_BUFFER_BEGIN_INFO,
-                    p_next: std::ptr::null(),
-                    flags: CommandBufferUsageFlags::ONE_TIME_SUBMIT,
-                    p_inheritance_info: std::ptr::null(),
-                },
-            )?;
-
-            let src_buffer = source_buffer.inner;
-            let dst_buffer = dest_buffer.inner;
-
-            self.state.logical_device.cmd_copy_buffer(
-                command_buffer,
-                src_buffer,
-                dst_buffer,
-                &[vk::BufferCopy {
-                    src_offset: 0,
-                    dst_offset: dest_offset as _,
-                    size: size as u64,
-                }],
-            );
-            self.state
-                .logical_device
-                .end_command_buffer(command_buffer)?;
-            self.state.logical_device.queue_submit(
-                self.state.graphics_queue,
-                &[SubmitInfo {
-                    s_type: StructureType::SUBMIT_INFO,
-                    p_next: std::ptr::null(),
-                    wait_semaphore_count: 0,
-                    p_wait_semaphores: std::ptr::null(),
-                    p_wait_dst_stage_mask: std::ptr::null(),
-                    command_buffer_count: 1,
-                    p_command_buffers: addr_of!(command_buffer),
-                    signal_semaphore_count: 0,
-                    p_signal_semaphores: std::ptr::null(),
-                }],
-                Fence::null(),
-            )?;
-            self.state
-                .logical_device
-                .queue_wait_idle(self.graphics_queue())?;
-
-            self.state
-                .logical_device
-                .free_command_buffers(command_pool, &[command_buffer]);
-            self.state
-                .logical_device
-                .destroy_command_pool(command_pool, None);
-        }
+        command_buffer.copy_buffer(source_buffer, dest_buffer, dest_offset, size)?;
+        command_buffer.submit(&CommandBufferSubmitInfo::default())?;
+        self.wait_queue_idle(QueueType::Transfer)?;
 
         Ok(())
     }
