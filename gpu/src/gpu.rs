@@ -35,13 +35,13 @@ use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 
 use crate::{
-    get_allocation_callbacks, BufferCreateInfo, CommandBuffer, ComputePipeline,
-    ComputePipelineDescription, Extent2D, FramebufferCreateInfo, GPUFence, GpuConfiguration,
-    GpuFramebuffer, GpuImageView, GpuShaderModule, GraphicsPipeline, GraphicsPipelineDescription,
+    get_allocation_callbacks, BufferCreateInfo, ComputePipelineDescription, Extent2D,
+    FramebufferCreateInfo, GPUFence, GpuConfiguration, GraphicsPipelineDescription,
     ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageLayout, ImageMemoryBarrier,
     ImageSubresourceRange, ImageViewCreateInfo, PipelineBarrierInfo, PipelineStageFlags, QueueType,
-    RenderPass, RenderPassDescription, SamplerCreateInfo, ShaderModuleCreateInfo, ToVk,
-    TransitionInfo,
+    RenderPassDescription, SamplerCreateInfo, ShaderModuleCreateInfo, ToVk, TransitionInfo,
+    VkCommandBuffer, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView,
+    VkRenderPass, VkShaderModule,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -49,8 +49,8 @@ use super::descriptor_set::PooledDescriptorSetAllocator;
 use super::{
     allocator::{GpuAllocator, PasstroughAllocator},
     descriptor_set::DescriptorSetAllocator,
-    AccessFlags, AllocationRequirements, DescriptorSetInfo, GpuBuffer, GpuDescriptorSet, GpuImage,
-    GpuSampler, MemoryDomain,
+    AccessFlags, AllocationRequirements, DescriptorSetInfo, MemoryDomain, VkBuffer,
+    VkDescriptorSet, VkImage, VkSampler,
 };
 
 const KHRONOS_VALIDATION_LAYER: &str = "VK_LAYER_KHRONOS_validation";
@@ -147,7 +147,7 @@ impl GpuThreadLocalState {
 pub struct VkGpu {
     pub(crate) state: Arc<GpuThreadSharedState>,
     pub(crate) thread_local_state: GpuThreadLocalState,
-    pub(crate) staging_buffer: GpuBuffer,
+    pub(crate) staging_buffer: VkBuffer,
 }
 
 impl Drop for VkGpu {
@@ -828,7 +828,7 @@ impl VkGpu {
     pub fn create_shader_module(
         &self,
         create_info: &ShaderModuleCreateInfo,
-    ) -> VkResult<GpuShaderModule> {
+    ) -> VkResult<VkShaderModule> {
         let code = bytemuck::cast_slice(create_info.code);
         let p_code = code.as_ptr();
 
@@ -846,7 +846,7 @@ impl VkGpu {
             p_code,
         };
 
-        let shader = GpuShaderModule::create(self.vk_logical_device(), &create_info)?;
+        let shader = VkShaderModule::create(self.vk_logical_device(), &create_info)?;
 
         Ok(shader)
     }
@@ -921,7 +921,7 @@ fn find_supported_features(
     supported_features
 }
 
-fn create_staging_buffer(state: &Arc<GpuThreadSharedState>) -> VkResult<GpuBuffer> {
+fn create_staging_buffer(state: &Arc<GpuThreadSharedState>) -> VkResult<VkBuffer> {
     let mb_64 = 1024 * 1024 * 64;
     let create_info: vk::BufferCreateInfo = vk::BufferCreateInfo {
         s_type: StructureType::BUFFER_CREATE_INFO,
@@ -951,7 +951,7 @@ fn create_staging_buffer(state: &Arc<GpuThreadSharedState>) -> VkResult<GpuBuffe
             .bind_buffer_memory(buffer, allocation.device_memory, 0)
     }?;
 
-    let buffer = GpuBuffer::create(
+    let buffer = VkBuffer::create(
         state.logical_device.clone(),
         buffer,
         MemoryDomain::HostVisible,
@@ -966,7 +966,7 @@ impl VkGpu {
         &self,
         create_info: &BufferCreateInfo,
         memory_domain: MemoryDomain,
-    ) -> VkResult<GpuBuffer> {
+    ) -> VkResult<VkBuffer> {
         let size = create_info.size as u64;
         assert_ne!(size, 0, "Can't create a buffer with size 0!");
 
@@ -1016,7 +1016,7 @@ impl VkGpu {
 
         self.set_object_debug_name(create_info.label, buffer)?;
 
-        GpuBuffer::create(
+        VkBuffer::create(
             self.vk_logical_device(),
             buffer,
             memory_domain,
@@ -1048,13 +1048,13 @@ impl VkGpu {
         Ok(())
     }
 
-    pub fn write_buffer_data<T: Copy>(&self, buffer: &GpuBuffer, data: &[T]) -> VkResult<()> {
+    pub fn write_buffer_data<T: Copy>(&self, buffer: &VkBuffer, data: &[T]) -> VkResult<()> {
         self.write_buffer_data_with_offset(buffer, 0, data)
     }
 
     pub fn write_buffer_data_with_offset<T: Copy>(
         &self,
-        buffer: &GpuBuffer,
+        buffer: &VkBuffer,
         offset: u64,
         data: &[T],
     ) -> VkResult<()> {
@@ -1076,7 +1076,7 @@ impl VkGpu {
         Ok(())
     }
 
-    pub fn write_image_data(&self, image: &GpuImage, data: &[u8]) -> VkResult<()> {
+    pub fn write_image_data(&self, image: &VkImage, data: &[u8]) -> VkResult<()> {
         self.staging_buffer.write_data(0, data);
 
         self.transition_image_layout(
@@ -1122,7 +1122,7 @@ impl VkGpu {
         create_info: &ImageCreateInfo,
         memory_domain: MemoryDomain,
         data: Option<&[u8]>,
-    ) -> VkResult<GpuImage> {
+    ) -> VkResult<VkImage> {
         let mut format = create_info.format;
         if format == ImageFormat::Rgb8 && !self.state.features.supports_rgb_images {
             format = ImageFormat::Rgba8;
@@ -1177,7 +1177,7 @@ impl VkGpu {
         }?;
         self.set_object_debug_name(create_info.label, image)?;
 
-        let image = GpuImage::create(
+        let image = VkImage::create(
             self,
             image,
             allocation,
@@ -1210,7 +1210,7 @@ impl VkGpu {
         Ok(image)
     }
 
-    pub fn create_image_view(&self, create_info: &ImageViewCreateInfo) -> VkResult<GpuImageView> {
+    pub fn create_image_view(&self, create_info: &ImageViewCreateInfo) -> VkResult<VkImageView> {
         let image = create_info.image.inner;
 
         let gpu_view_format: ImageFormat = create_info.format.into();
@@ -1235,7 +1235,7 @@ impl VkGpu {
             components: create_info.components.to_vk(),
             subresource_range: create_info.subresource_range.to_vk(),
         };
-        GpuImageView::create(
+        VkImageView::create(
             self.vk_logical_device(),
             &vk_create_info,
             gpu_view_format,
@@ -1243,14 +1243,14 @@ impl VkGpu {
             create_info.image.extents,
         )
     }
-    pub fn create_sampler(&self, create_info: &SamplerCreateInfo) -> VkResult<GpuSampler> {
-        GpuSampler::create(self.vk_logical_device(), create_info)
+    pub fn create_sampler(&self, create_info: &SamplerCreateInfo) -> VkResult<VkSampler> {
+        VkSampler::create(self.vk_logical_device(), create_info)
     }
 
     pub fn create_framebuffer(
         &self,
         create_info: &FramebufferCreateInfo,
-    ) -> VkResult<GpuFramebuffer> {
+    ) -> VkResult<VkFramebuffer> {
         let attachments: Vec<_> = create_info.attachments.iter().map(|a| a.inner).collect();
         let create_info = vk::FramebufferCreateInfo {
             s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
@@ -1267,13 +1267,13 @@ impl VkGpu {
             layers: 1,
         };
 
-        GpuFramebuffer::create(self.vk_logical_device(), &create_info)
+        VkFramebuffer::create(self.vk_logical_device(), &create_info)
     }
 
     pub fn copy_buffer(
         &self,
-        source_buffer: &GpuBuffer,
-        dest_buffer: &GpuBuffer,
+        source_buffer: &VkBuffer,
+        dest_buffer: &VkBuffer,
         dest_offset: u64,
         size: usize,
     ) -> VkResult<()> {
@@ -1357,12 +1357,12 @@ impl VkGpu {
 
     pub fn transition_image_layout(
         &self,
-        image: &GpuImage,
+        image: &VkImage,
         old_layout: TransitionInfo,
         new_layout: TransitionInfo,
         aspect_mask: ImageAspectFlags,
     ) -> VkResult<()> {
-        let mut command_buffer = super::CommandBuffer::new(self, crate::QueueType::Graphics)?;
+        let mut command_buffer = super::VkCommandBuffer::new(self, crate::QueueType::Graphics)?;
 
         self.transition_image_layout_in_command_buffer(
             image,
@@ -1377,8 +1377,8 @@ impl VkGpu {
 
     pub fn transition_image_layout_in_command_buffer(
         &self,
-        image: &GpuImage,
-        command_buffer: &mut crate::CommandBuffer,
+        image: &VkImage,
+        command_buffer: &mut crate::VkCommandBuffer,
         old_layout: TransitionInfo,
         new_layout: TransitionInfo,
         aspect_mask: ImageAspectFlags,
@@ -1409,8 +1409,8 @@ impl VkGpu {
 
     pub fn copy_buffer_to_image(
         &self,
-        source_buffer: &GpuBuffer,
-        dest_image: &GpuImage,
+        source_buffer: &VkBuffer,
+        dest_image: &VkImage,
         width: u32,
         height: u32,
     ) -> VkResult<()> {
@@ -1505,14 +1505,14 @@ impl VkGpu {
         Ok(())
     }
 
-    pub fn create_descriptor_set(&self, info: &DescriptorSetInfo) -> VkResult<GpuDescriptorSet> {
+    pub fn create_descriptor_set(&self, info: &DescriptorSetInfo) -> VkResult<VkDescriptorSet> {
         let allocated_descriptor_set = self
             .state
             .descriptor_set_allocator
             .borrow_mut()
             .allocate(info)?;
         self.initialize_descriptor_set(&allocated_descriptor_set.descriptor_set, info)?;
-        GpuDescriptorSet::create(
+        VkDescriptorSet::create(
             allocated_descriptor_set,
             self.state.descriptor_set_allocator.clone(),
         )
@@ -1536,26 +1536,29 @@ impl VkGpu {
         unsafe { self.vk_logical_device().reset_fences(&fences) }
     }
 
-    pub fn create_render_pass(&self, description: &RenderPassDescription) -> VkResult<RenderPass> {
-        RenderPass::new(self, description)
+    pub fn create_render_pass(
+        &self,
+        description: &RenderPassDescription,
+    ) -> VkResult<VkRenderPass> {
+        VkRenderPass::new(self, description)
     }
 
     pub fn create_graphics_pipeline(
         &self,
         description: &GraphicsPipelineDescription,
-    ) -> VkResult<GraphicsPipeline> {
-        GraphicsPipeline::new(self, description)
+    ) -> VkResult<VkGraphicsPipeline> {
+        VkGraphicsPipeline::new(self, description)
     }
 
     pub fn create_compute_pipeline(
         &self,
         description: &ComputePipelineDescription,
-    ) -> VkResult<ComputePipeline> {
-        ComputePipeline::new(self, description)
+    ) -> VkResult<VkComputePipeline> {
+        VkComputePipeline::new(self, description)
     }
 
-    pub fn create_command_buffer(&self, queue_type: QueueType) -> VkResult<CommandBuffer> {
-        CommandBuffer::new(self, queue_type)
+    pub fn create_command_buffer(&self, queue_type: QueueType) -> VkResult<VkCommandBuffer> {
+        VkCommandBuffer::new(self, queue_type)
     }
 
     pub fn save_pipeline_cache(&self, path: &str) -> VkResult<()> {

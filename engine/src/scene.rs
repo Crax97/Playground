@@ -1,4 +1,4 @@
-use gpu::{CommandBuffer, Extent2D, GpuImage, GpuImageView, ImageFormat, VkGpu};
+use gpu::{Extent2D, ImageFormat, VkCommandBuffer, VkGpu, VkImage, VkImageView};
 use nalgebra::{vector, Matrix4, Point3, Vector2, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
 
@@ -213,8 +213,8 @@ impl Scene {
 pub struct Backbuffer<'a> {
     pub size: Extent2D,
     pub format: ImageFormat,
-    pub image: &'a GpuImage,
-    pub image_view: &'a GpuImageView,
+    pub image: &'a VkImage,
+    pub image_view: &'a VkImageView,
 }
 
 pub trait RenderingPipeline {
@@ -224,7 +224,7 @@ pub trait RenderingPipeline {
         scene: &Scene,
         backbuffer: &Backbuffer,
         resource_map: &ResourceMap,
-    ) -> anyhow::Result<CommandBuffer>;
+    ) -> anyhow::Result<VkCommandBuffer>;
 
     fn create_material(
         &mut self,

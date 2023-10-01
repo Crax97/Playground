@@ -2,9 +2,9 @@ use std::{collections::HashMap, hash::Hash, mem::size_of, num::NonZeroU32};
 
 use gpu::{
     BindingElement, BindingType, CompareOp, CullMode, DepthStencilState, FragmentStageInfo,
-    FrontFace, GlobalBinding, GraphicsPipeline, GraphicsPipelineDescription, ImageFormat, LogicOp,
-    PolygonMode, PushConstantRange, StencilOpState, VertexAttributeDescription,
-    VertexBindingDescription, VertexStageInfo, VkGpu,
+    FrontFace, GlobalBinding, GraphicsPipelineDescription, ImageFormat, LogicOp, PolygonMode,
+    PushConstantRange, StencilOpState, VertexAttributeDescription, VertexBindingDescription,
+    VertexStageInfo, VkGpu, VkGraphicsPipeline,
 };
 use nalgebra::{Vector2, Vector3};
 use resource_map::Resource;
@@ -44,7 +44,7 @@ pub struct MasterMaterialDescription<'a> {
 #[derive(Eq, PartialEq)]
 pub struct MasterMaterial {
     pub(crate) name: String,
-    pub(crate) pipelines: HashMap<PipelineTarget, GraphicsPipeline>,
+    pub(crate) pipelines: HashMap<PipelineTarget, VkGraphicsPipeline>,
     pub(crate) texture_inputs: Vec<TextureInput>,
     pub(crate) material_parameters: HashMap<String, MaterialParameterOffsetSize>,
     pub(crate) parameter_block_size: usize,
@@ -78,7 +78,7 @@ impl MasterMaterial {
     fn create_pipelines(
         gpu: &VkGpu,
         description: &MasterMaterialDescription<'_>,
-    ) -> anyhow::Result<HashMap<PipelineTarget, GraphicsPipeline>> {
+    ) -> anyhow::Result<HashMap<PipelineTarget, VkGraphicsPipeline>> {
         let global_elements: Vec<_> = description
             .global_inputs
             .iter()
@@ -181,7 +181,7 @@ impl MasterMaterial {
         }
     }
 
-    pub(crate) fn get_pipeline(&self, target: PipelineTarget) -> Option<&GraphicsPipeline> {
+    pub(crate) fn get_pipeline(&self, target: PipelineTarget) -> Option<&VkGraphicsPipeline> {
         self.pipelines.get(&target)
     }
 
@@ -190,7 +190,7 @@ impl MasterMaterial {
         description: &MasterMaterialDescription,
         global_elements: Vec<BindingElement>,
         user_elements: Vec<BindingElement>,
-    ) -> anyhow::Result<HashMap<PipelineTarget, GraphicsPipeline>> {
+    ) -> anyhow::Result<HashMap<PipelineTarget, VkGraphicsPipeline>> {
         let mut pipelines = HashMap::new();
         for target in [PipelineTarget::ColorAndDepth, PipelineTarget::DepthOnly] {
             let pipeline = gpu.create_graphics_pipeline(&GraphicsPipelineDescription {
@@ -254,7 +254,7 @@ impl MasterMaterial {
         description: &MasterMaterialDescription,
         global_elements: Vec<BindingElement>,
         user_elements: Vec<BindingElement>,
-    ) -> anyhow::Result<HashMap<PipelineTarget, GraphicsPipeline>> {
+    ) -> anyhow::Result<HashMap<PipelineTarget, VkGraphicsPipeline>> {
         let mut pipelines = HashMap::new();
         let pipeline = gpu.create_graphics_pipeline(&GraphicsPipelineDescription {
             global_bindings: &[

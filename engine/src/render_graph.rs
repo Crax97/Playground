@@ -9,18 +9,18 @@ use std::{
 use gpu::{
     AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, BindingElement,
     BindingType, BlendMode, BlendOp, BlendState, BufferCreateInfo, BufferRange, BufferUsageFlags,
-    ColorAttachment, ColorComponentFlags, ColorLoadOp, CommandBuffer, ComponentMapping, CullMode,
-    DepthAttachment, DepthLoadOp, DepthStencilAttachment, DepthStencilState, DescriptorInfo,
-    DescriptorSetInfo, Extent2D, Filter, FragmentStageInfo, FramebufferCreateInfo, FrontFace,
-    GlobalBinding, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView, GpuSampler,
-    GpuShaderModule, GraphicsPipeline, GraphicsPipelineDescription, ImageAspectFlags,
-    ImageCreateInfo, ImageFormat, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
-    ImageUsageFlags, ImageViewCreateInfo, ImageViewType, LogicOp, MemoryDomain, Offset2D,
-    PipelineBarrierInfo, PipelineBindPoint, PipelineStageFlags, PolygonMode, PrimitiveTopology,
-    PushConstantRange, Rect2D, RenderPass, RenderPassAttachment, RenderPassCommand,
+    ColorAttachment, ColorComponentFlags, ColorLoadOp, ComponentMapping, CullMode, DepthAttachment,
+    DepthLoadOp, DepthStencilAttachment, DepthStencilState, DescriptorInfo, DescriptorSetInfo,
+    Extent2D, Filter, FragmentStageInfo, FramebufferCreateInfo, FrontFace, GlobalBinding,
+    GraphicsPipelineDescription, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageLayout,
+    ImageMemoryBarrier, ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewType,
+    LogicOp, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineBindPoint, PipelineStageFlags,
+    PolygonMode, PrimitiveTopology, PushConstantRange, Rect2D, RenderPassAttachment,
     RenderPassDescription, SampleCount, SamplerAddressMode, SamplerCreateInfo, StencilAttachment,
     StencilLoadOp, SubpassDependency, SubpassDescription, TransitionInfo, VertexBindingDescription,
-    VertexStageInfo, VkGpu,
+    VertexStageInfo, VkBuffer, VkCommandBuffer, VkDescriptorSet, VkFramebuffer, VkGpu,
+    VkGraphicsPipeline, VkImage, VkImageView, VkRenderPass, VkRenderPassCommand, VkSampler,
+    VkShaderModule,
 };
 
 use indexmap::IndexSet;
@@ -222,18 +222,18 @@ impl<R: Sized + GraphResource, ID: Hash + Eq + PartialEq + Ord + PartialOrd + Cl
 }
 
 enum ExternalShaderResource<'a> {
-    ImageView(&'a GpuImageView),
-    Buffer(&'a GpuBuffer),
+    ImageView(&'a VkImageView),
+    Buffer(&'a VkBuffer),
 }
 
 impl<'a> ExternalShaderResource<'a> {
-    fn as_image_view(&self) -> &GpuImageView {
+    fn as_image_view(&self) -> &VkImageView {
         match self {
             ExternalShaderResource::ImageView(v) => v,
             _ => panic!("This resource is not an image view!"),
         }
     }
-    fn as_buffer(&self) -> &GpuBuffer {
+    fn as_buffer(&self) -> &VkBuffer {
         match self {
             ExternalShaderResource::Buffer(b) => b,
             _ => panic!("This resource is not a buffer!"),
@@ -243,7 +243,7 @@ impl<'a> ExternalShaderResource<'a> {
 
 #[derive(Default)]
 struct ExternalResources<'a> {
-    external_images: HashMap<ResourceId, &'a GpuImage>,
+    external_images: HashMap<ResourceId, &'a VkImage>,
     external_shader_resources: HashMap<ResourceId, ExternalShaderResource<'a>>,
 }
 
@@ -259,30 +259,30 @@ impl<'a> ExternalResources<'a> {
     pub fn inject_external_image(
         &mut self,
         id: &ResourceId,
-        image: &'a GpuImage,
-        view: &'a GpuImageView,
+        image: &'a VkImage,
+        view: &'a VkImageView,
     ) {
         self.external_images.insert(*id, image);
         self.external_shader_resources
             .insert(*id, ExternalShaderResource::ImageView(view));
     }
 
-    pub fn inject_external_buffer(&mut self, id: &ResourceId, buffer: &'a GpuBuffer) {
+    pub fn inject_external_buffer(&mut self, id: &ResourceId, buffer: &'a VkBuffer) {
         self.external_shader_resources
             .insert(*id, ExternalShaderResource::Buffer(buffer));
     }
 }
 
 pub struct GraphImage {
-    image: GpuImage,
+    image: VkImage,
     desc: ImageDescription,
 }
 
 impl GraphResource for GraphImage {
-    type Inner = GpuImage;
+    type Inner = VkImage;
     type Desc = ImageDescription;
 
-    fn construct(image: GpuImage, desc: Self::Desc) -> Self
+    fn construct(image: VkImage, desc: Self::Desc) -> Self
     where
         Self: Sized,
     {
@@ -331,15 +331,15 @@ impl AsRef<SamplerState> for SamplerState {
 }
 
 pub struct GraphSampler {
-    image: GpuSampler,
+    image: VkSampler,
     desc: SamplerState,
 }
 
 impl GraphResource for GraphSampler {
-    type Inner = GpuSampler;
+    type Inner = VkSampler;
     type Desc = SamplerState;
 
-    fn construct(image: GpuSampler, desc: Self::Desc) -> Self
+    fn construct(image: VkSampler, desc: Self::Desc) -> Self
     where
         Self: Sized,
     {
@@ -376,15 +376,15 @@ impl<'a> CreateFrom<'a, SamplerState> for GraphSampler {
 }
 
 pub struct GraphImageView {
-    image: GpuImageView,
+    image: VkImageView,
     desc: ImageDescription,
 }
 
 impl GraphResource for GraphImageView {
-    type Inner = GpuImageView;
+    type Inner = VkImageView;
     type Desc = ImageDescription;
 
-    fn construct(image: GpuImageView, desc: Self::Desc) -> Self
+    fn construct(image: VkImageView, desc: Self::Desc) -> Self
     where
         Self: Sized,
     {
@@ -402,7 +402,7 @@ impl GraphResource for GraphImageView {
 
 pub struct GraphImageViewCreateInfo<'a> {
     desc: &'a ImageDescription,
-    image: &'a GpuImage,
+    image: &'a VkImage,
 }
 impl<'a> AsRef<ImageDescription> for GraphImageViewCreateInfo<'a> {
     fn as_ref(&self) -> &ImageDescription {
@@ -431,7 +431,7 @@ impl<'a> CreateFrom<'a, GraphImageViewCreateInfo<'_>> for GraphImageView {
 }
 
 pub struct GraphBuffer {
-    inner: GpuBuffer,
+    inner: VkBuffer,
     desc: BufferDescription,
 }
 
@@ -442,7 +442,7 @@ impl AsRef<BufferDescription> for BufferDescription {
 }
 
 impl GraphResource for GraphBuffer {
-    type Inner = GpuBuffer;
+    type Inner = VkBuffer;
     type Desc = BufferDescription;
 
     fn construct(inner: Self::Inner, desc: Self::Desc) -> Self
@@ -492,12 +492,12 @@ impl AsRef<ImageDescription> for ImageDescription {
 }
 
 pub struct GraphPass {
-    inner: RenderPass,
+    inner: VkRenderPass,
     desc: RenderPassInfo,
 }
 
 impl GraphResource for GraphPass {
-    type Inner = RenderPass;
+    type Inner = VkRenderPass;
     type Desc = RenderPassInfo;
 
     fn construct(inner: Self::Inner, desc: Self::Desc) -> Self
@@ -691,12 +691,12 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
 }
 
 pub struct GraphFramebuffer {
-    inner: GpuFramebuffer,
+    inner: VkFramebuffer,
     desc: FramebufferHandle,
 }
 
 impl GraphResource for GraphFramebuffer {
-    type Inner = GpuFramebuffer;
+    type Inner = VkFramebuffer;
     type Desc = FramebufferHandle;
 
     fn construct(inner: Self::Inner, desc: Self::Desc) -> Self
@@ -716,8 +716,8 @@ impl GraphResource for GraphFramebuffer {
 }
 
 struct RenderGraphFramebufferCreateInfo<'a> {
-    render_pass: &'a RenderPass,
-    render_targets: &'a [&'a GpuImageView],
+    render_pass: &'a VkRenderPass,
+    render_targets: &'a [&'a VkImageView],
     extents: Extent2D,
     framebuffer_hash: FramebufferHandle,
 }
@@ -744,12 +744,12 @@ impl<'a> CreateFrom<'a, RenderGraphFramebufferCreateInfo<'a>> for GraphFramebuff
 }
 
 pub struct GraphDescriptorSet {
-    inner: GpuDescriptorSet,
+    inner: VkDescriptorSet,
     desc: u64,
 }
 
 impl GraphResource for GraphDescriptorSet {
-    type Inner = GpuDescriptorSet;
+    type Inner = VkDescriptorSet;
     type Desc = u64;
 
     fn construct(inner: Self::Inner, desc: Self::Desc) -> Self
@@ -844,13 +844,13 @@ pub struct GraphRunContext<'a, 'e> {
 
     callbacks: Callbacks<'e>,
     external_resources: ExternalResources<'e>,
-    command_buffer: &'e mut CommandBuffer<'a>,
+    command_buffer: &'e mut VkCommandBuffer<'a>,
 }
 
 impl<'a, 'e> GraphRunContext<'a, 'e> {
     pub fn new(
         gpu: &'a VkGpu,
-        command_buffer: &'e mut CommandBuffer<'a>,
+        command_buffer: &'e mut VkCommandBuffer<'a>,
         current_iteration: u64,
     ) -> Self {
         Self {
@@ -877,13 +877,13 @@ impl<'a, 'e> GraphRunContext<'a, 'e> {
     pub(crate) fn inject_external_image(
         &mut self,
         handle: &ResourceId,
-        image: &'e GpuImage,
-        view: &'e GpuImageView,
+        image: &'e VkImage,
+        view: &'e VkImageView,
     ) {
         self.external_resources
             .inject_external_image(handle, image, view);
     }
-    pub(crate) fn injext_external_buffer(&mut self, handle: &ResourceId, buffer: &'e GpuBuffer) {
+    pub(crate) fn injext_external_buffer(&mut self, handle: &ResourceId, buffer: &'e VkBuffer) {
         self.external_resources
             .inject_external_buffer(handle, buffer);
     }
@@ -1011,7 +1011,7 @@ pub struct ResourceInfo {
 
 #[derive(Hash)]
 pub struct ModuleInfo<'a> {
-    pub module: &'a GpuShaderModule,
+    pub module: &'a VkShaderModule,
     pub entry_point: &'a str,
 }
 
@@ -1069,7 +1069,7 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
     pass_info: &RenderPassInfo,
     gpu: &VkGpu,
     description: &RenderGraphPipelineDescription,
-) -> anyhow::Result<GraphicsPipeline> {
+) -> anyhow::Result<VkGraphicsPipeline> {
     let mut set_zero_bindings = vec![];
     for (idx, read) in pass_info.shader_reads.iter().enumerate() {
         let resource = graph.get_resource_info(read)?;
@@ -1179,7 +1179,7 @@ pub struct RenderGraph {
     cached_graph_hash: u64,
     cached_graph: CompiledRenderGraph,
 
-    render_pass_pipelines: HashMap<RenderPassHandle, GraphicsPipeline>,
+    render_pass_pipelines: HashMap<RenderPassHandle, VkGraphicsPipeline>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -1376,12 +1376,12 @@ pub enum GraphOperation {
 
 pub struct RenderPassContext<'p, 'g> {
     pub render_graph: &'p RenderGraph,
-    pub render_pass_command: RenderPassCommand<'p, 'g>,
-    pub read_descriptor_set: Option<&'p GpuDescriptorSet>,
-    pub pipeline: Option<&'p GraphicsPipeline>,
+    pub render_pass_command: VkRenderPassCommand<'p, 'g>,
+    pub read_descriptor_set: Option<&'p VkDescriptorSet>,
+    pub pipeline: Option<&'p VkGraphicsPipeline>,
 }
 pub struct EndContext<'p, 'g> {
-    pub command_buffer: &'p mut CommandBuffer<'g>,
+    pub command_buffer: &'p mut VkCommandBuffer<'g>,
 }
 
 #[derive(Default, Clone)]
@@ -1698,7 +1698,7 @@ impl RenderGraph {
     pub(crate) fn get_pipeline(
         &self,
         pipeline_handle: &RenderPassHandle,
-    ) -> Option<&GraphicsPipeline> {
+    ) -> Option<&VkGraphicsPipeline> {
         self.render_pass_pipelines.get(pipeline_handle)
     }
 
@@ -1793,7 +1793,7 @@ impl GpuRunner {
         graph: &RenderGraph,
         id: &ResourceId,
         allocator: &'r mut DefaultResourceAllocator,
-    ) -> anyhow::Result<&'e GpuImage>
+    ) -> anyhow::Result<&'e VkImage>
     where
         'r: 'e,
     {
@@ -1811,7 +1811,7 @@ impl GpuRunner {
         external_resources: &'e ExternalResources,
         id: &ResourceId,
         allocator: &'r DefaultResourceAllocator,
-    ) -> &'e GpuImage
+    ) -> &'e VkImage
     where
         'r: 'e,
     {

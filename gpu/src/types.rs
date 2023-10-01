@@ -633,7 +633,7 @@ impl GPUSemaphore {
     }
 }
 
-pub struct GpuBuffer {
+pub struct VkBuffer {
     device: ash::Device,
     pub(super) inner: vk::Buffer,
     pub(super) memory_domain: MemoryDomain,
@@ -641,7 +641,7 @@ pub struct GpuBuffer {
     pub(super) allocator: Arc<RefCell<dyn GpuAllocator>>,
 }
 
-impl GpuBuffer {
+impl VkBuffer {
     pub(super) fn create(
         device: ash::Device,
         buffer: Buffer,
@@ -658,7 +658,7 @@ impl GpuBuffer {
         })
     }
 }
-impl Drop for GpuBuffer {
+impl Drop for VkBuffer {
     fn drop(&mut self) {
         self.allocator.borrow_mut().deallocate(&self.allocation);
         unsafe {
@@ -666,14 +666,14 @@ impl Drop for GpuBuffer {
         }
     }
 }
-impl Deref for GpuBuffer {
+impl Deref for VkBuffer {
     type Target = vk::Buffer;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl GpuBuffer {
+impl VkBuffer {
     pub fn write_data<I: Sized + Copy>(&self, offset: u64, data: &[I]) {
         let data_length_bytes = std::mem::size_of_val(data) as u64;
         assert!(
@@ -717,10 +717,10 @@ impl GpuBuffer {
     }
 }
 
-impl_raii_wrapper_hash!(GpuBuffer);
-impl_raii_wrapper_to_vk!(GpuBuffer, vk::Buffer);
+impl_raii_wrapper_hash!(VkBuffer);
+impl_raii_wrapper_to_vk!(VkBuffer, vk::Buffer);
 
-pub struct GpuImage {
+pub struct VkImage {
     device: ash::Device,
     pub(super) inner: vk::Image,
     pub(super) allocation: Option<MemoryAllocation>,
@@ -728,7 +728,7 @@ pub struct GpuImage {
     pub(super) extents: Extent2D,
     pub(super) format: ImageFormat,
 }
-impl GpuImage {
+impl VkImage {
     pub(super) fn create(
         gpu: &VkGpu,
         image: vk::Image,
@@ -771,7 +771,7 @@ impl GpuImage {
         self.extents
     }
 }
-impl Drop for GpuImage {
+impl Drop for VkImage {
     fn drop(&mut self) {
         if let (Some(allocator), Some(allocation)) = (&self.allocator, &self.allocation) {
             allocator.borrow_mut().deallocate(allocation);
@@ -785,16 +785,16 @@ impl Drop for GpuImage {
     }
 }
 
-impl Deref for GpuImage {
+impl Deref for VkImage {
     type Target = vk::Image;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
-impl_raii_wrapper_hash!(GpuImage);
-impl_raii_wrapper_to_vk!(GpuImage, vk::Image);
+impl_raii_wrapper_hash!(VkImage);
+impl_raii_wrapper_to_vk!(VkImage, vk::Image);
 
-define_raii_wrapper!((struct GpuImageView{
+define_raii_wrapper!((struct VkImageView{
     format: ImageFormat,
     owner_image: vk::Image,
     extents: Extent2D,
@@ -808,7 +808,7 @@ define_raii_wrapper!((struct GpuImageView{
     }
 });
 
-impl GpuImageView {
+impl VkImageView {
     pub fn inner_image_view(&self) -> vk::ImageView {
         self.inner
     }
@@ -825,21 +825,21 @@ impl GpuImageView {
     }
 }
 
-pub struct GpuDescriptorSet {
+pub struct VkDescriptorSet {
     pub(super) inner: vk::DescriptorSet,
     pub(super) allocation: DescriptorSetAllocation,
     pub(super) allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
 }
 
-impl PartialEq for GpuDescriptorSet {
+impl PartialEq for VkDescriptorSet {
     fn eq(&self, other: &Self) -> bool {
         self.inner == other.inner
     }
 }
 
-impl Eq for GpuDescriptorSet {}
+impl Eq for VkDescriptorSet {}
 
-impl GpuDescriptorSet {
+impl VkDescriptorSet {
     pub fn create(
         allocation: DescriptorSetAllocation,
         allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
@@ -851,7 +851,7 @@ impl GpuDescriptorSet {
         })
     }
 }
-impl Drop for GpuDescriptorSet {
+impl Drop for VkDescriptorSet {
     fn drop(&mut self) {
         self.allocator
             .borrow_mut()
@@ -859,27 +859,27 @@ impl Drop for GpuDescriptorSet {
             .expect("Failed to deallocate descriptor set");
     }
 }
-impl Deref for GpuDescriptorSet {
+impl Deref for VkDescriptorSet {
     type Target = vk::DescriptorSet;
     fn deref(&self) -> &Self::Target {
         &self.allocation.descriptor_set
     }
 }
-impl_raii_wrapper_hash!(GpuDescriptorSet);
-impl_raii_wrapper_to_vk!(GpuDescriptorSet, vk::DescriptorSet);
+impl_raii_wrapper_hash!(VkDescriptorSet);
+impl_raii_wrapper_to_vk!(VkDescriptorSet, vk::DescriptorSet);
 
-define_raii_wrapper!((struct GpuSampler {}, vk::Sampler, ash::Device::destroy_sampler) {
+define_raii_wrapper!((struct VkSampler {}, vk::Sampler, ash::Device::destroy_sampler) {
     (create_info: &SamplerCreateInfo,) => {
         |device: &ash::Device| { unsafe { device.create_sampler(&create_info.to_vk(), get_allocation_callbacks()) }}
     }
 });
-define_raii_wrapper!((struct GpuShaderModule {}, vk::ShaderModule, ash::Device::destroy_shader_module) {
+define_raii_wrapper!((struct VkShaderModule {}, vk::ShaderModule, ash::Device::destroy_shader_module) {
     (create_info: &ShaderModuleCreateInfo,) => {
         |device: &ash::Device| { unsafe { device.create_shader_module(create_info, get_allocation_callbacks()) }}
     }
 });
 
-define_raii_wrapper!((struct GpuFramebuffer {}, vk::Framebuffer, ash::Device::destroy_framebuffer) {
+define_raii_wrapper!((struct VkFramebuffer {}, vk::Framebuffer, ash::Device::destroy_framebuffer) {
     (create_info: &vk::FramebufferCreateInfo,) => {
         |device: &ash::Device| {
             unsafe {

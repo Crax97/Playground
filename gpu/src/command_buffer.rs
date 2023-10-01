@@ -13,12 +13,12 @@ use ash::{
     RawPtr,
 };
 
-use crate::pipeline::GpuPipeline;
+use crate::pipeline::VkPipelineInfo;
 use crate::*;
 
-use super::{GpuBuffer, GpuDescriptorSet, GraphicsPipeline, QueueType, VkGpu};
+use super::{QueueType, VkBuffer, VkDescriptorSet, VkGpu, VkGraphicsPipeline};
 
-pub struct CommandBuffer<'g> {
+pub struct VkCommandBuffer<'g> {
     gpu: &'g VkGpu,
     inner_command_buffer: vk::CommandBuffer,
     has_recorded_anything: bool,
@@ -26,11 +26,11 @@ pub struct CommandBuffer<'g> {
     target_queue: vk::Queue,
 }
 
-pub struct RenderPassCommand<'c, 'g>
+pub struct VkRenderPassCommand<'c, 'g>
 where
     'g: 'c,
 {
-    command_buffer: &'c mut CommandBuffer<'g>,
+    command_buffer: &'c mut VkCommandBuffer<'g>,
     viewport_area: Option<Viewport>,
     scissor_area: Option<Rect2D>,
     has_draw_command: bool,
@@ -38,19 +38,19 @@ where
     depth_bias_setup: Option<(f32, f32, f32)>,
 }
 
-pub struct ComputePassCommand<'c, 'g>
+pub struct VkComputePassCommand<'c, 'g>
 where
     'g: 'c,
 {
-    command_buffer: &'c mut CommandBuffer<'g>,
+    command_buffer: &'c mut VkCommandBuffer<'g>,
 }
 
 mod inner {
     use ash::vk::ShaderStageFlags;
 
     pub(super) fn push_constant<T: Copy + Sized>(
-        command_buffer: &crate::CommandBuffer,
-        pipeline: &crate::GraphicsPipeline,
+        command_buffer: &crate::VkCommandBuffer,
+        pipeline: &crate::VkGraphicsPipeline,
         data: &T,
         offset: u32,
     ) {
@@ -69,7 +69,7 @@ mod inner {
     }
 }
 
-impl<'g> CommandBuffer<'g> {
+impl<'g> VkCommandBuffer<'g> {
     pub(crate) fn new(gpu: &'g VkGpu, target_queue: QueueType) -> VkResult<Self> {
         let device = gpu.vk_logical_device();
         let inner_command_buffer = unsafe {
@@ -105,12 +105,12 @@ impl<'g> CommandBuffer<'g> {
     pub fn begin_render_pass<'p>(
         &'p mut self,
         info: &BeginRenderPassInfo<'p>,
-    ) -> RenderPassCommand<'p, 'g> {
-        RenderPassCommand::<'p, 'g>::new(self, info)
+    ) -> VkRenderPassCommand<'p, 'g> {
+        VkRenderPassCommand::<'p, 'g>::new(self, info)
     }
 
-    pub fn begin_compute_pass<'p>(&'p mut self) -> ComputePassCommand<'p, 'g> {
-        ComputePassCommand::<'p, 'g>::new(self)
+    pub fn begin_compute_pass<'p>(&'p mut self) -> VkComputePassCommand<'p, 'g> {
+        VkComputePassCommand::<'p, 'g>::new(self)
     }
 
     pub fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo) {
@@ -144,11 +144,11 @@ impl<'g> CommandBuffer<'g> {
         };
     }
 
-    pub fn bind_descriptor_sets<T: GpuPipeline>(
+    pub fn bind_descriptor_sets<T: VkPipelineInfo>(
         &self,
         pipeline: &T,
         first_index: u32,
-        descriptor_sets: &[&GpuDescriptorSet],
+        descriptor_sets: &[&VkDescriptorSet],
     ) {
         let descriptor_sets: Vec<_> = descriptor_sets
             .iter()
@@ -279,7 +279,7 @@ impl Drop for ScopedDebugLabel {
     }
 }
 
-impl<'g> CommandBuffer<'g> {
+impl<'g> VkCommandBuffer<'g> {
     pub fn begin_debug_region(&self, label: &str, color: [f32; 4]) -> ScopedDebugLabel {
         ScopedDebugLabel {
             inner: self.gpu.state.debug_utilities.as_ref().map(|debug_utils| {
@@ -306,7 +306,7 @@ impl<'g> CommandBuffer<'g> {
     }
 }
 
-impl<'g> Drop for CommandBuffer<'g> {
+impl<'g> Drop for VkCommandBuffer<'g> {
     fn drop(&mut self) {
         if !self.has_been_submitted {
             panic!("CommandBuffer::submit hasn't been called!");
@@ -314,8 +314,8 @@ impl<'g> Drop for CommandBuffer<'g> {
     }
 }
 
-impl<'c, 'g> RenderPassCommand<'c, 'g> {
-    fn new(command_buffer: &'c mut CommandBuffer<'g>, info: &BeginRenderPassInfo<'c>) -> Self {
+impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
+    fn new(command_buffer: &'c mut VkCommandBuffer<'g>, info: &BeginRenderPassInfo<'c>) -> Self {
         let color_attachments: Vec<_> = info
             .color_attachments
             .iter()
@@ -414,7 +414,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         }
     }
 
-    pub fn bind_pipeline(&mut self, material: &GraphicsPipeline) {
+    pub fn bind_pipeline(&mut self, material: &VkGraphicsPipeline) {
         let device = self.command_buffer.gpu.vk_logical_device();
         unsafe {
             device.cmd_bind_pipeline(
@@ -520,7 +520,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
         }
     }
 
-    pub fn bind_index_buffer(&self, buffer: &GpuBuffer, offset: u64, index_type: IndexType) {
+    pub fn bind_index_buffer(&self, buffer: &VkBuffer, offset: u64, index_type: IndexType) {
         let device = self.command_buffer.gpu.vk_logical_device();
         let index_buffer = buffer.inner;
         unsafe {
@@ -532,7 +532,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
             );
         }
     }
-    pub fn bind_vertex_buffer(&self, first_binding: u32, buffers: &[&GpuBuffer], offsets: &[u64]) {
+    pub fn bind_vertex_buffer(&self, first_binding: u32, buffers: &[&VkBuffer], offsets: &[u64]) {
         assert!(buffers.len() == offsets.len());
         let device = self.command_buffer.gpu.vk_logical_device();
         let vertex_buffers: Vec<_> = buffers.iter().map(|b| b.inner).collect();
@@ -548,7 +548,7 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
 
     pub fn push_constant<T: Copy + Sized>(
         &self,
-        pipeline: &GraphicsPipeline,
+        pipeline: &VkGraphicsPipeline,
         data: &T,
         offset: u32,
     ) {
@@ -556,21 +556,21 @@ impl<'c, 'g> RenderPassCommand<'c, 'g> {
     }
 }
 
-impl<'c, 'g> AsRef<CommandBuffer<'g>> for RenderPassCommand<'c, 'g> {
-    fn as_ref(&self) -> &CommandBuffer<'g> {
+impl<'c, 'g> AsRef<VkCommandBuffer<'g>> for VkRenderPassCommand<'c, 'g> {
+    fn as_ref(&self) -> &VkCommandBuffer<'g> {
         self.command_buffer
     }
 }
 
-impl<'c, 'g> Deref for RenderPassCommand<'c, 'g> {
-    type Target = CommandBuffer<'g>;
+impl<'c, 'g> Deref for VkRenderPassCommand<'c, 'g> {
+    type Target = VkCommandBuffer<'g>;
 
     fn deref(&self) -> &Self::Target {
         self.command_buffer
     }
 }
 
-impl<'c, 'g> Drop for RenderPassCommand<'c, 'g> {
+impl<'c, 'g> Drop for VkRenderPassCommand<'c, 'g> {
     fn drop(&mut self) {
         unsafe {
             self.command_buffer
@@ -582,12 +582,12 @@ impl<'c, 'g> Drop for RenderPassCommand<'c, 'g> {
     }
 }
 
-impl<'c, 'g> ComputePassCommand<'c, 'g> {
-    fn new(command_buffer: &'c mut CommandBuffer<'g>) -> Self {
+impl<'c, 'g> VkComputePassCommand<'c, 'g> {
+    fn new(command_buffer: &'c mut VkCommandBuffer<'g>) -> Self {
         Self { command_buffer }
     }
 
-    pub fn bind_pipeline(&mut self, pipeline: &ComputePipeline) {
+    pub fn bind_pipeline(&mut self, pipeline: &VkComputePipeline) {
         let device = self.command_buffer.gpu.vk_logical_device();
         unsafe {
             device.cmd_bind_pipeline(
@@ -611,14 +611,14 @@ impl<'c, 'g> ComputePassCommand<'c, 'g> {
     }
 }
 
-impl<'c, 'g> AsRef<CommandBuffer<'g>> for ComputePassCommand<'c, 'g> {
-    fn as_ref(&self) -> &CommandBuffer<'g> {
+impl<'c, 'g> AsRef<VkCommandBuffer<'g>> for VkComputePassCommand<'c, 'g> {
+    fn as_ref(&self) -> &VkCommandBuffer<'g> {
         self.command_buffer
     }
 }
 
-impl<'c, 'g> Deref for ComputePassCommand<'c, 'g> {
-    type Target = CommandBuffer<'g>;
+impl<'c, 'g> Deref for VkComputePassCommand<'c, 'g> {
+    type Target = VkCommandBuffer<'g>;
 
     fn deref(&self) -> &Self::Target {
         self.command_buffer

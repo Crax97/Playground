@@ -11,7 +11,7 @@ use engine::{
     MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo,
     RenderingPipeline, Scene, ScenePrimitive, Texture, TextureInput,
 };
-use gpu::{CommandBuffer, PresentMode};
+use gpu::{PresentMode, VkCommandBuffer};
 use imgui::Ui;
 use nalgebra::*;
 use resource_map::ResourceMap;
@@ -238,7 +238,7 @@ impl App for PlanesApp {
         Ok(())
     }
 
-    fn draw(&mut self, backbuffer: &Backbuffer) -> anyhow::Result<CommandBuffer> {
+    fn draw(&mut self, backbuffer: &Backbuffer) -> anyhow::Result<VkCommandBuffer> {
         self.scene_renderer
             .render(&self.camera, &self.scene, backbuffer, &self.resource_map)
     }

@@ -7,7 +7,7 @@ mod utils;
 use app::{bootstrap, App};
 
 use fps_camera::FpsCamera;
-use gpu::{CommandBuffer, PresentMode};
+use gpu::{PresentMode, VkCommandBuffer};
 use imgui::{TreeNodeFlags, Ui};
 use input::InputState;
 use winit::dpi::{PhysicalPosition, Position};
@@ -344,7 +344,7 @@ impl App for GLTFViewer {
         Ok(())
     }
 
-    fn draw(&mut self, backbuffer: &Backbuffer) -> anyhow::Result<CommandBuffer> {
+    fn draw(&mut self, backbuffer: &Backbuffer) -> anyhow::Result<VkCommandBuffer> {
         let command_buffer = self.scene_renderer.render(
             &self.camera.camera(),
             self.gltf_loader.scene(),

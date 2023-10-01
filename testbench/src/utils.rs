@@ -1,12 +1,12 @@
 use log::info;
 use std::path::Path;
 
-use gpu::{GpuShaderModule, ShaderModuleCreateInfo, VkGpu};
+use gpu::{ShaderModuleCreateInfo, VkGpu, VkShaderModule};
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
     gpu: &VkGpu,
     path: P,
-) -> anyhow::Result<GpuShaderModule> {
+) -> anyhow::Result<VkShaderModule> {
     info!(
         "Reading path from {:?}",
         path.as_ref()

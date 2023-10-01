@@ -1,6 +1,6 @@
 use gpu::{
     BufferCreateInfo, BufferRange, BufferUsageFlags, DescriptorInfo, DescriptorSetInfo,
-    DescriptorType, GpuBuffer, GpuDescriptorSet, ImageLayout, MemoryDomain, VkGpu,
+    DescriptorType, ImageLayout, MemoryDomain, VkBuffer, VkDescriptorSet, VkGpu,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 use std::collections::HashMap;
@@ -18,8 +18,8 @@ pub struct MaterialInstanceDescription<'a> {
 pub struct MaterialInstance {
     pub(crate) name: String,
     pub(crate) owner: ResourceHandle<MasterMaterial>,
-    pub(crate) parameter_buffer: Option<GpuBuffer>,
-    pub(crate) user_descriptor_set: GpuDescriptorSet,
+    pub(crate) parameter_buffer: Option<VkBuffer>,
+    pub(crate) user_descriptor_set: VkDescriptorSet,
     #[allow(dead_code)]
     pub(crate) current_inputs: HashMap<String, ResourceHandle<Texture>>,
     pub(crate) parameter_block_size: usize,
@@ -83,8 +83,8 @@ impl MaterialInstance {
         resource_map: &ResourceMap,
         master: &MasterMaterial,
         description: &MaterialInstanceDescription<'_>,
-        param_buffer: &Option<GpuBuffer>,
-    ) -> anyhow::Result<GpuDescriptorSet> {
+        param_buffer: &Option<VkBuffer>,
+    ) -> anyhow::Result<VkDescriptorSet> {
         let mut descriptors: Vec<_> = master
             .texture_inputs
             .iter()

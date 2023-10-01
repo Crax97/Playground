@@ -167,12 +167,12 @@ fn p_or_null<T>(slice: &[T]) -> *const T {
     }
 }
 
-pub struct RenderPass {
+pub struct VkRenderPass {
     pub(super) inner: vk::RenderPass,
     state: Arc<GpuThreadSharedState>,
 }
 
-impl Drop for RenderPass {
+impl Drop for VkRenderPass {
     fn drop(&mut self) {
         unsafe {
             self.state
@@ -181,7 +181,7 @@ impl Drop for RenderPass {
         }
     }
 }
-impl RenderPass {
+impl VkRenderPass {
     pub(crate) fn new(gpu: &VkGpu, pass_description: &RenderPassDescription) -> VkResult<Self> {
         let output_attachments = pass_description.get_output_attachments();
         let subpasses = pass_description.get_subpasses();
@@ -209,7 +209,7 @@ impl RenderPass {
     }
 }
 
-pub trait GpuPipeline {
+pub trait VkPipelineInfo {
     fn bind_point() -> PipelineBindPoint;
     fn vk_pipeline(&self) -> vk::Pipeline;
     fn vk_pipeline_layout(&self) -> vk::PipelineLayout;
@@ -296,28 +296,28 @@ impl<'a> GraphicsPipelineDescription<'a> {
     }
 }
 
-pub struct GraphicsPipeline {
+pub struct VkGraphicsPipeline {
     pub(super) pipeline: vk::Pipeline,
     pub(super) pipeline_layout: PipelineLayout,
 
     shared_state: Arc<GpuThreadSharedState>,
 }
 
-impl Eq for GraphicsPipeline {}
+impl Eq for VkGraphicsPipeline {}
 
-impl PartialEq for GraphicsPipeline {
+impl PartialEq for VkGraphicsPipeline {
     fn eq(&self, other: &Self) -> bool {
         self.pipeline == other.pipeline
     }
 }
 
-impl std::hash::Hash for GraphicsPipeline {
+impl std::hash::Hash for VkGraphicsPipeline {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.pipeline.hash(state);
     }
 }
 
-impl GraphicsPipeline {
+impl VkGraphicsPipeline {
     pub(crate) fn new(
         gpu: &VkGpu,
         pipeline_description: &GraphicsPipelineDescription,
@@ -602,7 +602,7 @@ impl GraphicsPipeline {
     }
 }
 
-impl Drop for GraphicsPipeline {
+impl Drop for VkGraphicsPipeline {
     fn drop(&mut self) {
         unsafe {
             self.shared_state
@@ -615,13 +615,13 @@ impl Drop for GraphicsPipeline {
     }
 }
 
-pub struct ComputePipeline {
+pub struct VkComputePipeline {
     pub(super) pipeline: vk::Pipeline,
     pub(super) pipeline_layout: PipelineLayout,
 
     shared_state: Arc<GpuThreadSharedState>,
 }
-impl ComputePipeline {
+impl VkComputePipeline {
     pub(crate) fn new(gpu: &VkGpu, description: &ComputePipelineDescription) -> VkResult<Self> {
         let descriptor_set_layouts = create_descriptor_set_layouts(&description.bindings, gpu)?;
 
@@ -681,7 +681,7 @@ impl ComputePipeline {
     }
 }
 
-impl Drop for ComputePipeline {
+impl Drop for VkComputePipeline {
     fn drop(&mut self) {
         unsafe {
             self.shared_state
@@ -694,7 +694,7 @@ impl Drop for ComputePipeline {
     }
 }
 
-impl GpuPipeline for ComputePipeline {
+impl VkPipelineInfo for VkComputePipeline {
     fn bind_point() -> PipelineBindPoint {
         PipelineBindPoint::Compute
     }
@@ -708,7 +708,7 @@ impl GpuPipeline for ComputePipeline {
     }
 }
 
-impl GpuPipeline for GraphicsPipeline {
+impl VkPipelineInfo for VkGraphicsPipeline {
     fn bind_point() -> PipelineBindPoint {
         PipelineBindPoint::Graphics
     }

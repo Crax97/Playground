@@ -1,11 +1,11 @@
 use gpu::{
-    ComponentMapping, Filter, GpuImage, GpuImageView, GpuSampler, ImageAspectFlags,
-    ImageCreateInfo, ImageFormat, ImageSubresourceRange, ImageUsageFlags, ImageViewType,
-    MemoryDomain, SamplerAddressMode, SamplerCreateInfo, VkGpu,
+    ComponentMapping, Filter, ImageAspectFlags, ImageCreateInfo, ImageFormat,
+    ImageSubresourceRange, ImageUsageFlags, ImageViewType, MemoryDomain, SamplerAddressMode,
+    SamplerCreateInfo, VkGpu, VkImage, VkImageView, VkSampler,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 
-pub struct ImageResource(pub GpuImage);
+pub struct ImageResource(pub VkImage);
 impl Resource for ImageResource {
     fn get_description(&self) -> &str {
         "GPU Image"
@@ -13,7 +13,7 @@ impl Resource for ImageResource {
 }
 
 pub struct TextureImageView {
-    pub view: GpuImageView,
+    pub view: VkImageView,
     pub image: ResourceHandle<ImageResource>,
 }
 impl Resource for TextureImageView {
@@ -22,7 +22,7 @@ impl Resource for TextureImageView {
     }
 }
 
-pub struct SamplerResource(pub GpuSampler);
+pub struct SamplerResource(pub VkSampler);
 impl Resource for SamplerResource {
     fn get_description(&self) -> &str {
         "GPU Sampler"
@@ -40,7 +40,7 @@ impl Texture {
         height: u32,
         data: Option<&[u8]>,
         label: Option<&str>,
-    ) -> anyhow::Result<(GpuImage, GpuImageView, GpuSampler)> {
+    ) -> anyhow::Result<(VkImage, VkImageView, VkSampler)> {
         let image = gpu.create_image(
             &ImageCreateInfo {
                 label,

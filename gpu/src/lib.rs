@@ -59,7 +59,7 @@ pub struct ImageCreateInfo<'a> {
 }
 
 pub struct ImageViewCreateInfo<'a> {
-    pub image: &'a GpuImage,
+    pub image: &'a VkImage,
     pub view_type: ImageViewType,
     pub format: ImageFormat,
     pub components: ComponentMapping,
@@ -80,8 +80,8 @@ pub struct TransitionInfo {
 
 #[derive(Clone, Copy)]
 pub struct FramebufferCreateInfo<'a> {
-    pub render_pass: &'a RenderPass,
-    pub attachments: &'a [&'a GpuImageView],
+    pub render_pass: &'a VkRenderPass,
+    pub attachments: &'a [&'a VkImageView],
     pub width: u32,
     pub height: u32,
 }
@@ -532,15 +532,15 @@ impl QueueType {
 
 #[derive(Clone, Hash)]
 pub struct BufferRange<'a> {
-    pub handle: &'a GpuBuffer,
+    pub handle: &'a VkBuffer,
     pub offset: u64,
     pub size: u64,
 }
 
 #[derive(Clone, Hash)]
 pub struct SamplerState<'a> {
-    pub sampler: &'a GpuSampler,
-    pub image_view: &'a GpuImageView,
+    pub sampler: &'a VkSampler,
+    pub image_view: &'a VkImageView,
     pub image_layout: ImageLayout,
 }
 
@@ -686,7 +686,7 @@ pub struct VertexBindingDescription<'a> {
 #[derive(Clone, Copy)]
 pub struct VertexStageInfo<'a> {
     pub entry_point: &'a str,
-    pub module: &'a GpuShaderModule,
+    pub module: &'a VkShaderModule,
 }
 
 #[derive(Clone, Copy, Debug, Default, Hash, Eq, PartialEq, PartialOrd, Ord)]
@@ -719,7 +719,7 @@ pub struct DepthStencilAttachment {}
 #[derive(Clone, Copy)]
 pub struct FragmentStageInfo<'a> {
     pub entry_point: &'a str,
-    pub module: &'a GpuShaderModule,
+    pub module: &'a VkShaderModule,
     pub color_attachments: &'a [RenderPassAttachment],
     pub depth_stencil_attachments: &'a [DepthStencilAttachment],
 }
@@ -787,7 +787,7 @@ pub struct GraphicsPipelineDescription<'a> {
 
 #[derive(Clone, Copy)]
 pub struct ComputePipelineDescription<'a> {
-    pub module: &'a GpuShaderModule,
+    pub module: &'a VkShaderModule,
     pub entry_point: &'a str,
     pub bindings: &'a [GlobalBinding<'a>],
     pub push_constant_ranges: &'a [PushConstantRange],
@@ -819,7 +819,7 @@ pub struct BufferMemoryBarrier<'a> {
     pub dst_access_mask: AccessFlags,
     pub src_queue_family_index: u32,
     pub dst_queue_family_index: u32,
-    pub buffer: &'a GpuBuffer,
+    pub buffer: &'a VkBuffer,
     pub offset: u64,
     pub size: u64,
 }
@@ -831,7 +831,7 @@ pub struct ImageMemoryBarrier<'a> {
     pub new_layout: ImageLayout,
     pub src_queue_family_index: u32,
     pub dst_queue_family_index: u32,
-    pub image: &'a GpuImage,
+    pub image: &'a VkImage,
     pub subresource_range: ImageSubresourceRange,
 }
 
@@ -876,7 +876,7 @@ pub enum AttachmentStoreOp {
 
 #[derive(Clone, Copy)]
 pub struct ColorAttachment<'a> {
-    pub image_view: &'a GpuImageView,
+    pub image_view: &'a VkImageView,
     pub load_op: ColorLoadOp,
     pub store_op: AttachmentStoreOp,
     pub initial_layout: ImageLayout,
@@ -884,7 +884,7 @@ pub struct ColorAttachment<'a> {
 
 #[derive(Clone, Copy)]
 pub struct DepthAttachment<'a> {
-    pub image_view: &'a GpuImageView,
+    pub image_view: &'a VkImageView,
     pub load_op: DepthLoadOp,
     pub store_op: AttachmentStoreOp,
     pub initial_layout: ImageLayout,
@@ -892,7 +892,7 @@ pub struct DepthAttachment<'a> {
 
 #[derive(Clone, Copy)]
 pub struct StencilAttachment<'a> {
-    pub image_view: &'a GpuImageView,
+    pub image_view: &'a VkImageView,
     pub load_op: StencilLoadOp,
     pub store_op: AttachmentStoreOp,
     pub initial_layout: ImageLayout,

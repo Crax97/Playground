@@ -19,8 +19,8 @@ use raw_window_handle::{
 use winit::window::Window;
 
 use crate::{
-    Extent2D, FenceCreateFlags, FenceCreateInfo, GpuImage, GpuImageView, ImageAspectFlags,
-    ImageSubresourceRange, PresentMode, ToVk, VkGpu,
+    Extent2D, FenceCreateFlags, FenceCreateInfo, ImageAspectFlags, ImageSubresourceRange,
+    PresentMode, ToVk, VkGpu, VkImage, VkImageView,
 };
 
 use super::{GPUFence, GPUSemaphore, GpuThreadSharedState};
@@ -100,8 +100,8 @@ pub struct Swapchain {
     pub(super) supported_presentation_formats: Vec<SurfaceFormatKHR>,
     pub(super) surface_capabilities: SurfaceCapabilitiesKHR,
     pub current_swapchain: SwapchainKHR,
-    pub(super) current_swapchain_images: Vec<GpuImage>,
-    pub(super) current_swapchain_image_views: Vec<MaybeUninit<GpuImageView>>,
+    pub(super) current_swapchain_images: Vec<VkImage>,
+    pub(super) current_swapchain_image_views: Vec<MaybeUninit<VkImageView>>,
     pub(super) frames_in_flight: Vec<SwapchainFrame>,
 
     current_swapchain_index: Cell<u32>,
@@ -168,7 +168,7 @@ impl Swapchain {
         Ok(me)
     }
 
-    pub fn acquire_next_image(&mut self) -> VkResult<(&GpuImage, &GpuImageView)> {
+    pub fn acquire_next_image(&mut self) -> VkResult<(&VkImage, &VkImageView)> {
         let current_frame = &self.frames_in_flight[self.current_frame.get()];
         let wait_semaphore = current_frame.image_available_semaphore.inner;
 
@@ -406,7 +406,7 @@ impl Swapchain {
         self.current_swapchain_images = images
             .iter()
             .map(|i| {
-                GpuImage::wrap(
+                VkImage::wrap(
                     self.state.logical_device.clone(),
                     *i,
                     self.extents(),
@@ -446,7 +446,7 @@ impl Swapchain {
                 }
                 .to_vk(),
             };
-            self.current_swapchain_image_views[i] = MaybeUninit::new(GpuImageView::create(
+            self.current_swapchain_image_views[i] = MaybeUninit::new(VkImageView::create(
                 self.state.logical_device.clone(),
                 &view_info,
                 view_info.format.into(),

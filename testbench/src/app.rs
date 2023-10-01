@@ -1,8 +1,8 @@
 use engine::{AppState, Backbuffer};
 use gpu::{
-    AccessFlags, BeginRenderPassInfo, ColorAttachment, CommandBuffer, CommandBufferSubmitInfo,
-    ImageAspectFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, Offset2D,
-    PipelineBarrierInfo, PipelineStageFlags, Rect2D,
+    AccessFlags, BeginRenderPassInfo, ColorAttachment, CommandBufferSubmitInfo, ImageAspectFlags,
+    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, Offset2D, PipelineBarrierInfo,
+    PipelineStageFlags, Rect2D, VkCommandBuffer,
 };
 use imgui::{Context, FontConfig, FontSource, Ui};
 use imgui_rs_vulkan_renderer::{DynamicRendering, Options, Renderer};
@@ -37,7 +37,7 @@ pub trait App {
         event: winit::event::DeviceEvent,
     ) -> anyhow::Result<()>;
     fn update(&mut self, app_state: &mut AppState, ui: &mut Ui) -> anyhow::Result<()>;
-    fn draw(&mut self, backbuffer: &Backbuffer) -> anyhow::Result<CommandBuffer>;
+    fn draw(&mut self, backbuffer: &Backbuffer) -> anyhow::Result<VkCommandBuffer>;
 }
 
 pub fn app_loop<A: App + 'static>(
@@ -143,7 +143,7 @@ fn update_loop(
 fn draw_imgui(
     imgui_data: &mut ImguiData,
     backbuffer: &Backbuffer,
-    command_buffer: &mut CommandBuffer<'_>,
+    command_buffer: &mut VkCommandBuffer<'_>,
 ) -> Result<(), anyhow::Error> {
     let data = imgui_data.imgui.render();
     {

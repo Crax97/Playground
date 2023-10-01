@@ -3,10 +3,10 @@ use std::{collections::HashMap, mem::size_of};
 
 use gpu::{
     AttachmentStoreOp, BindingType, BufferCreateInfo, BufferUsageFlags, ColorComponentFlags,
-    ColorLoadOp, CommandBuffer, CompareOp, DepthStencilState, Extent2D, FragmentStageInfo,
-    GpuBuffer, GpuShaderModule, ImageFormat, ImageLayout, IndexType, MemoryDomain,
-    PushConstantRange, SampleCount, ShaderModuleCreateInfo, ShaderStage, StencilLoadOp,
-    StencilOpState, Swapchain, VertexStageInfo, VkGpu,
+    ColorLoadOp, CompareOp, DepthStencilState, Extent2D, FragmentStageInfo, ImageFormat,
+    ImageLayout, IndexType, MemoryDomain, PushConstantRange, SampleCount, ShaderModuleCreateInfo,
+    ShaderStage, StencilLoadOp, StencilOpState, Swapchain, VertexStageInfo, VkBuffer,
+    VkCommandBuffer, VkGpu, VkShaderModule,
 };
 use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -142,8 +142,8 @@ use crate::{
 use gpu::{BlendMode, BlendOp, BlendState, RenderPassAttachment};
 
 struct FrameBuffers {
-    camera_buffer: GpuBuffer,
-    light_buffer: GpuBuffer,
+    camera_buffer: VkBuffer,
+    light_buffer: VkBuffer,
 }
 
 struct DrawCall<'a> {
@@ -155,16 +155,16 @@ struct DrawCall<'a> {
 pub struct DeferredRenderingPipeline {
     frame_buffers: Vec<FrameBuffers>,
     render_graph: RenderGraph,
-    screen_quad: GpuShaderModule,
-    texture_copy: GpuShaderModule,
-    gbuffer_combine: GpuShaderModule,
-    tonemap_fs: GpuShaderModule,
+    screen_quad: VkShaderModule,
+    texture_copy: VkShaderModule,
+    gbuffer_combine: VkShaderModule,
+    tonemap_fs: VkShaderModule,
 
     fxaa_settings: FxaaSettings,
 
     runner: GpuRunner,
-    fxaa_vs: GpuShaderModule,
-    fxaa_fs: GpuShaderModule,
+    fxaa_vs: VkShaderModule,
+    fxaa_fs: VkShaderModule,
     in_flight_frame: usize,
     max_frames_in_flight: usize,
 
@@ -179,10 +179,10 @@ pub struct DeferredRenderingPipeline {
 impl DeferredRenderingPipeline {
     pub fn new(
         gpu: &VkGpu,
-        screen_quad: GpuShaderModule,
-        gbuffer_combine: GpuShaderModule,
-        texture_copy: GpuShaderModule,
-        tonemap_fs: GpuShaderModule,
+        screen_quad: VkShaderModule,
+        gbuffer_combine: VkShaderModule,
+        texture_copy: VkShaderModule,
+        tonemap_fs: VkShaderModule,
     ) -> anyhow::Result<Self> {
         let mut frame_buffers = vec![];
         for _ in 0..Swapchain::MAX_FRAMES_IN_FLIGHT {
@@ -364,7 +364,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         scene: &Scene,
         backbuffer: &Backbuffer,
         resource_map: &ResourceMap,
-    ) -> anyhow::Result<CommandBuffer> {
+    ) -> anyhow::Result<VkCommandBuffer> {
         let projection = pov.projection();
 
         let current_buffers = &self.frame_buffers[self.in_flight_frame];

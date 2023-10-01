@@ -1,6 +1,6 @@
 use nalgebra::{Vector2, Vector3};
 
-use gpu::{BufferCreateInfo, BufferUsageFlags, GpuBuffer, MemoryDomain, VkGpu};
+use gpu::{BufferCreateInfo, BufferUsageFlags, MemoryDomain, VkBuffer, VkGpu};
 use resource_map::Resource;
 
 pub struct MeshPrimitiveCreateInfo {
@@ -18,12 +18,12 @@ pub struct MeshCreateInfo<'a> {
 }
 
 pub struct MeshPrimitive {
-    pub index_buffer: GpuBuffer,
-    pub position_component: GpuBuffer,
-    pub color_component: GpuBuffer,
-    pub normal_component: GpuBuffer,
-    pub tangent_component: GpuBuffer,
-    pub uv_component: GpuBuffer,
+    pub index_buffer: VkBuffer,
+    pub position_component: VkBuffer,
+    pub color_component: VkBuffer,
+    pub normal_component: VkBuffer,
+    pub tangent_component: VkBuffer,
+    pub uv_component: VkBuffer,
 
     pub index_count: u32,
 }
