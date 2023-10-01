@@ -76,7 +76,7 @@ impl<'g> CommandBuffer<'g> {
             device.allocate_command_buffers(&CommandBufferAllocateInfo {
                 s_type: StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
                 p_next: std::ptr::null(),
-                command_pool: target_queue.get_vk_command_pool(gpu),
+                command_pool: gpu.command_pool(),
                 level: CommandBufferLevel::PRIMARY,
                 command_buffer_count: 1,
             })

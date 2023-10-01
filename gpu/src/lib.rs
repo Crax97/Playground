@@ -473,14 +473,6 @@ pub enum QueueType {
     Transfer,
 }
 impl QueueType {
-    fn get_vk_command_pool(&self, gpu: &Gpu) -> ash::vk::CommandPool {
-        let thread_local_state = &gpu.thread_local_state;
-        match self {
-            QueueType::Graphics => thread_local_state.graphics_command_pool,
-            QueueType::AsyncCompute => thread_local_state.compute_command_pool,
-            QueueType::Transfer => thread_local_state.transfer_command_pool,
-        }
-    }
     fn get_vk_queue(&self, gpu: &Gpu) -> ash::vk::Queue {
         match self {
             QueueType::Graphics => gpu.state.graphics_queue,

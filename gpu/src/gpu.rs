@@ -105,16 +105,14 @@ impl Drop for GpuState {
 }
 
 pub struct GpuThreadLocalState {
-    pub graphics_command_pool: vk::CommandPool,
-    pub compute_command_pool: vk::CommandPool,
-    pub transfer_command_pool: vk::CommandPool,
+    pub command_pool: vk::CommandPool,
 
     shared_state: Arc<GpuState>,
 }
 
 impl GpuThreadLocalState {
     pub fn new(shared_state: Arc<GpuState>) -> VkResult<Self> {
-        let graphics_command_pool = unsafe {
+        let command_pool = unsafe {
             shared_state.logical_device.create_command_pool(
                 &CommandPoolCreateInfo {
                     s_type: StructureType::COMMAND_POOL_CREATE_INFO,
@@ -125,33 +123,9 @@ impl GpuThreadLocalState {
                 None,
             )
         }?;
-        let compute_command_pool = unsafe {
-            shared_state.logical_device.create_command_pool(
-                &CommandPoolCreateInfo {
-                    s_type: StructureType::COMMAND_POOL_CREATE_INFO,
-                    p_next: null(),
-                    flags: CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
-                    queue_family_index: shared_state.queue_families.async_compute_family.index,
-                },
-                None,
-            )
-        }?;
-        let transfer_command_pool = unsafe {
-            shared_state.logical_device.create_command_pool(
-                &CommandPoolCreateInfo {
-                    s_type: StructureType::COMMAND_POOL_CREATE_INFO,
-                    p_next: null(),
-                    flags: CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
-                    queue_family_index: shared_state.queue_families.transfer_family.index,
-                },
-                None,
-            )
-        }?;
 
         Ok(Self {
-            graphics_command_pool,
-            compute_command_pool,
-            transfer_command_pool,
+            command_pool,
             shared_state,
         })
     }
@@ -164,9 +138,7 @@ impl Drop for GpuThreadLocalState {
             device
                 .device_wait_idle()
                 .expect("Failed to wait for device while dropping thread local state");
-            device.destroy_command_pool(self.graphics_command_pool, None);
-            device.destroy_command_pool(self.compute_command_pool, None);
-            device.destroy_command_pool(self.transfer_command_pool, None);
+            device.destroy_command_pool(self.command_pool, None);
         }
     }
 }
@@ -682,7 +654,7 @@ impl Gpu {
     }
 
     pub fn command_pool(&self) -> vk::CommandPool {
-        self.thread_local_state.graphics_command_pool
+        self.thread_local_state.command_pool
     }
     pub fn queue_families(&self) -> QueueFamilies {
         self.state.queue_families.clone()
