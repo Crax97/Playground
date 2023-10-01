@@ -1291,7 +1291,7 @@ impl VkGpu {
         new_layout: TransitionInfo,
         aspect_mask: ImageAspectFlags,
     ) -> VkResult<()> {
-        let mut command_buffer = super::VkCommandBuffer::new(self, crate::QueueType::Graphics)?;
+        let mut command_buffer = self.create_command_buffer(QueueType::Graphics)?;
 
         self.transition_image_layout_in_command_buffer(
             image,
