@@ -13,18 +13,16 @@ use ash::{
     extensions::ext::DebugUtils,
     prelude::*,
     vk::{
-        make_api_version, ApplicationInfo, BufferCreateFlags, CommandBufferAllocateInfo,
-        CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags,
-        CommandPoolCreateFlags, CommandPoolCreateInfo, DebugUtilsMessageSeverityFlagsEXT,
-        DebugUtilsMessageTypeFlagsEXT, DebugUtilsMessengerCreateFlagsEXT,
-        DebugUtilsMessengerCreateInfoEXT, DebugUtilsObjectNameInfoEXT, DescriptorBufferInfo,
-        DescriptorImageInfo, DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags,
-        DeviceQueueCreateInfo, Extent3D, Fence, FormatFeatureFlags, FramebufferCreateFlags, Handle,
-        ImageCreateFlags, ImageSubresourceLayers, ImageTiling, ImageType, ImageViewCreateFlags,
-        InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, Offset3D,
-        PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType,
-        PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo, Queue, QueueFlags,
-        SampleCountFlags, ShaderModuleCreateFlags, SharingMode, StructureType, SubmitInfo,
+        make_api_version, ApplicationInfo, BufferCreateFlags, CommandPoolCreateFlags,
+        CommandPoolCreateInfo, DebugUtilsMessageSeverityFlagsEXT, DebugUtilsMessageTypeFlagsEXT,
+        DebugUtilsMessengerCreateFlagsEXT, DebugUtilsMessengerCreateInfoEXT,
+        DebugUtilsObjectNameInfoEXT, DescriptorBufferInfo, DescriptorImageInfo, DeviceCreateFlags,
+        DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo, Extent3D,
+        FormatFeatureFlags, FramebufferCreateFlags, Handle, ImageCreateFlags, ImageTiling,
+        ImageType, ImageViewCreateFlags, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap,
+        MemoryHeapFlags, PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties,
+        PhysicalDeviceType, PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo,
+        Queue, QueueFlags, SampleCountFlags, ShaderModuleCreateFlags, SharingMode, StructureType,
         WriteDescriptorSet, API_VERSION_1_3,
     },
     *,
@@ -1345,93 +1343,16 @@ impl VkGpu {
         width: u32,
         height: u32,
     ) -> VkResult<()> {
-        unsafe {
-            let command_pool = self.state.logical_device.create_command_pool(
-                &CommandPoolCreateInfo {
-                    s_type: StructureType::COMMAND_POOL_CREATE_INFO,
-                    p_next: std::ptr::null(),
-                    flags: CommandPoolCreateFlags::empty(),
-                    queue_family_index: self.graphics_queue_family_index(),
-                },
-                None,
-            )?;
-
-            let command_buffer =
-                self.state
-                    .logical_device
-                    .allocate_command_buffers(&CommandBufferAllocateInfo {
-                        s_type: StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
-                        p_next: std::ptr::null(),
-                        command_pool,
-                        level: CommandBufferLevel::PRIMARY,
-                        command_buffer_count: 1,
-                    })?[0];
-
-            self.state.logical_device.begin_command_buffer(
-                command_buffer,
-                &CommandBufferBeginInfo {
-                    s_type: StructureType::COMMAND_BUFFER_BEGIN_INFO,
-                    p_next: std::ptr::null(),
-                    flags: CommandBufferUsageFlags::ONE_TIME_SUBMIT,
-                    p_inheritance_info: std::ptr::null(),
-                },
-            )?;
-
-            let src_buffer = source_buffer.inner;
-            let dst_image = dest_image.inner;
-
-            self.state.logical_device.cmd_copy_buffer_to_image(
-                command_buffer,
-                src_buffer,
-                dst_image,
-                ImageLayout::TransferDst.to_vk(),
-                &[vk::BufferImageCopy {
-                    buffer_offset: 0,
-                    buffer_row_length: 0,
-                    buffer_image_height: 0,
-                    image_subresource: ImageSubresourceLayers {
-                        aspect_mask: ImageAspectFlags::COLOR.to_vk(),
-                        mip_level: 0,
-                        layer_count: 1,
-                        base_array_layer: 0,
-                    },
-                    image_offset: Offset3D { x: 0, y: 0, z: 0 },
-                    image_extent: Extent3D {
-                        width,
-                        height,
-                        depth: 1,
-                    },
-                }],
-            );
-            self.state
-                .logical_device
-                .end_command_buffer(command_buffer)?;
-            self.state.logical_device.queue_submit(
-                self.state.graphics_queue,
-                &[SubmitInfo {
-                    s_type: StructureType::SUBMIT_INFO,
-                    p_next: std::ptr::null(),
-                    wait_semaphore_count: 0,
-                    p_wait_semaphores: std::ptr::null(),
-                    p_wait_dst_stage_mask: std::ptr::null(),
-                    command_buffer_count: 1,
-                    p_command_buffers: addr_of!(command_buffer),
-                    signal_semaphore_count: 0,
-                    p_signal_semaphores: std::ptr::null(),
-                }],
-                Fence::null(),
-            )?;
-            self.state
-                .logical_device
-                .queue_wait_idle(self.graphics_queue())?;
-
-            self.state
-                .logical_device
-                .free_command_buffers(command_pool, &[command_buffer]);
-            self.state
-                .logical_device
-                .destroy_command_pool(command_pool, None);
-        }
+        let mut command_buffer = self.create_command_buffer(QueueType::Transfer)?;
+        command_buffer.copy_buffer_to_image(
+            source_buffer,
+            dest_image,
+            ImageLayout::TransferDst,
+            width,
+            height,
+        )?;
+        command_buffer.submit(&CommandBufferSubmitInfo::default())?;
+        self.wait_queue_idle(QueueType::Transfer)?;
 
         Ok(())
     }
