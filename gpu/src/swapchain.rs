@@ -19,11 +19,11 @@ use raw_window_handle::{
 use winit::window::Window;
 
 use crate::{
-    Extent2D, FenceCreateFlags, FenceCreateInfo, Gpu, GpuImage, GpuImageView, ImageAspectFlags,
-    ImageSubresourceRange, PresentMode, ToVk,
+    Extent2D, FenceCreateFlags, FenceCreateInfo, GpuImage, GpuImageView, ImageAspectFlags,
+    ImageSubresourceRange, PresentMode, ToVk, VkGpu,
 };
 
-use super::{GPUFence, GPUSemaphore, GpuState};
+use super::{GPUFence, GPUSemaphore, GpuThreadSharedState};
 
 mod util {
     use ash::vk::{PresentModeKHR, SurfaceFormatKHR};
@@ -105,7 +105,7 @@ pub struct Swapchain {
     pub(super) frames_in_flight: Vec<SwapchainFrame>,
 
     current_swapchain_index: Cell<u32>,
-    state: Arc<GpuState>,
+    state: Arc<GpuThreadSharedState>,
     pub current_frame: Cell<usize>,
     pub next_image_fence: GPUFence,
 
@@ -116,7 +116,7 @@ pub struct Swapchain {
 impl Swapchain {
     pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
-    pub fn new(gpu: &Gpu, window: &Window) -> VkResult<Self> {
+    pub fn new(gpu: &VkGpu, window: &Window) -> VkResult<Self> {
         let state = gpu.state.clone();
         let surface_extension = Surface::new(&state.entry, &state.instance);
         let swapchain_extension =

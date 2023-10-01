@@ -1,17 +1,17 @@
-use gpu::{Gpu, Swapchain};
+use gpu::{Swapchain, VkGpu};
 use winit::window::Window;
 
 use crate::Time;
 
 pub struct AppState {
-    pub gpu: Gpu,
+    pub gpu: VkGpu,
     pub time: Time,
     pub swapchain: Swapchain,
     pub window: Window,
 }
 
 impl AppState {
-    pub fn new(gpu: Gpu, window: Window) -> Self {
+    pub fn new(gpu: VkGpu, window: Window) -> Self {
         let swapchain = Swapchain::new(&gpu, &window).expect("Failed to create swapchain!");
 
         Self {

@@ -3,8 +3,8 @@ use gpu::DescriptorType::{StorageBuffer, UniformBuffer};
 use gpu::{
     BindingElement, BindingType, BufferCreateInfo, BufferRange, BufferUsageFlags,
     CommandBufferSubmitInfo, ComputePipelineDescription, DescriptorInfo, DescriptorSetInfo,
-    GPUFence, GlobalBinding, Gpu, GpuConfiguration, MemoryDomain, PipelineStageFlags, QueueType,
-    ShaderModuleCreateInfo, ShaderStage,
+    GPUFence, GlobalBinding, GpuConfiguration, MemoryDomain, PipelineStageFlags, QueueType,
+    ShaderModuleCreateInfo, ShaderStage, VkGpu,
 };
 use std::mem::{size_of, size_of_val};
 
@@ -26,9 +26,8 @@ void main() {
 );
 
 fn main() -> anyhow::Result<()> {
-    let gpu = Gpu::new(GpuConfiguration {
+    let gpu = VkGpu::new(GpuConfiguration {
         app_name: "compute sample",
-        engine_name: "compute engine",
         pipeline_cache_path: None,
         enable_debug_utilities: true,
         window: None,

@@ -12,15 +12,15 @@ use gpu::{
     ColorAttachment, ColorComponentFlags, ColorLoadOp, CommandBuffer, ComponentMapping, CullMode,
     DepthAttachment, DepthLoadOp, DepthStencilAttachment, DepthStencilState, DescriptorInfo,
     DescriptorSetInfo, Extent2D, Filter, FragmentStageInfo, FramebufferCreateInfo, FrontFace,
-    GlobalBinding, Gpu, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView,
-    GpuSampler, GpuShaderModule, GraphicsPipeline, GraphicsPipelineDescription, ImageAspectFlags,
+    GlobalBinding, GpuBuffer, GpuDescriptorSet, GpuFramebuffer, GpuImage, GpuImageView, GpuSampler,
+    GpuShaderModule, GraphicsPipeline, GraphicsPipelineDescription, ImageAspectFlags,
     ImageCreateInfo, ImageFormat, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
     ImageUsageFlags, ImageViewCreateInfo, ImageViewType, LogicOp, MemoryDomain, Offset2D,
     PipelineBarrierInfo, PipelineBindPoint, PipelineStageFlags, PolygonMode, PrimitiveTopology,
     PushConstantRange, Rect2D, RenderPass, RenderPassAttachment, RenderPassCommand,
     RenderPassDescription, SampleCount, SamplerAddressMode, SamplerCreateInfo, StencilAttachment,
     StencilLoadOp, SubpassDependency, SubpassDescription, TransitionInfo, VertexBindingDescription,
-    VertexStageInfo,
+    VertexStageInfo, VkGpu,
 };
 
 use indexmap::IndexSet;
@@ -47,7 +47,7 @@ pub trait CreateFrom<'a, D>
 where
     Self: Sized,
 {
-    fn create(gpu: &Gpu, desc: &'a D) -> anyhow::Result<Self>;
+    fn create(gpu: &VkGpu, desc: &'a D) -> anyhow::Result<Self>;
 }
 
 pub trait GraphResource {
@@ -127,7 +127,7 @@ impl<R: Sized + GraphResource, ID: Hash + Eq + PartialEq + Ord + PartialOrd + Cl
 
     fn get_explicit<'a, D: AsRef<R::Desc>>(
         &mut self,
-        gpu: &Gpu,
+        gpu: &VkGpu,
         current_iteration: u64,
         desc: &'a D,
         id: &ID,
@@ -152,7 +152,7 @@ impl<R: Sized + GraphResource, ID: Hash + Eq + PartialEq + Ord + PartialOrd + Cl
 
     fn ensure_resource_exists<'a, D: AsRef<R::Desc>>(
         &mut self,
-        gpu: &Gpu,
+        gpu: &VkGpu,
         desc: &'a D,
         id: &ID,
     ) -> anyhow::Result<()>
@@ -168,7 +168,7 @@ impl<R: Sized + GraphResource, ID: Hash + Eq + PartialEq + Ord + PartialOrd + Cl
 
     fn create_resource<'a, D: AsRef<R::Desc>>(
         &mut self,
-        gpu: &Gpu,
+        gpu: &VkGpu,
         desc: &'a D,
         id: &ID,
     ) -> anyhow::Result<()>
@@ -183,7 +183,7 @@ impl<R: Sized + GraphResource, ID: Hash + Eq + PartialEq + Ord + PartialOrd + Cl
     }
     fn ensure_resource_hasnt_changed<'a, D: AsRef<R::Desc>>(
         &mut self,
-        gpu: &Gpu,
+        gpu: &VkGpu,
         desc: &'a D,
         id: &ID,
     ) -> anyhow::Result<()>
@@ -299,7 +299,7 @@ impl GraphResource for GraphImage {
 }
 
 impl<'a> CreateFrom<'a, ImageDescription> for GraphImage {
-    fn create(gpu: &Gpu, desc: &'a ImageDescription) -> anyhow::Result<Self> {
+    fn create(gpu: &VkGpu, desc: &'a ImageDescription) -> anyhow::Result<Self> {
         let image = gpu
             .create_image(
                 &ImageCreateInfo {
@@ -356,7 +356,7 @@ impl GraphResource for GraphSampler {
 }
 
 impl<'a> CreateFrom<'a, SamplerState> for GraphSampler {
-    fn create(gpu: &Gpu, samp: &'a SamplerState) -> anyhow::Result<Self> {
+    fn create(gpu: &VkGpu, samp: &'a SamplerState) -> anyhow::Result<Self> {
         let sam = gpu
             .create_sampler(&SamplerCreateInfo {
                 mag_filter: Filter::Linear,
@@ -410,7 +410,7 @@ impl<'a> AsRef<ImageDescription> for GraphImageViewCreateInfo<'a> {
     }
 }
 impl<'a> CreateFrom<'a, GraphImageViewCreateInfo<'_>> for GraphImageView {
-    fn create(gpu: &Gpu, desc: &'a GraphImageViewCreateInfo) -> anyhow::Result<Self> {
+    fn create(gpu: &VkGpu, desc: &'a GraphImageViewCreateInfo) -> anyhow::Result<Self> {
         let view = gpu
             .create_image_view(&ImageViewCreateInfo {
                 image: desc.image,
@@ -462,7 +462,7 @@ impl GraphResource for GraphBuffer {
 }
 
 impl<'a> CreateFrom<'a, BufferDescription> for GraphBuffer {
-    fn create(gpu: &Gpu, desc: &'a BufferDescription) -> anyhow::Result<Self> {
+    fn create(gpu: &VkGpu, desc: &'a BufferDescription) -> anyhow::Result<Self> {
         let buffer = gpu.create_buffer(
             &BufferCreateInfo {
                 label: None,
@@ -517,7 +517,7 @@ impl GraphResource for GraphPass {
 }
 
 impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
-    fn create(gpu: &Gpu, create_info: &'a RenderGraphPassCreateInfo) -> anyhow::Result<Self> {
+    fn create(gpu: &VkGpu, create_info: &'a RenderGraphPassCreateInfo) -> anyhow::Result<Self> {
         let mut color_attachments = vec![];
         let mut depth_attachments = vec![];
 
@@ -729,7 +729,7 @@ impl<'a> AsRef<FramebufferHandle> for RenderGraphFramebufferCreateInfo<'a> {
 }
 
 impl<'a> CreateFrom<'a, RenderGraphFramebufferCreateInfo<'a>> for GraphFramebuffer {
-    fn create(gpu: &Gpu, desc: &'a RenderGraphFramebufferCreateInfo) -> anyhow::Result<Self> {
+    fn create(gpu: &VkGpu, desc: &'a RenderGraphFramebufferCreateInfo) -> anyhow::Result<Self> {
         let fb = gpu
             .create_framebuffer(&FramebufferCreateInfo {
                 render_pass: desc.render_pass,
@@ -780,7 +780,7 @@ impl<'a> AsRef<u64> for DescriptorSetCreateInfo<'a> {
 }
 
 impl<'a> CreateFrom<'a, DescriptorSetCreateInfo<'a>> for GraphDescriptorSet {
-    fn create(gpu: &Gpu, desc: &'a DescriptorSetCreateInfo) -> anyhow::Result<Self> {
+    fn create(gpu: &VkGpu, desc: &'a DescriptorSetCreateInfo) -> anyhow::Result<Self> {
         let ds = gpu
             .create_descriptor_set(&DescriptorSetInfo {
                 descriptors: desc.inputs,
@@ -839,7 +839,7 @@ impl DefaultResourceAllocator {
     }
 }
 pub struct GraphRunContext<'a, 'e> {
-    gpu: &'a Gpu,
+    gpu: &'a VkGpu,
     current_iteration: u64,
 
     callbacks: Callbacks<'e>,
@@ -849,7 +849,7 @@ pub struct GraphRunContext<'a, 'e> {
 
 impl<'a, 'e> GraphRunContext<'a, 'e> {
     pub fn new(
-        gpu: &'a Gpu,
+        gpu: &'a VkGpu,
         command_buffer: &'e mut CommandBuffer<'a>,
         current_iteration: u64,
     ) -> Self {
@@ -862,7 +862,7 @@ impl<'a, 'e> GraphRunContext<'a, 'e> {
         }
     }
 
-    pub(crate) fn register_callback<F: FnMut(&Gpu, &mut RenderPassContext) + 'e>(
+    pub(crate) fn register_callback<F: FnMut(&VkGpu, &mut RenderPassContext) + 'e>(
         &mut self,
         handle: &RenderPassHandle,
         callback: F,
@@ -870,7 +870,7 @@ impl<'a, 'e> GraphRunContext<'a, 'e> {
         self.callbacks.register_callback(handle, callback)
     }
 
-    pub fn register_end_callback<F: FnMut(&Gpu, &mut EndContext) + 'e>(&mut self, callback: F) {
+    pub fn register_end_callback<F: FnMut(&VkGpu, &mut EndContext) + 'e>(&mut self, callback: F) {
         self.callbacks.register_end_callback(callback)
     }
 
@@ -1067,7 +1067,7 @@ pub struct RenderGraphPipelineDescription<'a> {
 pub(crate) fn create_pipeline_for_graph_renderpass(
     graph: &RenderGraph,
     pass_info: &RenderPassInfo,
-    gpu: &Gpu,
+    gpu: &VkGpu,
     description: &RenderGraphPipelineDescription,
 ) -> anyhow::Result<GraphicsPipeline> {
     let mut set_zero_bindings = vec![];
@@ -1397,8 +1397,8 @@ impl CompiledRenderGraph {
     }
 }
 
-type RenderCallback<'g> = Box<dyn FnMut(&Gpu, &mut RenderPassContext) + 'g>;
-type EndCallback<'g> = Box<dyn FnMut(&Gpu, &mut EndContext) + 'g>;
+type RenderCallback<'g> = Box<dyn FnMut(&VkGpu, &mut RenderPassContext) + 'g>;
+type EndCallback<'g> = Box<dyn FnMut(&VkGpu, &mut EndContext) + 'g>;
 
 #[derive(Default)]
 struct Callbacks<'g> {
@@ -1407,7 +1407,7 @@ struct Callbacks<'g> {
 }
 
 impl<'g> Callbacks<'g> {
-    pub fn register_callback<F: FnMut(&Gpu, &mut RenderPassContext) + 'g>(
+    pub fn register_callback<F: FnMut(&VkGpu, &mut RenderPassContext) + 'g>(
         &mut self,
         handle: &RenderPassHandle,
         callback: F,
@@ -1415,7 +1415,7 @@ impl<'g> Callbacks<'g> {
         self.callbacks.insert(*handle, Box::new(callback));
     }
 
-    pub fn register_end_callback<F: FnMut(&Gpu, &mut EndContext) + 'g>(&mut self, callback: F) {
+    pub fn register_end_callback<F: FnMut(&VkGpu, &mut EndContext) + 'g>(&mut self, callback: F) {
         self.end_callback = Some(Box::new(callback));
     }
 }
@@ -1704,7 +1704,7 @@ impl RenderGraph {
 
     pub(crate) fn define_pipeline_for_renderpass(
         &mut self,
-        gpu: &Gpu,
+        gpu: &VkGpu,
         pass_handle: &RenderPassHandle,
         pipeline_label: &'static str,
         pipeline_description: &RenderGraphPipelineDescription<'_>,

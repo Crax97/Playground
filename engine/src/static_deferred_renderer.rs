@@ -3,10 +3,10 @@ use std::{collections::HashMap, mem::size_of};
 
 use gpu::{
     AttachmentStoreOp, BindingType, BufferCreateInfo, BufferUsageFlags, ColorComponentFlags,
-    ColorLoadOp, CommandBuffer, CompareOp, DepthStencilState, Extent2D, FragmentStageInfo, Gpu,
+    ColorLoadOp, CommandBuffer, CompareOp, DepthStencilState, Extent2D, FragmentStageInfo,
     GpuBuffer, GpuShaderModule, ImageFormat, ImageLayout, IndexType, MemoryDomain,
     PushConstantRange, SampleCount, ShaderModuleCreateInfo, ShaderStage, StencilLoadOp,
-    StencilOpState, Swapchain, VertexStageInfo,
+    StencilOpState, Swapchain, VertexStageInfo, VkGpu,
 };
 use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -178,7 +178,7 @@ pub struct DeferredRenderingPipeline {
 
 impl DeferredRenderingPipeline {
     pub fn new(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         screen_quad: GpuShaderModule,
         gbuffer_combine: GpuShaderModule,
         texture_copy: GpuShaderModule,
@@ -879,7 +879,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         );
 
         //#region context setup
-        context.register_callback(&dbuffer_pass, |_: &Gpu, ctx| {
+        context.register_callback(&dbuffer_pass, |_: &VkGpu, ctx| {
             Self::main_render_loop(
                 resource_map,
                 PipelineTarget::DepthOnly,
@@ -888,7 +888,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 ctx,
             );
         });
-        context.register_callback(&shadow_map_pass, |_: &Gpu, ctx| {
+        context.register_callback(&shadow_map_pass, |_: &VkGpu, ctx| {
             ctx.render_pass_command.set_depth_bias(
                 self.depth_bias_constant,
                 self.depth_bias_clamp,
@@ -913,7 +913,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 );
             }
         });
-        context.register_callback(&gbuffer_pass, |_: &Gpu, ctx| {
+        context.register_callback(&gbuffer_pass, |_: &VkGpu, ctx| {
             Self::main_render_loop(
                 resource_map,
                 PipelineTarget::ColorAndDepth,
@@ -923,13 +923,13 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             );
         });
 
-        context.register_callback(&combine_pass, |_: &Gpu, ctx| {
+        context.register_callback(&combine_pass, |_: &VkGpu, ctx| {
             ctx.render_pass_command.draw(4, 1, 0, 0);
         });
-        context.register_callback(&tonemap_pass, |_: &Gpu, ctx| {
+        context.register_callback(&tonemap_pass, |_: &VkGpu, ctx| {
             ctx.render_pass_command.draw(4, 1, 0, 0);
         });
-        context.register_callback(&fxaa_pass, |_: &Gpu, ctx| {
+        context.register_callback(&fxaa_pass, |_: &VkGpu, ctx| {
             let rcp_frame = vector![backbuffer.size.width as f32, backbuffer.size.height as f32];
             let rcp_frame = vector![1.0 / rcp_frame.x, 1.0 / rcp_frame.y];
 
@@ -948,7 +948,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             );
             ctx.render_pass_command.draw(3, 1, 0, 0);
         });
-        context.register_callback(&present_render_pass, |_: &Gpu, ctx| {
+        context.register_callback(&present_render_pass, |_: &VkGpu, ctx| {
             ctx.render_pass_command.draw(4, 1, 0, 0);
         });
 
@@ -963,7 +963,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
     fn create_material(
         &mut self,
-        gpu: &Gpu,
+        gpu: &VkGpu,
         material_description: MaterialDescription,
     ) -> anyhow::Result<MasterMaterial> {
         let color_attachments = &[

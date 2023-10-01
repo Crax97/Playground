@@ -622,13 +622,13 @@ define_raii_wrapper!((struct GPUFence {}, vk::Fence, ash::Device::destroy_fence)
 });
 
 impl GPUFence {
-    pub fn new(gpu: &Gpu, create_info: &FenceCreateInfo) -> VkResult<Self> {
+    pub fn new(gpu: &VkGpu, create_info: &FenceCreateInfo) -> VkResult<Self> {
         Self::create(gpu.vk_logical_device(), create_info)
     }
 }
 
 impl GPUSemaphore {
-    pub fn new(gpu: &Gpu, create_info: &SemaphoreCreateInfo) -> VkResult<Self> {
+    pub fn new(gpu: &VkGpu, create_info: &SemaphoreCreateInfo) -> VkResult<Self> {
         Self::create(gpu.vk_logical_device(), create_info)
     }
 }
@@ -730,7 +730,7 @@ pub struct GpuImage {
 }
 impl GpuImage {
     pub(super) fn create(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         image: vk::Image,
         allocation: MemoryAllocation,
         allocator: Arc<RefCell<dyn GpuAllocator>>,

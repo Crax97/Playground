@@ -33,14 +33,15 @@ use ash::{
 use log::{error, trace, warn};
 use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
-use winit::window::Window;
 
 use crate::{
-    get_allocation_callbacks, CommandBuffer, ComponentMapping, ComputePipeline,
-    ComputePipelineDescription, Extent2D, GPUFence, GpuFramebuffer, GpuImageView, GpuShaderModule,
-    GraphicsPipeline, GraphicsPipelineDescription, ImageAspectFlags, ImageFormat, ImageLayout,
-    ImageMemoryBarrier, ImageSubresourceRange, ImageUsageFlags, ImageViewType, PipelineBarrierInfo,
-    PipelineStageFlags, QueueType, RenderPass, RenderPassDescription, SamplerCreateInfo, ToVk,
+    get_allocation_callbacks, BufferCreateInfo, CommandBuffer, ComputePipeline,
+    ComputePipelineDescription, Extent2D, FramebufferCreateInfo, GPUFence, GpuConfiguration,
+    GpuFramebuffer, GpuImageView, GpuShaderModule, GraphicsPipeline, GraphicsPipelineDescription,
+    ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageLayout, ImageMemoryBarrier,
+    ImageSubresourceRange, ImageViewCreateInfo, PipelineBarrierInfo, PipelineStageFlags, QueueType,
+    RenderPass, RenderPassDescription, SamplerCreateInfo, ShaderModuleCreateInfo, ToVk,
+    TransitionInfo,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -48,8 +49,8 @@ use super::descriptor_set::PooledDescriptorSetAllocator;
 use super::{
     allocator::{GpuAllocator, PasstroughAllocator},
     descriptor_set::DescriptorSetAllocator,
-    AccessFlags, AllocationRequirements, BufferUsageFlags, DescriptorSetInfo, GpuBuffer,
-    GpuDescriptorSet, GpuImage, GpuSampler, MemoryDomain,
+    AccessFlags, AllocationRequirements, DescriptorSetInfo, GpuBuffer, GpuDescriptorSet, GpuImage,
+    GpuSampler, MemoryDomain,
 };
 
 const KHRONOS_VALIDATION_LAYER: &str = "VK_LAYER_KHRONOS_validation";
@@ -73,7 +74,10 @@ struct SupportedFeatures {
     supports_rgb_images: bool,
 }
 
-pub struct GpuState {
+/*
+ * All the state that can be shared across threads
+ * */
+pub struct GpuThreadSharedState {
     pub entry: Entry,
     pub instance: Instance,
     pub logical_device: Device,
@@ -92,7 +96,7 @@ pub struct GpuState {
     pub dynamic_rendering: DynamicRendering,
 }
 
-impl Drop for GpuState {
+impl Drop for GpuThreadSharedState {
     fn drop(&mut self) {
         if let (Some(messenger), Some(debug_utils)) = (&self.messenger, &self.debug_utilities) {
             unsafe {
@@ -104,14 +108,17 @@ impl Drop for GpuState {
     }
 }
 
+/*
+ * All the stuff that should be specific for a thread should go here
+ * e.g since command pools cannot be shared across threads, each thread should have its own command
+ * pool
+ * */
 pub struct GpuThreadLocalState {
     pub command_pool: vk::CommandPool,
-
-    shared_state: Arc<GpuState>,
 }
 
 impl GpuThreadLocalState {
-    pub fn new(shared_state: Arc<GpuState>) -> VkResult<Self> {
+    pub fn new(shared_state: Arc<GpuThreadSharedState>) -> VkResult<Self> {
         let command_pool = unsafe {
             shared_state.logical_device.create_command_pool(
                 &CommandPoolCreateInfo {
@@ -124,16 +131,10 @@ impl GpuThreadLocalState {
             )
         }?;
 
-        Ok(Self {
-            command_pool,
-            shared_state,
-        })
+        Ok(Self { command_pool })
     }
-}
 
-impl Drop for GpuThreadLocalState {
-    fn drop(&mut self) {
-        let device = &self.shared_state.logical_device;
+    fn destroy(&self, device: &ash::Device) {
         unsafe {
             device
                 .device_wait_idle()
@@ -143,18 +144,16 @@ impl Drop for GpuThreadLocalState {
     }
 }
 
-pub struct Gpu {
-    pub(crate) state: Arc<GpuState>,
+pub struct VkGpu {
+    pub(crate) state: Arc<GpuThreadSharedState>,
     pub(crate) thread_local_state: GpuThreadLocalState,
     pub(crate) staging_buffer: GpuBuffer,
 }
 
-pub struct GpuConfiguration<'a> {
-    pub app_name: &'a str,
-    pub engine_name: &'a str,
-    pub pipeline_cache_path: Option<&'a str>,
-    pub enable_debug_utilities: bool,
-    pub window: Option<&'a Window>,
+impl Drop for VkGpu {
+    fn drop(&mut self) {
+        self.thread_local_state.destroy(&self.vk_logical_device());
+    }
 }
 
 #[derive(Error, Debug, Clone)]
@@ -226,7 +225,7 @@ impl QueueFamilies {
     }
 }
 
-impl Gpu {
+impl VkGpu {
     pub fn new(configuration: GpuConfiguration) -> Result<Self> {
         let entry = unsafe { Entry::load()? };
 
@@ -339,7 +338,7 @@ impl Gpu {
 
         let dynamic_rendering = Self::create_dynamic_rendering(&instance, &logical_device)?;
 
-        let state = Arc::new(GpuState {
+        let state = Arc::new(GpuThreadSharedState {
             entry,
             instance,
             logical_device,
@@ -361,7 +360,7 @@ impl Gpu {
         let thread_local_state = GpuThreadLocalState::new(state.clone())?;
 
         let staging_buffer = create_staging_buffer(&state)?;
-        Ok(Gpu {
+        Ok(VkGpu {
             state,
             thread_local_state,
             staging_buffer,
@@ -373,6 +372,7 @@ impl Gpu {
         configuration: &GpuConfiguration,
         instance_extensions: &[String],
     ) -> VkResult<Instance> {
+        const ENGINE_NAME: &'static str = "PlaygroundEngine";
         let vk_layer_khronos_validation = CString::new(KHRONOS_VALIDATION_LAYER).unwrap();
         let vk_layer_khronos_validation = vk_layer_khronos_validation.as_ptr();
 
@@ -385,8 +385,7 @@ impl Gpu {
 
         let app_name =
             CString::new(configuration.app_name).expect("Failed to create valid App name");
-        let engine_name =
-            CString::new(configuration.engine_name).expect("Failed to create valid Engine Engine");
+        let engine_name = CString::new(ENGINE_NAME).expect("Failed to create valid Engine Engine");
 
         let app_info = ApplicationInfo {
             s_type: StructureType::APPLICATION_INFO,
@@ -668,7 +667,7 @@ impl Gpu {
         self.state.graphics_queue
     }
 
-    pub fn state(&self) -> &GpuState {
+    pub fn state(&self) -> &GpuThreadSharedState {
         &self.state
     }
 
@@ -922,7 +921,7 @@ fn find_supported_features(
     supported_features
 }
 
-fn create_staging_buffer(state: &Arc<GpuState>) -> VkResult<GpuBuffer> {
+fn create_staging_buffer(state: &Arc<GpuThreadSharedState>) -> VkResult<GpuBuffer> {
     let mb_64 = 1024 * 1024 * 64;
     let create_info: vk::BufferCreateInfo = vk::BufferCreateInfo {
         s_type: StructureType::BUFFER_CREATE_INFO,
@@ -962,47 +961,7 @@ fn create_staging_buffer(state: &Arc<GpuState>) -> VkResult<GpuBuffer> {
     Ok(buffer)
 }
 
-pub struct ImageCreateInfo<'a> {
-    pub label: Option<&'a str>,
-    pub width: u32,
-    pub height: u32,
-    pub format: ImageFormat,
-    pub usage: ImageUsageFlags,
-}
-
-pub struct ImageViewCreateInfo<'a> {
-    pub image: &'a GpuImage,
-    pub view_type: ImageViewType,
-    pub format: ImageFormat,
-    pub components: ComponentMapping,
-    pub subresource_range: ImageSubresourceRange,
-}
-pub struct BufferCreateInfo<'a> {
-    pub label: Option<&'a str>,
-    pub size: usize,
-    pub usage: BufferUsageFlags,
-}
-
-#[derive(Clone, Copy)]
-pub struct TransitionInfo {
-    pub layout: ImageLayout,
-    pub access_mask: AccessFlags,
-    pub stage_mask: PipelineStageFlags,
-}
-
-#[derive(Clone, Copy)]
-pub struct FramebufferCreateInfo<'a> {
-    pub render_pass: &'a RenderPass,
-    pub attachments: &'a [&'a GpuImageView],
-    pub width: u32,
-    pub height: u32,
-}
-
-pub struct ShaderModuleCreateInfo<'a> {
-    pub code: &'a [u8],
-}
-
-impl Gpu {
+impl VkGpu {
     pub fn create_buffer(
         &self,
         create_info: &BufferCreateInfo,

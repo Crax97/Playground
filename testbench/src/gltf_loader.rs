@@ -8,9 +8,9 @@ use engine::{
 use gltf::image::Data;
 use gltf::Document;
 use gpu::{
-    ComponentMapping, Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageSubresourceRange,
+    ComponentMapping, Filter, ImageAspectFlags, ImageCreateInfo, ImageSubresourceRange,
     ImageUsageFlags, ImageViewCreateInfo, ImageViewType, MemoryDomain, SamplerAddressMode,
-    SamplerCreateInfo,
+    SamplerCreateInfo, VkGpu,
 };
 use nalgebra::{vector, Matrix4, Quaternion, UnitQuaternion, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -41,7 +41,7 @@ struct LoadedTextures {
 impl GltfLoader {
     pub fn load<P: AsRef<Path>, R: RenderingPipeline>(
         path: P,
-        gpu: &Gpu,
+        gpu: &VkGpu,
         scene_renderer: &mut R,
         resource_map: &mut ResourceMap,
         _options: GltfLoadOptions,
@@ -99,7 +99,7 @@ impl GltfLoader {
     }
 
     fn load_meshes(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         resource_map: &mut ResourceMap,
         document: &Document,
         buffers: &[gltf::buffer::Data],
@@ -168,7 +168,7 @@ impl GltfLoader {
     }
 
     fn create_master_pbr_material<R: RenderingPipeline>(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         scene_renderer: &mut R,
         resource_map: &mut ResourceMap,
     ) -> anyhow::Result<ResourceHandle<MasterMaterial>> {
@@ -235,7 +235,7 @@ impl GltfLoader {
     }
 
     fn load_images(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         resource_map: &mut ResourceMap,
         images: &mut [Data],
     ) -> anyhow::Result<Vec<ResourceHandle<TextureImageView>>> {
@@ -287,7 +287,7 @@ impl GltfLoader {
     }
 
     fn load_textures(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         resource_map: &mut ResourceMap,
         allocated_image_views: Vec<ResourceHandle<TextureImageView>>,
         allocated_samplers: Vec<ResourceHandle<SamplerResource>>,
@@ -327,7 +327,7 @@ impl GltfLoader {
     }
 
     fn load_samplers(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         resource_map: &mut ResourceMap,
         document: &Document,
     ) -> anyhow::Result<Vec<ResourceHandle<SamplerResource>>> {
@@ -388,7 +388,7 @@ impl GltfLoader {
     }
 
     fn load_materials(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         resource_map: &mut ResourceMap,
         pbr_master: ResourceHandle<MasterMaterial>,
         textures: LoadedTextures,

@@ -1,7 +1,7 @@
 use gpu::{
-    ComponentMapping, Filter, Gpu, GpuImage, GpuImageView, GpuSampler, ImageAspectFlags,
+    ComponentMapping, Filter, GpuImage, GpuImageView, GpuSampler, ImageAspectFlags,
     ImageCreateInfo, ImageFormat, ImageSubresourceRange, ImageUsageFlags, ImageViewType,
-    MemoryDomain, SamplerAddressMode, SamplerCreateInfo,
+    MemoryDomain, SamplerAddressMode, SamplerCreateInfo, VkGpu,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 
@@ -35,7 +35,7 @@ pub struct Texture {
 
 impl Texture {
     fn new_impl(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         width: u32,
         height: u32,
         data: Option<&[u8]>,
@@ -83,7 +83,7 @@ impl Texture {
     }
 
     pub fn new_empty(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         resource_map: &mut ResourceMap,
         width: u32,
         height: u32,
@@ -100,7 +100,7 @@ impl Texture {
         })
     }
     pub fn new_with_data(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         resource_map: &mut ResourceMap,
         width: u32,
         height: u32,

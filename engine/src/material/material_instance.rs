@@ -1,6 +1,6 @@
 use gpu::{
     BufferCreateInfo, BufferRange, BufferUsageFlags, DescriptorInfo, DescriptorSetInfo,
-    DescriptorType, Gpu, GpuBuffer, GpuDescriptorSet, ImageLayout, MemoryDomain,
+    DescriptorType, GpuBuffer, GpuDescriptorSet, ImageLayout, MemoryDomain, VkGpu,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 use std::collections::HashMap;
@@ -33,7 +33,7 @@ impl Resource for MaterialInstance {
 
 impl MaterialInstance {
     pub fn create_instance(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         owner: ResourceHandle<MasterMaterial>,
         resource_map: &ResourceMap,
         description: &MaterialInstanceDescription,
@@ -69,7 +69,7 @@ impl MaterialInstance {
         })
     }
 
-    pub fn write_parameters<T: Sized + Copy>(&self, gpu: &Gpu, block: T) -> anyhow::Result<()> {
+    pub fn write_parameters<T: Sized + Copy>(&self, gpu: &VkGpu, block: T) -> anyhow::Result<()> {
         assert!(
             std::mem::size_of::<T>() <= self.parameter_block_size
                 && self.parameter_buffer.is_some()
@@ -79,7 +79,7 @@ impl MaterialInstance {
     }
 
     fn create_user_descriptor_set(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         resource_map: &ResourceMap,
         master: &MasterMaterial,
         description: &MaterialInstanceDescription<'_>,

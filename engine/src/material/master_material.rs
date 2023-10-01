@@ -2,9 +2,9 @@ use std::{collections::HashMap, hash::Hash, mem::size_of, num::NonZeroU32};
 
 use gpu::{
     BindingElement, BindingType, CompareOp, CullMode, DepthStencilState, FragmentStageInfo,
-    FrontFace, GlobalBinding, Gpu, GraphicsPipeline, GraphicsPipelineDescription, ImageFormat,
-    LogicOp, PolygonMode, PushConstantRange, StencilOpState, VertexAttributeDescription,
-    VertexBindingDescription, VertexStageInfo,
+    FrontFace, GlobalBinding, GraphicsPipeline, GraphicsPipelineDescription, ImageFormat, LogicOp,
+    PolygonMode, PushConstantRange, StencilOpState, VertexAttributeDescription,
+    VertexBindingDescription, VertexStageInfo, VkGpu,
 };
 use nalgebra::{Vector2, Vector3};
 use resource_map::Resource;
@@ -63,7 +63,7 @@ impl Resource for MasterMaterial {
 }
 
 impl MasterMaterial {
-    pub fn new(gpu: &Gpu, description: &MasterMaterialDescription) -> anyhow::Result<Self> {
+    pub fn new(gpu: &VkGpu, description: &MasterMaterialDescription) -> anyhow::Result<Self> {
         let pipelines = Self::create_pipelines(gpu, description)?;
         let parameter_block_size = size_of::<f32>() * 4 * description.material_parameters.len();
         Ok(MasterMaterial {
@@ -76,7 +76,7 @@ impl MasterMaterial {
     }
 
     fn create_pipelines(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         description: &MasterMaterialDescription<'_>,
     ) -> anyhow::Result<HashMap<PipelineTarget, GraphicsPipeline>> {
         let global_elements: Vec<_> = description
@@ -186,7 +186,7 @@ impl MasterMaterial {
     }
 
     fn create_surface_pipelines(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         description: &MasterMaterialDescription,
         global_elements: Vec<BindingElement>,
         user_elements: Vec<BindingElement>,
@@ -250,7 +250,7 @@ impl MasterMaterial {
         Ok(pipelines)
     }
     fn create_post_process_pipeline(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         description: &MasterMaterialDescription,
         global_elements: Vec<BindingElement>,
         user_elements: Vec<BindingElement>,

@@ -12,7 +12,7 @@ mod utils;
 
 use std::thread::ThreadId;
 
-use gpu::{Gpu, GpuConfiguration};
+use gpu::{GpuConfiguration, VkGpu};
 use once_cell::unsync::OnceCell;
 
 pub use app_state::*;
@@ -56,9 +56,8 @@ pub fn init(app_name: &str, window: winit::window::Window) -> anyhow::Result<()>
 
         let enable_debug_utilities = std::env::var("ENABLE_DEBUG_UTILITIES").is_ok();
 
-        let gpu = Gpu::new(GpuConfiguration {
+        let gpu = VkGpu::new(GpuConfiguration {
             app_name,
-            engine_name: "Hello Engine",
             enable_debug_utilities,
             pipeline_cache_path: Some("pipeline_cache.pso"),
             window: Some(&window),

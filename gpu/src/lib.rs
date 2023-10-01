@@ -15,9 +15,17 @@ use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 pub use swapchain::Swapchain;
 pub use types::*;
+use winit::window::Window;
 
 pub const WHOLE_SIZE: u64 = u64::MAX;
 pub const QUEUE_FAMILY_IGNORED: u32 = u32::MAX;
+
+pub struct GpuConfiguration<'a> {
+    pub app_name: &'a str,
+    pub pipeline_cache_path: Option<&'a str>,
+    pub enable_debug_utilities: bool,
+    pub window: Option<&'a Window>,
+}
 
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -40,6 +48,46 @@ pub enum ImageLayout {
     PreinitializedByCpu,
 
     PresentSrc,
+}
+
+pub struct ImageCreateInfo<'a> {
+    pub label: Option<&'a str>,
+    pub width: u32,
+    pub height: u32,
+    pub format: ImageFormat,
+    pub usage: ImageUsageFlags,
+}
+
+pub struct ImageViewCreateInfo<'a> {
+    pub image: &'a GpuImage,
+    pub view_type: ImageViewType,
+    pub format: ImageFormat,
+    pub components: ComponentMapping,
+    pub subresource_range: ImageSubresourceRange,
+}
+pub struct BufferCreateInfo<'a> {
+    pub label: Option<&'a str>,
+    pub size: usize,
+    pub usage: BufferUsageFlags,
+}
+
+#[derive(Clone, Copy)]
+pub struct TransitionInfo {
+    pub layout: ImageLayout,
+    pub access_mask: AccessFlags,
+    pub stage_mask: PipelineStageFlags,
+}
+
+#[derive(Clone, Copy)]
+pub struct FramebufferCreateInfo<'a> {
+    pub render_pass: &'a RenderPass,
+    pub attachments: &'a [&'a GpuImageView],
+    pub width: u32,
+    pub height: u32,
+}
+
+pub struct ShaderModuleCreateInfo<'a> {
+    pub code: &'a [u8],
 }
 
 bitflags! {
@@ -473,7 +521,7 @@ pub enum QueueType {
     Transfer,
 }
 impl QueueType {
-    fn get_vk_queue(&self, gpu: &Gpu) -> ash::vk::Queue {
+    fn get_vk_queue(&self, gpu: &VkGpu) -> ash::vk::Queue {
         match self {
             QueueType::Graphics => gpu.state.graphics_queue,
             QueueType::AsyncCompute => gpu.state.async_compute_queue,

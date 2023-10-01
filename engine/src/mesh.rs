@@ -1,6 +1,6 @@
 use nalgebra::{Vector2, Vector3};
 
-use gpu::{BufferCreateInfo, BufferUsageFlags, Gpu, GpuBuffer, MemoryDomain};
+use gpu::{BufferCreateInfo, BufferUsageFlags, GpuBuffer, MemoryDomain, VkGpu};
 use resource_map::Resource;
 
 pub struct MeshPrimitiveCreateInfo {
@@ -33,7 +33,7 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub fn new(gpu: &Gpu, mesh_create_info: &MeshCreateInfo) -> anyhow::Result<Self> {
+    pub fn new(gpu: &VkGpu, mesh_create_info: &MeshCreateInfo) -> anyhow::Result<Self> {
         let primitives: Vec<anyhow::Result<MeshPrimitive>> = mesh_create_info
             .primitives
             .iter()

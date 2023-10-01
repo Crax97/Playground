@@ -16,10 +16,10 @@ use ash::{
 use crate::pipeline::GpuPipeline;
 use crate::*;
 
-use super::{Gpu, GpuBuffer, GpuDescriptorSet, GraphicsPipeline, QueueType};
+use super::{GpuBuffer, GpuDescriptorSet, GraphicsPipeline, QueueType, VkGpu};
 
 pub struct CommandBuffer<'g> {
-    gpu: &'g Gpu,
+    gpu: &'g VkGpu,
     inner_command_buffer: vk::CommandBuffer,
     has_recorded_anything: bool,
     has_been_submitted: bool,
@@ -70,7 +70,7 @@ mod inner {
 }
 
 impl<'g> CommandBuffer<'g> {
-    pub(crate) fn new(gpu: &'g Gpu, target_queue: QueueType) -> VkResult<Self> {
+    pub(crate) fn new(gpu: &'g VkGpu, target_queue: QueueType) -> VkResult<Self> {
         let device = gpu.vk_logical_device();
         let inner_command_buffer = unsafe {
             device.allocate_command_buffers(&CommandBufferAllocateInfo {

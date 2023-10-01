@@ -1,4 +1,4 @@
-use gpu::{CommandBuffer, Extent2D, Gpu, GpuImage, GpuImageView, ImageFormat};
+use gpu::{CommandBuffer, Extent2D, GpuImage, GpuImageView, ImageFormat, VkGpu};
 use nalgebra::{vector, Matrix4, Point3, Vector2, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
 
@@ -228,7 +228,7 @@ pub trait RenderingPipeline {
 
     fn create_material(
         &mut self,
-        gpu: &Gpu,
+        gpu: &VkGpu,
         material_description: MaterialDescription,
     ) -> anyhow::Result<MasterMaterial>;
 }

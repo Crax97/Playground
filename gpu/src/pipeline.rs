@@ -169,7 +169,7 @@ fn p_or_null<T>(slice: &[T]) -> *const T {
 
 pub struct RenderPass {
     pub(super) inner: vk::RenderPass,
-    state: Arc<GpuState>,
+    state: Arc<GpuThreadSharedState>,
 }
 
 impl Drop for RenderPass {
@@ -182,7 +182,7 @@ impl Drop for RenderPass {
     }
 }
 impl RenderPass {
-    pub(crate) fn new(gpu: &Gpu, pass_description: &RenderPassDescription) -> VkResult<Self> {
+    pub(crate) fn new(gpu: &VkGpu, pass_description: &RenderPassDescription) -> VkResult<Self> {
         let output_attachments = pass_description.get_output_attachments();
         let subpasses = pass_description.get_subpasses();
         let subpass_dependencies = pass_description.get_subpass_dependencies();
@@ -217,7 +217,7 @@ pub trait GpuPipeline {
 
 fn create_descriptor_set_layouts(
     bindings: &[GlobalBinding],
-    gpu: &Gpu,
+    gpu: &VkGpu,
 ) -> VkResult<Vec<DescriptorSetLayout>> {
     let mut layouts: Vec<DescriptorSetLayout> = vec![];
     for element in bindings.iter() {
@@ -300,7 +300,7 @@ pub struct GraphicsPipeline {
     pub(super) pipeline: vk::Pipeline,
     pub(super) pipeline_layout: PipelineLayout,
 
-    shared_state: Arc<GpuState>,
+    shared_state: Arc<GpuThreadSharedState>,
 }
 
 impl Eq for GraphicsPipeline {}
@@ -319,7 +319,7 @@ impl std::hash::Hash for GraphicsPipeline {
 
 impl GraphicsPipeline {
     pub(crate) fn new(
-        gpu: &Gpu,
+        gpu: &VkGpu,
         pipeline_description: &GraphicsPipelineDescription,
     ) -> VkResult<Self> {
         let descriptor_set_layouts =
@@ -532,8 +532,7 @@ impl GraphicsPipeline {
             let color_attachment = pipeline_description
                 .fragment_stage
                 .map(|frag| {
-                    frag
-                        .color_attachments
+                    frag.color_attachments
                         .iter()
                         .map(|c| c.format.to_vk())
                         .collect()
@@ -620,10 +619,10 @@ pub struct ComputePipeline {
     pub(super) pipeline: vk::Pipeline,
     pub(super) pipeline_layout: PipelineLayout,
 
-    shared_state: Arc<GpuState>,
+    shared_state: Arc<GpuThreadSharedState>,
 }
 impl ComputePipeline {
-    pub(crate) fn new(gpu: &Gpu, description: &ComputePipelineDescription) -> VkResult<Self> {
+    pub(crate) fn new(gpu: &VkGpu, description: &ComputePipelineDescription) -> VkResult<Self> {
         let descriptor_set_layouts = create_descriptor_set_layouts(&description.bindings, gpu)?;
 
         let entry_point = CString::new(description.entry_point).unwrap();
