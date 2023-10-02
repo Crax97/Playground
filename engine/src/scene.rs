@@ -161,6 +161,13 @@ pub struct LightHandle(pub usize);
 pub struct Scene {
     pub primitives: Vec<ScenePrimitive>,
     pub lights: Vec<Light>,
+    current_lights_iteration: u64,
+}
+
+impl Scene {
+    fn increment_light_counter(&mut self) {
+        self.current_lights_iteration = self.current_lights_iteration.wrapping_add(1);
+    }
 }
 
 impl Scene {
@@ -168,6 +175,7 @@ impl Scene {
         Self {
             primitives: vec![],
             lights: vec![],
+            current_lights_iteration: 0,
         }
     }
 
@@ -179,6 +187,7 @@ impl Scene {
 
     pub fn add_light(&mut self, light: Light) -> LightHandle {
         let idx = self.lights.len();
+        self.increment_light_counter();
         self.lights.push(light);
         LightHandle(idx)
     }
@@ -187,6 +196,7 @@ impl Scene {
         &mut self.primitives[idx]
     }
     pub fn edit_light(&mut self, handle: &LightHandle) -> &mut Light {
+        self.increment_light_counter();
         &mut self.lights[handle.0]
     }
 
@@ -207,6 +217,14 @@ impl Scene {
 
     pub fn edit_all_primitives(&mut self) -> &mut [ScenePrimitive] {
         &mut self.primitives
+    }
+
+    pub fn lights_iteration(&self) -> u64 {
+        /*
+         * When a light is added/removed, the current iteration counter is incremented to
+         * notify that the lights in the scene have changed.
+         * */
+        self.current_lights_iteration
     }
 }
 

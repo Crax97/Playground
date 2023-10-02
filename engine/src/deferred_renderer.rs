@@ -167,6 +167,9 @@ pub struct DeferredRenderingPipeline {
     fxaa_fs: VkShaderModule,
     in_flight_frame: usize,
     max_frames_in_flight: usize,
+    light_iteration: u64,
+    active_lights: Vec<GpuLightInfo>,
+    light_povs: Vec<PerFrameData>,
 
     pub depth_bias_constant: f32,
     pub depth_bias_clamp: f32,
@@ -237,6 +240,7 @@ impl DeferredRenderingPipeline {
             fxaa_vs,
             fxaa_fs,
             fxaa_settings: Default::default(),
+            light_iteration: 0,
             runner: GpuRunner::new(),
             in_flight_frame: 0,
             max_frames_in_flight: Swapchain::MAX_FRAMES_IN_FLIGHT,
@@ -245,6 +249,8 @@ impl DeferredRenderingPipeline {
             depth_bias_slope: 1.75,
             ambient_color: vector![1.0, 1.0, 1.0],
             ambient_intensity: 0.3,
+            active_lights: vec![],
+            light_povs: vec![],
         })
     }
 
@@ -355,33 +361,12 @@ impl DeferredRenderingPipeline {
         }
         draw_hashmap
     }
-}
 
-impl RenderingPipeline for DeferredRenderingPipeline {
-    fn render(
-        &mut self,
-        pov: &Camera,
-        scene: &Scene,
-        backbuffer: &Backbuffer,
-        resource_map: &ResourceMap,
-    ) -> anyhow::Result<VkCommandBuffer> {
-        let projection = pov.projection();
+    fn update_lights(&mut self, scene: &Scene) {
+        self.light_iteration = scene.lights_iteration();
+        self.active_lights.clear();
+        self.light_povs.clear();
 
-        let current_buffers = &self.frame_buffers[self.in_flight_frame];
-
-        self.in_flight_frame = (1 + self.in_flight_frame) % self.max_frames_in_flight;
-
-        let mut per_frame_data = vec![PerFrameData {
-            eye: Point4::new(pov.location[0], pov.location[1], pov.location[2], 0.0),
-            view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * pov.view(),
-            projection,
-            viewport_size_offset: vector![
-                0.0,
-                0.0,
-                backbuffer.size.width as f32,
-                backbuffer.size.height as f32
-            ],
-        }];
         let mut x = 0.0;
         let mut y = 0.0;
         let mut shadow_caster_idx = 0;
@@ -421,11 +406,47 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                         .take_while(|l| l.is_some())
                         .flatten()
                         .collect::<Vec<_>>();
-                    per_frame_data.extend(povs);
+                    self.light_povs.extend(povs);
                 }
                 light
             })
             .collect();
+        self.active_lights = collected_active_lights;
+    }
+}
+
+impl RenderingPipeline for DeferredRenderingPipeline {
+    fn render(
+        &mut self,
+        pov: &Camera,
+        scene: &Scene,
+        backbuffer: &Backbuffer,
+        resource_map: &ResourceMap,
+    ) -> anyhow::Result<VkCommandBuffer> {
+        let projection = pov.projection();
+
+        if self.light_iteration != scene.lights_iteration() {
+            self.update_lights(scene);
+        }
+
+        let current_buffers = &self.frame_buffers[self.in_flight_frame];
+
+        self.in_flight_frame = (1 + self.in_flight_frame) % self.max_frames_in_flight;
+
+        let mut per_frame_data = vec![PerFrameData {
+            eye: Point4::new(pov.location[0], pov.location[1], pov.location[2], 0.0),
+            view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * pov.view(),
+            projection,
+            viewport_size_offset: vector![
+                0.0,
+                0.0,
+                backbuffer.size.width as f32,
+                backbuffer.size.height as f32
+            ],
+        }];
+
+        per_frame_data.extend_from_slice(&self.light_povs);
+
         super::app_state()
             .gpu
             .write_buffer_data_with_offset(
@@ -459,7 +480,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .write_buffer_data_with_offset(
                 &current_buffers.light_buffer,
                 std::mem::size_of::<Vector4<f32>>() as _,
-                &[collected_active_lights.len() as u32],
+                &[self.active_lights.len() as u32],
             )
             .unwrap();
         super::app_state()
@@ -467,7 +488,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .write_buffer_data_with_offset(
                 &current_buffers.light_buffer,
                 std::mem::size_of::<Vector4<f32>>() as u64 + size_of::<u32>() as u64 * 4,
-                &collected_active_lights,
+                &self.active_lights,
             )
             .unwrap();
 
