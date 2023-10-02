@@ -22,8 +22,8 @@ use ash::{
         ImageType, ImageViewCreateFlags, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap,
         MemoryHeapFlags, PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties,
         PhysicalDeviceType, PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo,
-        Queue, QueueFlags, SampleCountFlags, ShaderModuleCreateFlags, SharingMode, StructureType,
-        WriteDescriptorSet, API_VERSION_1_3,
+        Queue, QueueFlags, ShaderModuleCreateFlags, SharingMode, StructureType, WriteDescriptorSet,
+        API_VERSION_1_3,
     },
     *,
 };
@@ -1136,11 +1136,11 @@ impl VkGpu {
                 extent: Extent3D {
                     width: create_info.width,
                     height: create_info.height,
-                    depth: 1,
+                    depth: create_info.depth,
                 },
-                mip_levels: 1,
-                array_layers: 1,
-                samples: SampleCountFlags::TYPE_1,
+                mip_levels: create_info.mips,
+                array_layers: create_info.layers,
+                samples: create_info.samples.to_vk(),
                 tiling: if memory_domain.contains(MemoryDomain::HostVisible) {
                     ImageTiling::LINEAR
                 } else {

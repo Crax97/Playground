@@ -253,8 +253,12 @@ impl GltfLoader {
                 label: Some(&label),
                 width: gltf_image.width,
                 height: gltf_image.height,
+                depth: 1,
                 format,
                 usage: ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST,
+                mips: 1,
+                layers: 1,
+                samples: gpu::SampleCount::Sample1,
             };
             let gpu_image = gpu.create_image(
                 &image_create_info,

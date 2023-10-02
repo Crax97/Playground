@@ -174,6 +174,8 @@ pub struct DeferredRenderingPipeline {
     light_povs: Vec<PerFrameData>,
     shadow_map: VkImage,
     shadow_map_view: VkImageView,
+    shadow_2d_array: VkImageView,
+    shadow_cube_array: VkImageView,
 
     pub depth_bias_constant: f32,
     pub depth_bias_clamp: f32,
@@ -230,6 +232,10 @@ impl DeferredRenderingPipeline {
                 label: Some("Shadow Map image"),
                 width: SHADOW_MAP_WIDTH,
                 height: SHADOW_MAP_HEIGHT,
+                depth: 1,
+                layers: 1,
+                mips: 1,
+                samples: SampleCount::Sample1,
                 format: ImageFormat::Depth,
                 usage: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | ImageUsageFlags::SAMPLED,
             },
@@ -250,6 +256,33 @@ impl DeferredRenderingPipeline {
             },
         })?;
 
+        let shadow_2d_array = gpu.create_image_view(&gpu::ImageViewCreateInfo {
+            image: &shadow_map,
+            view_type: gpu::ImageViewType::Type2DArray,
+            format: ImageFormat::Depth,
+            components: gpu::ComponentMapping::default(),
+            subresource_range: gpu::ImageSubresourceRange {
+                aspect_mask: ImageAspectFlags::DEPTH,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+        })?;
+
+        let shadow_cube_array = gpu.create_image_view(&gpu::ImageViewCreateInfo {
+            image: &shadow_map,
+            view_type: gpu::ImageViewType::TypeCubeArray,
+            format: ImageFormat::Depth,
+            components: gpu::ComponentMapping::default(),
+            subresource_range: gpu::ImageSubresourceRange {
+                aspect_mask: ImageAspectFlags::DEPTH,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+        })?;
         let render_graph = RenderGraph::new();
 
         let fxaa_vs = gpu.create_shader_module(&ShaderModuleCreateInfo {
@@ -282,6 +315,8 @@ impl DeferredRenderingPipeline {
             light_povs: vec![],
             shadow_map,
             shadow_map_view,
+            shadow_2d_array,
+            shadow_cube_array,
         })
     }
 
@@ -604,7 +639,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             }),
         };
 
-        let _shadow_2d_array = ImageDescription {
+        let shadow_2d_array = ImageDescription {
             format: ImageFormat::Depth,
             view_description: ImageViewDescription::Array {
                 info: ImageArrayInfo {
@@ -618,7 +653,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 compare_op: Some(gpu::CompareOp::LessEqual),
             }),
         };
-        let _shadow_cube_array = ImageDescription {
+        let shadow_cube_array = ImageDescription {
             format: ImageFormat::Depth,
             view_description: ImageViewDescription::Array {
                 info: ImageArrayInfo {
@@ -675,6 +710,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let shadow_map = self
             .render_graph
             .use_image("shadow_map", &shadow_map_desc, true)?;
+        let shadows_2d = self
+            .render_graph
+            .use_image("shadows-2d", &shadow_2d_array, true)?;
+        let shadows_cube = self
+            .render_graph
+            .use_image("shadows-cube", &shadow_cube_array, true)?;
         let color_target =
             self.render_graph
                 .use_image("color-buffer", &framebuffer_vector_desc, false)?;
@@ -760,6 +801,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 emissive_target,
                 pbr_target,
                 shadow_map,
+                shadows_cube,
+                shadows_2d,
                 camera_buffer,
                 light_buffer,
             ])
@@ -1069,6 +1112,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         context.inject_external_image(&swapchain_image, backbuffer.image, backbuffer.image_view);
         context.inject_external_image(&shadow_map, &self.shadow_map, &self.shadow_map_view);
+        context.inject_external_image(&shadows_cube, &self.shadow_map, &self.shadow_cube_array);
+        context.inject_external_image(&shadows_2d, &self.shadow_map, &self.shadow_2d_array);
         context.injext_external_buffer(&camera_buffer, &current_buffers.camera_buffer);
         context.injext_external_buffer(&light_buffer, &current_buffers.light_buffer);
         //#endregion

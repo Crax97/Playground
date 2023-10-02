@@ -50,10 +50,15 @@ pub enum ImageLayout {
     PresentSrc,
 }
 
+#[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug)]
 pub struct ImageCreateInfo<'a> {
     pub label: Option<&'a str>,
     pub width: u32,
     pub height: u32,
+    pub depth: u32,
+    pub mips: u32,
+    pub layers: u32,
+    pub samples: SampleCount,
     pub format: ImageFormat,
     pub usage: ImageUsageFlags,
 }

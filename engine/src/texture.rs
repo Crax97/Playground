@@ -46,6 +46,11 @@ impl Texture {
                 label,
                 width,
                 height,
+                depth: 1,
+
+                mips: 1,
+                layers: 1,
+                samples: gpu::SampleCount::Sample1,
                 format: ImageFormat::Rgba8,
                 usage: ImageUsageFlags::TRANSFER_DST | ImageUsageFlags::SAMPLED,
             },

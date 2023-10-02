@@ -14,14 +14,16 @@ layout(set = 0, binding = 2) uniform sampler2D difSampler;
 layout(set = 0, binding = 3) uniform sampler2D emissSampler;
 layout(set = 0, binding = 4) uniform sampler2D pbrSampler;
 layout(set = 0, binding = 5) uniform sampler2DShadow shadowMap;
+layout(set = 0, binding = 6) uniform sampler2DArray shadows2d;
+layout(set = 0, binding = 7) uniform samplerCubeArray shadowsCube;
 
-layout(set = 0, binding = 6) readonly buffer  PerFrameDataBlock {
+layout(set = 0, binding = 8) readonly buffer  PerFrameDataBlock {
     uint shadow_count;
     PointOfView camera;
     PointOfView shadows[];
 } per_frame_data;
 
-layout(set = 0, binding = 7, std140) readonly buffer LightData {
+layout(set = 0, binding = 9, std140) readonly buffer LightData {
     vec4 ambient_light_color;
     uint light_count;
     LightInfo lights[];
@@ -76,7 +78,7 @@ FragmentInfo get_fragment_info(vec2 in_uv) {
     info.position = texture(posSampler, in_uv).xyz;
     info.normal = texture(normSampler, in_uv).xyz;
     info.normal = info.normal * 2.0 - 1.0;
-    
+
     vec4 pbr_sample = texture(pbrSampler, in_uv);
     info.metalness = pbr_sample.x;
     info.roughness = pbr_sample.y;
@@ -105,7 +107,7 @@ float d_trowbridge_reitz_ggx(float n_dot_h, float rough)
     float n_dot_h_2 = n_dot_h * n_dot_h;
     float a_2 = a * a;
     float a_2_sub = a - 1.0;
-    
+
     float d = n_dot_h_2 * a_2_sub + 1.0;
     return a_2 / (PI * d * d);
 }
@@ -117,18 +119,18 @@ vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, float l_dot_n, v
 
     vec3 F0 = vec3(0.04);
     F0 = mix(F0, frag_info.diffuse, frag_info.metalness);
-    
+
     // Reflective component
     float d = d_trowbridge_reitz_ggx(n_dot_h, frag_info.roughness);
     float g = ggx_smith(v_dot_n, l_dot_n, frag_info.roughness);
     vec3  f = fresnel_schlick(h_dot_v, F0, vec3(1.0));
     vec3 dfg = d * g * f;
-    
+
     const float eps = 0.0001;
-    
+
     float denom = max(4.0 * (l_dot_n * v_dot_n), eps);
     vec3 s_cook_torrance = dfg / denom;
-    
+
     // Refracftion component
     vec3 lambert = frag_info.diffuse / PI;
     vec3 ks = f;
@@ -145,7 +147,7 @@ float shadow_influence(uint shadow_index, FragmentInfo frag_info, float light_di
     vec4 frag_pos_light_unnorm = light_vp * vec4(frag_info.position, 1.0);
     vec4 frag_pos_light = frag_pos_light_unnorm / frag_pos_light_unnorm.w;
     frag_pos_light.xy = frag_pos_light.xy * 0.5 + 0.5;
-    
+
     if (frag_pos_light.x < 0.0 || frag_pos_light.x > 1.0 ||
     frag_pos_light.y < 0.0 || frag_pos_light.y > 1.0) {
         return 0.0;
@@ -155,8 +157,8 @@ float shadow_influence(uint shadow_index, FragmentInfo frag_info, float light_di
     vec2 scaled_light_size = shadow.viewport_size_offset.zw / tex_size;
 
     frag_pos_light.xy *=  scaled_light_size;
-    frag_pos_light.xy += scaled_light_offset; 
-    
+    frag_pos_light.xy += scaled_light_offset;
+
     float STEPS = 4.0;
     float STEPS_TOTAL = 4.0 * STEPS * STEPS;
     float s = 0.0;
@@ -168,14 +170,14 @@ float shadow_influence(uint shadow_index, FragmentInfo frag_info, float light_di
                 continue;
             }
             s += texture(shadowMap, loc) * 1.0 / STEPS_TOTAL;
-        }   
+        }
     }
     return s;
 }
 
 float calculate_shadow_influence(FragmentInfo frag_info, LightInfo light_info, float light_dist) {
     float shadow = 0.0;
-    
+
     uint shadow_caster_count = 1;
     if (light_info.type_shadowcaster.x == POINT_LIGHT) {
         shadow_caster_count = 6;
@@ -190,11 +192,11 @@ float calculate_shadow_influence(FragmentInfo frag_info, LightInfo light_info, f
 }
 
 vec3 lit_fragment(FragmentInfo frag_info) {
-    
+
     vec3 view = normalize(per_frame_data.camera.eye.xyz - frag_info.position);
-    
+
     vec3 ambient_color = light_data.ambient_light_color.xyz * light_data.ambient_light_color.w ;
-    
+
     vec3 fragment_light = vec3(0.0);
 
     float overall_mask = 0.0;
@@ -213,10 +215,10 @@ vec3 lit_fragment(FragmentInfo frag_info) {
         if (light_info.type_shadowcaster.y != -1) {
             light_color *= calculate_shadow_influence(frag_info, light_info, light_dist);
         }
-        
+
         fragment_light += light_color;
     }
-    
+
     return frag_info.diffuse * (ambient_color + fragment_light);
 }
 

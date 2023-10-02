@@ -321,10 +321,14 @@ impl<'a> CreateFrom<'a, ImageDescription> for GraphImage {
                     label: None,
                     width: image_info.width,
                     height: image_info.height,
+                    depth: 1,
                     format: desc.format,
                     usage: desc.format.default_usage_flags()
                         | ImageUsageFlags::INPUT_ATTACHMENT
                         | ImageUsageFlags::SAMPLED,
+                    mips: 1,
+                    layers: 1,
+                    samples: SampleCount::Sample1,
                 },
                 MemoryDomain::DeviceLocal,
                 None,
