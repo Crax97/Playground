@@ -1,11 +1,11 @@
 mod app_state;
 mod camera;
+mod deferred_renderer;
 mod gpu_pipeline;
 mod material;
 mod mesh;
 mod render_graph;
 mod scene;
-mod static_deferred_renderer;
 mod texture;
 mod time;
 mod utils;
@@ -17,12 +17,12 @@ use once_cell::unsync::OnceCell;
 
 pub use app_state::*;
 pub use camera::*;
+pub use deferred_renderer::*;
 pub use gpu_pipeline::*;
 pub use material::*;
 pub use mesh::*;
 pub use render_graph::*;
 pub use scene::*;
-pub use static_deferred_renderer::*;
 pub use texture::*;
 pub use time::*;
 pub use utils::constants::*;
