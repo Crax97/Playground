@@ -300,12 +300,18 @@ impl GraphResource for GraphImage {
 
 impl<'a> CreateFrom<'a, ImageDescription> for GraphImage {
     fn create(gpu: &VkGpu, desc: &'a ImageDescription) -> anyhow::Result<Self> {
+        let image_info = match desc.view_description {
+            ImageViewDescription::Image2D { info } => info,
+            ImageViewDescription::Array { .. } => {
+                return Err(anyhow::format_err!("Cannot create an image from a texture array: they're supposed to be injected externally"));
+            }
+        };
         let image = gpu
             .create_image(
                 &ImageCreateInfo {
                     label: None,
-                    width: desc.width,
-                    height: desc.height,
+                    width: image_info.width,
+                    height: image_info.height,
                     format: desc.format,
                     usage: desc.format.default_usage_flags()
                         | ImageUsageFlags::INPUT_ATTACHMENT
@@ -963,14 +969,39 @@ impl ClearValue {
 }
 
 #[derive(Hash, Copy, Clone, PartialEq, Eq)]
-pub struct ImageDescription {
+pub struct Image2DInfo {
     pub width: u32,
     pub height: u32,
+    pub present: bool,
+}
+
+#[derive(Hash, Copy, Clone, PartialEq, Eq)]
+pub struct ImageArrayInfo {
+    pub format: ImageViewType,
+}
+
+#[derive(Hash, Copy, Clone, PartialEq, Eq)]
+pub enum ImageViewDescription {
+    Image2D { info: Image2DInfo },
+    Array { info: ImageArrayInfo },
+}
+
+#[derive(Hash, Copy, Clone, PartialEq, Eq)]
+pub struct ImageDescription {
     pub format: ImageFormat,
     pub samples: u32,
-    pub present: bool,
     pub clear_value: ClearValue,
     pub sampler_state: Option<SamplerState>,
+    pub view_description: ImageViewDescription,
+}
+
+impl ImageDescription {
+    pub fn present(&self) -> bool {
+        match self.view_description {
+            ImageViewDescription::Image2D { info } => info.present,
+            ImageViewDescription::Array { .. } => false,
+        }
+    }
 }
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Copy, Hash)]
@@ -1961,7 +1992,7 @@ impl RenderGraphRunner for GpuRunner {
                             });
 
                         let new_layout = TransitionInfo {
-                            layout: if image_desc.present {
+                            layout: if image_desc.present() {
                                 ImageLayout::PresentSrc
                             } else if image_desc.format.is_color() {
                                 ImageLayout::ColorAttachment
@@ -2493,11 +2524,15 @@ mod test {
 
     fn alloc(name: &'static str, rg: &mut RenderGraph) -> ResourceId {
         let description = ImageDescription {
-            width: 1240,
-            height: 720,
+            view_description: crate::ImageViewDescription::Image2D {
+                info: crate::Image2DInfo {
+                    present: false,
+                    width: 1240,
+                    height: 720,
+                },
+            },
             format: gpu::ImageFormat::Rgba8,
             samples: 1,
-            present: false,
             clear_value: Color([0.0, 0.0, 0.0, 0.0]),
             sampler_state: None,
         };
@@ -2534,11 +2569,17 @@ mod test {
         let color_component_1 = alloc("color1", &mut render_graph);
         let color_component_2 = {
             let description = ImageDescription {
-                width: 1240,
-                height: 720,
+                view_description: crate::ImageViewDescription::Image2D {
+                    info: crate::Image2DInfo {
+                        present: false,
+                        width: 1240,
+                        height: 720,
+                    },
+                },
+
                 format: gpu::ImageFormat::Rgba8,
                 samples: 1,
-                present: false,
+
                 clear_value: DontCare,
                 sampler_state: None,
             };

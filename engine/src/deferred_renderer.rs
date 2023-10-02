@@ -498,58 +498,92 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         //#region render graph resources
         let framebuffer_rgba_desc = crate::ImageDescription {
-            width: backbuffer.size.width,
-            height: backbuffer.size.height,
+            view_description: crate::ImageViewDescription::Image2D {
+                info: crate::Image2DInfo {
+                    width: backbuffer.size.width,
+                    height: backbuffer.size.height,
+                    present: false,
+                },
+            },
             format: ImageFormat::Rgba8,
             samples: 1,
-            present: false,
             clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
             sampler_state: None,
         };
         let framebuffer_normal_desc = crate::ImageDescription {
-            width: backbuffer.size.width,
-            height: backbuffer.size.height,
+            view_description: crate::ImageViewDescription::Image2D {
+                info: crate::Image2DInfo {
+                    height: backbuffer.size.height,
+                    width: backbuffer.size.width,
+                    present: false,
+                },
+            },
+
             format: ImageFormat::Rgba8,
             samples: 1,
-            present: false,
+
             clear_value: ClearValue::Color([0.5, 0.5, 0.5, 1.0]),
             sampler_state: None,
         };
         let framebuffer_vector_desc = crate::ImageDescription {
-            width: backbuffer.size.width,
-            height: backbuffer.size.height,
+            view_description: crate::ImageViewDescription::Image2D {
+                info: crate::Image2DInfo {
+                    height: backbuffer.size.height,
+                    width: backbuffer.size.width,
+                    present: false,
+                },
+            },
+
             format: ImageFormat::RgbaFloat32,
             samples: 1,
-            present: false,
+
             clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
             sampler_state: None,
         };
         let framebuffer_depth_desc = crate::ImageDescription {
-            width: backbuffer.size.width,
-            height: backbuffer.size.height,
+            view_description: crate::ImageViewDescription::Image2D {
+                info: crate::Image2DInfo {
+                    height: backbuffer.size.height,
+                    width: backbuffer.size.width,
+                    present: false,
+                },
+            },
+
             format: ImageFormat::Depth,
             samples: 1,
-            present: false,
+
             clear_value: ClearValue::Depth(1.0),
             sampler_state: None,
         };
         let shadow_map_desc = crate::ImageDescription {
-            width: SHADOW_MAP_WIDTH,
-            height: SHADOW_MAP_HEIGHT,
+            view_description: crate::ImageViewDescription::Image2D {
+                info: crate::Image2DInfo {
+                    height: SHADOW_MAP_HEIGHT,
+                    width: SHADOW_MAP_WIDTH,
+                    present: false,
+                },
+            },
+
             format: ImageFormat::Depth,
             samples: 1,
-            present: false,
+
             clear_value: ClearValue::Depth(1.0),
             sampler_state: Some(crate::SamplerState {
                 compare_op: Some(gpu::CompareOp::LessEqual),
             }),
         };
         let framebuffer_swapchain_desc = crate::ImageDescription {
-            width: backbuffer.size.width,
-            height: backbuffer.size.height,
+            view_description: crate::ImageViewDescription::Image2D {
+                info: crate::Image2DInfo {
+                    height: backbuffer.size.height,
+                    width: backbuffer.size.width,
+                    present: false,
+                },
+            },
+
             format: backbuffer.format.into(),
             samples: 1,
-            present: false,
+
             clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
             sampler_state: None,
         };
