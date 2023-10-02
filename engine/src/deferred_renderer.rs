@@ -1,13 +1,23 @@
 use engine_macros::glsl;
 use std::{collections::HashMap, mem::size_of};
 
+use crate::{
+    app_state, app_state_mut,
+    camera::Camera,
+    material::{MasterMaterial, MasterMaterialDescription},
+    Backbuffer, BufferDescription, BufferType, ClearValue, FragmentState, GpuRunner,
+    GraphRunContext, Image2DInfo, ImageDescription, ImageViewDescription, Light, LightType,
+    MaterialDescription, MaterialDomain, MaterialInstance, MeshPrimitive, ModuleInfo,
+    PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage,
+    RenderingPipeline, SamplerState, Scene,
+};
+
 use gpu::{
-    AttachmentStoreOp, BindingType, BufferCreateInfo, BufferUsageFlags, ColorComponentFlags,
-    ColorLoadOp, CompareOp, DepthStencilState, Extent2D, FragmentStageInfo, ImageAspectFlags,
-    ImageCreateInfo, ImageFormat, ImageLayout, ImageUsageFlags, IndexType, MemoryDomain,
-    PushConstantRange, SampleCount, ShaderModuleCreateInfo, ShaderStage, StencilLoadOp,
-    StencilOpState, Swapchain, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu, VkImage,
-    VkImageView, VkShaderModule,
+    AttachmentStoreOp, BindingType, BlendMode, BlendOp, BlendState, BufferCreateInfo,
+    BufferUsageFlags, ColorComponentFlags, ColorLoadOp, CompareOp, DepthStencilState, Extent2D,
+    FragmentStageInfo, ImageFormat, ImageLayout, IndexType, MemoryDomain, PushConstantRange,
+    RenderPassAttachment, SampleCount, ShaderModuleCreateInfo, ShaderStage, StencilLoadOp,
+    StencilOpState, Swapchain, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu, VkShaderModule,
 };
 use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -24,8 +34,8 @@ const FXAA_VS: &[u32] = glsl!(
     entry_point = "main"
 );
 
-const SHADOW_MAP_WIDTH: u32 = 7680;
-const SHADOW_MAP_HEIGHT: u32 = 4320;
+const SHADOW_ATLAS_WIDTH: u32 = 7680;
+const SHADOW_ATLAS_HEIGHT: u32 = 4320;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -130,19 +140,6 @@ impl From<&Light> for GpuLightInfo {
     }
 }
 
-use crate::{
-    app_state, app_state_mut,
-    camera::Camera,
-    material::{MasterMaterial, MasterMaterialDescription},
-    Backbuffer, BufferDescription, BufferType, ClearValue, FragmentState, GpuRunner,
-    GraphRunContext, Image2DInfo, ImageArrayInfo, ImageDescription, ImageViewDescription, Light,
-    LightType, MaterialDescription, MaterialDomain, MaterialInstance, MeshPrimitive, ModuleInfo,
-    PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage,
-    RenderingPipeline, SamplerState, Scene,
-};
-
-use gpu::{BlendMode, BlendOp, BlendState, RenderPassAttachment};
-
 struct FrameBuffers {
     camera_buffer: VkBuffer,
     light_buffer: VkBuffer,
@@ -172,10 +169,6 @@ pub struct DeferredRenderingPipeline {
     light_iteration: u64,
     active_lights: Vec<GpuLightInfo>,
     light_povs: Vec<PerFrameData>,
-    shadow_map: VkImage,
-    shadow_map_view: VkImageView,
-    shadow_2d_array: VkImageView,
-    shadow_cube_array: VkImageView,
 
     pub depth_bias_constant: f32,
     pub depth_bias_clamp: f32,
@@ -227,62 +220,6 @@ impl DeferredRenderingPipeline {
             })
         }
 
-        let shadow_map = gpu.create_image(
-            &ImageCreateInfo {
-                label: Some("Shadow Map image"),
-                width: SHADOW_MAP_WIDTH,
-                height: SHADOW_MAP_HEIGHT,
-                depth: 1,
-                layers: 1,
-                mips: 1,
-                samples: SampleCount::Sample1,
-                format: ImageFormat::Depth,
-                usage: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | ImageUsageFlags::SAMPLED,
-            },
-            MemoryDomain::DeviceLocal,
-            None,
-        )?;
-        let shadow_map_view = gpu.create_image_view(&gpu::ImageViewCreateInfo {
-            image: &shadow_map,
-            view_type: gpu::ImageViewType::Type2D,
-            format: ImageFormat::Depth,
-            components: gpu::ComponentMapping::default(),
-            subresource_range: gpu::ImageSubresourceRange {
-                aspect_mask: ImageAspectFlags::DEPTH,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 1,
-            },
-        })?;
-
-        let shadow_2d_array = gpu.create_image_view(&gpu::ImageViewCreateInfo {
-            image: &shadow_map,
-            view_type: gpu::ImageViewType::Type2DArray,
-            format: ImageFormat::Depth,
-            components: gpu::ComponentMapping::default(),
-            subresource_range: gpu::ImageSubresourceRange {
-                aspect_mask: ImageAspectFlags::DEPTH,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 1,
-            },
-        })?;
-
-        let shadow_cube_array = gpu.create_image_view(&gpu::ImageViewCreateInfo {
-            image: &shadow_map,
-            view_type: gpu::ImageViewType::TypeCubeArray,
-            format: ImageFormat::Depth,
-            components: gpu::ComponentMapping::default(),
-            subresource_range: gpu::ImageSubresourceRange {
-                aspect_mask: ImageAspectFlags::DEPTH,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 1,
-            },
-        })?;
         let render_graph = RenderGraph::new();
 
         let fxaa_vs = gpu.create_shader_module(&ShaderModuleCreateInfo {
@@ -313,10 +250,6 @@ impl DeferredRenderingPipeline {
             ambient_intensity: 0.3,
             active_lights: vec![],
             light_povs: vec![],
-            shadow_map,
-            shadow_map_view,
-            shadow_2d_array,
-            shadow_cube_array,
         })
     }
 
@@ -458,8 +391,8 @@ impl DeferredRenderingPipeline {
                             });
 
                             x += w;
-                            if x > SHADOW_MAP_WIDTH as f32 {
-                                if (y + h) <= SHADOW_MAP_HEIGHT as f32 {
+                            if x > SHADOW_ATLAS_WIDTH as f32 {
+                                if (y + h) <= SHADOW_ATLAS_HEIGHT as f32 {
                                     x = 0.0;
                                     y += h;
                                 } else {
@@ -621,11 +554,11 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             clear_value: ClearValue::Depth(1.0),
             sampler_state: None,
         };
-        let shadow_map_desc = ImageDescription {
+        let shadow_atlas_desc = ImageDescription {
             view_description: ImageViewDescription::Image2D {
                 info: Image2DInfo {
-                    height: SHADOW_MAP_HEIGHT,
-                    width: SHADOW_MAP_WIDTH,
+                    height: SHADOW_ATLAS_HEIGHT,
+                    width: SHADOW_ATLAS_WIDTH,
                     present: false,
                 },
             },
@@ -639,34 +572,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             }),
         };
 
-        let shadow_2d_array = ImageDescription {
-            format: ImageFormat::Depth,
-            view_description: ImageViewDescription::Array {
-                info: ImageArrayInfo {
-                    format: gpu::ImageViewType::Type2D,
-                },
-            },
-            samples: 1,
-
-            clear_value: ClearValue::Depth(1.0),
-            sampler_state: Some(SamplerState {
-                compare_op: Some(gpu::CompareOp::LessEqual),
-            }),
-        };
-        let shadow_cube_array = ImageDescription {
-            format: ImageFormat::Depth,
-            view_description: ImageViewDescription::Array {
-                info: ImageArrayInfo {
-                    format: gpu::ImageViewType::Cube,
-                },
-            },
-            samples: 1,
-
-            clear_value: ClearValue::Depth(1.0),
-            sampler_state: Some(SamplerState {
-                compare_op: Some(gpu::CompareOp::LessEqual),
-            }),
-        };
         let framebuffer_swapchain_desc = ImageDescription {
             view_description: ImageViewDescription::Image2D {
                 info: Image2DInfo {
@@ -707,15 +612,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let depth_target =
             self.render_graph
                 .use_image("depth-buffer", &framebuffer_depth_desc, false)?;
-        let shadow_map = self
-            .render_graph
-            .use_image("shadow_map", &shadow_map_desc, true)?;
-        let shadows_2d = self
-            .render_graph
-            .use_image("shadows-2d", &shadow_2d_array, true)?;
-        let shadows_cube = self
-            .render_graph
-            .use_image("shadows-cube", &shadow_cube_array, true)?;
+        let shadow_atlas =
+            self.render_graph
+                .use_image("shadow-atlas", &shadow_atlas_desc, false)?;
         let color_target =
             self.render_graph
                 .use_image("color-buffer", &framebuffer_vector_desc, false)?;
@@ -751,16 +650,16 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .shader_reads(&[camera_buffer])
             .mark_external()
             .commit();
-        let shadow_map_pass = self
+        let shadow_atlas_rendering_pass = self
             .render_graph
             .begin_render_pass(
                 "ShadowMapRendering",
                 Extent2D {
-                    width: SHADOW_MAP_WIDTH,
-                    height: SHADOW_MAP_HEIGHT,
+                    width: SHADOW_ATLAS_WIDTH,
+                    height: SHADOW_ATLAS_HEIGHT,
                 },
             )?
-            .writes_attachments(&[shadow_map])
+            .writes_attachments(&[shadow_atlas])
             .shader_reads(&[camera_buffer])
             .mark_external()
             .commit();
@@ -800,9 +699,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 diffuse_target,
                 emissive_target,
                 pbr_target,
-                shadow_map,
-                shadows_cube,
-                shadows_2d,
+                shadow_atlas,
                 camera_buffer,
                 light_buffer,
             ])
@@ -1046,7 +943,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 ctx,
             );
         });
-        context.register_callback(&shadow_map_pass, |_: &VkGpu, ctx| {
+        context.register_callback(&shadow_atlas_rendering_pass, |_: &VkGpu, ctx| {
             ctx.render_pass_command.set_depth_bias(
                 self.depth_bias_constant,
                 self.depth_bias_clamp,
@@ -1111,9 +1008,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         });
 
         context.inject_external_image(&swapchain_image, backbuffer.image, backbuffer.image_view);
-        context.inject_external_image(&shadow_map, &self.shadow_map, &self.shadow_map_view);
-        context.inject_external_image(&shadows_cube, &self.shadow_map, &self.shadow_cube_array);
-        context.inject_external_image(&shadows_2d, &self.shadow_map, &self.shadow_2d_array);
         context.injext_external_buffer(&camera_buffer, &current_buffers.camera_buffer);
         context.injext_external_buffer(&light_buffer, &current_buffers.light_buffer);
         //#endregion

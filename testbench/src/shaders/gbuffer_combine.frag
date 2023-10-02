@@ -14,16 +14,14 @@ layout(set = 0, binding = 2) uniform sampler2D difSampler;
 layout(set = 0, binding = 3) uniform sampler2D emissSampler;
 layout(set = 0, binding = 4) uniform sampler2D pbrSampler;
 layout(set = 0, binding = 5) uniform sampler2DShadow shadowMap;
-layout(set = 0, binding = 6) uniform sampler2DArray shadows2d;
-layout(set = 0, binding = 7) uniform samplerCubeArray shadowsCube;
 
-layout(set = 0, binding = 8) readonly buffer  PerFrameDataBlock {
+layout(set = 0, binding = 6) readonly buffer  PerFrameDataBlock {
     uint shadow_count;
     PointOfView camera;
     PointOfView shadows[];
 } per_frame_data;
 
-layout(set = 0, binding = 9, std140) readonly buffer LightData {
+layout(set = 0, binding = 7, std140) readonly buffer LightData {
     vec4 ambient_light_color;
     uint light_count;
     LightInfo lights[];
