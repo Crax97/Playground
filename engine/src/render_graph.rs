@@ -58,6 +58,7 @@ pub trait GraphResource {
         Self: Sized;
     fn matches_description(&self, new_desc: &Self::Desc) -> bool;
     fn resource(&self) -> &Self::Inner;
+    fn type_str() -> &'static str;
 }
 
 pub struct LifetimeAllocation<R: GraphResource> {
@@ -142,12 +143,16 @@ impl<R: Sized + GraphResource, ID: Hash + Eq + PartialEq + Ord + PartialOrd + Cl
     }
 
     fn get_unchecked(&self, id: &ID) -> &R {
-        assert!(
-            self.resources.contains_key(id),
-            "tried to get_unchecked non existent resource: {:?}",
-            id
-        );
-        &self.resources[id].inner
+        &self
+            .resources
+            .get(id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "Tried to get_checked non existent resource of type {} - {id:?}",
+                    R::type_str()
+                )
+            })
+            .inner
     }
 
     fn ensure_resource_exists<'a, D: AsRef<R::Desc>>(
@@ -251,7 +256,7 @@ impl<'a> ExternalResources<'a> {
     fn get_shader_resource(&self, resource_id: &ResourceId) -> &ExternalShaderResource {
         self.external_shader_resources
             .get(resource_id)
-            .expect("Resource not found!")
+            .unwrap_or_else(|| panic!("External resource not found: {resource_id:?}"))
     }
 }
 
@@ -295,6 +300,10 @@ impl GraphResource for GraphImage {
 
     fn resource(&self) -> &Self::Inner {
         &self.image
+    }
+
+    fn type_str() -> &'static str {
+        "GraphImage"
     }
 }
 
@@ -359,6 +368,9 @@ impl GraphResource for GraphSampler {
     fn resource(&self) -> &Self::Inner {
         &self.image
     }
+    fn type_str() -> &'static str {
+        "GraphSampler"
+    }
 }
 
 impl<'a> CreateFrom<'a, SamplerState> for GraphSampler {
@@ -403,6 +415,9 @@ impl GraphResource for GraphImageView {
 
     fn resource(&self) -> &Self::Inner {
         &self.image
+    }
+    fn type_str() -> &'static str {
+        "GraphImageView"
     }
 }
 
@@ -465,6 +480,9 @@ impl GraphResource for GraphBuffer {
     fn resource(&self) -> &Self::Inner {
         &self.inner
     }
+    fn type_str() -> &'static str {
+        "GraphBuffer"
+    }
 }
 
 impl<'a> CreateFrom<'a, BufferDescription> for GraphBuffer {
@@ -519,6 +537,9 @@ impl GraphResource for GraphPass {
 
     fn resource(&self) -> &Self::Inner {
         &self.inner
+    }
+    fn type_str() -> &'static str {
+        "GraphPass"
     }
 }
 
@@ -719,6 +740,9 @@ impl GraphResource for GraphFramebuffer {
     fn resource(&self) -> &Self::Inner {
         &self.inner
     }
+    fn type_str() -> &'static str {
+        "GraphFramebuffer"
+    }
 }
 
 struct RenderGraphFramebufferCreateInfo<'a> {
@@ -771,6 +795,9 @@ impl GraphResource for GraphDescriptorSet {
 
     fn resource(&self) -> &Self::Inner {
         &self.inner
+    }
+    fn type_str() -> &'static str {
+        "GraphDescriptorSet"
     }
 }
 
@@ -2189,7 +2216,7 @@ impl RenderGraphRunner for GpuRunner {
                     info,
                     &resource_allocator.image_views,
                     &resource_allocator.buffers,
-                    &resource_allocator.samplers,
+                    &mut resource_allocator.samplers,
                     &mut resource_allocator.descriptors,
                 );
 
@@ -2446,7 +2473,7 @@ fn resolve_input_descriptor_set<'a>(
     info: &RenderPassInfo,
     image_view_allocator: &'a ImageViewAllocator,
     buffer_allocator: &'a BufferAllocator,
-    sampler_allocator: &'a SampleAllocator,
+    sampler_allocator: &'a mut SampleAllocator,
     descriptor_view_allocator: &'a mut DescriptorSetAllocator,
 ) -> Option<&'a GraphDescriptorSet> {
     let mut hasher = DefaultHasher::new();
@@ -2454,6 +2481,16 @@ fn resolve_input_descriptor_set<'a>(
         return None;
     }
     let mut descriptors = vec![];
+    for (_, read) in info.shader_reads.iter().enumerate() {
+        let resource_info = graph.get_resource_info(read).expect("No resource found");
+
+        if let AllocationType::Image(desc) = resource_info.ty {
+            let sampler_desc = desc.sampler_state.unwrap_or_default();
+            sampler_allocator
+                .ensure_resource_exists(&ctx.gpu, &sampler_desc, &read)
+                .expect("Failed to ensure sampler exists");
+        }
+    }
     for (idx, read) in info.shader_reads.iter().enumerate() {
         let resource_info = graph.get_resource_info(read).expect("No resource found");
 
@@ -2464,6 +2501,7 @@ fn resolve_input_descriptor_set<'a>(
                 } else {
                     image_view_allocator.get_unchecked(read).resource()
                 };
+
                 view.hash(&mut hasher);
                 descriptors.push(DescriptorInfo {
                     binding: idx as _,

@@ -3,10 +3,11 @@ use std::{collections::HashMap, mem::size_of};
 
 use gpu::{
     AttachmentStoreOp, BindingType, BufferCreateInfo, BufferUsageFlags, ColorComponentFlags,
-    ColorLoadOp, CompareOp, DepthStencilState, Extent2D, FragmentStageInfo, ImageFormat,
-    ImageLayout, IndexType, MemoryDomain, PushConstantRange, SampleCount, ShaderModuleCreateInfo,
-    ShaderStage, StencilLoadOp, StencilOpState, Swapchain, VertexStageInfo, VkBuffer,
-    VkCommandBuffer, VkGpu, VkShaderModule,
+    ColorLoadOp, CompareOp, DepthStencilState, Extent2D, FragmentStageInfo, ImageAspectFlags,
+    ImageCreateInfo, ImageFormat, ImageLayout, ImageUsageFlags, IndexType, MemoryDomain,
+    PushConstantRange, SampleCount, ShaderModuleCreateInfo, ShaderStage, StencilLoadOp,
+    StencilOpState, Swapchain, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu, VkImage,
+    VkImageView, VkShaderModule,
 };
 use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -134,9 +135,10 @@ use crate::{
     camera::Camera,
     material::{MasterMaterial, MasterMaterialDescription},
     Backbuffer, BufferDescription, BufferType, ClearValue, FragmentState, GpuRunner,
-    GraphRunContext, Light, LightType, MaterialDescription, MaterialDomain, MaterialInstance,
-    MeshPrimitive, ModuleInfo, PipelineTarget, RenderGraph, RenderGraphPipelineDescription,
-    RenderPassContext, RenderStage, RenderingPipeline, Scene,
+    GraphRunContext, Image2DInfo, ImageArrayInfo, ImageDescription, ImageViewDescription, Light,
+    LightType, MaterialDescription, MaterialDomain, MaterialInstance, MeshPrimitive, ModuleInfo,
+    PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage,
+    RenderingPipeline, SamplerState, Scene,
 };
 
 use gpu::{BlendMode, BlendOp, BlendState, RenderPassAttachment};
@@ -170,6 +172,8 @@ pub struct DeferredRenderingPipeline {
     light_iteration: u64,
     active_lights: Vec<GpuLightInfo>,
     light_povs: Vec<PerFrameData>,
+    shadow_map: VkImage,
+    shadow_map_view: VkImageView,
 
     pub depth_bias_constant: f32,
     pub depth_bias_clamp: f32,
@@ -221,6 +225,31 @@ impl DeferredRenderingPipeline {
             })
         }
 
+        let shadow_map = gpu.create_image(
+            &ImageCreateInfo {
+                label: Some("Shadow Map image"),
+                width: SHADOW_MAP_WIDTH,
+                height: SHADOW_MAP_HEIGHT,
+                format: ImageFormat::Depth,
+                usage: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | ImageUsageFlags::SAMPLED,
+            },
+            MemoryDomain::DeviceLocal,
+            None,
+        )?;
+        let shadow_map_view = gpu.create_image_view(&gpu::ImageViewCreateInfo {
+            image: &shadow_map,
+            view_type: gpu::ImageViewType::Type2D,
+            format: ImageFormat::Depth,
+            components: gpu::ComponentMapping::default(),
+            subresource_range: gpu::ImageSubresourceRange {
+                aspect_mask: ImageAspectFlags::DEPTH,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+        })?;
+
         let render_graph = RenderGraph::new();
 
         let fxaa_vs = gpu.create_shader_module(&ShaderModuleCreateInfo {
@@ -251,6 +280,8 @@ impl DeferredRenderingPipeline {
             ambient_intensity: 0.3,
             active_lights: vec![],
             light_povs: vec![],
+            shadow_map,
+            shadow_map_view,
         })
     }
 
@@ -497,9 +528,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let draw_hashmap = Self::generate_draw_calls(resource_map, scene);
 
         //#region render graph resources
-        let framebuffer_rgba_desc = crate::ImageDescription {
-            view_description: crate::ImageViewDescription::Image2D {
-                info: crate::Image2DInfo {
+        let framebuffer_rgba_desc = ImageDescription {
+            view_description: ImageViewDescription::Image2D {
+                info: Image2DInfo {
                     width: backbuffer.size.width,
                     height: backbuffer.size.height,
                     present: false,
@@ -510,9 +541,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
             sampler_state: None,
         };
-        let framebuffer_normal_desc = crate::ImageDescription {
-            view_description: crate::ImageViewDescription::Image2D {
-                info: crate::Image2DInfo {
+        let framebuffer_normal_desc = ImageDescription {
+            view_description: ImageViewDescription::Image2D {
+                info: Image2DInfo {
                     height: backbuffer.size.height,
                     width: backbuffer.size.width,
                     present: false,
@@ -525,9 +556,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             clear_value: ClearValue::Color([0.5, 0.5, 0.5, 1.0]),
             sampler_state: None,
         };
-        let framebuffer_vector_desc = crate::ImageDescription {
-            view_description: crate::ImageViewDescription::Image2D {
-                info: crate::Image2DInfo {
+        let framebuffer_vector_desc = ImageDescription {
+            view_description: ImageViewDescription::Image2D {
+                info: Image2DInfo {
                     height: backbuffer.size.height,
                     width: backbuffer.size.width,
                     present: false,
@@ -540,9 +571,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             clear_value: ClearValue::Color([0.0, 0.0, 0.0, 0.0]),
             sampler_state: None,
         };
-        let framebuffer_depth_desc = crate::ImageDescription {
-            view_description: crate::ImageViewDescription::Image2D {
-                info: crate::Image2DInfo {
+        let framebuffer_depth_desc = ImageDescription {
+            view_description: ImageViewDescription::Image2D {
+                info: Image2DInfo {
                     height: backbuffer.size.height,
                     width: backbuffer.size.width,
                     present: false,
@@ -555,9 +586,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             clear_value: ClearValue::Depth(1.0),
             sampler_state: None,
         };
-        let shadow_map_desc = crate::ImageDescription {
-            view_description: crate::ImageViewDescription::Image2D {
-                info: crate::Image2DInfo {
+        let shadow_map_desc = ImageDescription {
+            view_description: ImageViewDescription::Image2D {
+                info: Image2DInfo {
                     height: SHADOW_MAP_HEIGHT,
                     width: SHADOW_MAP_WIDTH,
                     present: false,
@@ -568,13 +599,42 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             samples: 1,
 
             clear_value: ClearValue::Depth(1.0),
-            sampler_state: Some(crate::SamplerState {
+            sampler_state: Some(SamplerState {
                 compare_op: Some(gpu::CompareOp::LessEqual),
             }),
         };
-        let framebuffer_swapchain_desc = crate::ImageDescription {
-            view_description: crate::ImageViewDescription::Image2D {
-                info: crate::Image2DInfo {
+
+        let _shadow_2d_array = ImageDescription {
+            format: ImageFormat::Depth,
+            view_description: ImageViewDescription::Array {
+                info: ImageArrayInfo {
+                    format: gpu::ImageViewType::Type2D,
+                },
+            },
+            samples: 1,
+
+            clear_value: ClearValue::Depth(1.0),
+            sampler_state: Some(SamplerState {
+                compare_op: Some(gpu::CompareOp::LessEqual),
+            }),
+        };
+        let _shadow_cube_array = ImageDescription {
+            format: ImageFormat::Depth,
+            view_description: ImageViewDescription::Array {
+                info: ImageArrayInfo {
+                    format: gpu::ImageViewType::Cube,
+                },
+            },
+            samples: 1,
+
+            clear_value: ClearValue::Depth(1.0),
+            sampler_state: Some(SamplerState {
+                compare_op: Some(gpu::CompareOp::LessEqual),
+            }),
+        };
+        let framebuffer_swapchain_desc = ImageDescription {
+            view_description: ImageViewDescription::Image2D {
+                info: Image2DInfo {
                     height: backbuffer.size.height,
                     width: backbuffer.size.width,
                     present: false,
@@ -614,7 +674,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 .use_image("depth-buffer", &framebuffer_depth_desc, false)?;
         let shadow_map = self
             .render_graph
-            .use_image("shadow_map", &shadow_map_desc, false)?;
+            .use_image("shadow_map", &shadow_map_desc, true)?;
         let color_target =
             self.render_graph
                 .use_image("color-buffer", &framebuffer_vector_desc, false)?;
@@ -1008,6 +1068,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         });
 
         context.inject_external_image(&swapchain_image, backbuffer.image, backbuffer.image_view);
+        context.inject_external_image(&shadow_map, &self.shadow_map, &self.shadow_map_view);
         context.injext_external_buffer(&camera_buffer, &current_buffers.camera_buffer);
         context.injext_external_buffer(&light_buffer, &current_buffers.light_buffer);
         //#endregion
