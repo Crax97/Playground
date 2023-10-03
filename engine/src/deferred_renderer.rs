@@ -370,50 +370,57 @@ impl DeferredRenderingPipeline {
         let mut x = 0.0;
         let mut y = 0.0;
         let mut shadow_caster_idx = 0;
-        let collected_active_lights: Vec<GpuLightInfo> = scene
-            .all_enabled_lights()
-            .enumerate()
-            .map(|(_, l)| {
-                let mut light: GpuLightInfo = l.into();
-                if l.shadow_setup.is_some() {
-                    light.ty_shadowcaster[1] = shadow_caster_idx;
-                    let povs = l
-                        .shadow_view_matrices()
-                        .iter()
-                        .map(|v| {
-                            let w = (l.shadow_setup.unwrap().importance.get()
-                                * SHADOW_ATLAS_TILE_SIZE)
-                                as f32;
-                            let h = w;
 
-                            let pfd = Some(PerFrameData {
-                                eye: Point4::new(l.position.x, l.position.y, l.position.z, 0.0),
-                                view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * v,
-                                projection: l.projection_matrix(),
-                                viewport_size_offset: vector![x, y, w, h],
-                            });
+        let mut sorted_active_lights = scene.all_enabled_lights().collect::<Vec<_>>();
+        sorted_active_lights.sort_by(|a, b| {
+            let a = a.shadow_setup.unwrap_or_default();
+            let b = b.shadow_setup.unwrap_or_default();
+            b.importance.cmp(&a.importance)
+        });
 
-                            x += w;
-                            if x > SHADOW_ATLAS_WIDTH as f32 {
-                                if (y + h) <= SHADOW_ATLAS_HEIGHT as f32 {
-                                    x = 0.0;
-                                    y += h;
-                                } else {
-                                    return None;
-                                }
+        for active_light in sorted_active_lights {
+            let mut gpu_light: GpuLightInfo = active_light.into();
+            if active_light.shadow_setup.is_some() {
+                gpu_light.ty_shadowcaster[1] = shadow_caster_idx;
+                let povs = active_light
+                    .shadow_view_matrices()
+                    .iter()
+                    .map(|v| {
+                        let w = (active_light.shadow_setup.unwrap().importance.get()
+                            * SHADOW_ATLAS_TILE_SIZE) as f32;
+                        let h = w;
+
+                        let pfd = Some(PerFrameData {
+                            eye: Point4::new(
+                                active_light.position.x,
+                                active_light.position.y,
+                                active_light.position.z,
+                                0.0,
+                            ),
+                            view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * v,
+                            projection: active_light.projection_matrix(),
+                            viewport_size_offset: vector![x, y, w, h],
+                        });
+
+                        x += w;
+                        if x > SHADOW_ATLAS_WIDTH as f32 {
+                            if (y + h) <= SHADOW_ATLAS_HEIGHT as f32 {
+                                x = 0.0;
+                                y += h;
+                            } else {
+                                return None;
                             }
-                            shadow_caster_idx += 1;
-                            pfd
-                        })
-                        .take_while(|l| l.is_some())
-                        .flatten()
-                        .collect::<Vec<_>>();
-                    self.light_povs.extend(povs);
-                }
-                light
-            })
-            .collect();
-        self.active_lights = collected_active_lights;
+                        }
+                        shadow_caster_idx += 1;
+                        pfd
+                    })
+                    .take_while(|l| l.is_some())
+                    .flatten()
+                    .collect::<Vec<_>>();
+                self.light_povs.extend(povs);
+            }
+            self.active_lights.push(gpu_light);
+        }
     }
 }
 
