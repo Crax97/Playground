@@ -407,7 +407,7 @@ fn add_scene_lights(scene: &mut Scene) -> LightHandle {
         intensity: 2.0,
         enabled: true,
         shadow_setup: Some(ShadowSetup {
-            importance: NonZeroU32::new(1).unwrap(),
+            importance: NonZeroU32::new(5).unwrap(),
         }),
     })
 }

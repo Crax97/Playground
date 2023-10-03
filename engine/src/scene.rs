@@ -89,16 +89,6 @@ impl Light {
             LightType::Point => vec![
                 Matrix4::look_at_rh(
                     &self.position,
-                    &(self.position + vector![0.0, 1.0, 0.0]),
-                    &vector![0.0, 0.0, 1.0],
-                ),
-                Matrix4::look_at_rh(
-                    &self.position,
-                    &(self.position + vector![0.0, -1.0, 0.0]),
-                    &vector![0.0, 0.0, 1.0],
-                ),
-                Matrix4::look_at_rh(
-                    &self.position,
                     &(self.position + vector![1.0, 0.0, 0.0]),
                     &vector![0.0, 1.0, 0.0],
                 ),
@@ -106,6 +96,16 @@ impl Light {
                     &self.position,
                     &(self.position + vector![-1.0, 0.0, 0.0]),
                     &vector![0.0, 1.0, 0.0],
+                ),
+                Matrix4::look_at_rh(
+                    &self.position,
+                    &(self.position + vector![0.0, 1.0, 0.0]),
+                    &vector![0.0, 0.0, 1.0],
+                ),
+                Matrix4::look_at_rh(
+                    &self.position,
+                    &(self.position + vector![0.0, -1.0, 0.0]),
+                    &vector![0.0, 0.0, 1.0],
                 ),
                 Matrix4::look_at_rh(
                     &self.position,
@@ -132,7 +132,7 @@ impl Light {
     }
 
     pub(crate) fn projection_matrix(&self) -> Matrix4<f32> {
-        const ZNEAR: f32 = 1.0;
+        const ZNEAR: f32 = 0.001;
         match self.ty {
             LightType::Point => Matrix4::new_perspective(
                 1.0,
