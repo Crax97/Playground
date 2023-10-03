@@ -36,7 +36,7 @@ const FXAA_VS: &[u32] = glsl!(
 
 const SHADOW_ATLAS_TILE_SIZE: u32 = 64;
 const SHADOW_ATLAS_WIDTH: u32 = 7680;
-const SHADOW_ATLAS_HEIGHT: u32 = 4320;
+const SHADOW_ATLAS_HEIGHT: u32 = 4352;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -366,9 +366,6 @@ impl DeferredRenderingPipeline {
         self.light_iteration = scene.lights_iteration();
         self.active_lights.clear();
         self.light_povs.clear();
-
-        let mut x = 0.0;
-        let mut y = 0.0;
         let mut shadow_caster_idx = 0;
 
         let mut sorted_active_lights = scene.all_enabled_lights().collect::<Vec<_>>();
@@ -378,46 +375,48 @@ impl DeferredRenderingPipeline {
             b.importance.cmp(&a.importance)
         });
 
+        let mut packer = crate::utils::TiledTexture2DPacker::new(
+            SHADOW_ATLAS_TILE_SIZE,
+            SHADOW_ATLAS_WIDTH,
+            SHADOW_ATLAS_HEIGHT,
+        )
+        .expect("Could not create packer");
+
         for active_light in sorted_active_lights {
             let mut gpu_light: GpuLightInfo = active_light.into();
             if active_light.shadow_setup.is_some() {
                 gpu_light.ty_shadowcaster[1] = shadow_caster_idx;
-                let povs = active_light
-                    .shadow_view_matrices()
-                    .iter()
-                    .map(|v| {
-                        let w = (active_light.shadow_setup.unwrap().importance.get()
-                            * SHADOW_ATLAS_TILE_SIZE) as f32;
-                        let h = w;
+                let povs = active_light.shadow_view_matrices();
+                let w =
+                    active_light.shadow_setup.unwrap().importance.get() * SHADOW_ATLAS_TILE_SIZE;
+                let h = w;
+                let allocated_slot = packer.allocate(w * povs.len() as u32, h);
+                let allocated_slot = if let Ok(slot) = allocated_slot {
+                    slot
+                } else {
+                    break;
+                };
+                for (i, pov) in povs.into_iter().enumerate() {
+                    let pfd = Some(PerFrameData {
+                        eye: Point4::new(
+                            active_light.position.x,
+                            active_light.position.y,
+                            active_light.position.z,
+                            0.0,
+                        ),
+                        view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * pov,
+                        projection: active_light.projection_matrix(),
+                        viewport_size_offset: vector![
+                            allocated_slot.x as f32 + w as f32 * i as f32,
+                            allocated_slot.y as f32,
+                            w as f32,
+                            h as f32
+                        ],
+                    });
 
-                        let pfd = Some(PerFrameData {
-                            eye: Point4::new(
-                                active_light.position.x,
-                                active_light.position.y,
-                                active_light.position.z,
-                                0.0,
-                            ),
-                            view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * v,
-                            projection: active_light.projection_matrix(),
-                            viewport_size_offset: vector![x, y, w, h],
-                        });
-
-                        x += w;
-                        if x > SHADOW_ATLAS_WIDTH as f32 {
-                            if (y + h) <= SHADOW_ATLAS_HEIGHT as f32 {
-                                x = 0.0;
-                                y += h;
-                            } else {
-                                return None;
-                            }
-                        }
-                        shadow_caster_idx += 1;
-                        pfd
-                    })
-                    .take_while(|l| l.is_some())
-                    .flatten()
-                    .collect::<Vec<_>>();
-                self.light_povs.extend(povs);
+                    shadow_caster_idx += 1;
+                    self.light_povs.extend(pfd);
+                }
             }
             self.active_lights.push(gpu_light);
         }
