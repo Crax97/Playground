@@ -34,6 +34,7 @@ const FXAA_VS: &[u32] = glsl!(
     entry_point = "main"
 );
 
+const SHADOW_ATLAS_TILE_SIZE: u32 = 64;
 const SHADOW_ATLAS_WIDTH: u32 = 7680;
 const SHADOW_ATLAS_HEIGHT: u32 = 4320;
 
@@ -380,8 +381,10 @@ impl DeferredRenderingPipeline {
                         .shadow_view_matrices()
                         .iter()
                         .map(|v| {
-                            let w = l.shadow_setup.unwrap().width as f32;
-                            let h = l.shadow_setup.unwrap().height as f32;
+                            let w = (l.shadow_setup.unwrap().importance.get()
+                                * SHADOW_ATLAS_TILE_SIZE)
+                                as f32;
+                            let h = w;
 
                             let pfd = Some(PerFrameData {
                                 eye: Point4::new(l.position.x, l.position.y, l.position.z, 0.0),

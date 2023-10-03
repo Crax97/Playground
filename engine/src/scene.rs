@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use gpu::{Extent2D, ImageFormat, VkCommandBuffer, VkGpu, VkImage, VkImageView};
 use nalgebra::{vector, Matrix4, Point3, Vector2, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -37,10 +39,17 @@ pub enum LightType {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShadowSetup {
-    pub width: u32,
-    pub height: u32,
+    pub importance: NonZeroU32,
+}
+
+impl Default for ShadowSetup {
+    fn default() -> Self {
+        Self {
+            importance: NonZeroU32::new(1).unwrap(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

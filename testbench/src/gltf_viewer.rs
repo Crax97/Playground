@@ -4,6 +4,8 @@ mod gltf_loader;
 mod input;
 mod utils;
 
+use std::num::NonZeroU32;
+
 use app::{bootstrap, App};
 
 use fps_camera::FpsCamera;
@@ -140,8 +142,7 @@ impl GLTFViewer {
                     intensity: 10.0,
                     enabled: true,
                     shadow_setup: Some(ShadowSetup {
-                        width: 512,
-                        height: 512,
+                        importance: NonZeroU32::new(1).unwrap(),
                     }),
                 });
             }
@@ -157,8 +158,7 @@ impl GLTFViewer {
                     intensity: 10.0,
                     enabled: true,
                     shadow_setup: Some(ShadowSetup {
-                        width: 512,
-                        height: 512,
+                        importance: NonZeroU32::new(1).unwrap(),
                     }),
                 });
             }
@@ -171,8 +171,7 @@ impl GLTFViewer {
                     intensity: 10.0,
                     enabled: true,
                     shadow_setup: Some(ShadowSetup {
-                        width: 512,
-                        height: 512,
+                        importance: NonZeroU32::new(1).unwrap(),
                     }),
                 });
             }
@@ -367,8 +366,7 @@ fn add_scene_lights(scene: &mut Scene) -> LightHandle {
         intensity: 9.836,
         enabled: true,
         shadow_setup: Some(ShadowSetup {
-            width: 2048,
-            height: 2048,
+            importance: NonZeroU32::new(5).unwrap(),
         }),
     });
     scene.add_light(Light {
@@ -383,8 +381,7 @@ fn add_scene_lights(scene: &mut Scene) -> LightHandle {
         intensity: 10.0,
         enabled: true,
         shadow_setup: Some(ShadowSetup {
-            width: 512,
-            height: 512,
+            importance: NonZeroU32::new(2).unwrap(),
         }),
     });
     scene.add_light(Light {
@@ -399,8 +396,7 @@ fn add_scene_lights(scene: &mut Scene) -> LightHandle {
         intensity: 10.0,
         enabled: true,
         shadow_setup: Some(ShadowSetup {
-            width: 512,
-            height: 512,
+            importance: NonZeroU32::new(1).unwrap(),
         }),
     });
     scene.add_light(Light {
@@ -411,8 +407,7 @@ fn add_scene_lights(scene: &mut Scene) -> LightHandle {
         intensity: 2.0,
         enabled: true,
         shadow_setup: Some(ShadowSetup {
-            width: 512,
-            height: 512,
+            importance: NonZeroU32::new(1).unwrap(),
         }),
     })
 }
