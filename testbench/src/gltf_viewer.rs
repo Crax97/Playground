@@ -275,14 +275,14 @@ impl App for GLTFViewer {
         if ui.collapsing_header("Shadow settings", TreeNodeFlags::DEFAULT_OPEN) {
             ui.slider(
                 "Depth Bias constant",
-                -2.0,
-                2.0,
+                -10.0,
+                10.0,
                 &mut self.scene_renderer.depth_bias_constant,
             );
             ui.slider(
                 "Depth Bias slope",
-                -2.0,
-                2.0,
+                -10.0,
+                10.0,
                 &mut self.scene_renderer.depth_bias_slope,
             );
         }
