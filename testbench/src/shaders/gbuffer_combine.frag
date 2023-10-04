@@ -36,6 +36,43 @@ struct FragmentInfo {
     float metalness;
 };
 
+struct CubeSample {
+		vec2 uv;
+		uint face_index;
+};
+
+CubeSample sample_cube(vec3 v)
+{
+	vec3 v_abs = abs(v);
+	float ma;
+	vec2 uv;
+	uint face_index;
+
+	if(v_abs.z >= v_abs.x && v_abs.z >= v_abs.y)
+	{
+		face_index = v.z < 0.0 ? 5 : 4;
+		ma = 0.5 / v_abs.z;
+		uv = vec2(v.z < 0.0 ? -v.x : v.x, -v.y);
+	}
+	else if(v_abs.y >= v_abs.x)
+	{
+		face_index = v.y < 0.0 ? 3 : 2;
+		ma = 0.5 / v_abs.y;
+		uv = vec2(v.x, v.y < 0.0 ? -v.z : v.z);
+	}
+	else
+	{
+		face_index = v.x < 0.0 ? 1 : 0;
+		ma = 0.5 / v_abs.x;
+		uv = vec2(v.x < 0.0 ? v.z : -v.z, -v.y);
+	}
+	uv = uv * ma + 0.5;
+	CubeSample sam;
+	sam.uv = uv;
+	sam.face_index = face_index;
+	return sam;
+}
+
 vec3 get_unnormalized_light_direction(LightInfo info, FragmentInfo frag_info) {
     if (info.type_shadowcaster.x == DIRECTIONAL_LIGHT) {
         return info.direction.xyz;
@@ -157,36 +194,22 @@ float shadow_influence(uint shadow_index, FragmentInfo frag_info, float light_di
     frag_pos_light.xy *=  scaled_light_size;
     frag_pos_light.xy += scaled_light_offset;
 
-    float STEPS = 4.0;
-    float STEPS_TOTAL = 4.0 * STEPS * STEPS;
-    float s = 0.0;
-    for (float x = -STEPS; x <= STEPS; x += 1.0) {
-        for (float y = -STEPS; y <= STEPS; y += 1.0) {
-            vec3 loc = vec3(frag_pos_light.xy + vec2(x, y) * 1.0 / tex_size, frag_pos_light.z);
-            if (loc.x < scaled_light_offset.x || loc.x > scaled_light_offset.x + scaled_light_size.x ||
-            loc.y < scaled_light_offset.y || loc.y > scaled_light_offset.y + scaled_light_size.y) {
-                continue;
-            }
-            s += texture(shadowMap, loc) * 1.0 / STEPS_TOTAL;
-        }
-    }
-    return s;
+	vec3 loc = vec3(frag_pos_light.xy, frag_pos_light.z);
+	loc.x = clamp(loc.x, scaled_light_offset.x, scaled_light_offset.x + scaled_light_size.x);
+	loc.y = clamp(loc.y, scaled_light_offset.y, scaled_light_offset.y + scaled_light_size.y);
+	return texture(shadowMap, loc);
 }
 
-float calculate_shadow_influence(FragmentInfo frag_info, LightInfo light_info, float light_dist) {
+float calculate_shadow_influence(FragmentInfo frag_info, LightInfo light_info, vec3 light_dir, float light_dist) {
     float shadow = 0.0;
 
-    uint shadow_caster_count = 1;
+	int base_shadow_index = light_info.type_shadowcaster.y;
     if (light_info.type_shadowcaster.x == POINT_LIGHT) {
-        shadow_caster_count = 6;
-    }
-
-    uint base_shadow_index = light_info.type_shadowcaster.y;
-    for (uint i = 0; i < shadow_caster_count; i ++) {
-        shadow += shadow_influence(base_shadow_index + i, frag_info, light_dist);
-    }
-
-    return shadow;
+		CubeSample sam = sample_cube(-light_dir);
+        return shadow_influence(base_shadow_index + sam.face_index, frag_info, light_dist);
+    } else {
+        return shadow_influence(base_shadow_index, frag_info, light_dist);
+	}
 }
 
 vec3 lit_fragment(FragmentInfo frag_info) {
@@ -211,7 +234,7 @@ vec3 lit_fragment(FragmentInfo frag_info) {
         overall_mask += light_mask;
         vec3 light_color = cook_torrance(view, frag_info, l_dot_n, h) * masked_light_color;
         if (light_info.type_shadowcaster.y != -1) {
-            light_color *= calculate_shadow_influence(frag_info, light_info, light_dist);
+            light_color *= calculate_shadow_influence(frag_info, light_info, light_dir, light_dist);
         }
 
         fragment_light += light_color;

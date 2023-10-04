@@ -341,6 +341,7 @@ impl<'a> CreateFrom<'a, ImageDescription> for GraphImage {
 #[derive(Clone, Copy, Default, Hash, PartialEq, Eq)]
 pub struct SamplerState {
     pub compare_op: Option<gpu::CompareOp>,
+    pub filtering_mode: Filter,
 }
 
 impl AsRef<SamplerState> for SamplerState {
@@ -381,8 +382,8 @@ impl<'a> CreateFrom<'a, SamplerState> for GraphSampler {
     fn create(gpu: &VkGpu, samp: &'a SamplerState) -> anyhow::Result<Self> {
         let sam = gpu
             .create_sampler(&SamplerCreateInfo {
-                mag_filter: Filter::Linear,
-                min_filter: Filter::Linear,
+                mag_filter: samp.filtering_mode,
+                min_filter: samp.filtering_mode,
                 address_u: SamplerAddressMode::Repeat,
                 address_v: SamplerAddressMode::Repeat,
                 address_w: SamplerAddressMode::Repeat,
