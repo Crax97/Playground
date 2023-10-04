@@ -34,7 +34,7 @@ const FXAA_VS: &[u32] = glsl!(
     entry_point = "main"
 );
 
-const SHADOW_ATLAS_TILE_SIZE: u32 = 64;
+const SHADOW_ATLAS_TILE_SIZE: u32 = 128;
 const SHADOW_ATLAS_WIDTH: u32 = 7680;
 const SHADOW_ATLAS_HEIGHT: u32 = 4352;
 
