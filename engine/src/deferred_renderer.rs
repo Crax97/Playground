@@ -578,7 +578,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             clear_value: ClearValue::Depth(1.0),
             sampler_state: Some(SamplerState {
                 compare_op: Some(gpu::CompareOp::LessEqual),
-                filtering_mode: gpu::Filter::Nearest,
+                filtering_mode: gpu::Filter::Linear,
             }),
         };
 
