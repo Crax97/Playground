@@ -139,7 +139,7 @@ impl Light {
                 90.0f32.to_radians(),
                 ZNEAR,
                 // Use max to avoid superimposing far plane onto near plane
-                (self.radius * 5.0).max(ZNEAR + 0.01),
+                self.radius.max(ZNEAR + 0.01),
             ),
             LightType::Directional { size, .. } => Matrix4::new_orthographic(
                 -size.x * 0.5,
