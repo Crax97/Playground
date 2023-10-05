@@ -363,7 +363,7 @@ fn add_scene_lights(scene: &mut Scene) -> LightHandle {
         position: point![9.261562, -20.304585, -1.3664505],
         radius: 100.0,
         color: vector![0.95098037, 0.90916246, 0.66661865],
-        intensity: 9.836,
+        intensity: 5.0,
         enabled: true,
         shadow_setup: Some(ShadowSetup {
             importance: NonZeroU32::new(5).unwrap(),
@@ -372,22 +372,22 @@ fn add_scene_lights(scene: &mut Scene) -> LightHandle {
     scene.add_light(Light {
         ty: LightType::Spotlight {
             direction: vector![-0.1424134, -0.31258363, 0.9391538],
-            inner_cone_degrees: 15.0,
+            inner_cone_degrees: 32.0,
             outer_cone_degrees: 35.0,
         },
         position: point![-9.699096, -0.08773269, -3.9881172],
         radius: 100.0,
         color: vector![1.0, 0.3333333, 0.3333333],
-        intensity: 10.0,
+        intensity: 20.0,
         enabled: true,
         shadow_setup: Some(ShadowSetup {
-            importance: NonZeroU32::new(2).unwrap(),
+            importance: NonZeroU32::new(5).unwrap(),
         }),
     });
     scene.add_light(Light {
         ty: LightType::Spotlight {
             direction: vector![-0.19844706, -0.27760813, -0.93997467],
-            inner_cone_degrees: 15.0,
+            inner_cone_degrees: 32.0,
             outer_cone_degrees: 35.0,
         },
         position: point![-9.586186, -0.38097504, 2.9570565],
@@ -396,15 +396,15 @@ fn add_scene_lights(scene: &mut Scene) -> LightHandle {
         intensity: 10.0,
         enabled: true,
         shadow_setup: Some(ShadowSetup {
-            importance: NonZeroU32::new(1).unwrap(),
+            importance: NonZeroU32::new(5).unwrap(),
         }),
     });
     scene.add_light(Light {
         ty: LightType::Point,
         position: point![9.669, -1.487, -3.267],
-        radius: 5.0,
+        radius: 10.0,
         color: vector![1.0, 1.0, 1.0],
-        intensity: 2.0,
+        intensity: 10.0,
         enabled: true,
         shadow_setup: Some(ShadowSetup {
             importance: NonZeroU32::new(5).unwrap(),
