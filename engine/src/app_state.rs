@@ -1,5 +1,5 @@
 use gpu::{Swapchain, VkGpu};
-use winit::window::Window;
+use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::Time;
 
@@ -8,6 +8,7 @@ pub struct AppState {
     pub time: Time,
     pub swapchain: Swapchain,
     pub window: Window,
+    pub new_size: Option<PhysicalSize<u32>>,
 }
 
 impl AppState {
@@ -19,6 +20,7 @@ impl AppState {
             time: Time::new(),
             swapchain,
             window,
+            new_size: None,
         }
     }
 
