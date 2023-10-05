@@ -102,24 +102,21 @@ vec3 get_unnormalized_light_direction(LightInfo info, FragmentInfo frag_info) {
 }
 
 float get_light_mask(float n_dot_l, LightInfo light, FragmentInfo frag_info) {
-    float attenuation = 1.0;
     vec3 light_dir = light.position_radius.xyz - frag_info.position;
     float light_distance = length(light_dir);
     light_dir /= light_distance;
-    float i = 1.0;
-    float light_distance_normalized = clamp(light_distance / light.position_radius.w, 0.0, 1.0);
-    attenuation = clamp(1.0 / (light_distance_normalized * light_distance_normalized + 0.01), 0.0, 1.0);
-    i *= attenuation;
+    float attenuation = 1.0 - clamp(light_distance / light.position_radius.w, 0.0, 1.0);
+    attenuation *= attenuation;
     if (light.type_shadowcaster.x == SPOT_LIGHT) {
         vec3 frag_direction = light_dir;
         float cos_theta = dot(-light.direction.xyz, frag_direction);
         float inner_angle_cutoff = light.extras.x;
         float outer_angle_cutoff = light.extras.y;
         float eps = inner_angle_cutoff - outer_angle_cutoff;
-        float cutoff = float(cos_theta > 0.0) * clamp((cos_theta - outer_angle_cutoff) / eps, 0.0, 1.0);
-        i *= cutoff;
+        float spotlight_cutoff = float(cos_theta > 0.0) * clamp((cos_theta - outer_angle_cutoff) / eps, 0.0, 1.0);
+        attenuation *= spotlight_cutoff;
     }
-    return i;
+    return attenuation;
 }
 
 FragmentInfo get_fragment_info(vec2 in_uv) {
