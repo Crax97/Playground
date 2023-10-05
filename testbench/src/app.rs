@@ -232,7 +232,7 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
         engine::app_state().gpu.vk_physical_device(),
         engine::app_state().gpu.vk_logical_device(),
         engine::app_state().gpu.graphics_queue(),
-        engine::app_state().gpu.command_pool(),
+        engine::app_state().gpu.graphics_command_pool().inner,
         DynamicRendering {
             color_attachment_format: engine::app_state().swapchain().present_format(),
             depth_attachment_format: None,

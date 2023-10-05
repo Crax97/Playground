@@ -70,13 +70,19 @@ mod inner {
 }
 
 impl<'g> VkCommandBuffer<'g> {
-    pub(crate) fn new(gpu: &'g VkGpu, target_queue: QueueType) -> VkResult<Self> {
+    pub(crate) fn new(
+        gpu: &'g VkGpu,
+        command_pool: &VkCommandPool,
+        target_queue: QueueType,
+    ) -> VkResult<Self> {
+        assert_eq!(command_pool.associated_queue, target_queue);
+
         let device = gpu.vk_logical_device();
         let inner_command_buffer = unsafe {
             device.allocate_command_buffers(&CommandBufferAllocateInfo {
                 s_type: StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
                 p_next: std::ptr::null(),
-                command_pool: gpu.command_pool(),
+                command_pool: command_pool.inner,
                 level: CommandBufferLevel::PRIMARY,
                 command_buffer_count: 1,
             })

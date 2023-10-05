@@ -633,6 +633,49 @@ impl GPUSemaphore {
     }
 }
 
+pub struct VkCommandPool {
+    device: ash::Device,
+    pub inner: vk::CommandPool,
+    pub(super) associated_queue: QueueType,
+}
+
+impl Drop for VkCommandPool {
+    fn drop(&mut self) {
+        unsafe {
+            self.device
+                .destroy_command_pool(self.inner, get_allocation_callbacks())
+        };
+    }
+}
+
+impl VkCommandPool {
+    pub(super) fn new(
+        device: ash::Device,
+        families: &QueueFamilies,
+        create_info: &CommandPoolCreateInfo,
+    ) -> VkResult<Self> {
+        let inner = unsafe {
+            device.create_command_pool(
+                &vk::CommandPoolCreateInfo {
+                    s_type: StructureType::COMMAND_POOL_CREATE_INFO,
+                    p_next: std::ptr::null(),
+                    // Always allow command buffers to be resettable
+                    flags: create_info.flags.to_vk()
+                        | vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
+                    queue_family_index: create_info.queue_type.get_vk_queue_index(families),
+                },
+                get_allocation_callbacks(),
+            )?
+        };
+
+        Ok(Self {
+            inner,
+            device,
+            associated_queue: create_info.queue_type,
+        })
+    }
+}
+
 pub struct VkBuffer {
     device: ash::Device,
     pub(super) inner: vk::Buffer,
@@ -1206,5 +1249,17 @@ impl ToVk for Viewport {
             min_depth: self.min_depth,
             max_depth: self.max_depth,
         }
+    }
+}
+
+impl ToVk for CommandPoolCreateFlags {
+    type Inner = vk::CommandPoolCreateFlags;
+
+    fn to_vk(&self) -> Self::Inner {
+        let mut result = vk::CommandPoolCreateFlags::default();
+
+        case!(self, result, Self::TRANSIENT, Self::Inner::TRANSIENT);
+
+        result
     }
 }

@@ -518,7 +518,7 @@ pub enum PipelineBindPoint {
     Compute,
 }
 
-#[derive(Default)]
+#[derive(Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
 pub enum QueueType {
     #[default]
     Graphics,
@@ -531,6 +531,14 @@ impl QueueType {
             QueueType::Graphics => gpu.state.graphics_queue,
             QueueType::AsyncCompute => gpu.state.async_compute_queue,
             QueueType::Transfer => gpu.state.transfer_queue,
+        }
+    }
+
+    fn get_vk_queue_index(&self, families: &QueueFamilies) -> u32 {
+        match self {
+            QueueType::Graphics => families.graphics_family.index,
+            QueueType::AsyncCompute => families.async_compute_family.index,
+            QueueType::Transfer => families.transfer_family.index,
         }
     }
 }
@@ -809,6 +817,19 @@ pub struct ImageSubresourceRange {
     pub level_count: u32,
     pub base_array_layer: u32,
     pub layer_count: u32,
+}
+
+bitflags! {
+    #[derive(Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
+    pub struct CommandPoolCreateFlags :  u8 {
+        const TRANSIENT = 0b0;
+    }
+}
+
+#[derive(Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug)]
+pub struct CommandPoolCreateInfo {
+    pub queue_type: QueueType,
+    pub flags: CommandPoolCreateFlags,
 }
 
 #[derive(Default)]

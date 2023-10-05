@@ -13,17 +13,16 @@ use ash::{
     extensions::ext::DebugUtils,
     prelude::*,
     vk::{
-        make_api_version, ApplicationInfo, BufferCreateFlags, CommandPoolCreateFlags,
-        CommandPoolCreateInfo, DebugUtilsMessageSeverityFlagsEXT, DebugUtilsMessageTypeFlagsEXT,
-        DebugUtilsMessengerCreateFlagsEXT, DebugUtilsMessengerCreateInfoEXT,
-        DebugUtilsObjectNameInfoEXT, DescriptorBufferInfo, DescriptorImageInfo, DeviceCreateFlags,
-        DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo, Extent3D,
-        FormatFeatureFlags, FramebufferCreateFlags, Handle, ImageCreateFlags, ImageTiling,
-        ImageType, ImageViewCreateFlags, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap,
-        MemoryHeapFlags, PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties,
-        PhysicalDeviceType, PipelineCache, PipelineCacheCreateFlags, PipelineCacheCreateInfo,
-        Queue, QueueFlags, ShaderModuleCreateFlags, SharingMode, StructureType, WriteDescriptorSet,
-        API_VERSION_1_3,
+        make_api_version, ApplicationInfo, BufferCreateFlags, DebugUtilsMessageSeverityFlagsEXT,
+        DebugUtilsMessageTypeFlagsEXT, DebugUtilsMessengerCreateFlagsEXT,
+        DebugUtilsMessengerCreateInfoEXT, DebugUtilsObjectNameInfoEXT, DescriptorBufferInfo,
+        DescriptorImageInfo, DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags,
+        DeviceQueueCreateInfo, Extent3D, FormatFeatureFlags, FramebufferCreateFlags, Handle,
+        ImageCreateFlags, ImageTiling, ImageType, ImageViewCreateFlags, InstanceCreateFlags,
+        InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, PhysicalDevice, PhysicalDeviceFeatures,
+        PhysicalDeviceProperties, PhysicalDeviceType, PipelineCache, PipelineCacheCreateFlags,
+        PipelineCacheCreateInfo, Queue, QueueFlags, ShaderModuleCreateFlags, SharingMode,
+        StructureType, WriteDescriptorSet, API_VERSION_1_3,
     },
     *,
 };
@@ -33,13 +32,14 @@ use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 
 use crate::{
-    get_allocation_callbacks, BufferCreateInfo, CommandBufferSubmitInfo,
-    ComputePipelineDescription, Extent2D, FramebufferCreateInfo, GPUFence, GpuConfiguration,
-    GraphicsPipelineDescription, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageLayout,
-    ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, PipelineBarrierInfo,
-    PipelineStageFlags, QueueType, RenderPassDescription, SamplerCreateInfo,
-    ShaderModuleCreateInfo, ToVk, TransitionInfo, VkCommandBuffer, VkComputePipeline,
-    VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass, VkShaderModule,
+    get_allocation_callbacks, BufferCreateInfo, CommandBufferSubmitInfo, CommandPoolCreateFlags,
+    CommandPoolCreateInfo, ComputePipelineDescription, Extent2D, FramebufferCreateInfo, GPUFence,
+    GpuConfiguration, GraphicsPipelineDescription, ImageAspectFlags, ImageCreateInfo, ImageFormat,
+    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
+    PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPassDescription, SamplerCreateInfo,
+    ShaderModuleCreateInfo, ToVk, TransitionInfo, VkCommandBuffer, VkCommandPool,
+    VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
+    VkShaderModule,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -112,33 +112,45 @@ impl Drop for GpuThreadSharedState {
  * pool
  * */
 pub struct GpuThreadLocalState {
-    pub command_pool: vk::CommandPool,
+    pub graphics_command_pool: VkCommandPool,
+    pub async_compute_command_pool: VkCommandPool,
+    pub transfer_command_pool: VkCommandPool,
 }
 
 impl GpuThreadLocalState {
     pub fn new(shared_state: Arc<GpuThreadSharedState>) -> VkResult<Self> {
-        let command_pool = unsafe {
-            shared_state.logical_device.create_command_pool(
-                &CommandPoolCreateInfo {
-                    s_type: StructureType::COMMAND_POOL_CREATE_INFO,
-                    p_next: null(),
-                    flags: CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
-                    queue_family_index: shared_state.queue_families.graphics_family.index,
-                },
-                None,
-            )
-        }?;
+        let graphics_command_pool = VkCommandPool::new(
+            shared_state.logical_device.clone(),
+            &shared_state.queue_families,
+            &CommandPoolCreateInfo {
+                queue_type: QueueType::Graphics,
+                flags: CommandPoolCreateFlags::empty(),
+            },
+        )?;
 
-        Ok(Self { command_pool })
-    }
+        let async_compute_command_pool = VkCommandPool::new(
+            shared_state.logical_device.clone(),
+            &shared_state.queue_families,
+            &CommandPoolCreateInfo {
+                queue_type: QueueType::AsyncCompute,
+                flags: CommandPoolCreateFlags::empty(),
+            },
+        )?;
 
-    fn destroy(&self, device: &ash::Device) {
-        unsafe {
-            device
-                .device_wait_idle()
-                .expect("Failed to wait for device while dropping thread local state");
-            device.destroy_command_pool(self.command_pool, None);
-        }
+        let transfer_command_pool = VkCommandPool::new(
+            shared_state.logical_device.clone(),
+            &shared_state.queue_families,
+            &CommandPoolCreateInfo {
+                queue_type: QueueType::Transfer,
+                flags: CommandPoolCreateFlags::empty(),
+            },
+        )?;
+
+        Ok(Self {
+            graphics_command_pool,
+            async_compute_command_pool,
+            transfer_command_pool,
+        })
     }
 }
 
@@ -146,12 +158,6 @@ pub struct VkGpu {
     pub(crate) state: Arc<GpuThreadSharedState>,
     pub(crate) thread_local_state: GpuThreadLocalState,
     pub(crate) staging_buffer: VkBuffer,
-}
-
-impl Drop for VkGpu {
-    fn drop(&mut self) {
-        self.thread_local_state.destroy(&self.vk_logical_device());
-    }
 }
 
 #[derive(Error, Debug, Clone)]
@@ -650,9 +656,18 @@ impl VkGpu {
         self.state.physical_device.physical_device
     }
 
-    pub fn command_pool(&self) -> vk::CommandPool {
-        self.thread_local_state.command_pool
+    pub fn graphics_command_pool(&self) -> &VkCommandPool {
+        &self.thread_local_state.graphics_command_pool
     }
+
+    pub fn async_compute_command_pool(&self) -> &VkCommandPool {
+        &self.thread_local_state.async_compute_command_pool
+    }
+
+    pub fn transfer_command_pool(&self) -> &VkCommandPool {
+        &self.thread_local_state.transfer_command_pool
+    }
+
     pub fn queue_families(&self) -> QueueFamilies {
         self.state.queue_families.clone()
     }
@@ -1409,8 +1424,24 @@ impl VkGpu {
         VkComputePipeline::new(self, description)
     }
 
+    pub fn create_command_pool(
+        &self,
+        create_info: &CommandPoolCreateInfo,
+    ) -> VkResult<VkCommandPool> {
+        VkCommandPool::new(
+            self.vk_logical_device(),
+            &self.queue_families(),
+            create_info,
+        )
+    }
+
     pub fn create_command_buffer(&self, queue_type: QueueType) -> VkResult<VkCommandBuffer> {
-        VkCommandBuffer::new(self, queue_type)
+        let command_pool = match queue_type {
+            QueueType::Graphics => self.graphics_command_pool(),
+            QueueType::AsyncCompute => self.async_compute_command_pool(),
+            QueueType::Transfer => self.transfer_command_pool(),
+        };
+        VkCommandBuffer::new(self, command_pool, queue_type)
     }
 
     pub fn save_pipeline_cache(&self, path: &str) -> VkResult<()> {

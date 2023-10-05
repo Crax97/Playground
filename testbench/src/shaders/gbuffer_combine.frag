@@ -73,6 +73,7 @@ CubeSample sample_cube(vec3 v)
 	return sam;
 }
 vec2 poisson_disk[16] = vec2[](
+        vec2(0.0, 0.0),
 		vec2( -0.94201624, -0.39906216 ),
 		vec2( 0.94558609, -0.76890725 ),
 		vec2( -0.094184101, -0.92938870 ),
@@ -87,8 +88,7 @@ vec2 poisson_disk[16] = vec2[](
 		vec2( 0.79197514, 0.19090188 ),
 		vec2( -0.24188840, 0.99706507 ),
 		vec2( -0.81409955, 0.91437590 ),
-		vec2( 0.19984126, 0.78641367 ),
-		vec2( 0.14383161, -0.14100790 )
+		vec2( 0.19984126, 0.78641367 )
 );
 
 vec3 get_unnormalized_light_direction(LightInfo info, FragmentInfo frag_info) {
@@ -197,8 +197,8 @@ float shadow_map_sample(vec2 uv, float z, vec2 offset, vec2 size) {
     uv += offset;
 
 	vec3 loc = vec3(uv, z);
-	loc.x = clamp(loc.x, offset.x, offset.x + size.x);
-	loc.y = clamp(loc.y, offset.y, offset.y + size.y);
+	loc.x = clamp(loc.x, offset.x - 0.5, offset.x + size.x + 0.5);
+	loc.y = clamp(loc.y, offset.y - 0.5, offset.y + size.y + 0.5);
 	return texture(shadowMap, loc);
 }
 
@@ -211,7 +211,7 @@ float shadow_influence(uint shadow_index, FragmentInfo frag_info, float light_di
     vec4 frag_pos_light = frag_pos_light_unnorm / frag_pos_light_unnorm.w;
     frag_pos_light.xy = frag_pos_light.xy * 0.5 + 0.5;
 
-    vec2 scaled_light_offset = (shadow.viewport_size_offset.xy - vec2(0.5)) / tex_size;
+    vec2 scaled_light_offset = (shadow.viewport_size_offset.xy) / tex_size;
     vec2 scaled_light_size = shadow.viewport_size_offset.zw / tex_size;
 	float sam = 0.0;
 
@@ -228,10 +228,10 @@ float calculate_shadow_influence(FragmentInfo frag_info, LightInfo light_info, v
     float shadow = 0.0;
 
 	int base_shadow_index = light_info.type_shadowcaster.y;
-    int offset = 0;
+    uint offset = 0;
     if (light_info.type_shadowcaster.x == POINT_LIGHT) {
 		CubeSample sam = sample_cube(-light_dir);
-        return shadow_influence(base_shadow_index + sam.face_index, frag_info, light_dist);
+        offset = sam.face_index;
     }
     return shadow_influence(base_shadow_index + offset, frag_info, light_dist);
 }
