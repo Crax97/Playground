@@ -201,6 +201,10 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
         .with_title("Winit App")
         .build(&event_loop)?;
 
+    let mut imgui = Context::create();
+    let mut platform = WinitPlatform::init(&mut imgui);
+    platform.attach_window(imgui.io_mut(), &window, HiDpiMode::Default);
+
     engine::init("Winit App", window)?;
 
     let app = Box::new(A::create(engine::app_state(), &event_loop)?);
@@ -208,9 +212,9 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
 
     trace!("Created app");
 
-    let mut imgui = Context::create();
-    let mut platform = WinitPlatform::init(&mut imgui);
     let hidpi_factor = platform.hidpi_factor();
+    imgui.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
+
     let font_size = (13.0 * hidpi_factor) as f32;
     imgui.fonts().add_font(&[FontSource::DefaultFontData {
         config: Some(FontConfig {
@@ -218,7 +222,6 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
             ..FontConfig::default()
         }),
     }]);
-    imgui.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
     platform.attach_window(
         imgui.io_mut(),
         &engine::app_state().window(),
