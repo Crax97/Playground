@@ -54,7 +54,11 @@ pub fn init(app_name: &str, window: winit::window::Window) -> anyhow::Result<()>
 
         static mut DATA: OnceCell<AppState> = once_cell::unsync::OnceCell::new();
 
-        let enable_debug_utilities = std::env::var("ENABLE_DEBUG_UTILITIES").is_ok();
+        let enable_debug_utilities = if cfg!(debug_assertions) {
+            true
+        } else {
+            std::env::var("ENABLE_DEBUG_UTILITIES").is_ok()
+        };
 
         let gpu = VkGpu::new(GpuConfiguration {
             app_name,

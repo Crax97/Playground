@@ -191,7 +191,14 @@ fn draw_imgui(
 }
 
 pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
-    env_logger::init();
+    if cfg!(debug_assertions) {
+        // Enable all logging in debug configuration
+        env_logger::builder()
+            .filter(None, log::LevelFilter::Trace)
+            .init();
+    } else {
+        env_logger::init();
+    }
     let event_loop = winit::event_loop::EventLoop::default();
     let window = winit::window::WindowBuilder::default()
         .with_inner_size(PhysicalSize {
