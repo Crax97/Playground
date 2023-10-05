@@ -192,13 +192,15 @@ vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, float l_dot_n, v
     return vec3(o);
 }
 
-float shadow_map_sample(vec2 uv, float z, vec2 offset, vec2 size) {
+float shadow_map_sample(vec2 uv, float z, vec2 offset, vec2 size, vec2 tex_size) {
     uv *= size;
     uv += offset;
 
+    vec2 pixel_size = 1.0 / tex_size;
+
 	vec3 loc = vec3(uv, z);
-	loc.x = clamp(loc.x, offset.x - 0.5, offset.x + size.x + 0.5);
-	loc.y = clamp(loc.y, offset.y - 0.5, offset.y + size.y + 0.5);
+	loc.x = clamp(loc.x, offset.x + pixel_size.x, offset.x + size.x - pixel_size.x);
+	loc.y = clamp(loc.y, offset.y + pixel_size.y, offset.y + size.y - pixel_size.y);
 	return texture(shadowMap, loc);
 }
 
@@ -211,7 +213,7 @@ float shadow_influence(uint shadow_index, FragmentInfo frag_info, float light_di
     vec4 frag_pos_light = frag_pos_light_unnorm / frag_pos_light_unnorm.w;
     frag_pos_light.xy = frag_pos_light.xy * 0.5 + 0.5;
 
-    vec2 scaled_light_offset = (shadow.viewport_size_offset.xy) / tex_size;
+    vec2 scaled_light_offset = (shadow.viewport_size_offset.xy - vec2(0.5)) / tex_size;
     vec2 scaled_light_size = shadow.viewport_size_offset.zw / tex_size;
 	float sam = 0.0;
 
@@ -219,7 +221,7 @@ float shadow_influence(uint shadow_index, FragmentInfo frag_info, float light_di
 		vec2 offset = poisson_disk[i] / tex_size;
 		offset *= light_dist;
 		sam += shadow_map_sample(frag_pos_light.xy + offset,
-				frag_pos_light.z, scaled_light_offset, scaled_light_size);
+				frag_pos_light.z, scaled_light_offset, scaled_light_size, tex_size);
 	}
 	return sam / 16.0;
 }
