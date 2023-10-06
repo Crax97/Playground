@@ -3,6 +3,7 @@
 #pragma GL_GOOGLE_include_directive : require
 
 #include "definitions.glsl"
+#include "random.glsl"
 #include "light_definitions.glsl"
 
 layout(location=0) in vec2 uv;
@@ -185,6 +186,13 @@ vec3 cook_torrance(vec3 view_direction, FragmentInfo frag_info, float l_dot_n, v
     vec3 kd = mix(vec3(1.0) - f, vec3(0.0), frag_info.metalness);
     vec3 o = (kd * lambert + s_cook_torrance) * l_dot_n;
     return vec3(o);
+}
+
+vec2 rotate(vec2 v, float a) {
+	float s = sin(a);
+	float c = cos(a);
+	mat2 m = mat2(c, s, -s, c);
+	return m * v;
 }
 
 float shadow_map_sample(vec2 uv, float z, vec2 offset, vec2 size, vec2 tex_size) {
