@@ -175,8 +175,8 @@ fn draw_imgui(
             dst_access_mask: AccessFlags::COLOR_ATTACHMENT_READ,
             old_layout: ImageLayout::ColorAttachment,
             new_layout: ImageLayout::PresentSrc,
-            src_queue_family_index: ash::vk::QUEUE_FAMILY_IGNORED,
-            dst_queue_family_index: ash::vk::QUEUE_FAMILY_IGNORED,
+            src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+            dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
             image: backbuffer.image,
             subresource_range: ImageSubresourceRange {
                 aspect_mask: ImageAspectFlags::COLOR,
