@@ -25,6 +25,15 @@ use resource_map::ResourceMap;
 use winit::event::MouseButton;
 use winit::event_loop::EventLoop;
 
+use clap::Parser;
+
+#[derive(Parser)]
+pub struct GltfViewerArgs {
+
+    #[arg(value_name="FILE")]
+    gltf_file: String,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct VertexData {
@@ -190,6 +199,9 @@ impl App for GLTFViewer {
     where
         Self: Sized,
     {
+    
+        let args = GltfViewerArgs::parse();
+
         let mut resource_map = ResourceMap::new();
 
         let screen_quad_module =
@@ -210,7 +222,7 @@ impl App for GLTFViewer {
         )?;
 
         let mut gltf_loader = GltfLoader::load(
-            "gltf_models/Sponza/glTF/Sponza.gltf",
+            &args.gltf_file,
             &app_state.gpu,
             &mut scene_renderer,
             &mut resource_map,
