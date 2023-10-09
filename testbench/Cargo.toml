@@ -30,7 +30,7 @@ image = "0.24.6"
 bytemuck = "1.13.1"
 
 env_logger = "0.10.0"
-gltf = "1.2.0"
+gltf = { version = "1.2.0", features = ["KHR_lights_punctual"] }
 gpu = { path = "../gpu" }
 resource_map = { path = "../resource_map" }
 engine = { path = "../engine" }

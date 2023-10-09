@@ -147,7 +147,7 @@ impl Light {
                 -size.y * 0.5,
                 size.y * 0.5,
                 -self.radius * 0.5,
-                self.radius * 0.5,
+                (self.radius * 0.5).max(ZNEAR),
             ),
             LightType::Spotlight {
                 outer_cone_degrees, ..

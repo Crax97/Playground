@@ -1,9 +1,9 @@
 use crate::utils;
 use engine::{
-    ImageResource, MasterMaterial, MaterialDescription, MaterialDomain, MaterialInstance,
-    MaterialInstanceDescription, MaterialParameterOffsetSize, Mesh, MeshCreateInfo,
-    MeshPrimitiveCreateInfo, RenderingPipeline, SamplerResource, Scene, ScenePrimitive, Texture,
-    TextureImageView, TextureInput,
+    ImageResource, LightType, MasterMaterial, MaterialDescription, MaterialDomain,
+    MaterialInstance, MaterialInstanceDescription, MaterialParameterOffsetSize, Mesh,
+    MeshCreateInfo, MeshPrimitiveCreateInfo, RenderingPipeline, SamplerResource, Scene,
+    ScenePrimitive, Texture, TextureImageView, TextureInput,
 };
 use gltf::image::Data;
 use gltf::Document;
@@ -12,10 +12,11 @@ use gpu::{
     ImageUsageFlags, ImageViewCreateInfo, ImageViewType, MemoryDomain, SamplerAddressMode,
     SamplerCreateInfo, VkGpu,
 };
-use nalgebra::{vector, Matrix4, Quaternion, UnitQuaternion, Vector3, Vector4};
+use nalgebra::{point, vector, Matrix4, Quaternion, UnitQuaternion, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
 use std::collections::HashMap;
 use std::mem::size_of;
+use std::num::NonZeroU32;
 use std::path::Path;
 
 #[repr(C)]
@@ -71,16 +72,52 @@ impl GltfLoader {
             for node in scene.nodes() {
                 let node_transform = node.transform();
                 let (pos, rot, scale) = node_transform.decomposed();
+                let pos = Vector3::from_row_slice(&pos);
+
                 let rotation = UnitQuaternion::from_quaternion(Quaternion::new(
                     rot[0], rot[1], rot[2], rot[3],
                 ));
                 let rot_matrix = rotation.to_homogeneous();
 
-                let transform = Matrix4::new_translation(&Vector3::from_row_slice(&pos))
+                let transform = Matrix4::new_translation(&pos)
                     * Matrix4::new_nonuniform_scaling(&Vector3::from_row_slice(&scale))
                     * rot_matrix;
 
-                if let Some(mesh) = node.mesh() {
+                if let Some(light) = node.light() {
+                    use gltf::khr_lights_punctual::Kind as GltfLightKind;
+                    let direction = rotation.euler_angles();
+                    let direction = vector![direction.0, direction.1, direction.2];
+                    let light_type = match light.kind() {
+                        GltfLightKind::Directional => LightType::Directional {
+                            direction,
+                            size: vector![20.0, 20.0],
+                        },
+                        GltfLightKind::Spot {
+                            inner_cone_angle,
+                            outer_cone_angle,
+                        } => LightType::Spotlight {
+                            direction,
+                            inner_cone_degrees: 2.0* inner_cone_angle.to_degrees(),
+                            outer_cone_degrees: 2.0* outer_cone_angle.to_degrees(),
+                        },
+                        GltfLightKind::Point => LightType::Point,
+                    };
+                    engine_scene.add_light(engine::Light {
+                        ty: light_type,
+                        position: point![pos.x, pos.y, pos.z],
+                        radius: 500.0,
+                        color: Vector3::from_row_slice(&light.color()),
+                        intensity: 50.0,
+                        enabled: true,
+                        shadow_setup: Some(engine::ShadowSetup {
+                            importance: NonZeroU32::new(match light.kind() {
+                                GltfLightKind::Directional => 5,
+                                GltfLightKind::Point => 3,
+                                GltfLightKind::Spot {..} => 4,
+                            }).unwrap(),
+                        }),
+                    });
+                } else if let Some(mesh) = node.mesh() {
                     let mut materials = vec![];
                     for prim in mesh.primitives() {
                         let material_index = prim.material().index().unwrap_or(0);

@@ -103,11 +103,14 @@ vec3 get_unnormalized_light_direction(LightInfo info, FragmentInfo frag_info) {
 }
 
 float get_light_mask(float n_dot_l, LightInfo light, FragmentInfo frag_info) {
+    if (light.type_shadowcaster.x == DIRECTIONAL_LIGHT) {
+        // Directional lights are not attenuated
+        return 1.0; 
+    }
     vec3 light_dir = light.position_radius.xyz - frag_info.position;
     float light_distance = length(light_dir);
     light_dir /= light_distance;
     float attenuation = clamp(1.0 - pow(light_distance / light.position_radius.w, 4.0), 0.0, 1.0) / max(light_distance * light_distance, 0.01);
-    attenuation *= attenuation;
     if (light.type_shadowcaster.x == SPOT_LIGHT) {
         vec3 frag_direction = light_dir;
         float cos_theta = dot(-light.direction.xyz, frag_direction);

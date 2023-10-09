@@ -48,7 +48,7 @@ pub struct GLTFViewer {
     scene_renderer: DeferredRenderingPipeline,
     gltf_loader: GltfLoader,
     input: InputState,
-    camera_light: LightHandle,
+    camera_light: Option<LightHandle>,
 }
 
 impl GLTFViewer {
@@ -92,50 +92,52 @@ impl GLTFViewer {
 
                     if ui
                         .selectable_config(&format!("{light_string} light nr. #{i}"))
-                        .selected(self.camera_light == handle)
+                        .selected(self.camera_light.is_some_and(|l| l == handle))
                         .build()
                     {
-                        self.camera_light = handle;
+                        self.camera_light = Some(handle);
                     }
                 });
 
-            let l = self.gltf_loader.scene_mut().edit_light(&self.camera_light);
-            ui.indent();
-            ui.checkbox("Enabled", &mut l.enabled);
-            ui.input_float3("Position", &mut l.position.coords.data.0[0])
-                .build();
-            ui.color_edit3("Color", &mut l.color.data.0[0]);
-            ui.slider("Intensity", 0.0, 1000.0, &mut l.intensity);
-            ui.slider("Radius", 0.0, 1000.0, &mut l.radius);
-            match &mut l.ty {
-                LightType::Point => {}
-                LightType::Directional { direction, size } => {
-                    ui.input_float3("Direction", &mut direction.data.0[0])
-                        .build();
-                    ui.input_float2("Shadow size", &mut size.data.0[0]).build();
+            if let Some(cl) = self.camera_light {
+                let l = self.gltf_loader.scene_mut().edit_light(&cl);
+                ui.indent();
+                ui.checkbox("Enabled", &mut l.enabled);
+                ui.input_float3("Position", &mut l.position.coords.data.0[0])
+                    .build();
+                ui.color_edit3("Color", &mut l.color.data.0[0]);
+                ui.slider("Intensity", 0.0, 1000.0, &mut l.intensity);
+                ui.slider("Radius", 0.0, 1000.0, &mut l.radius);
+                match &mut l.ty {
+                    LightType::Point => {}
+                    LightType::Directional { direction, size } => {
+                        ui.input_float3("Direction", &mut direction.data.0[0])
+                            .build();
+                        ui.input_float2("Shadow size", &mut size.data.0[0]).build();
+                    }
+                    LightType::Spotlight {
+                        direction,
+                        inner_cone_degrees,
+                        outer_cone_degrees,
+                    } => {
+                        ui.input_float3("Direction", &mut direction.data.0[0])
+                            .build();
+                        ui.slider("Outer cone", *inner_cone_degrees, 90.0, outer_cone_degrees);
+                        ui.slider("Inner cone", 0.0, *outer_cone_degrees, inner_cone_degrees);
+                    }
+                    LightType::Rect {
+                        direction,
+                        width,
+                        height,
+                    } => {
+                        ui.input_float3("Direction", &mut direction.data.0[0])
+                            .build();
+                        ui.slider("Width", 0.0, 100000.0, width);
+                        ui.slider("Height", 0.0, 100000.0, height);
+                    }
                 }
-                LightType::Spotlight {
-                    direction,
-                    inner_cone_degrees,
-                    outer_cone_degrees,
-                } => {
-                    ui.input_float3("Direction", &mut direction.data.0[0])
-                        .build();
-                    ui.slider("Outer cone", *inner_cone_degrees, 90.0, outer_cone_degrees);
-                    ui.slider("Inner cone", 0.0, *outer_cone_degrees, inner_cone_degrees);
-                }
-                LightType::Rect {
-                    direction,
-                    width,
-                    height,
-                } => {
-                    ui.input_float3("Direction", &mut direction.data.0[0])
-                        .build();
-                    ui.slider("Width", 0.0, 100000.0, width);
-                    ui.slider("Height", 0.0, 100000.0, height);
-                }
+                ui.unindent();
             }
-            ui.unindent();
             ui.separator();
 
             if ui.button("Add new spotlight") {
@@ -221,15 +223,13 @@ impl App for GLTFViewer {
             tonemap_module,
         )?;
 
-        let mut gltf_loader = GltfLoader::load(
+        let gltf_loader = GltfLoader::load(
             &args.gltf_file,
             &app_state.gpu,
             &mut scene_renderer,
             &mut resource_map,
             GltfLoadOptions {},
         )?;
-
-        let camera_light = add_scene_lights(gltf_loader.scene_mut());
 
         engine::app_state_mut()
             .swapchain_mut()
@@ -241,7 +241,7 @@ impl App for GLTFViewer {
             gltf_loader,
             input: InputState::new(),
             camera: FpsCamera::default(),
-            camera_light,
+            camera_light: None,
         })
     }
 
@@ -341,14 +341,16 @@ impl App for GLTFViewer {
         }
 
         if self.input.is_mouse_button_pressed(MouseButton::Left) {
-            self.gltf_loader
-                .scene_mut()
-                .edit_light(&self.camera_light)
-                .position = self.camera.location;
-            self.gltf_loader
-                .scene_mut()
-                .edit_light(&self.camera_light)
-                .set_direction(self.camera.forward());
+            if let Some(camera_light) = self.camera_light {
+                self.gltf_loader
+                    .scene_mut()
+                    .edit_light(&camera_light)
+                    .position = self.camera.location;
+                self.gltf_loader
+                    .scene_mut()
+                    .edit_light(&camera_light)
+                    .set_direction(self.camera.forward());
+            }
         }
 
         self.input.end_frame();
@@ -366,63 +368,6 @@ impl App for GLTFViewer {
     }
 }
 
-fn add_scene_lights(scene: &mut Scene) -> LightHandle {
-    scene.add_light(Light {
-        ty: LightType::Directional {
-            direction: vector![-0.52155536, 0.8490293, 0.08443476],
-            size: vector![50.0, 50.0],
-        },
-        position: point![9.261562, -20.304585, -1.3664505],
-        radius: 100.0,
-        color: vector![0.95098037, 0.90916246, 0.66661865],
-        intensity: 5.0,
-        enabled: true,
-        shadow_setup: Some(ShadowSetup {
-            importance: NonZeroU32::new(5).unwrap(),
-        }),
-    });
-    scene.add_light(Light {
-        ty: LightType::Spotlight {
-            direction: vector![-0.1424134, -0.31258363, 0.9391538],
-            inner_cone_degrees: 32.0,
-            outer_cone_degrees: 35.0,
-        },
-        position: point![-9.699096, -0.08773269, -3.9881172],
-        radius: 100.0,
-        color: vector![1.0, 0.3333333, 0.3333333],
-        intensity: 20.0,
-        enabled: true,
-        shadow_setup: Some(ShadowSetup {
-            importance: NonZeroU32::new(5).unwrap(),
-        }),
-    });
-    scene.add_light(Light {
-        ty: LightType::Spotlight {
-            direction: vector![-0.19844706, -0.27760813, -0.93997467],
-            inner_cone_degrees: 32.0,
-            outer_cone_degrees: 35.0,
-        },
-        position: point![-9.586186, -0.38097504, 2.9570565],
-        radius: 100.0,
-        color: vector![0.07352942, 0.7820069, 1.0],
-        intensity: 10.0,
-        enabled: true,
-        shadow_setup: Some(ShadowSetup {
-            importance: NonZeroU32::new(5).unwrap(),
-        }),
-    });
-    scene.add_light(Light {
-        ty: LightType::Point,
-        position: point![9.669, -1.487, -3.267],
-        radius: 10.0,
-        color: vector![1.0, 1.0, 1.0],
-        intensity: 10.0,
-        enabled: true,
-        shadow_setup: Some(ShadowSetup {
-            importance: NonZeroU32::new(5).unwrap(),
-        }),
-    })
-}
 
 fn main() -> anyhow::Result<()> {
     bootstrap::<GLTFViewer>()
