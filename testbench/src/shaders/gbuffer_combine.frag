@@ -106,7 +106,7 @@ float get_light_mask(float n_dot_l, LightInfo light, FragmentInfo frag_info) {
     vec3 light_dir = light.position_radius.xyz - frag_info.position;
     float light_distance = length(light_dir);
     light_dir /= light_distance;
-    float attenuation = 1.0 - clamp(light_distance / light.position_radius.w, 0.0, 1.0);
+    float attenuation = clamp(1.0 - pow(light_distance / light.position_radius.w, 4.0), 0.0, 1.0) / max(light_distance * light_distance, 0.01);
     attenuation *= attenuation;
     if (light.type_shadowcaster.x == SPOT_LIGHT) {
         vec3 frag_direction = light_dir;
