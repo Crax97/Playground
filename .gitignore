@@ -2,6 +2,7 @@
 /gpu/target
 /resource_map/target
 /engine/target
+/gltf_models
 
 /shaders
 
