@@ -153,7 +153,11 @@ impl Light {
                 outer_cone_degrees, ..
             } => Matrix4::new_perspective(
                 1.0,
-                outer_cone_degrees.to_radians(),
+                // the outer cone spans from the light center to the light side: |-/ 
+                //                                                               |/
+                // the fov spans from side to side: \-|-/
+                //                                   \|/
+                2.0 * outer_cone_degrees.to_radians(),
                 ZNEAR,
                 self.radius.max(ZNEAR + 0.1),
             ),
