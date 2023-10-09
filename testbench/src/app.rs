@@ -202,8 +202,8 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
     let event_loop = winit::event_loop::EventLoop::default();
     let window = winit::window::WindowBuilder::default()
         .with_inner_size(PhysicalSize {
-            width: 1240,
-            height: 720,
+            width: 1920,
+            height: 1080,
         })
         .with_title("Winit App")
         .build(&event_loop)?;

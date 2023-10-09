@@ -73,6 +73,7 @@ impl GltfLoader {
                 let node_transform = node.transform();
                 let (pos, rot, scale) = node_transform.decomposed();
                 let pos = Vector3::from_row_slice(&pos);
+                let pos = vector![pos.x, -pos.y, pos.z];
 
                 let rotation = UnitQuaternion::from_quaternion(Quaternion::new(
                     rot[0], rot[1], rot[2], rot[3],
@@ -86,7 +87,7 @@ impl GltfLoader {
                 if let Some(light) = node.light() {
                     use gltf::khr_lights_punctual::Kind as GltfLightKind;
                     let direction = rotation.euler_angles();
-                    let direction = vector![direction.0, direction.1, direction.2];
+                    let direction = vector![direction.1, direction.0, direction.2];
                     let light_type = match light.kind() {
                         GltfLightKind::Directional => LightType::Directional {
                             direction,
@@ -97,8 +98,8 @@ impl GltfLoader {
                             outer_cone_angle,
                         } => LightType::Spotlight {
                             direction,
-                            inner_cone_degrees: 2.0* inner_cone_angle.to_degrees(),
-                            outer_cone_degrees: 2.0* outer_cone_angle.to_degrees(),
+                            inner_cone_degrees: inner_cone_angle.to_degrees(),
+                            outer_cone_degrees: outer_cone_angle.to_degrees(),
                         },
                         GltfLightKind::Point => LightType::Point,
                     };
@@ -107,7 +108,7 @@ impl GltfLoader {
                         position: point![pos.x, pos.y, pos.z],
                         radius: 500.0,
                         color: Vector3::from_row_slice(&light.color()),
-                        intensity: 50.0,
+                        intensity: light.intensity() / 100.0,
                         enabled: true,
                         shadow_setup: Some(engine::ShadowSetup {
                             importance: NonZeroU32::new(match light.kind() {

@@ -112,10 +112,11 @@ float get_light_mask(float n_dot_l, LightInfo light, FragmentInfo frag_info) {
     light_dir /= light_distance;
     float attenuation = clamp(1.0 - pow(light_distance / light.position_radius.w, 4.0), 0.0, 1.0) / max(light_distance * light_distance, 0.01);
     if (light.type_shadowcaster.x == SPOT_LIGHT) {
-        vec3 frag_direction = light_dir;
-        float cos_theta = dot(-light.direction.xyz, frag_direction);
         float inner_angle_cutoff = light.extras.x;
         float outer_angle_cutoff = light.extras.y;
+
+        vec3 frag_direction = light_dir;
+        float cos_theta = dot(-light.direction.xyz, frag_direction);
         float eps = inner_angle_cutoff - outer_angle_cutoff;
         float spotlight_cutoff = float(cos_theta > 0.0) * clamp((cos_theta - outer_angle_cutoff) / eps, 0.0, 1.0);
         attenuation *= spotlight_cutoff;

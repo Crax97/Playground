@@ -109,8 +109,8 @@ impl From<&Light> for GpuLightInfo {
             } => (
                 vector![direction.x, direction.y, direction.z, 0.0],
                 vector![
-                    (90.0 - inner_cone_degrees).to_radians(),
-                    (90.0 - outer_cone_degrees).to_radians(),
+                    inner_cone_degrees.to_radians().cos(),
+                    outer_cone_degrees.to_radians().cos(),
                     0.0,
                     0.0
                 ],
