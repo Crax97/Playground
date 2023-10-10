@@ -404,7 +404,7 @@ impl DeferredRenderingPipeline {
                             active_light.position.z,
                             0.0,
                         ),
-                        view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * pov,
+                        view: pov,
                         projection: active_light.projection_matrix(),
                         viewport_size_offset: vector![
                             allocated_slot.x as f32 + w as f32 * i as f32,
@@ -443,7 +443,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let mut per_frame_data = vec![PerFrameData {
             eye: Point4::new(pov.location[0], pov.location[1], pov.location[2], 0.0),
-            view: crate::utils::constants::MATRIX_COORDINATE_X_FLIP * pov.view(),
+            view: pov.view(),
             projection,
             viewport_size_offset: vector![
                 0.0,
@@ -761,7 +761,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let present_render_pass = self
             .render_graph
             .begin_render_pass("Present", backbuffer.size)?
-            .shader_reads(&[fxaa_output])
+            .shader_reads(&[color_target])
             .writes_attachments(&[swapchain_image])
             .with_blend_state(BlendState {
                 blend_enable: false,

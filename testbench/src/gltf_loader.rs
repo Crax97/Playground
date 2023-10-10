@@ -12,7 +12,7 @@ use gpu::{
     ImageUsageFlags, ImageViewCreateInfo, ImageViewType, MemoryDomain, SamplerAddressMode,
     SamplerCreateInfo, VkGpu,
 };
-use nalgebra::{point, vector, Matrix4, Quaternion, UnitQuaternion, Vector3, Vector4};
+use nalgebra::{vector, Matrix4, Quaternion, UnitQuaternion, Vector3, Vector4, Point3};
 use resource_map::{ResourceHandle, ResourceMap};
 use std::collections::HashMap;
 use std::mem::size_of;
@@ -73,12 +73,14 @@ impl GltfLoader {
                 let node_transform = node.transform();
                 let (pos, rot, scale) = node_transform.decomposed();
                 let pos = Vector3::from_row_slice(&pos);
-                let pos = vector![pos.x, -pos.y, pos.z];
+                let rot = Vector3::from_row_slice(&rot[0..3]);
 
-                let rotation = UnitQuaternion::from_quaternion(Quaternion::new(
-                    rot[0], rot[1], rot[2], rot[3],
-                ));
-                let rot_matrix = rotation.to_homogeneous();
+                let rot_matrix = Matrix4::new_rotation(vector![rot.x, 0.0, 0.0]) 
+                    * Matrix4::new_rotation(vector![0.0, rot.y, 0.0]) 
+                    * Matrix4::new_rotation(vector![0.0, 0.0, rot.z]);
+
+                let forward = rot_matrix.row(2);
+                let forward = vector![forward[0], forward[1], forward[2]];
 
                 let transform = Matrix4::new_translation(&pos)
                     * Matrix4::new_nonuniform_scaling(&Vector3::from_row_slice(&scale))
@@ -86,18 +88,16 @@ impl GltfLoader {
 
                 if let Some(light) = node.light() {
                     use gltf::khr_lights_punctual::Kind as GltfLightKind;
-                    let direction = rotation.euler_angles();
-                    let direction = vector![direction.1, direction.0, direction.2];
                     let light_type = match light.kind() {
                         GltfLightKind::Directional => LightType::Directional {
-                            direction,
+                            direction: forward,
                             size: vector![20.0, 20.0],
                         },
                         GltfLightKind::Spot {
                             inner_cone_angle,
                             outer_cone_angle,
                         } => LightType::Spotlight {
-                            direction,
+                            direction: forward,
                             inner_cone_degrees: inner_cone_angle.to_degrees(),
                             outer_cone_degrees: outer_cone_angle.to_degrees(),
                         },
@@ -105,7 +105,7 @@ impl GltfLoader {
                     };
                     engine_scene.add_light(engine::Light {
                         ty: light_type,
-                        position: point![pos.x, pos.y, pos.z],
+                        position: Point3::from(pos),
                         radius: 500.0,
                         color: Vector3::from_row_slice(&light.color()),
                         intensity: light.intensity() / 100.0,

@@ -25,7 +25,12 @@ pub use render_graph::*;
 pub use scene::*;
 pub use texture::*;
 pub use time::*;
-pub use utils::constants::*;
+
+/*
+ * Conventions used
+ * Coordinates: +Y is up, +Z is forward, -X is right (same as glTF)
+ * */
+
 
 struct GlobalState {
     app: *mut AppState,

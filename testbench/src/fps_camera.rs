@@ -19,7 +19,7 @@ impl Default for FpsCamera {
             location: Default::default(),
             rotation: Default::default(),
             speed: 10.0,
-            rotation_speed: 45.0,
+            rotation_speed: 180.0,
             roll: Default::default(),
             pitch: Default::default(),
         }
@@ -30,15 +30,14 @@ impl FpsCamera {
     pub fn update(&mut self, input_state: &InputState, delta_time: f32) {
         let transform = self.rotation.to_homogeneous();
         let forward = transform.column(2).xyz();
-        let right = transform.column(0).xyz();
+        let left = transform.column(0).xyz();
 
         let mouse_delta = input_state
             .normalized_mouse_position()
-            .map(|v| v * 10.0)
-            .map(|v| f32::from(v.abs() > 0.1) * v);
-        self.roll += mouse_delta.y * self.rotation_speed * delta_time;
+            .map(|v| v * 10.0);
+        self.roll -= mouse_delta.y * self.rotation_speed * delta_time;
         self.roll = self.roll.clamp(-89.0, 89.0);
-        self.pitch += mouse_delta.x * 5.0 * self.rotation_speed * delta_time;
+        self.pitch -= mouse_delta.x * self.rotation_speed * delta_time;
         let rotation =
             Rotation3::from_euler_angles(self.roll.to_radians(), self.pitch.to_radians(), 0.0);
         self.rotation = rotation;
@@ -50,10 +49,10 @@ impl FpsCamera {
             self.location -= forward * self.speed * delta_time;
         }
         if input_state.is_key_pressed(Key::A) {
-            self.location -= right * self.speed * delta_time;
+            self.location += left * self.speed * delta_time;
         }
         if input_state.is_key_pressed(Key::D) {
-            self.location += right * self.speed * delta_time;
+            self.location -= left * self.speed * delta_time;
         }
     }
     pub fn camera(&self) -> Camera {

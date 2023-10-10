@@ -18,7 +18,7 @@ use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use crate::input::key::Key;
 use engine::{
     AppState, Backbuffer, DeferredRenderingPipeline, Light, LightHandle, LightType,
-    RenderingPipeline, Scene, ShadowSetup,
+    RenderingPipeline, ShadowSetup,
 };
 use nalgebra::*;
 use resource_map::ResourceMap;
