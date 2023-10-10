@@ -761,7 +761,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let present_render_pass = self
             .render_graph
             .begin_render_pass("Present", backbuffer.size)?
-            .shader_reads(&[color_target])
+            .shader_reads(&[fxaa_output])
             .writes_attachments(&[swapchain_image])
             .with_blend_state(BlendState {
                 blend_enable: false,
