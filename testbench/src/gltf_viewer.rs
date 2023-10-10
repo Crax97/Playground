@@ -29,8 +29,7 @@ use clap::Parser;
 
 #[derive(Parser)]
 pub struct GltfViewerArgs {
-
-    #[arg(value_name="FILE")]
+    #[arg(value_name = "FILE")]
     gltf_file: String,
 }
 
@@ -105,6 +104,15 @@ impl GLTFViewer {
                 ui.checkbox("Enabled", &mut l.enabled);
                 ui.input_float3("Position", &mut l.position.coords.data.0[0])
                     .build();
+                let mut degrees_rot = l.direction().map(|v| v.to_degrees());
+                if ui
+                    .input_float3("Rotation", &mut degrees_rot.data.0[0])
+                    .build()
+                {
+                    let rad_rot = degrees_rot.map(|v| v.to_radians());
+                    l.set_direction(rad_rot);
+                }
+
                 ui.color_edit3("Color", &mut l.color.data.0[0]);
                 ui.slider("Intensity", 0.0, 1000.0, &mut l.intensity);
                 ui.slider("Radius", 0.0, 1000.0, &mut l.radius);
@@ -122,7 +130,7 @@ impl GLTFViewer {
                     } => {
                         ui.input_float3("Direction", &mut direction.data.0[0])
                             .build();
-                        ui.slider("Outer cone", *inner_cone_degrees, 90.0, outer_cone_degrees);
+                        ui.slider("Outer cone", *inner_cone_degrees, 45.0, outer_cone_degrees);
                         ui.slider("Inner cone", 0.0, *outer_cone_degrees, inner_cone_degrees);
                     }
                     LightType::Rect {
@@ -201,7 +209,6 @@ impl App for GLTFViewer {
     where
         Self: Sized,
     {
-    
         let args = GltfViewerArgs::parse();
 
         let mut resource_map = ResourceMap::new();
@@ -367,7 +374,6 @@ impl App for GLTFViewer {
         Ok(command_buffer)
     }
 }
-
 
 fn main() -> anyhow::Result<()> {
     bootstrap::<GLTFViewer>()

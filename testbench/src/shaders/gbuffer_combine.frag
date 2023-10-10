@@ -105,7 +105,7 @@ vec3 get_unnormalized_light_direction(LightInfo info, FragmentInfo frag_info) {
 float get_light_mask(float n_dot_l, LightInfo light, FragmentInfo frag_info) {
     if (light.type_shadowcaster.x == DIRECTIONAL_LIGHT) {
         // Directional lights are not attenuated
-        return 1.0; 
+        return 1.0;
     }
     vec3 light_dir = light.position_radius.xyz - frag_info.position;
     float light_distance = length(light_dir);

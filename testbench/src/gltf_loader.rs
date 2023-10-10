@@ -12,7 +12,7 @@ use gpu::{
     ImageUsageFlags, ImageViewCreateInfo, ImageViewType, MemoryDomain, SamplerAddressMode,
     SamplerCreateInfo, VkGpu,
 };
-use nalgebra::{vector, Matrix4, Quaternion, UnitQuaternion, Vector3, Vector4, Point3};
+use nalgebra::{vector, Matrix4, Point3, Quaternion, Rotation3, UnitQuaternion, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
 use std::collections::HashMap;
 use std::mem::size_of;
@@ -73,18 +73,14 @@ impl GltfLoader {
                 let node_transform = node.transform();
                 let (pos, rot, scale) = node_transform.decomposed();
                 let pos = Vector3::from_row_slice(&pos);
-                let rot = Vector3::from_row_slice(&rot[0..3]);
+                let rot = Quaternion::new(rot[3], rot[0], rot[1], rot[2]);
+                let rot = UnitQuaternion::from_quaternion(rot);
 
-                let rot_matrix = Matrix4::new_rotation(vector![rot.x, 0.0, 0.0]) 
-                    * Matrix4::new_rotation(vector![0.0, rot.y, 0.0]) 
-                    * Matrix4::new_rotation(vector![0.0, 0.0, rot.z]);
+                let rot_matrix = rot.to_homogeneous();
+                let forward = rot_matrix.column(2);
 
-                let forward = rot_matrix.row(2);
-                let forward = vector![forward[0], forward[1], forward[2]];
-
-                let transform = Matrix4::new_translation(&pos)
-                    * Matrix4::new_nonuniform_scaling(&Vector3::from_row_slice(&scale))
-                    * rot_matrix;
+                // gltf specifies light directions to be in -z
+                let forward = -vector![forward[0], forward[1], forward[2]];
 
                 if let Some(light) = node.light() {
                     use gltf::khr_lights_punctual::Kind as GltfLightKind;
@@ -114,11 +110,16 @@ impl GltfLoader {
                             importance: NonZeroU32::new(match light.kind() {
                                 GltfLightKind::Directional => 5,
                                 GltfLightKind::Point => 3,
-                                GltfLightKind::Spot {..} => 4,
-                            }).unwrap(),
+                                GltfLightKind::Spot { .. } => 4,
+                            })
+                            .unwrap(),
                         }),
                     });
                 } else if let Some(mesh) = node.mesh() {
+                    let transform = Matrix4::new_translation(&pos)
+                        * Matrix4::new_nonuniform_scaling(&Vector3::from_row_slice(&scale))
+                        * rot_matrix;
+
                     let mut materials = vec![];
                     for prim in mesh.primitives() {
                         let material_index = prim.material().index().unwrap_or(0);
