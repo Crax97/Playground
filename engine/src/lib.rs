@@ -31,7 +31,6 @@ pub use time::*;
  * Coordinates: +Y is up, +Z is forward, -X is right (same as glTF)
  * */
 
-
 struct GlobalState {
     app: *mut AppState,
     creator_id: Option<ThreadId>,

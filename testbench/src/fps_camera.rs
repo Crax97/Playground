@@ -32,9 +32,7 @@ impl FpsCamera {
         let forward = transform.column(2).xyz();
         let left = transform.column(0).xyz();
 
-        let mouse_delta = input_state
-            .normalized_mouse_position()
-            .map(|v| v * 10.0);
+        let mouse_delta = input_state.normalized_mouse_position().map(|v| v * 10.0);
         self.roll -= mouse_delta.y * self.rotation_speed * delta_time;
         self.roll = self.roll.clamp(-89.0, 89.0);
         self.pitch -= mouse_delta.x * self.rotation_speed * delta_time;
