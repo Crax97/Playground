@@ -226,7 +226,7 @@ impl VkSwapchain {
         unsafe {
             let current_frame = self.get_current_swapchain_frame();
             let wait_semaphore = current_frame.render_finished_semaphore.inner;
-            self.swapchain_extension.queue_present(
+            let result = self.swapchain_extension.queue_present(
                 self.state.graphics_queue,
                 &PresentInfoKHR {
                     s_type: StructureType::PRESENT_INFO_KHR,
@@ -238,7 +238,15 @@ impl VkSwapchain {
                     p_image_indices: self.current_swapchain_index.as_ptr(),
                     p_results: std::ptr::null_mut(),
                 },
-            )?;
+            );
+
+            if let Err(e) = result {
+                if e == vk::Result::ERROR_OUT_OF_DATE_KHR {
+                    return Ok(false);
+                } else {
+                    anyhow::bail!(e)
+                }
+            }
         }
 
         self.current_frame

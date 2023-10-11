@@ -58,7 +58,7 @@ pub fn app_loop<A: App + 'static>(
             }
             winit::event::WindowEvent::Resized(new_size) => {
                 if new_size.width > 0 && new_size.height > 0 {
-                    app_state_mut.swapchain_mut().recreate_swapchain().unwrap();
+                    app_state_mut.new_size = Some(new_size);
                 }
             }
             _ => {}
@@ -95,6 +95,9 @@ fn update_loop(
     imgui_data: &mut ImguiData,
     app_state_mut: &mut AppState,
 ) -> anyhow::Result<()> {
+    if let Some(_) = app_state_mut.new_size.take() {
+        app_state_mut.swapchain_mut().recreate_swapchain()?;
+    }
     app_state_mut.begin_frame().unwrap();
     imgui_data
         .platform
