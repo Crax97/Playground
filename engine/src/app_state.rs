@@ -1,4 +1,4 @@
-use gpu::{Swapchain, VkGpu};
+use gpu::{VkSwapchain, VkGpu};
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::Time;
@@ -6,14 +6,14 @@ use crate::Time;
 pub struct AppState {
     pub gpu: VkGpu,
     pub time: Time,
-    pub swapchain: Swapchain,
+    pub swapchain: VkSwapchain,
     pub window: Window,
     pub new_size: Option<PhysicalSize<u32>>,
 }
 
 impl AppState {
     pub fn new(gpu: VkGpu, window: Window) -> Self {
-        let swapchain = Swapchain::new(&gpu, &window).expect("Failed to create swapchain!");
+        let swapchain = VkSwapchain::new(&gpu, &window).expect("Failed to create swapchain!");
 
         Self {
             gpu,
@@ -38,11 +38,11 @@ impl AppState {
     pub fn time(&self) -> &Time {
         &self.time
     }
-    pub fn swapchain(&self) -> &Swapchain {
+    pub fn swapchain(&self) -> &VkSwapchain {
         &self.swapchain
     }
 
-    pub fn swapchain_mut(&mut self) -> &mut Swapchain {
+    pub fn swapchain_mut(&mut self) -> &mut VkSwapchain {
         &mut self.swapchain
     }
 

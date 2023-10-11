@@ -13,7 +13,7 @@ pub use command_buffer::*;
 pub use pipeline::*;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
-pub use swapchain::Swapchain;
+pub use swapchain::VkSwapchain;
 pub use types::*;
 use winit::window::Window;
 

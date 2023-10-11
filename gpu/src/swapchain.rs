@@ -88,7 +88,7 @@ impl SwapchainFrame {
     }
 }
 
-pub struct Swapchain {
+pub struct VkSwapchain {
     pub(super) surface_extension: Surface,
     pub swapchain_extension: ash::extensions::khr::Swapchain,
     pub(super) surface: SurfaceKHR,
@@ -113,7 +113,7 @@ pub struct Swapchain {
     window_handle: RawWindowHandle,
 }
 
-impl Swapchain {
+impl VkSwapchain {
     pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
     pub fn new(gpu: &VkGpu, window: &Window) -> VkResult<Self> {
@@ -523,7 +523,7 @@ impl ToVk for PresentMode {
     }
 }
 
-impl Drop for Swapchain {
+impl Drop for VkSwapchain {
     fn drop(&mut self) {
         self.drop_swapchain()
     }

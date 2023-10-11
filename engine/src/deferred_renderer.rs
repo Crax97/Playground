@@ -17,7 +17,7 @@ use gpu::{
     BufferUsageFlags, ColorComponentFlags, ColorLoadOp, CompareOp, DepthStencilState, Extent2D,
     FragmentStageInfo, ImageFormat, ImageLayout, IndexType, MemoryDomain, PushConstantRange,
     RenderPassAttachment, SampleCount, ShaderModuleCreateInfo, ShaderStage, StencilLoadOp,
-    StencilOpState, Swapchain, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu, VkShaderModule,
+    StencilOpState, VkSwapchain, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu, VkShaderModule,
 };
 use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -188,7 +188,7 @@ impl DeferredRenderingPipeline {
         tonemap_fs: VkShaderModule,
     ) -> anyhow::Result<Self> {
         let mut frame_buffers = vec![];
-        for _ in 0..Swapchain::MAX_FRAMES_IN_FLIGHT {
+        for _ in 0..VkSwapchain::MAX_FRAMES_IN_FLIGHT {
             let camera_buffer = {
                 let create_info = BufferCreateInfo {
                     label: Some("Deferred Renderer - Camera buffer"),
@@ -243,7 +243,7 @@ impl DeferredRenderingPipeline {
             light_iteration: 0,
             runner: GpuRunner::new(),
             in_flight_frame: 0,
-            max_frames_in_flight: Swapchain::MAX_FRAMES_IN_FLIGHT,
+            max_frames_in_flight: VkSwapchain::MAX_FRAMES_IN_FLIGHT,
             depth_bias_constant: 2.0,
             depth_bias_clamp: 0.0,
             depth_bias_slope: 4.0,
