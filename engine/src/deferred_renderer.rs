@@ -17,7 +17,7 @@ use gpu::{
     BufferUsageFlags, ColorComponentFlags, ColorLoadOp, CompareOp, DepthStencilState, Extent2D,
     FragmentStageInfo, ImageFormat, ImageLayout, IndexType, MemoryDomain, PushConstantRange,
     RenderPassAttachment, SampleCount, ShaderModuleCreateInfo, ShaderStage, StencilLoadOp,
-    StencilOpState, VkSwapchain, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu, VkShaderModule,
+    StencilOpState, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu, VkShaderModule, VkSwapchain,
 };
 use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};

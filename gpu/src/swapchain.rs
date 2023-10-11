@@ -116,7 +116,7 @@ pub struct VkSwapchain {
 impl VkSwapchain {
     pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
-    pub fn new(gpu: &VkGpu, window: &Window) -> VkResult<Self> {
+    pub fn new(gpu: &VkGpu, window: &Window) -> anyhow::Result<Self> {
         let state = gpu.state.clone();
         let surface_extension = Surface::new(&state.entry, &state.instance);
         let swapchain_extension =
@@ -136,8 +136,7 @@ impl VkSwapchain {
 
         let mut frames_in_flight = vec![];
         for _ in 0..Self::MAX_FRAMES_IN_FLIGHT {
-            let swapchain_frame = SwapchainFrame::new(state.logical_device.clone())
-                .expect("TODO: change return type to anyhow::result");
+            let swapchain_frame = SwapchainFrame::new(state.logical_device.clone())?;
             frames_in_flight.push(swapchain_frame);
         }
 

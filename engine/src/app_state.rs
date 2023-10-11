@@ -1,4 +1,4 @@
-use gpu::{VkSwapchain, VkGpu};
+use gpu::{VkGpu, VkSwapchain};
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::Time;
