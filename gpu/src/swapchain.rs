@@ -167,7 +167,7 @@ impl VkSwapchain {
         Ok(me)
     }
 
-    pub fn acquire_next_image(&mut self) -> VkResult<(&VkImage, &VkImageView)> {
+    pub fn acquire_next_image(&mut self) -> anyhow::Result<(&VkImage, &VkImageView)> {
         let current_frame = &self.frames_in_flight[self.current_frame.get()];
         let wait_semaphore = current_frame.image_available_semaphore.inner;
 
@@ -222,7 +222,7 @@ impl VkSwapchain {
         &self.frames_in_flight[self.current_frame.get()]
     }
 
-    pub fn present(&self) -> VkResult<bool> {
+    pub fn present(&self) -> anyhow::Result<bool> {
         unsafe {
             let current_frame = self.get_current_swapchain_frame();
             let wait_semaphore = current_frame.render_finished_semaphore.inner;
@@ -256,7 +256,7 @@ impl VkSwapchain {
         supported_formats[0]
     }
 
-    pub fn recreate_swapchain(&mut self) -> VkResult<()> {
+    pub fn recreate_swapchain(&mut self) -> anyhow::Result<()> {
         unsafe {
             self.swapchain_extension
                 .destroy_swapchain(self.current_swapchain, None);
@@ -496,7 +496,7 @@ impl VkSwapchain {
         self.drop_swapchain_structs();
     }
 
-    pub fn select_present_mode(&mut self, present_mode: PresentMode) -> VkResult<()> {
+    pub fn select_present_mode(&mut self, present_mode: PresentMode) -> anyhow::Result<()> {
         self.present_mode = present_mode.to_vk();
         self.recreate_swapchain()
     }
