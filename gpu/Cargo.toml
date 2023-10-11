@@ -12,6 +12,6 @@ log = "0.4.*"
 raw-window-handle = "0.5.*"
 winit = "0.27.5"
 ash-window = "0.12.*"
-anyhow = "1.0.*"
+anyhow = { version = "1.0.*", features = ["backtrace"] }
 thiserror = "1.0.*"
 bytemuck = "1.13.*"

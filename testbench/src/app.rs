@@ -263,7 +263,11 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
             Ok(flow) => {
                 *control_flow = flow;
             }
-            Err(e) => panic!("In main body of application: {}", e),
+            Err(e) => panic!(
+                "In main body of application: {}\nBacktrace: {}",
+                e,
+                e.backtrace()
+            ),
         },
     )
 }
