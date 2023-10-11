@@ -266,6 +266,7 @@ impl VkSwapchain {
 
     pub fn recreate_swapchain(&mut self) -> anyhow::Result<()> {
         unsafe {
+            self.state.logical_device.device_wait_idle()?;
             self.swapchain_extension
                 .destroy_swapchain(self.current_swapchain, None);
             self.surface_extension.destroy_surface(self.surface, None);
