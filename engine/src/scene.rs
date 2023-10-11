@@ -75,9 +75,7 @@ impl Light {
 
     pub fn direction(&self) -> Vector3<f32> {
         match self.ty {
-            LightType::Point => {
-                todo!()
-            }
+            LightType::Point => vector![1.0, 0.0, 0.0],
             LightType::Directional { direction, .. }
             | LightType::Spotlight { direction, .. }
             | LightType::Rect { direction, .. } => direction,
