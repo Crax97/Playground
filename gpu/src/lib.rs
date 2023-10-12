@@ -755,9 +755,9 @@ pub enum PolygonMode {
 #[derive(Clone, Copy, Debug, Default, Hash)]
 pub enum CullMode {
     #[default]
+    None,
     Back,
     Front,
-    None,
     FrontAndBack,
 }
 
