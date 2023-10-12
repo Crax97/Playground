@@ -440,21 +440,9 @@ impl VkGraphicsPipeline {
                 flags: PipelineRasterizationStateCreateFlags::empty(),
                 depth_clamp_enable: vk::FALSE,
                 rasterizer_discard_enable: vk::FALSE,
-                polygon_mode: match pipeline_description.polygon_mode {
-                    PolygonMode::Fill => vk::PolygonMode::FILL,
-                    PolygonMode::Line(_) => vk::PolygonMode::LINE,
-                    PolygonMode::Point => vk::PolygonMode::POINT,
-                },
-                cull_mode: match pipeline_description.cull_mode {
-                    CullMode::Back => vk::CullModeFlags::BACK,
-                    CullMode::Front => vk::CullModeFlags::FRONT,
-                    CullMode::None => vk::CullModeFlags::NONE,
-                    CullMode::FrontAndBack => vk::CullModeFlags::FRONT_AND_BACK,
-                },
-                front_face: match pipeline_description.front_face {
-                    FrontFace::CounterClockWise => vk::FrontFace::COUNTER_CLOCKWISE,
-                    FrontFace::ClockWise => vk::FrontFace::CLOCKWISE,
-                },
+                polygon_mode: pipeline_description.polygon_mode.to_vk(),
+                cull_mode: pipeline_description.cull_mode.to_vk(),
+                front_face: pipeline_description.front_face.to_vk(),
                 depth_bias_enable: vk::TRUE,
                 depth_bias_constant_factor: 0.0,
                 depth_bias_clamp: 0.0,
@@ -518,6 +506,7 @@ impl VkGraphicsPipeline {
                 DynamicState::VIEWPORT,
                 DynamicState::SCISSOR,
                 DynamicState::FRONT_FACE,
+                DynamicState::CULL_MODE,
                 DynamicState::DEPTH_BIAS,
                 DynamicState::DEPTH_BIAS_ENABLE,
             ];

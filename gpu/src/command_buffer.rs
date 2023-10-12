@@ -34,6 +34,7 @@ where
     viewport_area: Option<Viewport>,
     scissor_area: Option<Rect2D>,
     front_face: FrontFace,
+    cull_mode: CullMode,
     has_draw_command: bool,
     render_area: Rect2D,
     depth_bias_setup: Option<(f32, f32, f32)>,
@@ -479,6 +480,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             viewport_area: None,
             scissor_area: None,
             front_face: FrontFace::default(),
+            cull_mode: CullMode::default(),
             render_area: info.render_area,
             depth_bias_setup: None,
         }
@@ -548,6 +550,14 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         self.depth_bias_setup = Some((constant, clamp, slope));
     }
 
+    pub fn set_front_face(&mut self, front_face: FrontFace) {
+        self.front_face = front_face;
+    }
+
+    pub fn set_cull_mode(&mut self, cull_mode: CullMode) {
+        self.cull_mode = cull_mode;
+    }
+
     fn prepare_draw(&self) {
         let device = self.command_buffer.gpu.vk_logical_device();
 
@@ -588,6 +598,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             device.cmd_set_viewport(self.command_buffer.inner(), 0, &[viewport.to_vk()]);
             device.cmd_set_scissor(self.command_buffer.inner(), 0, &[scissor.to_vk()]);
             device.cmd_set_front_face(self.command_buffer.inner(), self.front_face.to_vk());
+            device.cmd_set_cull_mode(self.command_buffer.inner(), self.cull_mode.to_vk());
         }
     }
 
@@ -624,10 +635,6 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         offset: u32,
     ) {
         inner::push_constant(self, pipeline, data, offset)
-    }
-
-    pub fn set_front_face(&mut self, front_face: FrontFace) {
-        self.front_face = front_face;
     }
 }
 
