@@ -1112,6 +1112,18 @@ impl ToVk for CullMode {
     }
 }
 
+impl ToVk for PolygonMode {
+    type Inner = vk::PolygonMode;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            PolygonMode::Fill => vk::PolygonMode::FILL,
+            PolygonMode::Line(_) => vk::PolygonMode::LINE,
+            PolygonMode::Point => vk::PolygonMode::POINT,
+        }
+    }
+}
+
 impl ToVk for FrontFace {
     type Inner = vk::FrontFace;
 
