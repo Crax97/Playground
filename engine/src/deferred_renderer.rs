@@ -17,7 +17,7 @@ use gpu::{
     BufferUsageFlags, ColorComponentFlags, ColorLoadOp, CompareOp, DepthStencilState, Extent2D,
     FragmentStageInfo, ImageFormat, ImageLayout, IndexType, MemoryDomain, PushConstantRange,
     RenderPassAttachment, SampleCount, ShaderModuleCreateInfo, ShaderStage, StencilLoadOp,
-    StencilOpState, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu, VkRenderPassCommand,
+    StencilOpState, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu,
     VkShaderModule, VkSwapchain,
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
@@ -431,7 +431,7 @@ impl DeferredRenderingPipeline {
         camera_location: &Point3<f32>,
         render_context: &mut RenderPassContext,
         skybox_mesh: &Mesh,
-        skybox_texture: &Texture,
+        _skybox_texture: &Texture,
         skybox_material: &MaterialInstance,
         skybox_master: &MasterMaterial,
     ) {

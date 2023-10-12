@@ -9,7 +9,7 @@ use std::num::NonZeroU32;
 use app::{bootstrap, App};
 
 use fps_camera::FpsCamera;
-use gpu::{ImageFormat, ImageViewType, PresentMode, VkCommandBuffer};
+use gpu::{PresentMode, VkCommandBuffer};
 use imgui::{TreeNodeFlags, Ui};
 use input::InputState;
 use winit::dpi::{PhysicalPosition, Position};
@@ -17,8 +17,8 @@ use winit::dpi::{PhysicalPosition, Position};
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use crate::input::key::Key;
 use engine::{
-    AppState, Backbuffer, DeferredRenderingPipeline, Light, LightHandle, LightType, MasterMaterial,
-    RenderingPipeline, ShadowSetup, Texture,
+    AppState, Backbuffer, DeferredRenderingPipeline, Light, LightHandle, LightType,
+    RenderingPipeline, ShadowSetup,
 };
 use nalgebra::*;
 use resource_map::ResourceMap;
