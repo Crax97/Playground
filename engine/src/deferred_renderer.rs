@@ -15,9 +15,10 @@ use crate::{
 use gpu::{
     AttachmentStoreOp, BindingType, BlendMode, BlendOp, BlendState, BufferCreateInfo,
     BufferUsageFlags, ColorComponentFlags, ColorLoadOp, CompareOp, DepthStencilState, Extent2D,
-    FragmentStageInfo, ImageFormat, ImageLayout, IndexType, MemoryDomain, PushConstantRange,
-    RenderPassAttachment, SampleCount, ShaderModuleCreateInfo, ShaderStage, StencilLoadOp,
-    StencilOpState, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu, VkShaderModule, VkSwapchain, FrontFace,
+    FragmentStageInfo, ImageFormat, ImageLayout, IndexType, MemoryDomain,
+    PushConstantRange, RenderPassAttachment, SampleCount, ShaderModuleCreateInfo, ShaderStage,
+    StencilLoadOp, StencilOpState, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu,
+    VkShaderModule, VkSwapchain,
 };
 use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -945,6 +946,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         //#region context setup
         context.register_callback(&dbuffer_pass, |_: &VkGpu, ctx| {
+            ctx.render_pass_command.set_cull_mode(gpu::CullMode::Back);
             Self::main_render_loop(
                 resource_map,
                 PipelineTarget::DepthOnly,
@@ -959,6 +961,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 self.depth_bias_clamp,
                 self.depth_bias_slope,
             );
+
+            ctx.render_pass_command.set_cull_mode(gpu::CullMode::Front);
             for (i, pov) in per_frame_data.iter().enumerate().skip(1) {
                 ctx.render_pass_command.set_viewport(gpu::Viewport {
                     x: pov.viewport_size_offset.x,
@@ -968,8 +972,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     min_depth: 0.0,
                     max_depth: 1.0,
                 });
-
-                ctx.render_pass_command.set_front_face(FrontFace::ClockWise);
 
                 Self::main_render_loop(
                     resource_map,
