@@ -9,7 +9,7 @@ use std::num::NonZeroU32;
 use app::{bootstrap, App};
 
 use fps_camera::FpsCamera;
-use gpu::{PresentMode, VkCommandBuffer};
+use gpu::{ImageFormat, ImageViewType, PresentMode, VkCommandBuffer};
 use imgui::{TreeNodeFlags, Ui};
 use input::InputState;
 use winit::dpi::{PhysicalPosition, Position};
@@ -17,8 +17,8 @@ use winit::dpi::{PhysicalPosition, Position};
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use crate::input::key::Key;
 use engine::{
-    AppState, Backbuffer, DeferredRenderingPipeline, Light, LightHandle, LightType,
-    RenderingPipeline, ShadowSetup,
+    AppState, Backbuffer, DeferredRenderingPipeline, Light, LightHandle, LightType, MasterMaterial,
+    RenderingPipeline, ShadowSetup, Texture,
 };
 use nalgebra::*;
 use resource_map::ResourceMap;
@@ -222,12 +222,15 @@ impl App for GLTFViewer {
         let tonemap_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/tonemap.spirv")?;
 
+        let cube_mesh = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
+
         let mut scene_renderer = DeferredRenderingPipeline::new(
             &app_state.gpu,
             screen_quad_module,
             gbuffer_combine_module,
             texture_copy_module,
             tonemap_module,
+            cube_mesh,
         )?;
 
         let gltf_loader = GltfLoader::load(

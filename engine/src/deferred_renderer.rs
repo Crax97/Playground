@@ -7,20 +7,20 @@ use crate::{
     material::{MasterMaterial, MasterMaterialDescription},
     Backbuffer, BufferDescription, BufferType, ClearValue, FragmentState, GpuRunner,
     GraphRunContext, Image2DInfo, ImageDescription, ImageViewDescription, Light, LightType,
-    MaterialDescription, MaterialDomain, MaterialInstance, MeshPrimitive, ModuleInfo,
+    MaterialDescription, MaterialDomain, MaterialInstance, Mesh, MeshPrimitive, ModuleInfo,
     PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage,
-    RenderingPipeline, SamplerState, Scene,
+    RenderingPipeline, SamplerState, Scene, Texture,
 };
 
 use gpu::{
     AttachmentStoreOp, BindingType, BlendMode, BlendOp, BlendState, BufferCreateInfo,
     BufferUsageFlags, ColorComponentFlags, ColorLoadOp, CompareOp, DepthStencilState, Extent2D,
-    FragmentStageInfo, ImageFormat, ImageLayout, IndexType, MemoryDomain,
-    PushConstantRange, RenderPassAttachment, SampleCount, ShaderModuleCreateInfo, ShaderStage,
-    StencilLoadOp, StencilOpState, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu,
+    FragmentStageInfo, ImageFormat, ImageLayout, IndexType, MemoryDomain, PushConstantRange,
+    RenderPassAttachment, SampleCount, ShaderModuleCreateInfo, ShaderStage, StencilLoadOp,
+    StencilOpState, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu, VkRenderPassCommand,
     VkShaderModule, VkSwapchain,
 };
-use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
+use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
 
 const FXAA_FS: &[u32] = glsl!(
@@ -172,6 +172,8 @@ pub struct DeferredRenderingPipeline {
     active_lights: Vec<GpuLightInfo>,
     light_povs: Vec<PerFrameData>,
 
+    cube_mesh: ResourceHandle<Mesh>,
+
     pub depth_bias_constant: f32,
     pub depth_bias_clamp: f32,
     pub depth_bias_slope: f32,
@@ -187,6 +189,7 @@ impl DeferredRenderingPipeline {
         gbuffer_combine: VkShaderModule,
         texture_copy: VkShaderModule,
         tonemap_fs: VkShaderModule,
+        cube_mesh: ResourceHandle<Mesh>,
     ) -> anyhow::Result<Self> {
         let mut frame_buffers = vec![];
         for _ in 0..VkSwapchain::MAX_FRAMES_IN_FLIGHT {
@@ -252,6 +255,7 @@ impl DeferredRenderingPipeline {
             ambient_intensity: 0.3,
             active_lights: vec![],
             light_povs: vec![],
+            cube_mesh,
         })
     }
 
@@ -421,6 +425,75 @@ impl DeferredRenderingPipeline {
             }
             self.active_lights.push(gpu_light);
         }
+    }
+
+    fn draw_skybox(
+        camera_location: &Point3<f32>,
+        render_context: &mut RenderPassContext,
+        skybox_mesh: &Mesh,
+        skybox_texture: &Texture,
+        skybox_material: &MaterialInstance,
+        skybox_master: &MasterMaterial,
+    ) {
+        const SKYBOX_SCALE: f32 = 1000.0;
+        let pipeline = skybox_master
+            .get_pipeline(PipelineTarget::ColorAndDepth)
+            .expect("failed to fetch pipeline {pipeline_target:?}");
+        render_context.render_pass_command.bind_pipeline(pipeline);
+        render_context.render_pass_command.bind_descriptor_sets(
+            pipeline,
+            0,
+            &[render_context
+                .read_descriptor_set
+                .expect("No descriptor set???")],
+        );
+
+        let skybox_label = render_context.render_pass_command.begin_debug_region(
+            &format!(
+                "Rendering scene skybox with material {} ",
+                skybox_material.name,
+            ),
+            [0.0, 0.3, 0.4, 1.0],
+        );
+        render_context.render_pass_command.bind_descriptor_sets(
+            pipeline,
+            1,
+            &[&skybox_material.user_descriptor_set],
+        );
+        render_context.render_pass_command.bind_index_buffer(
+            &skybox_mesh.primitives[0].index_buffer,
+            0,
+            IndexType::Uint32,
+        );
+        render_context.render_pass_command.bind_vertex_buffer(
+            0,
+            &[
+                &skybox_mesh.primitives[0].position_component,
+                &skybox_mesh.primitives[0].color_component,
+                &skybox_mesh.primitives[0].normal_component,
+                &skybox_mesh.primitives[0].tangent_component,
+                &skybox_mesh.primitives[0].uv_component,
+            ],
+            &[0, 0, 0, 0, 0],
+        );
+        render_context.render_pass_command.push_constant(
+            pipeline,
+            &ObjectDrawInfo {
+                model: Matrix4::new_scaling(SKYBOX_SCALE)
+                    * Matrix4::new_translation(&camera_location.coords),
+                camera_index: 0,
+            },
+            0,
+        );
+        render_context.render_pass_command.draw_indexed(
+            skybox_mesh.primitives[0].index_count,
+            1,
+            0,
+            0,
+            0,
+        );
+
+        skybox_label.end();
     }
 }
 
@@ -944,9 +1017,33 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             crate::app_state().time().frames_since_start(),
         );
 
+        let skybox_setup = match (
+            scene.get_skybox_material(),
+            scene.get_skybox_texture_handle(),
+        ) {
+            (Some(material), Some(texture)) => {
+                Some((resource_map.get(material), resource_map.get(texture)))
+            }
+
+            _ => None,
+        };
+
         //#region context setup
         context.register_callback(&dbuffer_pass, |_: &VkGpu, ctx| {
             ctx.render_pass_command.set_cull_mode(gpu::CullMode::Back);
+
+            if let Some((material, texture)) = skybox_setup {
+                let cube_mesh = resource_map.get(&self.cube_mesh);
+                let skybox_master = resource_map.get(&material.owner);
+                Self::draw_skybox(
+                    &pov.location,
+                    ctx,
+                    cube_mesh,
+                    texture,
+                    material,
+                    skybox_master,
+                );
+            }
             Self::main_render_loop(
                 resource_map,
                 PipelineTarget::DepthOnly,

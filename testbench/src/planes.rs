@@ -75,6 +75,8 @@ impl App for PlanesApp {
         let fragment_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/fragment_deferred.spirv")?;
 
+        let cube = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
+
         let mesh_data = MeshCreateInfo {
             label: Some("Quad mesh"),
             primitives: &[MeshPrimitiveCreateInfo {
@@ -140,6 +142,7 @@ impl App for PlanesApp {
             gbuffer_combine_module,
             texture_copy_module,
             tonemap_module,
+            cube.clone(),
         )?;
 
         let master = scene_renderer.create_material(
@@ -189,9 +192,24 @@ impl App for PlanesApp {
         });
         scene.add(ScenePrimitive {
             mesh,
-            materials: vec![mat_instance],
+            materials: vec![mat_instance.clone()],
             transform: Matrix4::new_translation(&vector![0.0, 0.0, -1.0]),
         });
+
+        scene.add(ScenePrimitive {
+            mesh: cube.clone(),
+            materials: vec![mat_instance.clone()],
+            transform: Matrix4::new_scaling(1.0)
+                * Matrix4::new_translation(&vector![1.5, 0.0, 0.0]),
+        });
+
+        scene.add(ScenePrimitive {
+            mesh: cube,
+            materials: vec![mat_instance],
+            transform: Matrix4::new_translation(&vector![-1.5, 0.0, 0.0])
+                * Matrix4::new_scaling(-1.0),
+        });
+
         Ok(Self {
             resource_map,
             camera,
@@ -246,8 +264,7 @@ impl App for PlanesApp {
     fn update(&mut self, _app_state: &mut engine::AppState, _ui: &mut Ui) -> anyhow::Result<()> {
         if self.rotation_movement > 0.0 {
             self.rot_z += self.movement.y;
-            self.rot_z = self.rot_z.clamp(-89.0, 89.0);
-            self.rot_x += self.movement.x;
+            self.rot_z = self.rot_z.clamp(-180.0, 180.0);
         } else {
             self.dist += self.movement.y * self.forward_movement * SPEED;
         }
@@ -260,7 +277,7 @@ impl App for PlanesApp {
             -self.rot_z.to_radians(),
         );
         let new_forward = new_forward.to_homogeneous();
-        let new_forward = new_forward.column(0);
+        let new_forward = new_forward.column(2);
 
         let direction = vector![new_forward[0], new_forward[1], new_forward[2]];
         let new_position = direction * self.dist;

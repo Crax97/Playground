@@ -11,7 +11,7 @@ struct PerFrameData {
     projection: nalgebra::Matrix4<f32>,
 }
 
-use crate::{mesh::Mesh, Camera, MasterMaterial, MaterialDescription, MaterialInstance};
+use crate::{mesh::Mesh, Camera, MasterMaterial, MaterialDescription, MaterialInstance, Texture};
 
 #[derive(Clone)]
 pub struct ScenePrimitive {
@@ -176,12 +176,23 @@ pub struct LightHandle(pub usize);
 pub struct Scene {
     pub primitives: Vec<ScenePrimitive>,
     pub lights: Vec<Light>,
+
+    skybox_material: Option<ResourceHandle<MaterialInstance>>,
+    skybox_texture: Option<ResourceHandle<Texture>>,
     current_lights_iteration: u64,
 }
 
 impl Scene {
     fn increment_light_counter(&mut self) {
         self.current_lights_iteration = self.current_lights_iteration.wrapping_add(1);
+    }
+
+    pub fn get_skybox_texture_handle(&self) -> &Option<ResourceHandle<Texture>> {
+        &self.skybox_texture
+    }
+
+    pub fn get_skybox_material(&self) -> &Option<ResourceHandle<MaterialInstance>> {
+        &self.skybox_material
     }
 }
 
@@ -191,6 +202,9 @@ impl Scene {
             primitives: vec![],
             lights: vec![],
             current_lights_iteration: 0,
+
+            skybox_texture: None,
+            skybox_material: None,
         }
     }
 
@@ -240,6 +254,17 @@ impl Scene {
          * notify that the lights in the scene have changed.
          * */
         self.current_lights_iteration
+    }
+
+    pub fn set_skybox_texture(&mut self, new_skybox_texture: Option<ResourceHandle<Texture>>) {
+        self.skybox_texture = new_skybox_texture;
+    }
+
+    pub fn set_skybox_material(
+        &mut self,
+        new_skybox_material: Option<ResourceHandle<MaterialInstance>>,
+    ) {
+        self.skybox_material = new_skybox_material;
     }
 }
 
