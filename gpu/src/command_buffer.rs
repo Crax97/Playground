@@ -33,6 +33,7 @@ where
     command_buffer: &'c mut VkCommandBuffer<'g>,
     viewport_area: Option<Viewport>,
     scissor_area: Option<Rect2D>,
+    front_face: FrontFace,
     has_draw_command: bool,
     render_area: Rect2D,
     depth_bias_setup: Option<(f32, f32, f32)>,
@@ -477,6 +478,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             has_draw_command: false,
             viewport_area: None,
             scissor_area: None,
+            front_face: FrontFace::default(),
             render_area: info.render_area,
             depth_bias_setup: None,
         }
@@ -585,6 +587,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             );
             device.cmd_set_viewport(self.command_buffer.inner(), 0, &[viewport.to_vk()]);
             device.cmd_set_scissor(self.command_buffer.inner(), 0, &[scissor.to_vk()]);
+            device.cmd_set_front_face(self.command_buffer.inner(), self.front_face.to_vk());
         }
     }
 
@@ -621,6 +624,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         offset: u32,
     ) {
         inner::push_constant(self, pipeline, data, offset)
+    }
+
+    pub fn set_front_face(&mut self, front_face: FrontFace) {
+        self.front_face = front_face;
     }
 }
 

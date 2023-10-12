@@ -17,7 +17,7 @@ use gpu::{
     BufferUsageFlags, ColorComponentFlags, ColorLoadOp, CompareOp, DepthStencilState, Extent2D,
     FragmentStageInfo, ImageFormat, ImageLayout, IndexType, MemoryDomain, PushConstantRange,
     RenderPassAttachment, SampleCount, ShaderModuleCreateInfo, ShaderStage, StencilLoadOp,
-    StencilOpState, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu, VkShaderModule, VkSwapchain,
+    StencilOpState, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu, VkShaderModule, VkSwapchain, FrontFace,
 };
 use nalgebra::{vector, Matrix4, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -968,6 +968,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     min_depth: 0.0,
                     max_depth: 1.0,
                 });
+
+                ctx.render_pass_command.set_front_face(FrontFace::ClockWise);
 
                 Self::main_render_loop(
                     resource_map,

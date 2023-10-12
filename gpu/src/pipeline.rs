@@ -517,6 +517,7 @@ impl VkGraphicsPipeline {
             let dynamic_state_flags = [
                 DynamicState::VIEWPORT,
                 DynamicState::SCISSOR,
+                DynamicState::FRONT_FACE,
                 DynamicState::DEPTH_BIAS,
                 DynamicState::DEPTH_BIAS_ENABLE,
             ];
