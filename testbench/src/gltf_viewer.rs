@@ -232,7 +232,7 @@ impl App for GLTFViewer {
 
         let david_texture = utils::load_cubemap_from_path(
             &app_state.gpu,
-            "./images/skybox/yokohama/",
+            "./images/skybox/forest/",
             ".jpg",
             ImageFormat::Rgba8,
             &mut resource_map,

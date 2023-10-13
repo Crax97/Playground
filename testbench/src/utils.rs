@@ -46,7 +46,7 @@ pub fn load_cubemap_from_path<P: AsRef<Path>>(
     target_format: ImageFormat,
     resource_map: &mut resource_map::ResourceMap,
 ) -> anyhow::Result<Texture> {
-    let images = ["left", "right", "up", "down", "front", "back"];
+    let images = ["posx", "negx", "posy", "negy", "posz", "negz"];
 
     let mut loaded_images = vec![];
 
