@@ -27,6 +27,7 @@ void main() {
     frag_out.color = in_color;
     frag_out.uv = in_uv;
     frag_out.position = world_pos.xyz;
+    frag_out.vert_position = in_position;
     frag_out.normal = in_normal;
     frag_out.model = pod.model;
     frag_out.tangent = in_tangent;

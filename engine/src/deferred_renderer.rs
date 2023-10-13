@@ -78,6 +78,7 @@ impl Default for FxaaSettings {
 #[derive(Clone, Copy)]
 struct PerFrameData {
     eye: Point4<f32>,
+    eye_forward: Vector4<f32>,
     view: nalgebra::Matrix4<f32>,
     projection: nalgebra::Matrix4<f32>,
     viewport_size_offset: Vector4<f32>,
@@ -408,6 +409,7 @@ impl DeferredRenderingPipeline {
                             active_light.position.z,
                             0.0,
                         ),
+                        eye_forward: gpu_light.direction,
                         view: pov,
                         projection: active_light.projection_matrix(),
                         viewport_size_offset: vector![
@@ -526,6 +528,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let mut per_frame_data = vec![PerFrameData {
             eye: Point4::new(pov.location[0], pov.location[1], pov.location[2], 0.0),
+            eye_forward: vector![pov.forward.x, pov.forward.y, pov.forward.z, 0.0],
             view: pov.view(),
             projection,
             viewport_size_offset: vector![
