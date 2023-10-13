@@ -509,6 +509,7 @@ impl VkGraphicsPipeline {
                 DynamicState::CULL_MODE,
                 DynamicState::DEPTH_BIAS,
                 DynamicState::DEPTH_BIAS_ENABLE,
+                DynamicState::DEPTH_TEST_ENABLE,
             ];
 
             let dynamic_state = PipelineDynamicStateCreateInfo {

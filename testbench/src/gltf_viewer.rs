@@ -4,6 +4,8 @@ mod gltf_loader;
 mod input;
 mod utils;
 
+use std::collections::HashMap;
+use std::io::BufReader;
 use std::num::NonZeroU32;
 
 use app::{bootstrap, App};
@@ -18,7 +20,7 @@ use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use crate::input::key::Key;
 use engine::{
     AppState, Backbuffer, DeferredRenderingPipeline, Light, LightHandle, LightType,
-    RenderingPipeline, ShadowSetup,
+    MaterialInstance, RenderingPipeline, ShadowSetup, Texture, TextureInput,
 };
 use nalgebra::*;
 use resource_map::ResourceMap;
@@ -213,6 +215,18 @@ impl App for GLTFViewer {
 
         let mut resource_map = ResourceMap::new();
 
+        let david_image = image::load(
+            BufReader::new(std::fs::File::open("images/texture.jpg")?),
+            image::ImageFormat::Jpeg,
+        )?;
+        let david_image = david_image.into_rgba8();
+
+        // TODO: avoid duplicating this module creation
+        let vertex_module =
+            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/vertex_deferred.spirv")?;
+        let skybox_fragment =
+            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/skybox_master.spirv")?;
+
         let screen_quad_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/screen_quad.spirv")?;
         let gbuffer_combine_module =
@@ -221,6 +235,16 @@ impl App for GLTFViewer {
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/texture_copy.spirv")?;
         let tonemap_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/tonemap.spirv")?;
+
+        let david_texture = Texture::new_with_data(
+            &app_state.gpu,
+            &mut resource_map,
+            david_image.width(),
+            david_image.height(),
+            &david_image,
+            Some("david"),
+        )?;
+        let david_texture = resource_map.add(david_texture);
 
         let cube_mesh = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
 
@@ -233,13 +257,47 @@ impl App for GLTFViewer {
             cube_mesh,
         )?;
 
-        let gltf_loader = GltfLoader::load(
+        let skybox_material = scene_renderer.create_material(
+            &app_state.gpu,
+            engine::MaterialDescription {
+                name: "skybox material",
+                domain: engine::MaterialDomain::Surface,
+                texture_inputs: &[TextureInput {
+                    name: "Cubemap".to_owned(),
+                    format: gpu::ImageFormat::Rgba8,
+                }],
+                material_parameters: HashMap::new(),
+                fragment_module: &skybox_fragment,
+                vertex_module: &vertex_module,
+            },
+        )?;
+        let skybox_master = resource_map.add(skybox_material);
+
+        let mut skybox_textures = HashMap::new();
+        skybox_textures.insert("Cubemap".to_string(), david_texture);
+
+        let skybox_instance = MaterialInstance::create_instance(
+            &app_state.gpu,
+            skybox_master,
+            &resource_map,
+            &engine::MaterialInstanceDescription {
+                name: "david skybox",
+                texture_inputs: skybox_textures,
+            },
+        )?;
+        let skybox_instance = resource_map.add(skybox_instance);
+
+        let mut gltf_loader = GltfLoader::load(
             &args.gltf_file,
             &app_state.gpu,
             &mut scene_renderer,
             &mut resource_map,
             GltfLoadOptions {},
         )?;
+
+        gltf_loader
+            .scene_mut()
+            .set_skybox_material(Some(skybox_instance));
 
         engine::app_state_mut()
             .swapchain_mut()

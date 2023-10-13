@@ -9,7 +9,7 @@ use crate::{
     GraphRunContext, Image2DInfo, ImageDescription, ImageViewDescription, Light, LightType,
     MaterialDescription, MaterialDomain, MaterialInstance, Mesh, MeshPrimitive, ModuleInfo,
     PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage,
-    RenderingPipeline, SamplerState, Scene, Texture,
+    RenderingPipeline, SamplerState, Scene,
 };
 
 use gpu::{
@@ -17,8 +17,7 @@ use gpu::{
     BufferUsageFlags, ColorComponentFlags, ColorLoadOp, CompareOp, DepthStencilState, Extent2D,
     FragmentStageInfo, ImageFormat, ImageLayout, IndexType, MemoryDomain, PushConstantRange,
     RenderPassAttachment, SampleCount, ShaderModuleCreateInfo, ShaderStage, StencilLoadOp,
-    StencilOpState, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu,
-    VkShaderModule, VkSwapchain,
+    StencilOpState, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu, VkShaderModule, VkSwapchain,
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -431,11 +430,16 @@ impl DeferredRenderingPipeline {
         camera_location: &Point3<f32>,
         render_context: &mut RenderPassContext,
         skybox_mesh: &Mesh,
-        _skybox_texture: &Texture,
         skybox_material: &MaterialInstance,
         skybox_master: &MasterMaterial,
     ) {
-        const SKYBOX_SCALE: f32 = 1000.0;
+        render_context
+            .render_pass_command
+            .set_enable_depth_test(false);
+        render_context
+            .render_pass_command
+            .set_cull_mode(gpu::CullMode::Front);
+        const SKYBOX_SCALE: f32 = 1.0;
         let pipeline = skybox_master
             .get_pipeline(PipelineTarget::ColorAndDepth)
             .expect("failed to fetch pipeline {pipeline_target:?}");
@@ -479,8 +483,8 @@ impl DeferredRenderingPipeline {
         render_context.render_pass_command.push_constant(
             pipeline,
             &ObjectDrawInfo {
-                model: Matrix4::new_scaling(SKYBOX_SCALE)
-                    * Matrix4::new_translation(&camera_location.coords),
+                model: Matrix4::new_translation(&camera_location.coords)
+                    * Matrix4::new_scaling(SKYBOX_SCALE),
                 camera_index: 0,
             },
             0,
@@ -492,8 +496,13 @@ impl DeferredRenderingPipeline {
             0,
             0,
         );
-
         skybox_label.end();
+        render_context
+            .render_pass_command
+            .set_enable_depth_test(true);
+        render_context
+            .render_pass_command
+            .set_cull_mode(gpu::CullMode::Back);
     }
 }
 
@@ -1017,13 +1026,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             crate::app_state().time().frames_since_start(),
         );
 
-        let skybox_setup = match (
-            scene.get_skybox_material(),
-            scene.get_skybox_texture_handle(),
-        ) {
-            (Some(material), Some(texture)) => {
-                Some((resource_map.get(material), resource_map.get(texture)))
-            }
+        let skybox_material = match scene.get_skybox_material() {
+            Some(material) => Some(resource_map.get(material)),
 
             _ => None,
         };
@@ -1032,18 +1036,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         context.register_callback(&dbuffer_pass, |_: &VkGpu, ctx| {
             ctx.render_pass_command.set_cull_mode(gpu::CullMode::Back);
 
-            if let Some((material, texture)) = skybox_setup {
-                let cube_mesh = resource_map.get(&self.cube_mesh);
-                let skybox_master = resource_map.get(&material.owner);
-                Self::draw_skybox(
-                    &pov.location,
-                    ctx,
-                    cube_mesh,
-                    texture,
-                    material,
-                    skybox_master,
-                );
-            }
             Self::main_render_loop(
                 resource_map,
                 PipelineTarget::DepthOnly,
@@ -1080,6 +1072,11 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             }
         });
         context.register_callback(&gbuffer_pass, |_: &VkGpu, ctx| {
+            if let Some(material) = skybox_material {
+                let cube_mesh = resource_map.get(&self.cube_mesh);
+                let skybox_master = resource_map.get(&material.owner);
+                Self::draw_skybox(&pov.location, ctx, cube_mesh, material, skybox_master);
+            }
             Self::main_render_loop(
                 resource_map,
                 PipelineTarget::ColorAndDepth,

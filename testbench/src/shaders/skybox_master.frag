@@ -15,7 +15,7 @@ layout(set = 0, binding = 0) readonly buffer PerFrameDataBlock {
     PointOfView pfd[];
 } per_frame_data;
 
-layout(set = 1, binding = 0) uniform samplerCube baseColorSampler;
+layout(set = 1, binding = 0) uniform sampler2D baseColorSampler;
 
 layout(location = 0) out vec4 outPosition;
 layout(location = 1) out vec4 outNormal;
@@ -28,7 +28,8 @@ layout(location = 0) in FragmentOut fragOut;
 void main() {
     outPosition = vec4(fragOut.position, 1.0);
     outNormal = vec4(fragOut.normal, 1.0);
-    outDiffuse = texture(baseColorSampler, per_frame_data.pfd[0].eye.xyz);
+    outDiffuse = texture(baseColorSampler, fragOut.uv);
+    //outDiffuse = texture(baseColorSampler, per_frame_data.pfd[0].eye.xyz);
     outEmissive = vec4(0.0);
     outPbr = vec4(0.0);
 }
