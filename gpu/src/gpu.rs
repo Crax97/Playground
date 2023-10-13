@@ -35,10 +35,10 @@ use crate::{
     get_allocation_callbacks, BufferCreateInfo, CommandBufferSubmitInfo, CommandPoolCreateFlags,
     CommandPoolCreateInfo, ComputePipelineDescription, Extent2D, FramebufferCreateInfo, GPUFence,
     GpuConfiguration, GraphicsPipelineDescription, ImageAspectFlags, ImageCreateInfo, ImageFormat,
-    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
-    PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPassDescription, SamplerCreateInfo,
-    ShaderModuleCreateInfo, ToVk, TransitionInfo, VkCommandBuffer, VkCommandPool,
-    VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
+    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, Offset2D,
+    Offset3D, PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPassDescription,
+    SamplerCreateInfo, ShaderModuleCreateInfo, ToVk, TransitionInfo, VkCommandBuffer,
+    VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
     VkShaderModule,
 };
 
@@ -1090,8 +1090,6 @@ impl VkGpu {
     }
 
     pub fn write_image_data(&self, image: &VkImage, data: &[u8]) -> VkResult<()> {
-        self.staging_buffer.write_data(0, data);
-
         self.transition_image_layout(
             image,
             TransitionInfo {
@@ -1107,12 +1105,44 @@ impl VkGpu {
             ImageAspectFlags::COLOR,
         )?;
 
-        self.copy_buffer_to_image(
-            &self.staging_buffer,
-            image,
-            image.extents.width,
-            image.extents.height,
-        )?;
+        let width = image.extents.width;
+        let height = image.extents.height;
+
+        if data.len() < self.staging_buffer.size() {
+            self.staging_buffer.write_data(0, &data);
+            self.copy_buffer_to_image(&self.staging_buffer, image, width, height)?;
+        } else {
+            let intermediary_buffer = self.create_buffer(
+                &BufferCreateInfo {
+                    label: None,
+                    size: data.len(),
+                    usage: crate::BufferUsageFlags::TRANSFER_DST
+                        | crate::BufferUsageFlags::TRANSFER_SRC,
+                },
+                MemoryDomain::DeviceLocal,
+            )?;
+            let mut written = 0;
+            while written < data.len() {
+                let remain = data.len() - written;
+                let written_this_iteration = if remain > self.staging_buffer.size() {
+                    self.staging_buffer.size()
+                } else {
+                    remain
+                };
+                self.staging_buffer
+                    .write_data(0, &data[written..written + written_this_iteration]);
+                self.copy_buffer(
+                    &self.staging_buffer,
+                    &intermediary_buffer,
+                    written as _,
+                    written_this_iteration,
+                )?;
+
+                written += written_this_iteration;
+            }
+            self.copy_buffer_to_image(&intermediary_buffer, image, width, height)?;
+        }
+
         self.transition_image_layout(
             image,
             TransitionInfo {
@@ -1145,7 +1175,11 @@ impl VkGpu {
             let create_info = vk::ImageCreateInfo {
                 s_type: StructureType::IMAGE_CREATE_INFO,
                 p_next: std::ptr::null(),
-                flags: ImageCreateFlags::empty(),
+                flags: if create_info.layers == 6 {
+                    ImageCreateFlags::CUBE_COMPATIBLE
+                } else {
+                    ImageCreateFlags::empty()
+                },
                 image_type: ImageType::TYPE_2D,
                 format: format.to_vk(),
                 extent: Extent3D {
@@ -1200,9 +1234,11 @@ impl VkGpu {
                 height: create_info.height,
             },
             format.into(),
+            create_info.layers,
         )?;
 
         if let Some(data) = data {
+            assert!(data.len() > 0);
             if create_info.format == ImageFormat::Rgb8 && !self.state.features.supports_rgb_images {
                 let mut rgba_data = vec![];
                 let rgba_size = create_info.width * create_info.height * 4;
@@ -1214,9 +1250,9 @@ impl VkGpu {
                     rgba_data.push(255);
                 }
 
-                self.write_image_data(&image, &rgba_data)?
+                self.write_image_data(&image, &rgba_data)?;
             } else {
-                self.write_image_data(&image, data)?
+                self.write_image_data(&image, &data)?;
             }
         }
 
@@ -1340,7 +1376,7 @@ impl VkGpu {
                 base_mip_level: 0,
                 level_count: 1,
                 base_array_layer: 0,
-                layer_count: 1,
+                layer_count: image.layers(),
             },
         };
         command_buffer.pipeline_barrier(&PipelineBarrierInfo {

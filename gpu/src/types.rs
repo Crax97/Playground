@@ -700,6 +700,10 @@ impl VkBuffer {
             allocator,
         })
     }
+
+    pub(crate) fn size(&self) -> usize {
+        self.allocation.size as _
+    }
 }
 impl Drop for VkBuffer {
     fn drop(&mut self) {
@@ -770,6 +774,7 @@ pub struct VkImage {
     pub(super) allocator: Option<Arc<RefCell<dyn GpuAllocator>>>,
     pub(super) extents: Extent2D,
     pub(super) format: ImageFormat,
+    layers: u32,
 }
 impl VkImage {
     pub(super) fn create(
@@ -779,6 +784,7 @@ impl VkImage {
         allocator: Arc<RefCell<dyn GpuAllocator>>,
         extents: Extent2D,
         format: ImageFormat,
+        layers: u32,
     ) -> VkResult<Self> {
         Ok(Self {
             device: gpu.state.logical_device.clone(),
@@ -787,6 +793,7 @@ impl VkImage {
             allocator: Some(allocator),
             extents,
             format,
+            layers,
         })
     }
 
@@ -803,6 +810,7 @@ impl VkImage {
             allocator: None,
             extents,
             format,
+            layers: 1,
         }
     }
 
@@ -812,6 +820,10 @@ impl VkImage {
 
     pub fn extents(&self) -> Extent2D {
         self.extents
+    }
+
+    pub(crate) fn layers(&self) -> u32 {
+        self.layers
     }
 }
 impl Drop for VkImage {
@@ -960,6 +972,30 @@ impl ToVk for Rect2D {
         Self::Inner {
             offset: self.offset.to_vk(),
             extent: self.extent.to_vk(),
+        }
+    }
+}
+
+impl ToVk for Offset3D {
+    type Inner = vk::Offset3D;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            x: self.x,
+            y: self.y,
+            z: self.z,
+        }
+    }
+}
+
+impl ToVk for Extent3D {
+    type Inner = vk::Extent3D;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            width: self.width,
+            height: self.height,
+            depth: self.depth,
         }
     }
 }

@@ -215,12 +215,6 @@ impl App for GLTFViewer {
 
         let mut resource_map = ResourceMap::new();
 
-        let david_image = image::load(
-            BufReader::new(std::fs::File::open("images/texture.jpg")?),
-            image::ImageFormat::Jpeg,
-        )?;
-        let david_image = david_image.into_rgba8();
-
         // TODO: avoid duplicating this module creation
         let vertex_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/vertex_deferred.spirv")?;
@@ -236,15 +230,12 @@ impl App for GLTFViewer {
         let tonemap_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/tonemap.spirv")?;
 
-        let david_texture = Texture::new_with_data(
+        let david_texture = utils::load_cubemap_from_path(
             &app_state.gpu,
-            &mut resource_map,
-            david_image.width(),
-            david_image.height(),
-            &david_image,
-            Some("david"),
+            "./images/skybox/yokohama/",
+            ".jpg",
             ImageFormat::Rgba8,
-            ImageViewType::Type2D,
+            &mut resource_map,
         )?;
         let david_texture = resource_map.add(david_texture);
 

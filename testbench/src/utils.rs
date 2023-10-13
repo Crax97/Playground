@@ -1,9 +1,11 @@
-use engine::{Mesh, MeshPrimitiveCreateInfo};
-use log::info;
+use anyhow::bail;
+use engine::{Mesh, MeshPrimitiveCreateInfo, Texture};
+use image::DynamicImage;
+use log::{debug, info};
 use nalgebra::vector;
 use std::path::Path;
 
-use gpu::{ShaderModuleCreateInfo, VkGpu, VkShaderModule};
+use gpu::{ImageFormat, ShaderModuleCreateInfo, VkGpu, VkShaderModule};
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
     gpu: &VkGpu,
@@ -18,6 +20,70 @@ pub fn read_file_to_vk_module<P: AsRef<Path>>(
     let input_file = std::fs::read(path)?;
     let create_info = ShaderModuleCreateInfo { code: &input_file };
     Ok(gpu.create_shader_module(&create_info)?)
+}
+
+pub fn load_image_from_path<P: AsRef<Path>>(
+    path: P,
+    target_format: ImageFormat,
+) -> anyhow::Result<DynamicImage> {
+    let image_data = std::fs::read(path)?;
+    let image = image::load_from_memory(&image_data)?;
+    Ok(match target_format {
+        ImageFormat::Rgba8 => DynamicImage::ImageRgba8(image.to_rgba8()),
+        ImageFormat::Rgb8 => DynamicImage::ImageRgb8(image.to_rgb8()),
+        ImageFormat::RgbaFloat32 => DynamicImage::ImageRgba32F(image.to_rgba32f()),
+        _ => anyhow::bail!(format!("Format not supported: {target_format:?}")),
+    })
+}
+
+// Loads 6 images from a folders and turns them into a cubemap texture
+// Searches for "left", "right", "up", "down", "front", "back" in the path
+pub fn load_cubemap_from_path<P: AsRef<Path>>(
+    gpu: &VkGpu,
+    path: P,
+    extension: &str,
+    target_format: ImageFormat,
+    resource_map: &mut resource_map::ResourceMap,
+) -> anyhow::Result<Texture> {
+    let images = ["left", "right", "up", "down", "front", "back"];
+
+    let mut loaded_images = vec![];
+
+    for image in images {
+        let path = path.as_ref().join(image.to_string() + extension);
+        debug!("Loading cubemap image {:?}", &path);
+        let dyn_image = load_image_from_path(path, target_format)?;
+        loaded_images.push(dyn_image);
+    }
+
+    let width = loaded_images[0].width();
+    let height = loaded_images[1].width();
+
+    let mut accumulated_bytes = vec![];
+
+    for image in loaded_images {
+        if image.width() != width || image.height() != height {
+            bail!(format!(
+                "Images aren't of the same size! Found {}x{}, expected {}x{}",
+                image.width(),
+                image.height(),
+                width,
+                height
+            ));
+        }
+        accumulated_bytes.extend(image.into_bytes());
+    }
+
+    Texture::new_with_data(
+        gpu,
+        resource_map,
+        width,
+        height,
+        &accumulated_bytes,
+        Some("Cubemap"),
+        target_format,
+        gpu::ImageViewType::Cube,
+    )
 }
 
 pub fn load_cube_to_resource_map(
