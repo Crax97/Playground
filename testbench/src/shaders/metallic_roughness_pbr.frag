@@ -4,7 +4,7 @@
 
 struct PbrProperties {
     vec4 baseColor;
-    
+
     // x: metallic, y: roughness
     vec4 metallicRoughness;
     vec3 emissiveFactor;
@@ -15,9 +15,9 @@ layout(set = 1, binding = 1) uniform sampler2D normalSampler;
 layout(set = 1, binding = 2) uniform sampler2D occlusionSampler;
 layout(set = 1, binding = 3) uniform sampler2D emissiveSampler;
 layout(set = 1, binding = 4) uniform sampler2D metallicRoughnessSampler;
-layout(set = 1, binding = 5, std140) uniform PbrPropertiesBlock { 
+layout(set = 1, binding = 5, std140) uniform PbrPropertiesBlock {
     PbrProperties pbrProperties;
-}; 
+};
 
 layout(location = 0) out vec4 outPosition;
 layout(location = 1) out vec4 outNormal;
@@ -39,10 +39,11 @@ void main() {
 
     sample_normal = normalize(TBN * sample_normal);
     sample_normal = (sample_normal + 1.0) * 0.5;
-    
+
     // outNormal = vec4((N + 1.0) * 0.5, 1.0);
     outNormal = vec4(sample_normal, 1.0);
     outDiffuse = texture(baseColorSampler, fragOut.uv) * pbrProperties.baseColor;
     outEmissive = texture(emissiveSampler, fragOut.uv) * vec4(pbrProperties.emissiveFactor, 1.0);
     outPbr = texture(metallicRoughnessSampler, fragOut.uv) * pbrProperties.metallicRoughness;
+    outPbr.w = 1.0; // The objects with this material should be receiving shadows
 }

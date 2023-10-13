@@ -35,6 +35,7 @@ struct FragmentInfo {
     vec3 normal;
     float roughness;
     float metalness;
+    float shadow_scale;
 };
 
 struct CubeSample {
@@ -136,6 +137,7 @@ FragmentInfo get_fragment_info(vec2 in_uv) {
     info.metalness = pbr_sample.x;
     info.roughness = pbr_sample.y;
 
+    info.shadow_scale = pbr_sample.w;
     return info;
 }
 
@@ -287,5 +289,5 @@ vec3 rgb(int r, int g, int b) {
 void main() {
     FragmentInfo fragInfo = get_fragment_info(uv);
     vec3 light_a = lit_fragment(fragInfo);
-    color = vec4(light_a, 1.0) + fragInfo.emissive;
+    color = fragInfo.shadow_scale * vec4(light_a, 1.0) + fragInfo.emissive;
 }

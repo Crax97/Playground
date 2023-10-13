@@ -29,7 +29,7 @@ void main() {
     outPosition = vec4(fragOut.position, 1.0);
     outNormal = vec4(fragOut.normal, 1.0);
     //outDiffuse = texture(baseColorSampler, fragOut.uv);
-    outDiffuse = texture(baseColorSampler, normalize(fragOut.vert_position));
-    outEmissive = vec4(0.0);
+    outDiffuse = vec4(0.0);
+    outEmissive = texture(baseColorSampler, normalize(fragOut.vert_position));
     outPbr = vec4(0.0);
 }
