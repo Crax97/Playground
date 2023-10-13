@@ -11,7 +11,7 @@ use std::num::NonZeroU32;
 use app::{bootstrap, App};
 
 use fps_camera::FpsCamera;
-use gpu::{PresentMode, VkCommandBuffer};
+use gpu::{ImageFormat, ImageViewType, PresentMode, VkCommandBuffer};
 use imgui::{TreeNodeFlags, Ui};
 use input::InputState;
 use winit::dpi::{PhysicalPosition, Position};
@@ -243,6 +243,8 @@ impl App for GLTFViewer {
             david_image.height(),
             &david_image,
             Some("david"),
+            ImageFormat::Rgba8,
+            ImageViewType::Type2D,
         )?;
         let david_texture = resource_map.add(david_texture);
 
@@ -264,7 +266,7 @@ impl App for GLTFViewer {
                 domain: engine::MaterialDomain::Surface,
                 texture_inputs: &[TextureInput {
                     name: "Cubemap".to_owned(),
-                    format: gpu::ImageFormat::Rgba8,
+                    format: ImageFormat::Rgba8,
                 }],
                 material_parameters: HashMap::new(),
                 fragment_module: &skybox_fragment,

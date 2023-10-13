@@ -11,7 +11,7 @@ use engine::{
     MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo,
     RenderingPipeline, Scene, ScenePrimitive, Texture, TextureInput,
 };
-use gpu::{PresentMode, VkCommandBuffer};
+use gpu::{ImageViewType, PresentMode, VkCommandBuffer};
 use imgui::Ui;
 use nalgebra::*;
 use resource_map::ResourceMap;
@@ -124,6 +124,8 @@ impl App for PlanesApp {
             cpu_image.height(),
             &cpu_image,
             Some("Quad texture david"),
+            gpu::ImageFormat::Rgba8,
+            ImageViewType::Type2D,
         )?;
         let texture = resource_map.add(texture);
 

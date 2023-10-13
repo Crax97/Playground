@@ -350,6 +350,8 @@ impl GltfLoader {
             1,
             &[255, 255, 255, 255],
             Some("White texture"),
+            gpu::ImageFormat::Rgba8,
+            ImageViewType::Type2D,
         )?;
         let white = resource_map.add(white);
         let black = Texture::new_with_data(
@@ -359,6 +361,8 @@ impl GltfLoader {
             1,
             &[0, 0, 0, 255],
             Some("Black texture"),
+            gpu::ImageFormat::Rgba8,
+            ImageViewType::Type2D,
         )?;
         let black = resource_map.add(black);
 
