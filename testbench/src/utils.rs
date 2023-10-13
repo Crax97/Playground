@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::bail;
 use engine::{Mesh, MeshPrimitiveCreateInfo, Texture};
 use image::DynamicImage;
