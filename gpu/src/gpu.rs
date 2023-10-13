@@ -32,12 +32,14 @@ use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 
 use crate::{
-    get_allocation_callbacks, BufferCreateInfo, CommandBufferSubmitInfo, CommandPoolCreateFlags,
-    CommandPoolCreateInfo, ComputePipelineDescription, Extent2D, FramebufferCreateInfo, GPUFence,
-    GpuConfiguration, GraphicsPipelineDescription, ImageAspectFlags, ImageCreateInfo, ImageFormat,
-    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPassDescription,
-    SamplerCreateInfo, ShaderModuleCreateInfo, ToVk, TransitionInfo, VkCommandBuffer,
-    VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
+    get_allocation_callbacks, BufferCreateInfo, BufferImageCopyInfo, CommandBufferSubmitInfo,
+    CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineDescription, Extent2D,
+    FramebufferCreateInfo, GPUFence, GpuConfiguration, GraphicsPipelineDescription,
+    ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageLayout, ImageMemoryBarrier,
+    ImageSubresourceRange, ImageViewCreateInfo, Offset2D, Offset3D, PipelineBarrierInfo,
+    PipelineStageFlags, QueueType, RenderPassDescription, SamplerCreateInfo,
+    ShaderModuleCreateInfo, ToVk, TransitionInfo, VkCommandBuffer, VkCommandPool,
+    VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
     VkShaderModule,
 };
 
@@ -1088,7 +1090,14 @@ impl VkGpu {
         Ok(())
     }
 
-    pub fn write_image_data(&self, image: &VkImage, data: &[u8]) -> VkResult<()> {
+    pub fn write_image_data(
+        &self,
+        image: &VkImage,
+        data: &[u8],
+        offset: Offset2D,
+        extent: Extent2D,
+        layer: u32,
+    ) -> VkResult<()> {
         self.transition_image_layout(
             image,
             TransitionInfo {
@@ -1104,12 +1113,29 @@ impl VkGpu {
             ImageAspectFlags::COLOR,
         )?;
 
-        let width = image.extents.width;
-        let height = image.extents.height;
-
         if data.len() < self.staging_buffer.size() {
             self.staging_buffer.write_data(0, &data);
-            self.copy_buffer_to_image(&self.staging_buffer, image, width, height)?;
+            self.copy_buffer_to_image(&BufferImageCopyInfo {
+                source: &self.staging_buffer,
+                dest: &image,
+                dest_layout: ImageLayout::TransferDst,
+                image_offset: Offset3D {
+                    x: offset.x,
+                    y: offset.y,
+                    z: 0,
+                },
+                image_extent: crate::Extent3D {
+                    width: extent.width,
+                    height: extent.height,
+                    depth: 1,
+                },
+                buffer_offset: 0,
+                buffer_row_length: 0,
+                buffer_image_height: 0,
+                mip_level: 0,
+                base_layer: layer as u32,
+                num_layers: 1,
+            })?;
         } else {
             let intermediary_buffer = self.create_buffer(
                 &BufferCreateInfo {
@@ -1139,9 +1165,28 @@ impl VkGpu {
 
                 written += written_this_iteration;
             }
-            self.copy_buffer_to_image(&intermediary_buffer, image, width, height)?;
+            self.copy_buffer_to_image(&BufferImageCopyInfo {
+                source: &self.staging_buffer,
+                dest: &image,
+                dest_layout: ImageLayout::TransferDst,
+                image_offset: Offset3D {
+                    x: offset.x,
+                    y: offset.y,
+                    z: 0,
+                },
+                image_extent: crate::Extent3D {
+                    width: extent.width,
+                    height: extent.height,
+                    depth: 1,
+                },
+                buffer_offset: 0,
+                buffer_row_length: 0,
+                buffer_image_height: 0,
+                mip_level: 1,
+                base_layer: layer as u32,
+                num_layers: 1,
+            })?;
         }
-
         self.transition_image_layout(
             image,
             TransitionInfo {
@@ -1236,6 +1281,36 @@ impl VkGpu {
             create_info.layers,
         )?;
 
+        let write_layered_image = |data: &[u8]| -> VkResult<()> {
+            let pixel_size = match format {
+                ImageFormat::Rgba8
+                | ImageFormat::Bgra8
+                | ImageFormat::SRgba8
+                | ImageFormat::RFloat32 => 4,
+                ImageFormat::RgFloat32 => 8,
+                ImageFormat::Rgb8 => 3,
+                ImageFormat::RgbFloat32 => 24,
+                ImageFormat::RgbaFloat32 => 32,
+                ImageFormat::Depth => 24,
+            };
+            for i in 0..create_info.layers {
+                let layer_size = (create_info.width * create_info.height * pixel_size) as usize;
+                let offset = i as usize * layer_size;
+
+                self.write_image_data(
+                    &image,
+                    &data[offset..offset + layer_size as usize],
+                    Offset2D { x: 0, y: 0 },
+                    Extent2D {
+                        width: create_info.width,
+                        height: create_info.height,
+                    },
+                    i,
+                )?;
+            }
+            Ok(())
+        };
+
         if let Some(data) = data {
             assert!(data.len() > 0);
             if create_info.format == ImageFormat::Rgb8 && !self.state.features.supports_rgb_images {
@@ -1249,9 +1324,9 @@ impl VkGpu {
                     rgba_data.push(255);
                 }
 
-                self.write_image_data(&image, &rgba_data)?;
+                write_layered_image(&rgba_data)?;
             } else {
-                self.write_image_data(&image, &data)?;
+                write_layered_image(&data)?;
             }
         }
 
@@ -1386,21 +1461,9 @@ impl VkGpu {
         });
     }
 
-    pub fn copy_buffer_to_image(
-        &self,
-        source_buffer: &VkBuffer,
-        dest_image: &VkImage,
-        width: u32,
-        height: u32,
-    ) -> VkResult<()> {
+    pub fn copy_buffer_to_image(&self, info: &BufferImageCopyInfo) -> VkResult<()> {
         let mut command_buffer = self.create_command_buffer(QueueType::Transfer)?;
-        command_buffer.copy_buffer_to_image(
-            source_buffer,
-            dest_image,
-            ImageLayout::TransferDst,
-            width,
-            height,
-        )?;
+        command_buffer.copy_buffer_to_image(info)?;
         command_buffer.submit(&CommandBufferSubmitInfo::default())?;
         self.wait_queue_idle(QueueType::Transfer)?;
 

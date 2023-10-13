@@ -83,6 +83,21 @@ pub struct TransitionInfo {
     pub stage_mask: PipelineStageFlags,
 }
 
+#[derive(Clone, Copy, Hash)]
+pub struct BufferImageCopyInfo<'a> {
+    pub source: &'a VkBuffer,
+    pub dest: &'a VkImage,
+    pub dest_layout: ImageLayout,
+    pub image_offset: Offset3D,
+    pub image_extent: Extent3D,
+    pub buffer_offset: u64,
+    pub buffer_row_length: u32,
+    pub buffer_image_height: u32,
+    pub mip_level: u32,
+    pub base_layer: u32,
+    pub num_layers: u32,
+}
+
 #[derive(Clone, Copy)]
 pub struct FramebufferCreateInfo<'a> {
     pub render_pass: &'a VkRenderPass,

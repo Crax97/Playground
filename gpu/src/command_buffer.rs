@@ -252,37 +252,26 @@ impl<'g> VkCommandBuffer<'g> {
         }
     }
 
-    pub fn copy_buffer_to_image(
-        &mut self,
-        src_buffer: &VkBuffer,
-        dst_image: &VkImage,
-        dst_image_layout: ImageLayout,
-        width: u32,
-        height: u32,
-    ) -> VkResult<()> {
+    pub fn copy_buffer_to_image(&mut self, info: &BufferImageCopyInfo) -> VkResult<()> {
         self.has_recorded_anything = true;
         unsafe {
             self.gpu.vk_logical_device().cmd_copy_buffer_to_image(
                 self.inner(),
-                src_buffer.inner,
-                dst_image.inner,
-                dst_image_layout.to_vk(),
+                info.source.inner,
+                info.dest.inner,
+                info.dest_layout.to_vk(),
                 &[vk::BufferImageCopy {
-                    buffer_offset: 0,
-                    buffer_row_length: 0,
-                    buffer_image_height: 0,
+                    buffer_offset: info.buffer_offset,
+                    buffer_row_length: info.buffer_row_length,
+                    buffer_image_height: info.buffer_image_height,
                     image_subresource: vk::ImageSubresourceLayers {
                         aspect_mask: ImageAspectFlags::COLOR.to_vk(),
-                        mip_level: 0,
-                        layer_count: 1,
-                        base_array_layer: 0,
+                        mip_level: info.mip_level,
+                        layer_count: info.num_layers,
+                        base_array_layer: info.base_layer,
                     },
-                    image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
-                    image_extent: vk::Extent3D {
-                        width,
-                        height,
-                        depth: 1,
-                    },
+                    image_offset: info.image_offset.to_vk(),
+                    image_extent: info.image_extent.to_vk(),
                 }],
             );
 
