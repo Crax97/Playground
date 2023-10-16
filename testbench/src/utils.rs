@@ -6,6 +6,14 @@ use log::{debug, info};
 use nalgebra::vector;
 use std::path::Path;
 
+use half::f16;
+
+pub struct LoadedImage {
+    pub bytes: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
 use gpu::{ImageFormat, ShaderModuleCreateInfo, VkGpu, VkShaderModule};
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
@@ -26,14 +34,32 @@ pub fn read_file_to_vk_module<P: AsRef<Path>>(
 pub fn load_image_from_path<P: AsRef<Path>>(
     path: P,
     target_format: ImageFormat,
-) -> anyhow::Result<DynamicImage> {
+) -> anyhow::Result<LoadedImage> {
     let image_data = std::fs::read(path)?;
     let image = image::load_from_memory(&image_data)?;
-    Ok(match target_format {
-        ImageFormat::Rgba8 => DynamicImage::ImageRgba8(image.to_rgba8()),
-        ImageFormat::Rgb8 => DynamicImage::ImageRgb8(image.to_rgb8()),
-        ImageFormat::RgbaFloat32 => DynamicImage::ImageRgba32F(image.to_rgba32f()),
+    let (width, height) = (image.width(), image.height());
+    let bytes = match target_format {
+        ImageFormat::Rgba8 => DynamicImage::ImageRgba8(image.to_rgba8()).into_bytes(),
+        ImageFormat::Rgb8 => DynamicImage::ImageRgb8(image.to_rgb8()).into_bytes(),
+        ImageFormat::RgbaFloat32 => DynamicImage::ImageRgba32F(image.to_rgba32f()).into_bytes(),
+        ImageFormat::RgbaFloat16 => {
+            let image = image.into_rgba8().into_vec();
+            let image = image.into_iter().map(|px| {
+                let r: f16 = f16::from_f32((px as f32 + 0.5) / 255.0);
+                r
+            });
+
+            let pixels = image.collect::<Vec<_>>();
+            let pixels = bytemuck::cast_slice::<f16, u8>(&pixels);
+            pixels.to_vec()
+        }
         _ => anyhow::bail!(format!("Format not supported: {target_format:?}")),
+    };
+
+    Ok(LoadedImage {
+        bytes,
+        width,
+        height,
     })
 }
 
@@ -57,24 +83,21 @@ pub fn load_cubemap_from_path<P: AsRef<Path>>(
         loaded_images.push(dyn_image);
     }
 
-    let width = loaded_images[0].width();
-    let height = loaded_images[0].height();
+    let width = loaded_images[0].width;
+    let height = loaded_images[0].height;
 
     info!("Cubemap is expected to be {width}x{height}");
 
     let mut accumulated_bytes = vec![];
 
     for image in loaded_images {
-        if image.width() != width || image.height() != height {
+        if image.width != width || image.height != height {
             bail!(format!(
                 "Images aren't of the same size! Found {}x{}, expected {}x{}",
-                image.width(),
-                image.height(),
-                width,
-                height
+                image.width, image.height, width, height
             ));
         }
-        accumulated_bytes.extend(image.into_bytes());
+        accumulated_bytes.extend(image.bytes.into_iter());
     }
 
     Texture::new_with_data(

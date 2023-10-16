@@ -41,6 +41,7 @@ imgui-winit-support = "0.11.0"
 strum = { version = "0.25.0", features = ["derive", "strum_macros"] }
 strum_macros = "0.25.1"
 clap = { version = "4.4.6", features = ["derive"] }
+half = { version = "2.3.1", features = ["bytemuck", "zerocopy", "num-traits"] }
 
 [build-dependencies]
 shaderc = "0.8.2"

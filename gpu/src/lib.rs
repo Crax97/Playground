@@ -267,13 +267,38 @@ pub enum ImageFormat {
     RgFloat32,
     RgbFloat32,
     RgbaFloat32,
+    RFloat16,
+    RgFloat16,
+    RgbFloat16,
+    RgbaFloat16,
     Depth,
 }
 
 impl ImageFormat {
-    pub fn is_color(&self) -> bool {
+    pub fn texel_size_bytes(&self) -> u32 {
         match self {
             ImageFormat::Rgba8
+            | ImageFormat::Bgra8
+            | ImageFormat::SRgba8
+            | ImageFormat::RFloat32 => 4,
+            ImageFormat::RgFloat32 => 8,
+            ImageFormat::Rgb8 => 3,
+            ImageFormat::RgbFloat32 => 12,
+            ImageFormat::RgbaFloat32 => 16,
+            ImageFormat::RFloat16 => 2,
+            ImageFormat::RgFloat16 => 4,
+            ImageFormat::RgbFloat16 => 6,
+            ImageFormat::RgbaFloat16 => 8,
+            ImageFormat::Depth => 3,
+        }
+    }
+    pub fn is_color(&self) -> bool {
+        match self {
+            ImageFormat::RFloat16
+            | ImageFormat::RgFloat16
+            | ImageFormat::RgbFloat16
+            | ImageFormat::RgbaFloat16
+            | ImageFormat::Rgba8
             | ImageFormat::Bgra8
             | ImageFormat::SRgba8
             | ImageFormat::Rgb8

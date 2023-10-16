@@ -234,7 +234,7 @@ impl App for GLTFViewer {
             &app_state.gpu,
             "./images/skybox/forest/",
             ".jpg",
-            ImageFormat::RgbaFloat32,
+            ImageFormat::RgbaFloat16,
             &mut resource_map,
         )?;
         let david_texture = resource_map.add(david_texture);

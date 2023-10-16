@@ -1282,19 +1282,9 @@ impl VkGpu {
         )?;
 
         let write_layered_image = |data: &[u8]| -> VkResult<()> {
-            let pixel_size = match format {
-                ImageFormat::Rgba8
-                | ImageFormat::Bgra8
-                | ImageFormat::SRgba8
-                | ImageFormat::RFloat32 => 4,
-                ImageFormat::RgFloat32 => 8,
-                ImageFormat::Rgb8 => 3,
-                ImageFormat::RgbFloat32 => 12,
-                ImageFormat::RgbaFloat32 => 16,
-                ImageFormat::Depth => 3,
-            };
+            let texel_size = format.texel_size_bytes();
             for i in 0..create_info.layers {
-                let layer_size = (create_info.width * create_info.height * pixel_size) as usize;
+                let layer_size = (create_info.width * create_info.height * texel_size) as usize;
                 let offset = i as usize * layer_size;
 
                 self.write_image_data(
