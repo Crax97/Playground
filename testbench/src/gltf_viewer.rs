@@ -221,15 +221,6 @@ impl App for GLTFViewer {
         let skybox_fragment =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/skybox_spherical.spirv")?;
 
-        let screen_quad_module =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/screen_quad.spirv")?;
-        let gbuffer_combine_module =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/gbuffer_combine.spirv")?;
-        let texture_copy_module =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/texture_copy.spirv")?;
-        let tonemap_module =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/tonemap.spirv")?;
-
         let david_texture = utils::load_hdr_to_cubemap(
             &app_state.gpu,
             &mut resource_map,
@@ -239,14 +230,7 @@ impl App for GLTFViewer {
 
         let cube_mesh = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
 
-        let mut scene_renderer = DeferredRenderingPipeline::new(
-            &app_state.gpu,
-            screen_quad_module,
-            gbuffer_combine_module,
-            texture_copy_module,
-            tonemap_module,
-            cube_mesh,
-        )?;
+        let mut scene_renderer = DeferredRenderingPipeline::new(&app_state.gpu, cube_mesh)?;
 
         let skybox_material = scene_renderer.create_material(
             &app_state.gpu,

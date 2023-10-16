@@ -1,5 +1,5 @@
 extern crate proc_macro;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -190,32 +190,33 @@ fn compile_shader(info: GlslInfo) -> anyhow::Result<Vec<u32>> {
         }
         GlslSource::Source(s) => s,
     };
+    let engine_shaders_path = std::path::Path::new(&workspace_path().unwrap())
+        .join("engine")
+        .join("src")
+        .join("shaders");
 
     let compiler = shaderc::Compiler::new().unwrap();
     let mut options = shaderc::CompileOptions::new().unwrap();
-    options.set_include_callback(|incl, _, _, _| {
-        let file_path = std::path::Path::new(incl);
-        let file_path = crate_path.join(file_path);
-        let absolute = file_path.canonicalize();
-        let absolute = match absolute {
-            Ok(s) => s,
-            Err(e) => {
-                return Err(e.to_string());
-            }
-        };
-        let content = std::fs::read_to_string(absolute.clone());
-        let content = match content {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("Failed to find include file {absolute:?}");
-                return Err(e.to_string());
-            }
-        };
+    options.set_include_callback(|incl, _, source, _| {
+        let file_name = std::path::Path::new(incl);
+        let crate_paths = [crate_path.as_str(), engine_shaders_path.to_str().unwrap()];
+        for path in crate_paths {
+            let file_in_path = std::path::Path::new(path).join(file_name).canonicalize();
+            let file_in_path = match file_in_path {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let file_in_path = std::fs::read_to_string(file_in_path);
 
-        Ok(ResolvedInclude {
-            resolved_name: incl.to_string(),
-            content,
-        })
+            if let Ok(s) = file_in_path {
+                return Ok(ResolvedInclude {
+                    resolved_name: incl.to_string(),
+                    content: s,
+                });
+            }
+        }
+
+        Err(format!("Failed to resolve include {incl} in {source}"))
     });
 
     let spirv = compiler.compile_into_spirv(
@@ -232,20 +233,29 @@ fn compile_shader(info: GlslInfo) -> anyhow::Result<Vec<u32>> {
     Ok(spirv.as_binary().to_vec())
 }
 
-fn get_source_file_path(path: String, crate_path: &Path) -> Result<PathBuf, anyhow::Error> {
-    let path = std::path::Path::new(&path);
-    let path = crate_path.join(std::path::Path::new(&path));
-    let path = path.canonicalize().map_err(|e| {
-        eprintln!("Failed to canonicalize path {path:?}");
-        e
-    })?;
+fn get_source_file_path(path: String, crate_path: &String) -> Result<PathBuf, anyhow::Error> {
+    let crate_path = std::path::Path::new(crate_path);
+    let crate_path = crate_path.join(path);
+    let path = crate_path.canonicalize()?;
     Ok(path)
 }
 
-fn crate_path() -> Result<PathBuf, anyhow::Error> {
-    let crate_path = std::env::var("CARGO_MANIFEST_DIR")?;
-    let crate_path = std::path::Path::new(&crate_path);
-    Ok(crate_path.to_owned())
+fn crate_path() -> Result<String, anyhow::Error> {
+    Ok(std::env::var("CARGO_MANIFEST_DIR")?)
+}
+
+fn workspace_path() -> Result<String, anyhow::Error> {
+    let output = std::process::Command::new("cargo")
+        .args(["locate-project", "--workspace", "--message-format", "plain"])
+        .output()
+        .expect("Failed to cargo locate-project")
+        .stdout;
+
+    let cargo_toml_path = String::from_utf8(output)?;
+    let mut cargo_path = std::path::PathBuf::from(&cargo_toml_path);
+    cargo_path.pop();
+
+    Ok(cargo_path.to_string_lossy().to_string())
 }
 
 #[proc_macro]

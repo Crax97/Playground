@@ -44,4 +44,5 @@ clap = { version = "4.4.6", features = ["derive"] }
 half = { version = "2.3.1", features = ["bytemuck", "zerocopy", "num-traits"] }
 
 [build-dependencies]
+anyhow = { version = "1.0.70", features = ["backtrace"] }
 shaderc = "0.8.2"

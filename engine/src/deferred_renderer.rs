@@ -34,6 +34,30 @@ const FXAA_VS: &[u32] = glsl!(
     entry_point = "main"
 );
 
+const SCREEN_QUAD: &[u32] = glsl!(
+    kind = vertex,
+    path = "src/shaders/screen_quad.vert",
+    entry_point = "main"
+);
+
+const GBUFFER_COMBINE: &[u32] = glsl!(
+    kind = fragment,
+    path = "src/shaders/gbuffer_combine.frag",
+    entry_point = "main"
+);
+
+const TONEMAP: &[u32] = glsl!(
+    kind = fragment,
+    path = "src/shaders/tonemap.frag",
+    entry_point = "main"
+);
+
+const TEXTURE_COPY: &[u32] = glsl!(
+    kind = fragment,
+    path = "src/shaders/texture_copy.frag",
+    entry_point = "main"
+);
+
 const SHADOW_ATLAS_TILE_SIZE: u32 = 128;
 const SHADOW_ATLAS_WIDTH: u32 = 7680;
 const SHADOW_ATLAS_HEIGHT: u32 = 4352;
@@ -183,14 +207,7 @@ pub struct DeferredRenderingPipeline {
 }
 
 impl DeferredRenderingPipeline {
-    pub fn new(
-        gpu: &VkGpu,
-        screen_quad: VkShaderModule,
-        gbuffer_combine: VkShaderModule,
-        texture_copy: VkShaderModule,
-        tonemap_fs: VkShaderModule,
-        cube_mesh: ResourceHandle<Mesh>,
-    ) -> anyhow::Result<Self> {
+    pub fn new(gpu: &VkGpu, cube_mesh: ResourceHandle<Mesh>) -> anyhow::Result<Self> {
         let mut frame_buffers = vec![];
         for _ in 0..VkSwapchain::MAX_FRAMES_IN_FLIGHT {
             let camera_buffer = {
@@ -232,6 +249,19 @@ impl DeferredRenderingPipeline {
         })?;
         let fxaa_fs = gpu.create_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(FXAA_FS),
+        })?;
+
+        let screen_quad = gpu.create_shader_module(&ShaderModuleCreateInfo {
+            code: bytemuck::cast_slice(SCREEN_QUAD),
+        })?;
+        let gbuffer_combine = gpu.create_shader_module(&ShaderModuleCreateInfo {
+            code: bytemuck::cast_slice(GBUFFER_COMBINE),
+        })?;
+        let tonemap_fs = gpu.create_shader_module(&ShaderModuleCreateInfo {
+            code: bytemuck::cast_slice(TONEMAP),
+        })?;
+        let texture_copy = gpu.create_shader_module(&ShaderModuleCreateInfo {
+            code: bytemuck::cast_slice(TEXTURE_COPY),
         })?;
 
         Ok(Self {

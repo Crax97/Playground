@@ -4,6 +4,20 @@ fn main() {
     recompile_all_shaders();
 }
 
+fn workspace_path() -> Result<String, anyhow::Error> {
+    let output = std::process::Command::new("cargo")
+        .args(["locate-project", "--workspace", "--message-format", "plain"])
+        .output()
+        .expect("Failed to cargo locate-project")
+        .stdout;
+
+    let cargo_toml_path = String::from_utf8(output)?;
+    let mut cargo_path = std::path::PathBuf::from(&cargo_toml_path);
+    cargo_path.pop();
+
+    Ok(cargo_path.to_string_lossy().to_string())
+}
+
 fn recompile_all_shaders() {
     use shaderc::*;
 
@@ -11,6 +25,7 @@ fn recompile_all_shaders() {
 
     let out_dir = "..";
 
+    let workspace_path = workspace_path().unwrap();
     let out_dir = std::path::Path::new(&out_dir);
     let input_shader_path = std::path::Path::new("src/shaders");
     let out_shader_path = out_dir.join("shaders");
@@ -20,27 +35,32 @@ fn recompile_all_shaders() {
     let shader_folder =
         std::fs::read_dir(input_shader_path).expect("failed to find input shaders folder");
     let mut options = CompileOptions::new().expect("Failed to create compiler options");
-    options.set_include_callback(|incl, _, _, _| {
-        let file_path = input_shader_path.join(incl);
-        let absolute = file_path.canonicalize();
-        let absolute = match absolute {
-            Ok(s) => s,
-            Err(e) => {
-                return Err(e.to_string());
-            }
-        };
-        let content = std::fs::read_to_string(absolute);
-        let content = match content {
-            Ok(s) => s,
-            Err(e) => {
-                return Err(e.to_string());
-            }
-        };
+    options.set_include_callback(|incl, _, source, _| {
+        let file_name = std::path::Path::new(incl);
+        let crate_paths = ["testbench", "engine"];
+        for path in crate_paths {
+            let file_path = std::path::Path::new(path)
+                .join("src")
+                .join("shaders")
+                .join(file_name);
+            let file_path = std::path::Path::new(&workspace_path).join(file_path);
+            println!("Checking path {file_path:?}");
+            let file_in_path = file_path.canonicalize();
+            let file_in_path = match file_in_path {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let file_in_path = std::fs::read_to_string(file_in_path);
 
-        Ok(ResolvedInclude {
-            resolved_name: incl.to_string(),
-            content,
-        })
+            if let Ok(s) = file_in_path {
+                return Ok(ResolvedInclude {
+                    resolved_name: incl.to_string(),
+                    content: s,
+                });
+            }
+        }
+
+        Err(format!("Failed to resolve include {incl} in {source}"))
     });
     for file in shader_folder.flatten() {
         let fty = file.file_type().expect("Could not get filetype");

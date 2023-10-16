@@ -129,23 +129,7 @@ impl App for PlanesApp {
         )?;
         let texture = resource_map.add(texture);
 
-        let screen_quad_module =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/screen_quad.spirv")?;
-        let gbuffer_combine_module =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/gbuffer_combine.spirv")?;
-        let texture_copy_module =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/texture_copy.spirv")?;
-        let tonemap_module =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/tonemap.spirv")?;
-
-        let mut scene_renderer = DeferredRenderingPipeline::new(
-            &app_state.gpu,
-            screen_quad_module,
-            gbuffer_combine_module,
-            texture_copy_module,
-            tonemap_module,
-            cube.clone(),
-        )?;
+        let mut scene_renderer = DeferredRenderingPipeline::new(&app_state.gpu, cube.clone())?;
 
         let master = scene_renderer.create_material(
             &app_state.gpu,
