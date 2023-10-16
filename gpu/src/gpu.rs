@@ -1182,7 +1182,7 @@ impl VkGpu {
                 buffer_offset: 0,
                 buffer_row_length: 0,
                 buffer_image_height: 0,
-                mip_level: 1,
+                mip_level: 0,
                 base_layer: layer as u32,
                 num_layers: 1,
             })?;
@@ -1289,9 +1289,9 @@ impl VkGpu {
                 | ImageFormat::RFloat32 => 4,
                 ImageFormat::RgFloat32 => 8,
                 ImageFormat::Rgb8 => 3,
-                ImageFormat::RgbFloat32 => 24,
-                ImageFormat::RgbaFloat32 => 32,
-                ImageFormat::Depth => 24,
+                ImageFormat::RgbFloat32 => 12,
+                ImageFormat::RgbaFloat32 => 16,
+                ImageFormat::Depth => 3,
             };
             for i in 0..create_info.layers {
                 let layer_size = (create_info.width * create_info.height * pixel_size) as usize;
@@ -1299,7 +1299,7 @@ impl VkGpu {
 
                 self.write_image_data(
                     &image,
-                    &data[offset..offset + layer_size as usize],
+                    &data[offset..offset + layer_size],
                     Offset2D { x: 0, y: 0 },
                     Extent2D {
                         width: create_info.width,

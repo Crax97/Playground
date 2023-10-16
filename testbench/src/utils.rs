@@ -58,7 +58,9 @@ pub fn load_cubemap_from_path<P: AsRef<Path>>(
     }
 
     let width = loaded_images[0].width();
-    let height = loaded_images[1].width();
+    let height = loaded_images[0].height();
+
+    info!("Cubemap is expected to be {width}x{height}");
 
     let mut accumulated_bytes = vec![];
 
