@@ -219,7 +219,7 @@ impl App for GLTFViewer {
         let vertex_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/vertex_deferred.spirv")?;
         let skybox_fragment =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/skybox_master.spirv")?;
+            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/skybox_spherical.spirv")?;
 
         let screen_quad_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/screen_quad.spirv")?;
@@ -230,12 +230,10 @@ impl App for GLTFViewer {
         let tonemap_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/tonemap.spirv")?;
 
-        let david_texture = utils::load_cubemap_from_path(
+        let david_texture = utils::load_hdr_to_cubemap(
             &app_state.gpu,
-            "./images/skybox/forest/",
-            ".jpg",
-            ImageFormat::RgbaFloat16,
             &mut resource_map,
+            "images/skybox/hdr/sunflowers.hdr",
         )?;
         let david_texture = resource_map.add(david_texture);
 

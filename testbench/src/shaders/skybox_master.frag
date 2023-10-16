@@ -2,14 +2,6 @@
 
 #include "definitions.glsl"
 
-struct PbrProperties {
-    vec4 baseColor;
-
-    // x: metallic, y: roughness
-    vec4 metallicRoughness;
-    vec3 emissiveFactor;
-};
-
 layout(set = 0, binding = 0) readonly buffer PerFrameDataBlock {
     uint shadow_count;
     PointOfView pfd[];

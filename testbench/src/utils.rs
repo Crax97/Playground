@@ -4,6 +4,7 @@ use engine::{Mesh, MeshPrimitiveCreateInfo, Texture};
 use image::DynamicImage;
 use log::{debug, info};
 use nalgebra::vector;
+use resource_map::ResourceMap;
 use std::path::Path;
 
 use half::f16;
@@ -110,6 +111,28 @@ pub fn load_cubemap_from_path<P: AsRef<Path>>(
         target_format,
         gpu::ImageViewType::Cube,
     )
+}
+
+pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
+    gpu: &VkGpu,
+    resource_map: &mut ResourceMap,
+    path: P,
+) -> anyhow::Result<Texture> {
+    let hdr_image = load_image_from_path(path, ImageFormat::RgbaFloat16)?;
+    Ok(Texture::new_with_data(
+        gpu,
+        resource_map,
+        hdr_image.width,
+        hdr_image.height,
+        &hdr_image.bytes,
+        Some("cubemap"),
+        ImageFormat::RgbaFloat16,
+        gpu::ImageViewType::Type2D,
+    )?)
+}
+
+pub fn generate_irradiance_map(gpu: &VkGpu, source_cubemap: &Texture) -> anyhow::Result<Texture> {
+    todo!()
 }
 
 pub fn load_cube_to_resource_map(
