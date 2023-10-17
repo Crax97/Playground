@@ -3,9 +3,9 @@ use anyhow::bail;
 use engine::{Mesh, MeshPrimitiveCreateInfo, Texture};
 use image::DynamicImage;
 use log::{debug, info};
-use nalgebra::{point, vector, Matrix4, Vector3};
+use nalgebra::{point, vector, Matrix4, Vector2, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
-use std::path::Path;
+use std::{mem::size_of, path::Path, f32::consts::PI};
 
 use half::f16;
 
@@ -23,7 +23,7 @@ use gpu::{
     ImageUsageFlags, ImageViewCreateInfo, MemoryDomain, Offset2D, PipelineStageFlags,
     PushConstantRange, Rect2D, RenderPassAttachment, SamplerCreateInfo, SamplerState,
     ShaderModuleCreateInfo, ShaderStage, VertexAttributeDescription, VertexBindingDescription,
-    VertexStageInfo, VkCommandBuffer, VkGpu, VkRenderPassCommand, VkShaderModule,
+    VertexStageInfo, VkCommandBuffer, VkGpu, VkRenderPassCommand, VkShaderModule, BlendMode, BlendOp, ColorComponentFlags,
 };
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
@@ -130,8 +130,8 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
 ) -> anyhow::Result<Texture> {
     let cube_image_format = ImageFormat::RgbaFloat16;
     let size = Extent2D {
-        width: 2048,
-        height: 2048,
+        width: 512,
+        height: 512,
     };
     let hdr_image = load_image_from_path(path, cube_image_format)?;
     let hdr_texture = gpu.create_image(
@@ -166,21 +166,19 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
     let equilateral_fragment = read_file_to_vk_module(&gpu, "./shaders/skybox_spherical.spirv")?;
 
     let skybox_pipeline = gpu.create_graphics_pipeline(&GraphicsPipelineDescription {
-        global_bindings: &[
-            GlobalBinding {
-                set_index: 0,
-                elements: &[BindingElement {
-                    binding_type: gpu::BindingType::CombinedImageSampler,
-                    index: 0,
-                    stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
-                }],
-            },
-        ],
+        global_bindings: &[GlobalBinding {
+            set_index: 0,
+            elements: &[BindingElement {
+                binding_type: gpu::BindingType::CombinedImageSampler,
+                index: 0,
+                stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
+            }],
+        }],
         vertex_inputs: &[
             VertexBindingDescription {
                 binding: 0,
                 input_rate: gpu::InputRate::PerVertex,
-                stride: 0,
+                stride: size_of::<Vector3<f32>>() as u32,
                 attributes: &[VertexAttributeDescription {
                     location: 0,
                     format: ImageFormat::RgbFloat32,
@@ -190,7 +188,7 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
             VertexBindingDescription {
                 binding: 1,
                 input_rate: gpu::InputRate::PerVertex,
-                stride: 0,
+                stride: size_of::<Vector3<f32>>() as u32,
                 attributes: &[VertexAttributeDescription {
                     location: 1,
                     format: ImageFormat::RgbFloat32,
@@ -200,7 +198,7 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
             VertexBindingDescription {
                 binding: 2,
                 input_rate: gpu::InputRate::PerVertex,
-                stride: 0,
+                stride: size_of::<Vector3<f32>>() as u32,
                 attributes: &[VertexAttributeDescription {
                     location: 2,
                     format: ImageFormat::RgbFloat32,
@@ -210,7 +208,7 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
             VertexBindingDescription {
                 binding: 3,
                 input_rate: gpu::InputRate::PerVertex,
-                stride: 0,
+                stride: size_of::<Vector3<f32>>() as u32,
                 attributes: &[VertexAttributeDescription {
                     location: 3,
                     format: ImageFormat::RgbFloat32,
@@ -220,7 +218,7 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
             VertexBindingDescription {
                 binding: 4,
                 input_rate: gpu::InputRate::PerVertex,
-                stride: 0,
+                stride: size_of::<Vector2<f32>>() as u32,
                 attributes: &[VertexAttributeDescription {
                     location: 4,
                     format: ImageFormat::RgFloat32,
@@ -261,8 +259,6 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
             size: std::mem::size_of::<Matrix4<f32>>() as _,
         }],
     })?;
-
-    let pfd_size = std::mem::size_of::<engine::PerFrameData>();
 
     let skybox_sampler = gpu.create_sampler(&SamplerCreateInfo {
         mag_filter: gpu::Filter::Linear,
@@ -313,15 +309,15 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
     let make_pov = |forward: Vector3<f32>, up| engine::PerFrameData {
         eye: point![0.0, 0.0, 0.0, 0.0],
         eye_forward: vector![forward.x, forward.y, forward.z, 0.0],
-        view: nalgebra::Matrix4::look_at_lh(
+        view: nalgebra::Matrix4::look_at_rh(
             &point![0.0, 0.0, 0.0],
             &point![forward.x, forward.y, forward.z],
             &up,
         ),
         projection: nalgebra::Matrix4::new_perspective(
-            size.width as f32 / size.height as f32,
-            90.0,
-            0.01,
+            1.0,
+            90.0f32.to_radians(),
+            0.001,
             1000.0,
         ),
         viewport_size_offset: vector![size.width as f32, size.height as f32, 0.0, 0.0],
@@ -339,8 +335,8 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
     let povs = [
         make_pov(vector![-1.0, 0.0, 0.0], vector![0.0, 1.0, 0.0]),
         make_pov(vector![1.0, 0.0, 0.0], vector![0.0, 1.0, 0.0]),
-        make_pov(vector![0.0, 1.0, 0.0], vector![0.0, 0.0, 1.0]),
-        make_pov(vector![0.0, -1.0, 0.0], vector![0.0, 0.0, -1.0]),
+        make_pov(vector![0.0, -1.0, 0.0], vector![0.0, 0.0, 1.0]),
+        make_pov(vector![0.0, 1.0, 0.0], vector![0.0, 0.0, -1.0]),
         make_pov(vector![0.0, 0.0, 1.0], vector![0.0, 1.0, 0.0]),
         make_pov(vector![0.0, 0.0, -1.0], vector![0.0, 1.0, 0.0]),
     ];
@@ -379,10 +375,10 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
     })?;
     let mesh = resource_map.get(&cube_mesh);
     for (i, view) in views.iter().enumerate() {
-        let mvp = povs[i].view * povs[i].projection;
+        let mvp = povs[i].projection * povs[i].view;
         let views = vec![ColorAttachment {
             image_view: view,
-            load_op: gpu::ColorLoadOp::Clear([-1.0; 4]),
+            load_op: gpu::ColorLoadOp::Clear([0.0; 4]),
             store_op: gpu::AttachmentStoreOp::Store,
             initial_layout: gpu::ImageLayout::ColorAttachment,
         }];
@@ -398,6 +394,15 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
                 },
             });
 
+            render_pass_command.set_cull_mode(gpu::CullMode::None);
+            render_pass_command.set_viewport(gpu::Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: size.width as f32,
+                height: size.height as f32,
+                min_depth: 0.0,
+                max_depth: 1.0,
+            });
             render_pass_command.bind_pipeline(&skybox_pipeline);
             render_pass_command.bind_descriptor_sets(
                 &skybox_pipeline,

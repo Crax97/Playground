@@ -13,7 +13,6 @@ vec2 sample_spherical_map(vec3 v)
     vec2 uv = vec2(atan(v.z, v.x), asin(v.y));
     uv *= invAtan;
     uv += 0.5;
-    uv.y = 1.0 - uv.y;
     return uv;
 }
 
@@ -25,5 +24,6 @@ layout(location = 0) out vec4 outEmissive;
 layout(location = 0) in FragmentOut fragOut;
 
 void main() {
-    outEmissive = texture(baseColorSampler, sample_spherical_map(normalize(fragOut.vert_position)));
+    vec3 sample_dir = normalize(fragOut.vert_position);
+    outEmissive = texture(baseColorSampler, sample_spherical_map(sample_dir));
 }

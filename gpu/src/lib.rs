@@ -756,7 +756,7 @@ pub struct VertexStageInfo<'a> {
     pub module: &'a VkShaderModule,
 }
 
-#[derive(Clone, Copy, Debug, Default, Hash, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct BlendState {
     pub blend_enable: bool,
     pub src_color_blend_factor: BlendMode,
@@ -766,6 +766,21 @@ pub struct BlendState {
     pub dst_alpha_blend_factor: BlendMode,
     pub alpha_blend_op: BlendOp,
     pub color_write_mask: ColorComponentFlags,
+}
+
+impl Default for BlendState {
+    fn default() -> Self {
+        Self {
+            blend_enable: true,
+            src_color_blend_factor: BlendMode::One,
+            dst_color_blend_factor: BlendMode::Zero,
+            color_blend_op: BlendOp::Add,
+            src_alpha_blend_factor: BlendMode::One,
+            dst_alpha_blend_factor: BlendMode::Zero,
+            alpha_blend_op: BlendOp::Add,
+            color_write_mask: ColorComponentFlags::RGBA,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
