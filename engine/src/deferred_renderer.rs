@@ -9,7 +9,7 @@ use crate::{
     GraphRunContext, Image2DInfo, ImageDescription, ImageViewDescription, Light, LightType,
     MaterialDescription, MaterialDomain, MaterialInstance, Mesh, MeshPrimitive, ModuleInfo,
     PipelineTarget, RenderGraph, RenderGraphPipelineDescription, RenderPassContext, RenderStage,
-    RenderingPipeline, SamplerState, Scene,
+    RenderingPipeline, SamplerState, Scene, Texture,
 };
 
 use gpu::{
@@ -195,6 +195,8 @@ pub struct DeferredRenderingPipeline {
     light_iteration: u64,
     active_lights: Vec<GpuLightInfo>,
     light_povs: Vec<PerFrameData>,
+    pub(crate) irradiance_map: Option<ResourceHandle<Texture>>,
+    default_irradiance_map: ResourceHandle<Texture>,
 
     cube_mesh: ResourceHandle<Mesh>,
 
@@ -207,7 +209,7 @@ pub struct DeferredRenderingPipeline {
 }
 
 impl DeferredRenderingPipeline {
-    pub fn new(gpu: &VkGpu, cube_mesh: ResourceHandle<Mesh>) -> anyhow::Result<Self> {
+    pub fn new(gpu: &VkGpu, resource_map: &mut ResourceMap, cube_mesh: ResourceHandle<Mesh>) -> anyhow::Result<Self> {
         let mut frame_buffers = vec![];
         for _ in 0..VkSwapchain::MAX_FRAMES_IN_FLIGHT {
             let camera_buffer = {
@@ -264,6 +266,9 @@ impl DeferredRenderingPipeline {
             code: bytemuck::cast_slice(TEXTURE_COPY),
         })?;
 
+        let default_irradiance_map = Texture::new_with_data(gpu, resource_map, 1, 1, &[0; 36 * 2], Some("Default Cubemap White"), ImageFormat::RgbaFloat16, gpu::ImageViewType::Cube)?;
+        let default_irradiance_map = resource_map.add(default_irradiance_map);
+
         Ok(Self {
             render_graph,
             screen_quad,
@@ -286,6 +291,8 @@ impl DeferredRenderingPipeline {
             active_lights: vec![],
             light_povs: vec![],
             cube_mesh,
+            irradiance_map: None,
+            default_irradiance_map,
         })
     }
 
@@ -536,6 +543,10 @@ impl DeferredRenderingPipeline {
             .render_pass_command
             .set_cull_mode(gpu::CullMode::Back);
     }
+
+    pub fn set_irradiance_texture(&mut self, irradiance_map: Option<ResourceHandle<crate::Texture>>) {
+        self.irradiance_map = irradiance_map;
+    }
 }
 
 impl RenderingPipeline for DeferredRenderingPipeline {
@@ -741,6 +752,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let shadow_atlas =
             self.render_graph
                 .use_image("shadow-atlas", &shadow_atlas_desc, false)?;
+        let irradiance_map =
+            self.render_graph
+                .use_image("irradiance-map", &framebuffer_vector_desc, true)?;
         let color_target =
             self.render_graph
                 .use_image("color-buffer", &framebuffer_vector_desc, false)?;
@@ -826,6 +840,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 emissive_target,
                 pbr_target,
                 shadow_atlas,
+                irradiance_map,
                 camera_buffer,
                 light_buffer,
             ])
@@ -1148,6 +1163,17 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             ctx.render_pass_command.draw(4, 1, 0, 0);
         });
 
+        let irradiance_map_texture = match &self.irradiance_map {
+            Some(texture) => {
+                texture
+            },
+            None => &self.default_irradiance_map
+        };
+                let irradiance_map_texture = resource_map.get(irradiance_map_texture);
+                let image_view = resource_map.get(&irradiance_map_texture.image_view);
+                let image = &resource_map.get(&image_view.image).0;
+
+        context.inject_external_image(&irradiance_map, image, &image_view.view);
         context.inject_external_image(&swapchain_image, backbuffer.image, backbuffer.image_view);
         context.injext_external_buffer(&camera_buffer, &current_buffers.camera_buffer);
         context.injext_external_buffer(&light_buffer, &current_buffers.light_buffer);

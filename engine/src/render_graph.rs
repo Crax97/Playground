@@ -859,7 +859,7 @@ impl DefaultResourceAllocator {
             buffers: ResourceAllocator::new(2),
             framebuffers: ResourceAllocator::new(5),
             render_passes: RenderPassAllocator::new(0),
-            samplers: ResourceAllocator::new(2),
+            samplers: ResourceAllocator::new(0),
             descriptors: ResourceAllocator::new(3),
         }
     }

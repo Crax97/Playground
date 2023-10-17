@@ -15,14 +15,15 @@ layout(set = 0, binding = 2) uniform sampler2D difSampler;
 layout(set = 0, binding = 3) uniform sampler2D emissSampler;
 layout(set = 0, binding = 4) uniform sampler2D pbrSampler;
 layout(set = 0, binding = 5) uniform sampler2DShadow shadowMap;
+layout(set = 0, binding = 6) uniform samplerCube irradianceMap;
 
-layout(set = 0, binding = 6) readonly buffer  PerFrameDataBlock {
+layout(set = 0, binding = 7) readonly buffer  PerFrameDataBlock {
     uint shadow_count;
     PointOfView camera;
     PointOfView shadows[];
 } per_frame_data;
 
-layout(set = 0, binding = 7, std140) readonly buffer LightData {
+layout(set = 0, binding = 8, std140) readonly buffer LightData {
     vec4 ambient_light_color;
     uint light_count;
     LightInfo lights[];
@@ -275,7 +276,8 @@ vec3 lit_fragment(FragmentInfo frag_info) {
         fragment_light += light_color;
     }
 
-    return frag_info.diffuse * (ambient_color + fragment_light);
+    vec3 irradiance_sample = texture(irradianceMap, normalize(frag_info.normal)).rgb;
+    return frag_info.diffuse * irradiance_sample * (ambient_color + fragment_light);
 }
 
 vec3 rgb(int r, int g, int b) {

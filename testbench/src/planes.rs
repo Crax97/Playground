@@ -129,7 +129,7 @@ impl App for PlanesApp {
         )?;
         let texture = resource_map.add(texture);
 
-        let mut scene_renderer = DeferredRenderingPipeline::new(&app_state.gpu, cube.clone())?;
+        let mut scene_renderer = DeferredRenderingPipeline::new(&app_state.gpu, &mut resource_map, cube.clone())?;
 
         let master = scene_renderer.create_material(
             &app_state.gpu,
