@@ -74,9 +74,9 @@ struct FxaaShaderParams {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct ObjectDrawInfo {
-    model: Matrix4<f32>,
-    camera_index: u32,
+pub struct ObjectDrawInfo {
+    pub model: Matrix4<f32>,
+    pub camera_index: u32,
 }
 
 #[derive(Clone, Copy)]
@@ -100,12 +100,12 @@ impl Default for FxaaSettings {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct PerFrameData {
-    eye: Point4<f32>,
-    eye_forward: Vector4<f32>,
-    view: nalgebra::Matrix4<f32>,
-    projection: nalgebra::Matrix4<f32>,
-    viewport_size_offset: Vector4<f32>,
+pub struct PerFrameData {
+    pub eye: Point4<f32>,
+    pub eye_forward: Vector4<f32>,
+    pub view: nalgebra::Matrix4<f32>,
+    pub projection: nalgebra::Matrix4<f32>,
+    pub viewport_size_offset: Vector4<f32>,
 }
 
 #[repr(C)]

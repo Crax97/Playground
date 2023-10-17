@@ -6,7 +6,7 @@ use engine::{
 };
 use image::DynamicImage;
 use log::{debug, info};
-use nalgebra::{point, vector};
+use nalgebra::{point, vector, Point3, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
 use std::{collections::HashMap, path::Path};
 
@@ -19,9 +19,14 @@ pub struct LoadedImage {
 }
 
 use gpu::{
-    AccessFlags, Extent2D, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageSubresourceRange,
-    ImageUsageFlags, MemoryDomain, PipelineStageFlags, ShaderModuleCreateInfo, VkGpu,
-    VkShaderModule,
+    AccessFlags, BeginRenderPassInfo, BindingElement, BlendState, BufferCreateInfo, BufferRange,
+    BufferUsageFlags, ColorAttachment, ComponentMapping, DepthStencilState, DescriptorInfo,
+    DescriptorSetInfo, Extent2D, FragmentStageInfo, GlobalBinding, GraphicsPipelineDescription,
+    ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageLayout, ImageSubresourceRange,
+    ImageUsageFlags, ImageViewCreateInfo, MemoryDomain, Offset2D, PipelineStageFlags,
+    PushConstantRange, Rect2D, RenderPassAttachment, SamplerCreateInfo, SamplerState,
+    ShaderModuleCreateInfo, ShaderStage, VertexAttributeDescription, VertexBindingDescription,
+    VertexStageInfo, VkCommandBuffer, VkGpu, VkRenderPassCommand, VkShaderModule,
 };
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
@@ -126,61 +131,159 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
     resource_map: &mut ResourceMap,
     path: P,
 ) -> anyhow::Result<Texture> {
-    let hdr_image = load_image_from_path(path, ImageFormat::RgbaFloat16)?;
-    let equi_texture = Texture::new_with_data(
-        gpu,
-        resource_map,
-        hdr_image.width,
-        hdr_image.height,
-        &hdr_image.bytes,
-        Some("Equilateral texture"),
-        ImageFormat::RgbaFloat16,
-        gpu::ImageViewType::Type2D,
-    )?;
-    let equi_texture = resource_map.add(equi_texture);
-
-    let vertex_module = read_file_to_vk_module(&gpu, "./shaders/vertex_deferred.spirv")?;
-    let equilateral_fragment = read_file_to_vk_module(&gpu, "./shaders/skybox_spherical.spirv")?;
-
-    let mut scene_renderer = DeferredRenderingPipeline::new(&gpu, cube_mesh)?;
-
-    let skybox_material = scene_renderer.create_material(
-        &gpu,
-        engine::MaterialDescription {
-            name: "skybox material",
-            domain: engine::MaterialDomain::Surface,
-            texture_inputs: &[TextureInput {
-                name: "Cubemap".to_owned(),
-                format: ImageFormat::Rgba8,
-            }],
-            material_parameters: HashMap::new(),
-            fragment_module: &equilateral_fragment,
-            vertex_module: &vertex_module,
-        },
-    )?;
-    let skybox_master = resource_map.add(skybox_material);
-
-    let mut skybox_textures = HashMap::new();
-    skybox_textures.insert("Cubemap".to_string(), equi_texture);
-
-    let skybox_instance = MaterialInstance::create_instance(
-        &gpu,
-        skybox_master,
-        &resource_map,
-        &engine::MaterialInstanceDescription {
-            name: "Skybox Generator",
-            texture_inputs: skybox_textures,
-        },
-    )?;
-    let skybox_instance = resource_map.add(skybox_instance);
-
-    let mut scene = Scene::new();
-    scene.set_skybox_material(Some(skybox_instance));
-
     let size = Extent2D {
         width: 2048,
         height: 2048,
     };
+    let hdr_image = load_image_from_path(path, ImageFormat::RgbaFloat16)?;
+    let hdr_texture = gpu.create_image(
+        &ImageCreateInfo {
+            label: None,
+            width: size.width,
+            height: size.height,
+            depth: 1,
+            mips: 1,
+            layers: 6,
+            samples: gpu::SampleCount::Sample1,
+            format: ImageFormat::RgbaFloat16,
+            usage: ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST,
+        },
+        MemoryDomain::DeviceLocal,
+        Some(&hdr_image.bytes),
+    )?;
+    let hdr_texture_view = gpu.create_image_view(&ImageViewCreateInfo {
+        image: &hdr_texture,
+        view_type: gpu::ImageViewType::Type2D,
+        format: ImageFormat::RgbaFloat16,
+        components: ComponentMapping::default(),
+        subresource_range: ImageSubresourceRange {
+            aspect_mask: ImageAspectFlags::COLOR,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
+        },
+    })?;
+    let vertex_module = read_file_to_vk_module(&gpu, "./shaders/vertex_deferred.spirv")?;
+    let equilateral_fragment = read_file_to_vk_module(&gpu, "./shaders/skybox_spherical.spirv")?;
+
+    let skybox_pipeline = gpu.create_graphics_pipeline(&GraphicsPipelineDescription {
+        global_bindings: &[GlobalBinding {
+            set_index: 0,
+            elements: &[BindingElement {
+                binding_type: gpu::BindingType::Uniform,
+                index: 0,
+                stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
+            }],
+        }],
+        vertex_inputs: &[
+            VertexBindingDescription {
+                binding: 0,
+                input_rate: gpu::InputRate::PerVertex,
+                stride: 0,
+                attributes: &[VertexAttributeDescription {
+                    location: 0,
+                    format: ImageFormat::RgbFloat32,
+                    offset: 0,
+                }],
+            },
+            VertexBindingDescription {
+                binding: 1,
+                input_rate: gpu::InputRate::PerVertex,
+                stride: 0,
+                attributes: &[VertexAttributeDescription {
+                    location: 1,
+                    format: ImageFormat::RgbFloat32,
+                    offset: 0,
+                }],
+            },
+            VertexBindingDescription {
+                binding: 2,
+                input_rate: gpu::InputRate::PerVertex,
+                stride: 0,
+                attributes: &[VertexAttributeDescription {
+                    location: 2,
+                    format: ImageFormat::RgbFloat32,
+                    offset: 0,
+                }],
+            },
+            VertexBindingDescription {
+                binding: 3,
+                input_rate: gpu::InputRate::PerVertex,
+                stride: 0,
+                attributes: &[VertexAttributeDescription {
+                    location: 3,
+                    format: ImageFormat::RgbFloat32,
+                    offset: 0,
+                }],
+            },
+            VertexBindingDescription {
+                binding: 5,
+                input_rate: gpu::InputRate::PerVertex,
+                stride: 0,
+                attributes: &[VertexAttributeDescription {
+                    location: 4,
+                    format: ImageFormat::RgFloat32,
+                    offset: 0,
+                }],
+            },
+        ],
+        vertex_stage: Some(VertexStageInfo {
+            entry_point: "main",
+            module: &vertex_module,
+        }),
+        fragment_stage: Some(FragmentStageInfo {
+            entry_point: "main",
+            module: &equilateral_fragment,
+            color_attachments: &[RenderPassAttachment {
+                format: ImageFormat::RgbaFloat16,
+                samples: gpu::SampleCount::Sample1,
+                load_op: gpu::ColorLoadOp::Clear([0.0; 4]),
+                store_op: gpu::AttachmentStoreOp::Store,
+                stencil_load_op: gpu::StencilLoadOp::DontCare,
+                stencil_store_op: gpu::AttachmentStoreOp::DontCare,
+                initial_layout: gpu::ImageLayout::ColorAttachment,
+                final_layout: gpu::ImageLayout::ShaderReadOnly,
+                blend_state: BlendState::default(),
+            }],
+            depth_stencil_attachments: &[],
+        }),
+        input_topology: gpu::PrimitiveTopology::TriangleList,
+        primitive_restart: false,
+        polygon_mode: gpu::PolygonMode::Fill,
+        cull_mode: gpu::CullMode::None,
+        front_face: gpu::FrontFace::ClockWise,
+        depth_stencil_state: DepthStencilState::default(),
+        logic_op: None,
+        push_constant_ranges: &[PushConstantRange {
+            stage_flags: ShaderStage::VERTEX | ShaderStage::FRAGMENT,
+            offset: 0,
+            size: std::mem::size_of::<engine::deferred_renderer::ObjectDrawInfo>() as _,
+        }],
+    })?;
+
+    let pfd_size = std::mem::size_of::<engine::PerFrameData>();
+    let cam_buffer = gpu.create_buffer(
+        &BufferCreateInfo {
+            label: None,
+            size: pfd_size * 6,
+            usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
+        },
+        MemoryDomain::HostVisible,
+    )?;
+
+    let skybox_sampler = gpu.create_sampler(&SamplerCreateInfo {
+        mag_filter: gpu::Filter::Linear,
+        min_filter: gpu::Filter::Linear,
+        address_u: gpu::SamplerAddressMode::ClampToBorder,
+        address_v: gpu::SamplerAddressMode::ClampToBorder,
+        address_w: gpu::SamplerAddressMode::ClampToBorder,
+        mip_lod_bias: 0.0,
+        compare_function: None,
+        min_lod: 0.0,
+        max_lod: 0.0,
+        border_color: [0.0; 4],
+    })?;
 
     let backing_image = gpu.create_image(
         &ImageCreateInfo {
@@ -215,6 +318,22 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
         })
         .unwrap()
     };
+    let make_pov = |forward: Vector3<f32>, up| engine::PerFrameData {
+        eye: point![0.0, 0.0, 0.0, 0.0],
+        eye_forward: vector![forward.x, forward.y, forward.z, 0.0],
+        view: nalgebra::Matrix4::look_at_lh(
+            &point![0.0, 0.0, 0.0],
+            &point![forward.x, forward.y, forward.z],
+            &up,
+        ),
+        projection: nalgebra::Matrix4::new_perspective(
+            size.width as f32 / size.height as f32,
+            90.0,
+            0.01,
+            1000.0,
+        ),
+        viewport_size_offset: vector![size.width as f32, size.height as f32, 0.0, 0.0],
+    };
 
     let views = [
         make_image_view(0),
@@ -226,60 +345,12 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
     ];
 
     let povs = [
-        Camera {
-            location: point![0.0, 0.0, 0.0],
-            forward: vector![1.0, 0.0, 0.0],
-            fov: 90.0,
-            width: size.width as f32,
-            height: size.height as f32,
-            near: 0.01,
-            far: 1000.0,
-        },
-        Camera {
-            location: point![0.0, 0.0, 0.0],
-            forward: vector![-1.0, 0.0, 0.0],
-            fov: 90.0,
-            width: 2048 as f32,
-            height: 2048 as f32,
-            near: 0.01,
-            far: 1000.0,
-        },
-        Camera {
-            location: point![0.0, 0.0, 0.0],
-            forward: vector![0.0, 1.0, 0.0],
-            fov: 90.0,
-            width: size.width as f32,
-            height: size.height as f32,
-            near: 0.01,
-            far: 1000.0,
-        },
-        Camera {
-            location: point![0.0, 0.0, 0.0],
-            forward: vector![0.0, -1.0, 0.0],
-            fov: 90.0,
-            width: 2048 as f32,
-            height: 2048 as f32,
-            near: 0.01,
-            far: 1000.0,
-        },
-        Camera {
-            location: point![0.0, 0.0, 0.0],
-            forward: vector![0.0, 0.0, 1.0],
-            fov: 90.0,
-            width: 2048 as f32,
-            height: 2048 as f32,
-            near: 0.01,
-            far: 1000.0,
-        },
-        Camera {
-            location: point![0.0, 0.0, 0.0],
-            forward: vector![0.0, 0.0, -1.0],
-            fov: 90.0,
-            width: 2048 as f32,
-            height: 2048 as f32,
-            near: 0.01,
-            far: 1000.0,
-        },
+        make_pov(vector![-1.0, 0.0, 0.0], vector![0.0, 1.0, 0.0]),
+        make_pov(vector![1.0, 0.0, 0.0], vector![0.0, 1.0, 0.0]),
+        make_pov(vector![0.0, 1.0, 0.0], vector![0.0, 0.0, 1.0]),
+        make_pov(vector![0.0, -1.0, 0.0], vector![0.0, 0.0, -1.0]),
+        make_pov(vector![0.0, 0.0, 1.0], vector![0.0, 1.0, 0.0]),
+        make_pov(vector![0.0, 0.0, -1.0], vector![0.0, 1.0, 0.0]),
     ];
     gpu.transition_image_layout(
         &backing_image,
@@ -303,26 +374,81 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
         },
     )?;
 
+    gpu.write_buffer_data_with_offset(&cam_buffer, 0, &[0])?;
+    gpu.write_buffer_data_with_offset(&cam_buffer, std::mem::size_of::<u32>() as _, &povs)?;
+    let mesh = resource_map.get(&cube_mesh);
     for (i, view) in views.iter().enumerate() {
         let pov = &povs[i];
-        let command_buffer = scene_renderer.render(
-            pov,
-            &scene,
-            &engine::Backbuffer {
-                size,
-                format: ImageFormat::RgbaFloat16,
-                image: &backing_image,
-                image_view: view,
-            },
-            resource_map,
-        )?;
+        let skybox_descriptor_set = gpu.create_descriptor_set(&DescriptorSetInfo {
+            descriptors: &[
+                DescriptorInfo {
+                    binding: 0,
+                    element_type: gpu::DescriptorType::StorageBuffer(BufferRange {
+                        handle: &cam_buffer,
+                        offset: (pfd_size * i) as u64,
+                        size: pfd_size as _,
+                    }),
+                    binding_stage: ShaderStage::VERTEX | ShaderStage::FRAGMENT,
+                },
+                DescriptorInfo {
+                    binding: 0,
+                    element_type: gpu::DescriptorType::CombinedImageSampler(SamplerState {
+                        sampler: &skybox_sampler,
+                        image_view: &hdr_texture_view,
+                        image_layout: ImageLayout::ShaderReadOnly,
+                    }),
+                    binding_stage: ShaderStage::VERTEX | ShaderStage::FRAGMENT,
+                },
+            ],
+        })?;
+        let views = vec![ColorAttachment {
+            image_view: view,
+            load_op: gpu::ColorLoadOp::Clear([-1.0; 4]),
+            store_op: gpu::AttachmentStoreOp::Store,
+            initial_layout: gpu::ImageLayout::ColorAttachment,
+        }];
+        let mut command_buffer = gpu.create_command_buffer(gpu::QueueType::Graphics)?;
+        {
+            let mut render_pass_command = command_buffer.begin_render_pass(&BeginRenderPassInfo {
+                color_attachments: &views,
+                depth_attachment: None,
+                stencil_attachment: None,
+                render_area: Rect2D {
+                    offset: Offset2D::default(),
+                    extent: size,
+                },
+            });
 
+            render_pass_command.bind_pipeline(&skybox_pipeline);
+            render_pass_command.bind_descriptor_sets(
+                &skybox_pipeline,
+                0,
+                &[&skybox_descriptor_set],
+            );
+            render_pass_command.bind_index_buffer(
+                &mesh.primitives[0].index_buffer,
+                0,
+                gpu::IndexType::Uint32,
+            );
+            render_pass_command.bind_vertex_buffer(
+                0,
+                &[
+                    &mesh.primitives[0].position_component,
+                    &mesh.primitives[0].color_component,
+                    &mesh.primitives[0].normal_component,
+                    &mesh.primitives[0].tangent_component,
+                    &mesh.primitives[0].uv_component,
+                ],
+                &[0, 0, 0, 0, 0],
+            );
+        }
         command_buffer.submit(&gpu::CommandBufferSubmitInfo {
             wait_semaphores: &[],
             wait_stages: &[],
             signal_semaphores: &[],
             fence: None,
         })?;
+        gpu.wait_device_idle()?;
     }
 
     gpu.wait_device_idle()?;

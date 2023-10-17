@@ -1,6 +1,6 @@
 mod app_state;
 mod camera;
-mod deferred_renderer;
+pub mod deferred_renderer;
 mod gpu_pipeline;
 mod material;
 mod mesh;
