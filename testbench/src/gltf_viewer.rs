@@ -232,6 +232,7 @@ impl App for GLTFViewer {
             &mut resource_map,
             "images/skybox/hdr/sunflowers.hdr",
         )?;
+        let david_texture = utils::generate_irradiance_map(&app_state.gpu, &david_texture, &mut resource_map, &cube_mesh)?;
         let david_texture = resource_map.add(david_texture);
 
         let mut scene_renderer = DeferredRenderingPipeline::new(&app_state.gpu, cube_mesh)?;

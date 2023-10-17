@@ -164,11 +164,11 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
     let (backing_image, view) = cubemap_main_loop(
         gpu,
         cube_image_format,
-        hdr_texture_view,
+        &hdr_texture_view,
         &equilateral_fragment,
         size,
         resource_map,
-        cube_mesh,
+        &cube_mesh,
     )?;
 
     Texture::wrap(gpu, backing_image, view, resource_map)
@@ -177,11 +177,11 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
 fn cubemap_main_loop(
     gpu: &VkGpu,
     cube_image_format: ImageFormat,
-    input_texture_view: gpu::VkImageView,
+    input_texture_view: &gpu::VkImageView,
     fragment_shader_to_apply: &VkShaderModule,
     size: Extent2D,
-    resource_map: &mut ResourceMap,
-    cube_mesh: ResourceHandle<Mesh>,
+    resource_map: &ResourceMap,
+    cube_mesh: &ResourceHandle<Mesh>,
 ) -> Result<(gpu::VkImage, gpu::VkImageView), anyhow::Error> {
     let vertex_module = read_file_to_vk_module(&gpu, "./shaders/vertex_simple.spirv")?;
     let backing_image = gpu.create_image(
@@ -484,8 +484,12 @@ fn cubemap_main_loop(
     Ok((backing_image, view))
 }
 
-pub fn generate_irradiance_map(gpu: &VkGpu, source_cubemap: &Texture) -> anyhow::Result<Texture> {
-    todo!()
+pub fn generate_irradiance_map(gpu: &VkGpu, source_cubemap: &Texture, resource_map: &mut ResourceMap, cube_mesh: &ResourceHandle<Mesh>) -> anyhow::Result<Texture> {
+    let size = Extent2D { width: 512, height: 512 };
+    let input_texture_view = resource_map.get(&source_cubemap.image_view);
+    let convolve = read_file_to_vk_module(&gpu, "./shaders/skybox_convolve_irradiance.spirv")?;
+    let (backing_image, view) = cubemap_main_loop(gpu, ImageFormat::RgbaFloat16, &input_texture_view.view, &convolve, size, resource_map, cube_mesh)?;
+    Texture::wrap(gpu, backing_image, view, resource_map)
 }
 
 pub fn load_cube_to_resource_map(
