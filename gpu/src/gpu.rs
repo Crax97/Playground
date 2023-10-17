@@ -35,7 +35,7 @@ use crate::{
     get_allocation_callbacks, BufferCreateInfo, BufferImageCopyInfo, CommandBufferSubmitInfo,
     CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineDescription, Extent2D,
     FramebufferCreateInfo, GPUFence, GpuConfiguration, GraphicsPipelineDescription,
-    ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageLayout, ImageMemoryBarrier,
+    ImageCreateInfo, ImageFormat, ImageLayout, ImageMemoryBarrier,
     ImageSubresourceRange, ImageViewCreateInfo, Offset2D, Offset3D, PipelineBarrierInfo,
     PipelineStageFlags, QueueType, RenderPassDescription, SamplerCreateInfo,
     ShaderModuleCreateInfo, ToVk, TransitionInfo, VkCommandBuffer, VkCommandPool,
@@ -1110,7 +1110,6 @@ impl VkGpu {
                 access_mask: AccessFlags::TRANSFER_WRITE,
                 stage_mask: PipelineStageFlags::TRANSFER,
             },
-            ImageAspectFlags::COLOR,
             ImageSubresourceRange {
                 aspect_mask: image.format().aspect_mask(),
                 base_mip_level: 0,
@@ -1206,7 +1205,6 @@ impl VkGpu {
                 access_mask: AccessFlags::SHADER_READ,
                 stage_mask: PipelineStageFlags::FRAGMENT_SHADER | PipelineStageFlags::VERTEX_SHADER,
             },
-            ImageAspectFlags::COLOR,
             ImageSubresourceRange {
                 aspect_mask: image.format().aspect_mask(),
                 base_mip_level: 0,
@@ -1292,7 +1290,6 @@ impl VkGpu {
                 height: create_info.height,
             },
             format.into(),
-            create_info.layers,
         )?;
 
         let write_layered_image = |data: &[u8]| -> VkResult<()> {
@@ -1418,7 +1415,6 @@ impl VkGpu {
         image: &VkImage,
         old_layout: TransitionInfo,
         new_layout: TransitionInfo,
-        aspect_mask: ImageAspectFlags,
         subresource_range: ImageSubresourceRange,
     ) -> VkResult<()> {
         let mut command_buffer = self.create_command_buffer(QueueType::Graphics)?;
@@ -1428,7 +1424,6 @@ impl VkGpu {
             &mut command_buffer,
             old_layout,
             new_layout,
-            aspect_mask,
             subresource_range,
         );
         command_buffer.submit(&crate::CommandBufferSubmitInfo::default())?;
@@ -1441,7 +1436,6 @@ impl VkGpu {
         command_buffer: &mut crate::VkCommandBuffer,
         old_layout: TransitionInfo,
         new_layout: TransitionInfo,
-        aspect_mask: ImageAspectFlags,
         subresource_range: ImageSubresourceRange,
     ) {
         let memory_barrier = ImageMemoryBarrier {
@@ -1452,13 +1446,7 @@ impl VkGpu {
             src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
             dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
             image,
-            subresource_range: ImageSubresourceRange {
-                aspect_mask,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: image.layers(),
-            },
+            subresource_range,
         };
         command_buffer.pipeline_barrier(&PipelineBarrierInfo {
             src_stage_mask: old_layout.stage_mask,

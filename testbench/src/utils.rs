@@ -363,7 +363,6 @@ fn cubemap_main_loop(
             access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
             stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
         },
-        ImageAspectFlags::COLOR,
         ImageSubresourceRange {
             aspect_mask: ImageAspectFlags::COLOR,
             base_mip_level: 0,
@@ -459,7 +458,6 @@ fn cubemap_main_loop(
             access_mask: AccessFlags::SHADER_READ,
             stage_mask: PipelineStageFlags::ALL_GRAPHICS,
         },
-        ImageAspectFlags::COLOR,
         ImageSubresourceRange {
             aspect_mask: ImageAspectFlags::COLOR,
             base_mip_level: 0,

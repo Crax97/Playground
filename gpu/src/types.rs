@@ -778,7 +778,6 @@ pub struct VkImage {
     pub(super) allocator: Option<Arc<RefCell<dyn GpuAllocator>>>,
     pub(super) extents: Extent2D,
     pub(super) format: ImageFormat,
-    layers: u32,
 }
 impl VkImage {
     pub(super) fn create(
@@ -788,7 +787,6 @@ impl VkImage {
         allocator: Arc<RefCell<dyn GpuAllocator>>,
         extents: Extent2D,
         format: ImageFormat,
-        layers: u32,
     ) -> VkResult<Self> {
         Ok(Self {
             device: gpu.state.logical_device.clone(),
@@ -797,7 +795,6 @@ impl VkImage {
             allocator: Some(allocator),
             extents,
             format,
-            layers,
         })
     }
 
@@ -814,7 +811,6 @@ impl VkImage {
             allocator: None,
             extents,
             format,
-            layers: 1,
         }
     }
 
@@ -826,9 +822,6 @@ impl VkImage {
         self.extents
     }
 
-    pub(crate) fn layers(&self) -> u32 {
-        self.layers
-    }
 }
 impl Drop for VkImage {
     fn drop(&mut self) {
