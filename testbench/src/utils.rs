@@ -5,7 +5,7 @@ use image::DynamicImage;
 use log::{debug, info};
 use nalgebra::{point, vector, Matrix4, Vector2, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
-use std::{mem::size_of, path::Path, f32::consts::PI};
+use std::{mem::size_of, path::Path};
 
 use half::f16;
 
@@ -16,14 +16,13 @@ pub struct LoadedImage {
 }
 
 use gpu::{
-    AccessFlags, BeginRenderPassInfo, BindingElement, BlendState, BufferCreateInfo, BufferRange,
-    BufferUsageFlags, ColorAttachment, ComponentMapping, DepthStencilState, DescriptorInfo,
-    DescriptorSetInfo, Extent2D, FragmentStageInfo, GlobalBinding, GraphicsPipelineDescription,
-    ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageLayout, ImageSubresourceRange,
-    ImageUsageFlags, ImageViewCreateInfo, MemoryDomain, Offset2D, PipelineStageFlags,
-    PushConstantRange, Rect2D, RenderPassAttachment, SamplerCreateInfo, SamplerState,
-    ShaderModuleCreateInfo, ShaderStage, VertexAttributeDescription, VertexBindingDescription,
-    VertexStageInfo, VkCommandBuffer, VkGpu, VkRenderPassCommand, VkShaderModule, BlendMode, BlendOp, ColorComponentFlags,
+    AccessFlags, BeginRenderPassInfo, BindingElement, BlendState, ColorAttachment,
+    ComponentMapping, DepthStencilState, DescriptorInfo, DescriptorSetInfo, Extent2D,
+    FragmentStageInfo, GlobalBinding, GraphicsPipelineDescription, ImageAspectFlags,
+    ImageCreateInfo, ImageFormat, ImageLayout, ImageSubresourceRange, ImageUsageFlags,
+    ImageViewCreateInfo, MemoryDomain, Offset2D, PipelineStageFlags, PushConstantRange, Rect2D,
+    RenderPassAttachment, SamplerCreateInfo, SamplerState, ShaderModuleCreateInfo, ShaderStage,
+    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo, VkGpu, VkShaderModule,
 };
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
@@ -124,15 +123,13 @@ pub fn load_cubemap_from_path<P: AsRef<Path>>(
 
 pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
     gpu: &VkGpu,
+    output_size: Extent2D,
     cube_mesh: ResourceHandle<Mesh>,
     resource_map: &mut ResourceMap,
     path: P,
 ) -> anyhow::Result<Texture> {
+    let size = output_size;
     let cube_image_format = ImageFormat::RgbaFloat16;
-    let size = Extent2D {
-        width: 512,
-        height: 512,
-    };
     let hdr_image = load_image_from_path(path, cube_image_format)?;
     let hdr_texture = gpu.create_image(
         &ImageCreateInfo {
@@ -162,9 +159,48 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
             layer_count: 1,
         },
     })?;
-    let vertex_module = read_file_to_vk_module(&gpu, "./shaders/vertex_simple.spirv")?;
-    let equilateral_fragment = read_file_to_vk_module(&gpu, "./shaders/skybox_spherical.spirv")?;
 
+    let equilateral_fragment = read_file_to_vk_module(&gpu, "./shaders/skybox_spherical.spirv")?;
+    let (backing_image, view) = cubemap_main_loop(
+        gpu,
+        cube_image_format,
+        hdr_texture_view,
+        &equilateral_fragment,
+        size,
+        resource_map,
+        cube_mesh,
+    )?;
+
+    Texture::wrap(gpu, backing_image, view, resource_map)
+}
+
+fn cubemap_main_loop(
+    gpu: &VkGpu,
+    cube_image_format: ImageFormat,
+    input_texture_view: gpu::VkImageView,
+    fragment_shader_to_apply: &VkShaderModule,
+    size: Extent2D,
+    resource_map: &mut ResourceMap,
+    cube_mesh: ResourceHandle<Mesh>,
+) -> Result<(gpu::VkImage, gpu::VkImageView), anyhow::Error> {
+    let vertex_module = read_file_to_vk_module(&gpu, "./shaders/vertex_simple.spirv")?;
+    let backing_image = gpu.create_image(
+        &ImageCreateInfo {
+            label: Some("Cubemap"),
+            width: size.width,
+            height: size.height,
+            depth: 1,
+            mips: 1,
+            layers: 6,
+            samples: gpu::SampleCount::Sample1,
+            format: cube_image_format,
+            usage: ImageUsageFlags::SAMPLED
+                | ImageUsageFlags::TRANSFER_DST
+                | ImageUsageFlags::COLOR_ATTACHMENT,
+        },
+        MemoryDomain::DeviceLocal,
+        None,
+    )?;
     let skybox_pipeline = gpu.create_graphics_pipeline(&GraphicsPipelineDescription {
         global_bindings: &[GlobalBinding {
             set_index: 0,
@@ -232,7 +268,7 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
         }),
         fragment_stage: Some(FragmentStageInfo {
             entry_point: "main",
-            module: &equilateral_fragment,
+            module: &fragment_shader_to_apply,
             color_attachments: &[RenderPassAttachment {
                 format: cube_image_format,
                 samples: gpu::SampleCount::Sample1,
@@ -259,7 +295,6 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
             size: std::mem::size_of::<Matrix4<f32>>() as _,
         }],
     })?;
-
     let skybox_sampler = gpu.create_sampler(&SamplerCreateInfo {
         mag_filter: gpu::Filter::Linear,
         min_filter: gpu::Filter::Linear,
@@ -273,23 +308,6 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
         border_color: [0.0; 4],
     })?;
 
-    let backing_image = gpu.create_image(
-        &ImageCreateInfo {
-            label: Some("Cubemap"),
-            width: size.width,
-            height: size.height,
-            depth: 1,
-            mips: 1,
-            layers: 6,
-            samples: gpu::SampleCount::Sample1,
-            format: cube_image_format,
-            usage: ImageUsageFlags::SAMPLED
-                | ImageUsageFlags::TRANSFER_DST
-                | ImageUsageFlags::COLOR_ATTACHMENT,
-        },
-        MemoryDomain::DeviceLocal,
-        None,
-    )?;
     let make_image_view = |i| {
         gpu.create_image_view(&gpu::ImageViewCreateInfo {
             image: &backing_image,
@@ -314,15 +332,9 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
             &point![forward.x, forward.y, forward.z],
             &up,
         ),
-        projection: nalgebra::Matrix4::new_perspective(
-            1.0,
-            90.0f32.to_radians(),
-            0.001,
-            1000.0,
-        ),
+        projection: nalgebra::Matrix4::new_perspective(1.0, 90.0f32.to_radians(), 0.001, 1000.0),
         viewport_size_offset: vector![size.width as f32, size.height as f32, 0.0, 0.0],
     };
-
     let views = [
         make_image_view(0),
         make_image_view(1),
@@ -331,7 +343,6 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
         make_image_view(4),
         make_image_view(5),
     ];
-
     let povs = [
         make_pov(vector![-1.0, 0.0, 0.0], vector![0.0, 1.0, 0.0]),
         make_pov(vector![1.0, 0.0, 0.0], vector![0.0, 1.0, 0.0]),
@@ -361,13 +372,12 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
             layer_count: 6,
         },
     )?;
-
     let skybox_descriptor_set = gpu.create_descriptor_set(&DescriptorSetInfo {
         descriptors: &[DescriptorInfo {
             binding: 0,
             element_type: gpu::DescriptorType::CombinedImageSampler(SamplerState {
                 sampler: &skybox_sampler,
-                image_view: &hdr_texture_view,
+                image_view: &input_texture_view,
                 image_layout: ImageLayout::ShaderReadOnly,
             }),
             binding_stage: ShaderStage::VERTEX | ShaderStage::FRAGMENT,
@@ -436,7 +446,6 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
         })?;
         gpu.wait_device_idle()?;
     }
-
     gpu.wait_device_idle()?;
     gpu.transition_image_layout(
         &backing_image,
@@ -472,8 +481,7 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
             base_mip_level: 0,
         },
     })?;
-
-    Texture::wrap(gpu, backing_image, view, resource_map)
+    Ok((backing_image, view))
 }
 
 pub fn generate_irradiance_map(gpu: &VkGpu, source_cubemap: &Texture) -> anyhow::Result<Texture> {

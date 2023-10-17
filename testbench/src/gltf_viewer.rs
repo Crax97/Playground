@@ -11,7 +11,7 @@ use std::num::NonZeroU32;
 use app::{bootstrap, App};
 
 use fps_camera::FpsCamera;
-use gpu::{ImageFormat, PresentMode, VkCommandBuffer};
+use gpu::{ImageFormat, PresentMode, VkCommandBuffer, Extent2D};
 use imgui::{TreeNodeFlags, Ui};
 use input::InputState;
 use winit::dpi::{PhysicalPosition, Position};
@@ -224,6 +224,10 @@ impl App for GLTFViewer {
 
         let david_texture = utils::load_hdr_to_cubemap(
             &app_state.gpu,
+            Extent2D {
+                width: 1024,
+                height: 1024,
+            },
             cube_mesh.clone(),
             &mut resource_map,
             "images/skybox/hdr/sunflowers.hdr",
