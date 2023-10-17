@@ -214,21 +214,21 @@ impl App for GLTFViewer {
         let args = GltfViewerArgs::parse();
 
         let mut resource_map = ResourceMap::new();
+        let cube_mesh = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
 
         // TODO: avoid duplicating this module creation
         let vertex_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/vertex_deferred.spirv")?;
         let skybox_fragment =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/skybox_spherical.spirv")?;
+            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/skybox_master.spirv")?;
 
         let david_texture = utils::load_hdr_to_cubemap(
             &app_state.gpu,
+            cube_mesh.clone(),
             &mut resource_map,
             "images/skybox/hdr/sunflowers.hdr",
         )?;
         let david_texture = resource_map.add(david_texture);
-
-        let cube_mesh = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
 
         let mut scene_renderer = DeferredRenderingPipeline::new(&app_state.gpu, cube_mesh)?;
 

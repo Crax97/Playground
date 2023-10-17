@@ -39,11 +39,9 @@ impl Default for Camera {
 
 impl Camera {
     pub fn view(&self) -> Matrix4<f32> {
-        Matrix4::look_at_rh(
-            &self.location,
-            &(self.location + self.forward),
-            &vector![0.0, 1.0, 0.0],
-        )
+        let up = vector![0.0, 1.0, 0.0, 0.0];
+        let up = Matrix4::new_rotation(vector![self.forward.y, 0.0, 0.0]) * up;
+        Matrix4::look_at_rh(&self.location, &(self.location + self.forward), &up.xyz())
     }
     pub fn projection(&self) -> Matrix4<f32> {
         Matrix4::new_perspective(

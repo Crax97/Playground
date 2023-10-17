@@ -1,11 +1,14 @@
 #![allow(dead_code)]
 use anyhow::bail;
-use engine::{Mesh, MeshPrimitiveCreateInfo, Texture};
+use engine::{
+    Camera, DeferredRenderingPipeline, MaterialInstance, Mesh, MeshPrimitiveCreateInfo,
+    RenderingPipeline, Scene, Texture, TextureInput,
+};
 use image::DynamicImage;
 use log::{debug, info};
-use nalgebra::vector;
-use resource_map::ResourceMap;
-use std::path::Path;
+use nalgebra::{point, vector};
+use resource_map::{ResourceHandle, ResourceMap};
+use std::{collections::HashMap, path::Path};
 
 use half::f16;
 
@@ -15,7 +18,11 @@ pub struct LoadedImage {
     pub height: u32,
 }
 
-use gpu::{ImageFormat, ShaderModuleCreateInfo, VkGpu, VkShaderModule};
+use gpu::{
+    AccessFlags, Extent2D, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageSubresourceRange,
+    ImageUsageFlags, MemoryDomain, PipelineStageFlags, ShaderModuleCreateInfo, VkGpu,
+    VkShaderModule,
+};
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
     gpu: &VkGpu,
@@ -115,20 +122,246 @@ pub fn load_cubemap_from_path<P: AsRef<Path>>(
 
 pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
     gpu: &VkGpu,
+    cube_mesh: ResourceHandle<Mesh>,
     resource_map: &mut ResourceMap,
     path: P,
 ) -> anyhow::Result<Texture> {
     let hdr_image = load_image_from_path(path, ImageFormat::RgbaFloat16)?;
-    Ok(Texture::new_with_data(
+    let equi_texture = Texture::new_with_data(
         gpu,
         resource_map,
         hdr_image.width,
         hdr_image.height,
         &hdr_image.bytes,
-        Some("cubemap"),
+        Some("Equilateral texture"),
         ImageFormat::RgbaFloat16,
         gpu::ImageViewType::Type2D,
-    )?)
+    )?;
+    let equi_texture = resource_map.add(equi_texture);
+
+    let vertex_module = read_file_to_vk_module(&gpu, "./shaders/vertex_deferred.spirv")?;
+    let equilateral_fragment = read_file_to_vk_module(&gpu, "./shaders/skybox_spherical.spirv")?;
+
+    let mut scene_renderer = DeferredRenderingPipeline::new(&gpu, cube_mesh)?;
+
+    let skybox_material = scene_renderer.create_material(
+        &gpu,
+        engine::MaterialDescription {
+            name: "skybox material",
+            domain: engine::MaterialDomain::Surface,
+            texture_inputs: &[TextureInput {
+                name: "Cubemap".to_owned(),
+                format: ImageFormat::Rgba8,
+            }],
+            material_parameters: HashMap::new(),
+            fragment_module: &equilateral_fragment,
+            vertex_module: &vertex_module,
+        },
+    )?;
+    let skybox_master = resource_map.add(skybox_material);
+
+    let mut skybox_textures = HashMap::new();
+    skybox_textures.insert("Cubemap".to_string(), equi_texture);
+
+    let skybox_instance = MaterialInstance::create_instance(
+        &gpu,
+        skybox_master,
+        &resource_map,
+        &engine::MaterialInstanceDescription {
+            name: "Skybox Generator",
+            texture_inputs: skybox_textures,
+        },
+    )?;
+    let skybox_instance = resource_map.add(skybox_instance);
+
+    let mut scene = Scene::new();
+    scene.set_skybox_material(Some(skybox_instance));
+
+    let size = Extent2D {
+        width: 2048,
+        height: 2048,
+    };
+
+    let backing_image = gpu.create_image(
+        &ImageCreateInfo {
+            label: Some("Cubemap"),
+            width: size.width,
+            height: size.height,
+            depth: 1,
+            mips: 1,
+            layers: 6,
+            samples: gpu::SampleCount::Sample1,
+            format: ImageFormat::RgbaFloat16,
+            usage: ImageUsageFlags::SAMPLED
+                | ImageUsageFlags::TRANSFER_DST
+                | ImageUsageFlags::COLOR_ATTACHMENT,
+        },
+        MemoryDomain::DeviceLocal,
+        None,
+    )?;
+    let make_image_view = |i| {
+        gpu.create_image_view(&gpu::ImageViewCreateInfo {
+            image: &backing_image,
+            view_type: gpu::ImageViewType::Type2D,
+            format: ImageFormat::RgbaFloat16,
+            components: gpu::ComponentMapping::default(),
+            subresource_range: gpu::ImageSubresourceRange {
+                base_array_layer: i,
+                layer_count: 1,
+                aspect_mask: ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+            },
+        })
+        .unwrap()
+    };
+
+    let views = [
+        make_image_view(0),
+        make_image_view(1),
+        make_image_view(2),
+        make_image_view(3),
+        make_image_view(4),
+        make_image_view(5),
+    ];
+
+    let povs = [
+        Camera {
+            location: point![0.0, 0.0, 0.0],
+            forward: vector![1.0, 0.0, 0.0],
+            fov: 90.0,
+            width: size.width as f32,
+            height: size.height as f32,
+            near: 0.01,
+            far: 1000.0,
+        },
+        Camera {
+            location: point![0.0, 0.0, 0.0],
+            forward: vector![-1.0, 0.0, 0.0],
+            fov: 90.0,
+            width: 2048 as f32,
+            height: 2048 as f32,
+            near: 0.01,
+            far: 1000.0,
+        },
+        Camera {
+            location: point![0.0, 0.0, 0.0],
+            forward: vector![0.0, 1.0, 0.0],
+            fov: 90.0,
+            width: size.width as f32,
+            height: size.height as f32,
+            near: 0.01,
+            far: 1000.0,
+        },
+        Camera {
+            location: point![0.0, 0.0, 0.0],
+            forward: vector![0.0, -1.0, 0.0],
+            fov: 90.0,
+            width: 2048 as f32,
+            height: 2048 as f32,
+            near: 0.01,
+            far: 1000.0,
+        },
+        Camera {
+            location: point![0.0, 0.0, 0.0],
+            forward: vector![0.0, 0.0, 1.0],
+            fov: 90.0,
+            width: 2048 as f32,
+            height: 2048 as f32,
+            near: 0.01,
+            far: 1000.0,
+        },
+        Camera {
+            location: point![0.0, 0.0, 0.0],
+            forward: vector![0.0, 0.0, -1.0],
+            fov: 90.0,
+            width: 2048 as f32,
+            height: 2048 as f32,
+            near: 0.01,
+            far: 1000.0,
+        },
+    ];
+    gpu.transition_image_layout(
+        &backing_image,
+        gpu::TransitionInfo {
+            layout: gpu::ImageLayout::Undefined,
+            access_mask: AccessFlags::empty(),
+            stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+        },
+        gpu::TransitionInfo {
+            layout: gpu::ImageLayout::ColorAttachment,
+            access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+            stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+        },
+        ImageAspectFlags::COLOR,
+        ImageSubresourceRange {
+            aspect_mask: ImageAspectFlags::COLOR,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 6,
+        },
+    )?;
+
+    for (i, view) in views.iter().enumerate() {
+        let pov = &povs[i];
+        let command_buffer = scene_renderer.render(
+            pov,
+            &scene,
+            &engine::Backbuffer {
+                size,
+                format: ImageFormat::RgbaFloat16,
+                image: &backing_image,
+                image_view: view,
+            },
+            resource_map,
+        )?;
+
+        command_buffer.submit(&gpu::CommandBufferSubmitInfo {
+            wait_semaphores: &[],
+            wait_stages: &[],
+            signal_semaphores: &[],
+            fence: None,
+        })?;
+    }
+
+    gpu.wait_device_idle()?;
+    gpu.transition_image_layout(
+        &backing_image,
+        gpu::TransitionInfo {
+            layout: gpu::ImageLayout::ColorAttachment,
+            access_mask: AccessFlags::empty(),
+            stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+        },
+        gpu::TransitionInfo {
+            layout: gpu::ImageLayout::ShaderReadOnly,
+            access_mask: AccessFlags::SHADER_READ,
+            stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+        },
+        ImageAspectFlags::COLOR,
+        ImageSubresourceRange {
+            aspect_mask: ImageAspectFlags::COLOR,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 6,
+        },
+    )?;
+    let view = gpu.create_image_view(&gpu::ImageViewCreateInfo {
+        image: &backing_image,
+        view_type: gpu::ImageViewType::Cube,
+        format: ImageFormat::RgbaFloat16,
+        components: gpu::ComponentMapping::default(),
+        subresource_range: gpu::ImageSubresourceRange {
+            base_array_layer: 0,
+            layer_count: 6,
+            aspect_mask: ImageAspectFlags::COLOR,
+            level_count: 1,
+            base_mip_level: 0,
+        },
+    })?;
+
+    Texture::wrap(gpu, backing_image, view, resource_map)
 }
 
 pub fn generate_irradiance_map(gpu: &VkGpu, source_cubemap: &Texture) -> anyhow::Result<Texture> {

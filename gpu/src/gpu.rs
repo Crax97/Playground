@@ -1111,6 +1111,13 @@ impl VkGpu {
                 stage_mask: PipelineStageFlags::TRANSFER,
             },
             ImageAspectFlags::COLOR,
+            ImageSubresourceRange {
+                aspect_mask: image.format().aspect_mask(),
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: layer,
+                layer_count: 1,
+            },
         )?;
 
         if data.len() < self.staging_buffer.size() {
@@ -1200,6 +1207,13 @@ impl VkGpu {
                 stage_mask: PipelineStageFlags::FRAGMENT_SHADER | PipelineStageFlags::VERTEX_SHADER,
             },
             ImageAspectFlags::COLOR,
+            ImageSubresourceRange {
+                aspect_mask: image.format().aspect_mask(),
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: layer,
+                layer_count: 1,
+            },
         )?;
         Ok(())
     }
@@ -1405,6 +1419,7 @@ impl VkGpu {
         old_layout: TransitionInfo,
         new_layout: TransitionInfo,
         aspect_mask: ImageAspectFlags,
+        subresource_range: ImageSubresourceRange,
     ) -> VkResult<()> {
         let mut command_buffer = self.create_command_buffer(QueueType::Graphics)?;
 
@@ -1414,6 +1429,7 @@ impl VkGpu {
             old_layout,
             new_layout,
             aspect_mask,
+            subresource_range,
         );
         command_buffer.submit(&crate::CommandBufferSubmitInfo::default())?;
         self.wait_queue_idle(QueueType::Graphics)
@@ -1426,6 +1442,7 @@ impl VkGpu {
         old_layout: TransitionInfo,
         new_layout: TransitionInfo,
         aspect_mask: ImageAspectFlags,
+        subresource_range: ImageSubresourceRange,
     ) {
         let memory_barrier = ImageMemoryBarrier {
             src_access_mask: old_layout.access_mask,

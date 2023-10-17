@@ -94,6 +94,33 @@ impl Texture {
         Ok((image, rgba_view, sampler))
     }
 
+    pub fn wrap(
+        gpu: &VkGpu,
+        image: VkImage,
+        view: VkImageView,
+        resource_map: &mut ResourceMap,
+    ) -> anyhow::Result<Self> {
+        let sampler = gpu.create_sampler(&SamplerCreateInfo {
+            mag_filter: Filter::Linear,
+            min_filter: Filter::Linear,
+            address_u: SamplerAddressMode::Repeat,
+            address_v: SamplerAddressMode::Repeat,
+            address_w: SamplerAddressMode::Repeat,
+            mip_lod_bias: 0.0,
+            compare_function: None,
+            min_lod: 0.0,
+            max_lod: 0.0,
+            border_color: [0.0; 4],
+        })?;
+        let image = resource_map.add(ImageResource(image));
+        let image_view = TextureImageView { image, view };
+        let image_view = resource_map.add(image_view);
+        let sampler = resource_map.add(SamplerResource(sampler));
+        Ok(Self {
+            image_view,
+            sampler,
+        })
+    }
     pub fn new_empty(
         gpu: &VkGpu,
         resource_map: &mut ResourceMap,
