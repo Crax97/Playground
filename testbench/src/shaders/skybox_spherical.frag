@@ -17,21 +17,13 @@ vec2 sample_spherical_map(vec3 v)
     return uv;
 }
 
-layout(set = 1, binding = 0) uniform sampler2D baseColorSampler;
+layout(set = 0, binding = 0) uniform sampler2D baseColorSampler;
 
-layout(location = 0) out vec4 outPosition;
-layout(location = 1) out vec4 outNormal;
-layout(location = 2) out vec4 outDiffuse;
-layout(location = 3) out vec4 outEmissive;
-layout(location = 4) out vec4 outPbr;
+
+layout(location = 0) out vec4 outEmissive;
 
 layout(location = 0) in FragmentOut fragOut;
 
 void main() {
-    outPosition = vec4(fragOut.position, 1.0);
-    outNormal = vec4(fragOut.normal, 1.0);
-    //outDiffuse = texture(baseColorSampler, fragOut.uv);
-    outDiffuse = vec4(0.0);
     outEmissive = texture(baseColorSampler, sample_spherical_map(normalize(fragOut.vert_position)));
-    outPbr = vec4(0.0);
 }
