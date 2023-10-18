@@ -1919,7 +1919,11 @@ impl RenderGraphRunner for GpuRunner {
                         };
                         let old_layout =
                             *self.resource_states.entry(*read).or_insert(TransitionInfo {
-                                layout: ImageLayout::Undefined,
+                                layout: if info.external {
+                                    ImageLayout::ShaderReadOnly
+                                } else {
+                                    ImageLayout::Undefined
+                                },
                                 access_mask: AccessFlags::empty(),
                                 stage_mask: if image_desc.format.is_color() {
                                     PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT

@@ -209,7 +209,11 @@ pub struct DeferredRenderingPipeline {
 }
 
 impl DeferredRenderingPipeline {
-    pub fn new(gpu: &VkGpu, resource_map: &mut ResourceMap, cube_mesh: ResourceHandle<Mesh>) -> anyhow::Result<Self> {
+    pub fn new(
+        gpu: &VkGpu,
+        resource_map: &mut ResourceMap,
+        cube_mesh: ResourceHandle<Mesh>,
+    ) -> anyhow::Result<Self> {
         let mut frame_buffers = vec![];
         for _ in 0..VkSwapchain::MAX_FRAMES_IN_FLIGHT {
             let camera_buffer = {
@@ -266,7 +270,16 @@ impl DeferredRenderingPipeline {
             code: bytemuck::cast_slice(TEXTURE_COPY),
         })?;
 
-        let default_irradiance_map = Texture::new_with_data(gpu, resource_map, 1, 1, &[0; 36 * 2], Some("Default Cubemap White"), ImageFormat::RgbaFloat16, gpu::ImageViewType::Cube)?;
+        let default_irradiance_map = Texture::new_with_data(
+            gpu,
+            resource_map,
+            1,
+            1,
+            bytemuck::cast_slice(&[1.0; 6 * 4]),
+            Some("Default Cubemap White"),
+            ImageFormat::RgbaFloat32,
+            gpu::ImageViewType::Cube,
+        )?;
         let default_irradiance_map = resource_map.add(default_irradiance_map);
 
         Ok(Self {
@@ -544,7 +557,10 @@ impl DeferredRenderingPipeline {
             .set_cull_mode(gpu::CullMode::Back);
     }
 
-    pub fn set_irradiance_texture(&mut self, irradiance_map: Option<ResourceHandle<crate::Texture>>) {
+    pub fn set_irradiance_texture(
+        &mut self,
+        irradiance_map: Option<ResourceHandle<crate::Texture>>,
+    ) {
         self.irradiance_map = irradiance_map;
     }
 }
@@ -1164,14 +1180,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         });
 
         let irradiance_map_texture = match &self.irradiance_map {
-            Some(texture) => {
-                texture
-            },
-            None => &self.default_irradiance_map
+            Some(texture) => texture,
+            None => &self.default_irradiance_map,
         };
-                let irradiance_map_texture = resource_map.get(irradiance_map_texture);
-                let image_view = resource_map.get(&irradiance_map_texture.image_view);
-                let image = &resource_map.get(&image_view.image).0;
+        let irradiance_map_texture = resource_map.get(irradiance_map_texture);
+        let image_view = resource_map.get(&irradiance_map_texture.image_view);
+        let image = &resource_map.get(&image_view.image).0;
 
         context.inject_external_image(&irradiance_map, image, &image_view.view);
         context.inject_external_image(&swapchain_image, backbuffer.image, backbuffer.image_view);

@@ -11,7 +11,7 @@ use std::num::NonZeroU32;
 use app::{bootstrap, App};
 
 use fps_camera::FpsCamera;
-use gpu::{ImageFormat, PresentMode, VkCommandBuffer, Extent2D};
+use gpu::{Extent2D, ImageFormat, PresentMode, VkCommandBuffer};
 use imgui::{TreeNodeFlags, Ui};
 use input::InputState;
 use winit::dpi::{PhysicalPosition, Position};
@@ -230,13 +230,19 @@ impl App for GLTFViewer {
             },
             cube_mesh.clone(),
             &mut resource_map,
-            "images/skybox/hdr/basement_boxing.hdr",
+            "images/skybox/hdr/evening_road.hdr",
         )?;
-        let irradiance_map = utils::generate_irradiance_map(&app_state.gpu, &david_texture, &mut resource_map, &cube_mesh)?;
+        let irradiance_map = utils::generate_irradiance_map(
+            &app_state.gpu,
+            &david_texture,
+            &mut resource_map,
+            &cube_mesh,
+        )?;
         let david_texture = resource_map.add(david_texture);
         let irradiance_map = resource_map.add(irradiance_map);
 
-        let mut scene_renderer = DeferredRenderingPipeline::new(&app_state.gpu, &mut resource_map, cube_mesh)?;
+        let mut scene_renderer =
+            DeferredRenderingPipeline::new(&app_state.gpu, &mut resource_map, cube_mesh)?;
 
         scene_renderer.set_irradiance_texture(Some(irradiance_map));
 
