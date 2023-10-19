@@ -39,9 +39,9 @@ use crate::{
     GraphicsPipelineDescription, Handle as GpuHandle, ImageCreateInfo, ImageFormat, ImageLayout,
     ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, Offset2D, Offset3D,
     PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPassDescription, SamplerCreateInfo,
-    ShaderModuleCreateInfo, ToVk, TransitionInfo, VkCommandBuffer, VkCommandPool,
-    VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
-    VkShaderModule, ShaderModuleHandle,
+    ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo, VkCommandBuffer,
+    VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
+    VkShaderModule,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -392,7 +392,6 @@ impl VkGpu {
             staging_buffer,
             allocated_buffers: RefCell::new(GpuResourceMap::new()),
             allocated_shader_modules: RefCell::new(GpuResourceMap::new()),
-
         })
     }
 
@@ -1585,9 +1584,9 @@ impl VkGpu {
     fn buffer_map(&self) -> *const GpuResourceMap<VkBuffer> {
         self.allocated_buffers.as_ptr() as *const _
     }
-    fn resolve_buffer(&self, buffer: BufferHandle) -> &VkBuffer {
-        let ptr =  self.buffer_map();
-        let map = unsafe {&*ptr};
+    pub(crate) fn resolve_buffer(&self, buffer: BufferHandle) -> &VkBuffer {
+        let ptr = self.buffer_map();
+        let map = unsafe { &*ptr };
         map.resolve(&buffer.id)
     }
 }
@@ -1613,7 +1612,10 @@ impl Gpu for VkGpu {
         Ok(())
     }
 
-    fn make_shader_module(&self, info: &ShaderModuleCreateInfo) -> anyhow::Result<crate::ShaderModuleHandle> {
+    fn make_shader_module(
+        &self,
+        info: &ShaderModuleCreateInfo,
+    ) -> anyhow::Result<crate::ShaderModuleHandle> {
         let buffer = self.create_shader_module(info)?;
         let handle = ShaderModuleHandle::new(buffer.inner.as_raw());
         self.allocated_shader_modules

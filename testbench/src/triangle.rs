@@ -5,9 +5,9 @@ use app::{bootstrap, App};
 
 use engine::Backbuffer;
 use gpu::{
-    AccessFlags, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorAttachment, Gpu,
-    ImageAspectFlags, ImageFormat, ImageMemoryBarrier, InputRate, MemoryDomain, PipelineStageFlags,
-    PresentMode, ShaderModuleHandle, VertexBindingInfo, VkCommandBuffer,
+    AccessFlags, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorAttachment, CullMode, Gpu,
+    ImageAspectFlags, ImageFormat, ImageMemoryBarrier, IndexType, InputRate, MemoryDomain,
+    PipelineStageFlags, PresentMode, ShaderModuleHandle, VertexBindingInfo, VkCommandBuffer,
 };
 use imgui::Ui;
 use nalgebra::*;
@@ -137,8 +137,9 @@ impl App for TriangleApp {
                 format: ImageFormat::RgbFloat32,
                 input_rate: InputRate::PerVertex,
             }]);
-            // pass.set_cull_mode(CullMode::None);
-            // pass.draw_indexed(&self.index_buffer, IndexType::Uint32, 0, 3, 0);
+            pass.set_index_buffer(self.index_buffer, IndexType::Uint32, 0);
+            pass.set_cull_mode(CullMode::None);
+            pass.draw_indexed_handle(3, 1, 0, 0, 0)?;
         }
         Ok(command_buffer)
     }

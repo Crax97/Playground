@@ -499,8 +499,8 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         }
     }
 
+    #[deprecated(note = "Use the new, higher-level, api")]
     pub fn bind_pipeline(&mut self, material: &VkGraphicsPipeline) {
-        todo!("Use the new, higher-level, api");
         let device = self.command_buffer.gpu.vk_logical_device();
         unsafe {
             device.cmd_bind_pipeline(
@@ -676,6 +676,54 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         offset: u32,
     ) {
         inner::push_constant(self, pipeline, data, offset)
+    }
+
+    pub fn draw_indexed_handle(
+        &self,
+        num_indices: u32,
+        instances: u32,
+        first_index: u32,
+        vertex_offset: i32,
+        first_instance: u32,
+    ) -> anyhow::Result<()> {
+        let pipeline = self.find_matching_pipeline();
+        let device = self.gpu.vk_logical_device();
+        unsafe {
+            device.cmd_bind_pipeline(self.inner(), PipelineBindPoint::GRAPHICS, pipeline);
+            device.cmd_draw_indexed(
+                self.inner(),
+                num_indices,
+                instances,
+                first_index,
+                vertex_offset,
+                first_instance,
+            );
+        }
+
+        Ok(())
+    }
+
+    fn find_matching_pipeline(&self) -> vk::Pipeline {
+        todo!()
+    }
+
+    pub fn set_index_buffer(
+        &self,
+        index_buffer: BufferHandle,
+        index_type: IndexType,
+        offset: usize,
+    ) {
+        assert!(!index_buffer.is_null());
+        let index_buffer = self.gpu.resolve_buffer(index_buffer);
+        let device = self.gpu.vk_logical_device();
+        unsafe {
+            device.cmd_bind_index_buffer(
+                self.inner(),
+                index_buffer.inner,
+                offset as _,
+                index_type.to_vk(),
+            );
+        }
     }
 }
 
