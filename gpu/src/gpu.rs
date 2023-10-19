@@ -1,4 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::ptr::addr_of_mut;
 use std::{
     cell::RefCell,
@@ -21,7 +23,7 @@ use ash::{
         DeviceQueueCreateInfo, Extent3D, FormatFeatureFlags, FramebufferCreateFlags, Handle,
         ImageCreateFlags, ImageTiling, ImageType, ImageViewCreateFlags, InstanceCreateFlags,
         InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, PhysicalDevice, PhysicalDeviceFeatures,
-        PhysicalDeviceProperties, PhysicalDeviceType, PipelineCache, PipelineCacheCreateFlags,
+        PhysicalDeviceProperties, PhysicalDeviceType, PipelineCacheCreateFlags,
         PipelineCacheCreateInfo, Queue, QueueFlags, ShaderModuleCreateFlags, SharingMode,
         StructureType, WriteDescriptorSet, API_VERSION_1_3,
     },
@@ -38,10 +40,10 @@ use crate::{
     ComputePipelineDescription, Extent2D, FramebufferCreateInfo, GPUFence, Gpu, GpuConfiguration,
     GraphicsPipelineDescription, Handle as GpuHandle, ImageCreateInfo, ImageFormat, ImageLayout,
     ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, Offset2D, Offset3D,
-    PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPassDescription, SamplerCreateInfo,
-    ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo, VkCommandBuffer,
-    VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
-    VkShaderModule,
+    PipelineBarrierInfo, PipelineStageFlags, PipelineState, QueueType, RenderPassDescription,
+    SamplerCreateInfo, ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo,
+    VkCommandBuffer, VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline,
+    VkImageView, VkRenderPass, VkShaderModule,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -91,6 +93,35 @@ struct SupportedFeatures {
     supports_rgb_images: bool,
 }
 
+pub(crate) struct PipelineCache {
+    pipelines: HashMap<u64, vk::Pipeline>,
+}
+
+impl PipelineCache {
+    pub(crate) fn get_pipeline(&mut self, pipeline_state: &PipelineState) -> vk::Pipeline {
+        let mut hasher = DefaultHasher::new();
+        pipeline_state.hash(&mut hasher);
+        let pipeline_hash = hasher.finish();
+        if self.pipelines.contains_key(&pipeline_hash) {
+            return self.pipelines[&pipeline_hash];
+        }
+
+        let pipeline = self.create_pipeline(pipeline_state);
+        self.pipelines.insert(pipeline_hash, pipeline);
+        pipeline
+    }
+
+    fn new() -> PipelineCache {
+        Self {
+            pipelines: HashMap::new(),
+        }
+    }
+
+    fn create_pipeline(&self, pipeline_state: &PipelineState) -> vk::Pipeline {
+        todo!()
+    }
+}
+
 /*
  * All the state that can be shared across threads
  * */
@@ -107,6 +138,7 @@ pub struct GpuThreadSharedState {
     pub gpu_memory_allocator: Arc<RefCell<dyn GpuAllocator>>,
     pub descriptor_set_allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
     pub debug_utilities: Option<DebugUtils>,
+    pub(crate) vk_pipeline_cache: vk::PipelineCache,
     pub(crate) pipeline_cache: PipelineCache,
     features: SupportedFeatures,
     messenger: Option<vk::DebugUtilsMessengerEXT>,
@@ -118,7 +150,7 @@ impl Drop for GpuThreadSharedState {
         if let (Some(messenger), Some(debug_utils)) = (&self.messenger, &self.debug_utilities) {
             unsafe {
                 self.logical_device
-                    .destroy_pipeline_cache(self.pipeline_cache, get_allocation_callbacks());
+                    .destroy_pipeline_cache(self.vk_pipeline_cache, get_allocation_callbacks());
                 debug_utils.destroy_debug_utils_messenger(*messenger, get_allocation_callbacks())
             };
         }
@@ -376,10 +408,11 @@ impl VkGpu {
             queue_families,
             debug_utilities,
             features: supported_features,
-            pipeline_cache,
+            vk_pipeline_cache: pipeline_cache,
             gpu_memory_allocator: Arc::new(RefCell::new(gpu_memory_allocator)),
             descriptor_set_allocator: Arc::new(RefCell::new(descriptor_set_allocator)),
             messenger,
+            pipeline_cache: PipelineCache::new(),
             dynamic_rendering,
         });
 
@@ -891,7 +924,7 @@ impl VkGpu {
     fn create_pipeline_cache(
         logical_device: &Device,
         filename: Option<&str>,
-    ) -> VkResult<PipelineCache> {
+    ) -> VkResult<vk::PipelineCache> {
         let mut data_ptr = std::ptr::null();
         let mut len = 0;
 
@@ -1563,7 +1596,7 @@ impl VkGpu {
     pub fn save_pipeline_cache(&self, path: &str) -> VkResult<()> {
         let cache_data = unsafe {
             self.vk_logical_device()
-                .get_pipeline_cache_data(self.state.pipeline_cache)
+                .get_pipeline_cache_data(self.state.vk_pipeline_cache)
         }?;
 
         match std::fs::write(path, cache_data) {

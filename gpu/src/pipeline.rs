@@ -573,7 +573,7 @@ impl VkGraphicsPipeline {
             }];
 
             let pipelines = gpu.state.logical_device.create_graphics_pipelines(
-                gpu.state.pipeline_cache,
+                gpu.state.vk_pipeline_cache,
                 &create_infos,
                 None,
             );
@@ -657,7 +657,7 @@ impl VkComputePipeline {
         let pipeline = unsafe {
             gpu.vk_logical_device()
                 .create_compute_pipelines(
-                    gpu.state.pipeline_cache,
+                    gpu.state.vk_pipeline_cache,
                     &[compute_create_info],
                     get_allocation_callbacks(),
                 )

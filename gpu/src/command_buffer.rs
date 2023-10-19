@@ -32,6 +32,8 @@ where
 {
     command_buffer: &'c mut VkCommandBuffer<'g>,
     has_draw_command: bool,
+    viewport_area: Option<Viewport>,
+    depth_bias_setup: Option<(f32, f32, f32)>,
 
     pipeline_state: PipelineState,
 }
@@ -43,17 +45,16 @@ where
     command_buffer: &'c mut VkCommandBuffer<'g>,
 }
 
-struct PipelineState {
+#[derive(Hash)]
+pub(crate) struct PipelineState {
     fragment_shader: ShaderModuleHandle,
     vertex_shader: ShaderModuleHandle,
 
-    viewport_area: Option<Viewport>,
     scissor_area: Option<Rect2D>,
     front_face: FrontFace,
     cull_mode: CullMode,
     enable_depth_test: bool,
     render_area: Rect2D,
-    depth_bias_setup: Option<(f32, f32, f32)>,
 
     vertex_inputs: Vec<VertexBindingInfo>,
 }
@@ -63,12 +64,10 @@ impl PipelineState {
         Self {
             fragment_shader: Handle::null(),
             vertex_shader: Handle::null(),
-            viewport_area: None,
             scissor_area: None,
             front_face: FrontFace::default(),
             cull_mode: CullMode::default(),
             render_area: info.render_area,
-            depth_bias_setup: None,
             enable_depth_test: true,
 
             vertex_inputs: vec![],
@@ -495,6 +494,8 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         Self {
             command_buffer,
             has_draw_command: false,
+            viewport_area: None,
+            depth_bias_setup: None,
             pipeline_state: PipelineState::new(info),
         }
     }
@@ -569,11 +570,11 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
     }
 
     pub fn set_viewport(&mut self, viewport: Viewport) {
-        self.pipeline_state.viewport_area = Some(viewport);
+        self.viewport_area = Some(viewport);
     }
 
     pub fn set_depth_bias(&mut self, constant: f32, clamp: f32, slope: f32) {
-        self.pipeline_state.depth_bias_setup = Some((constant, clamp, slope));
+        self.depth_bias_setup = Some((constant, clamp, slope));
     }
 
     pub fn set_front_face(&mut self, front_face: FrontFace) {
@@ -593,7 +594,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
 
         // Negate height because of Khronos brain farts
         let height = self.pipeline_state.render_area.extent.height as f32;
-        let viewport = match self.pipeline_state.viewport_area {
+        let viewport = match self.viewport_area {
             Some(viewport) => viewport,
             None => Viewport {
                 x: 0 as f32,
@@ -611,8 +612,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 extent: self.pipeline_state.render_area.extent,
             },
         };
-        let (depth_constant, depth_clamp, depth_slope) = match self.pipeline_state.depth_bias_setup
-        {
+        let (depth_constant, depth_clamp, depth_slope) = match self.depth_bias_setup {
             Some((depth_constant, depth_clamp, depth_slope)) => {
                 (depth_constant, depth_clamp, depth_slope)
             }
@@ -679,17 +679,21 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
     }
 
     pub fn draw_indexed_handle(
-        &self,
+        &mut self,
         num_indices: u32,
         instances: u32,
         first_index: u32,
         vertex_offset: i32,
         first_instance: u32,
     ) -> anyhow::Result<()> {
+        self.has_draw_command = true;
         let pipeline = self.find_matching_pipeline();
         let device = self.gpu.vk_logical_device();
         unsafe {
             device.cmd_bind_pipeline(self.inner(), PipelineBindPoint::GRAPHICS, pipeline);
+        }
+        self.prepare_draw();
+        unsafe {
             device.cmd_draw_indexed(
                 self.inner(),
                 num_indices,
@@ -703,8 +707,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         Ok(())
     }
 
-    fn find_matching_pipeline(&self) -> vk::Pipeline {
-        todo!()
+    fn find_matching_pipeline(&mut self) -> vk::Pipeline {
+        let pipeline_cache = &mut self.gpu.state.pipeline_cache;
+
+        pipeline_cache.get_pipeline(&self.pipeline_state)
     }
 
     pub fn set_index_buffer(
