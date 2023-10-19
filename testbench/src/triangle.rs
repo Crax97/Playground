@@ -3,8 +3,12 @@ mod utils;
 
 use app::{bootstrap, App};
 
-use engine::{Backbuffer};
-use gpu::{PresentMode, VkCommandBuffer, BufferHandle, Gpu, BufferCreateInfo, BufferUsageFlags, MemoryDomain, ShaderModuleHandle};
+use engine::Backbuffer;
+use gpu::{
+    AccessFlags, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorAttachment, Gpu,
+    ImageAspectFlags, ImageMemoryBarrier, MemoryDomain, PipelineStageFlags, PresentMode,
+    ShaderModuleHandle, VkCommandBuffer,
+};
 use imgui::Ui;
 use nalgebra::*;
 use winit::event_loop::EventLoop;
@@ -39,27 +43,33 @@ impl App for TriangleApp {
         let fragment_module =
             utils::read_file_to_shader_module(&app_state.gpu, "./shaders/fragment.spirv")?;
 
-        let vertices = [
-            -0.5, -0.5, 0.0,
-            0.5, -0.5, 0.0,
-            0.5, 0.5, 0.0,
-        ];
+        let vertices = [-0.5, -0.5, 0.0, 0.5, -0.5, 0.0, 0.5, 0.5, 0.0];
 
         let indices: [u32; 3] = [0, 1, 2];
 
-        let triangle_buffer = app_state.gpu.make_buffer(&BufferCreateInfo {
-            label: Some("Triangle buffer"),
-            size: std::mem::size_of_val(&vertices) as _,
-            usage: BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
-        }, MemoryDomain::DeviceLocal)?;
-        app_state.gpu.write_buffer(triangle_buffer, 0, bytemuck::cast_slice(&vertices))?;
+        let triangle_buffer = app_state.gpu.make_buffer(
+            &BufferCreateInfo {
+                label: Some("Triangle buffer"),
+                size: std::mem::size_of_val(&vertices) as _,
+                usage: BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
+            },
+            MemoryDomain::DeviceLocal,
+        )?;
+        app_state
+            .gpu
+            .write_buffer(triangle_buffer, 0, bytemuck::cast_slice(&vertices))?;
 
-        let index_buffer = app_state.gpu.make_buffer(&BufferCreateInfo {
-            label: Some("Triangle index buffer"),
-            size: std::mem::size_of_val(&indices) as _,
-            usage: BufferUsageFlags::INDEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
-        }, MemoryDomain::DeviceLocal)?;
-        app_state.gpu.write_buffer(triangle_buffer, 0, bytemuck::cast_slice(&indices))?;
+        let index_buffer = app_state.gpu.make_buffer(
+            &BufferCreateInfo {
+                label: Some("Triangle index buffer"),
+                size: std::mem::size_of_val(&indices) as _,
+                usage: BufferUsageFlags::INDEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
+            },
+            MemoryDomain::DeviceLocal,
+        )?;
+        app_state
+            .gpu
+            .write_buffer(triangle_buffer, 0, bytemuck::cast_slice(&indices))?;
 
         engine::app_state_mut()
             .swapchain_mut()
@@ -73,8 +83,51 @@ impl App for TriangleApp {
         })
     }
 
-    fn draw(&mut self, _backbuffer: &Backbuffer) -> anyhow::Result<VkCommandBuffer> {
-        todo!()
+    fn draw(&mut self, backbuffer: &Backbuffer) -> anyhow::Result<VkCommandBuffer> {
+        let gpu = &engine::app_state().gpu;
+        let mut command_buffer = gpu.create_command_buffer(gpu::QueueType::Graphics)?;
+
+        command_buffer.pipeline_barrier(&gpu::PipelineBarrierInfo {
+            src_stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+            dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            memory_barriers: &[],
+            buffer_memory_barriers: &[],
+            image_memory_barriers: &[ImageMemoryBarrier {
+                src_access_mask: AccessFlags::empty(),
+                dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                old_layout: gpu::ImageLayout::Undefined,
+                new_layout: gpu::ImageLayout::ColorAttachment,
+                src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+                dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+                image: &backbuffer.image,
+                subresource_range: gpu::ImageSubresourceRange {
+                    aspect_mask: ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+            }],
+        });
+        {
+            let color_attachments = vec![ColorAttachment {
+                image_view: backbuffer.image_view,
+                load_op: gpu::ColorLoadOp::Clear([0.3, 0.0, 0.3, 1.0]),
+                store_op: gpu::AttachmentStoreOp::Store,
+                initial_layout: gpu::ImageLayout::ColorAttachment,
+            }];
+
+            let pass = command_buffer.begin_render_pass(&gpu::BeginRenderPassInfo {
+                color_attachments: &color_attachments,
+                depth_attachment: None,
+                stencil_attachment: None,
+                render_area: gpu::Rect2D {
+                    offset: gpu::Offset2D::default(),
+                    extent: backbuffer.size,
+                },
+            });
+        }
+        Ok(command_buffer)
     }
 
     fn input(

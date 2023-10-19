@@ -18,11 +18,12 @@ pub struct LoadedImage {
 use gpu::{
     AccessFlags, BeginRenderPassInfo, BindingElement, BlendState, ColorAttachment,
     ComponentMapping, DepthStencilState, DescriptorInfo, DescriptorSetInfo, Extent2D,
-    FragmentStageInfo, GlobalBinding, GraphicsPipelineDescription, ImageAspectFlags,
+    FragmentStageInfo, GlobalBinding, Gpu, GraphicsPipelineDescription, ImageAspectFlags,
     ImageCreateInfo, ImageFormat, ImageLayout, ImageSubresourceRange, ImageUsageFlags,
     ImageViewCreateInfo, MemoryDomain, Offset2D, PipelineStageFlags, PushConstantRange, Rect2D,
-    RenderPassAttachment, SamplerCreateInfo, SamplerState, ShaderModuleCreateInfo, ShaderStage,
-    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo, VkGpu, VkShaderModule, ShaderModuleHandle, Gpu,
+    RenderPassAttachment, SamplerCreateInfo, SamplerState, ShaderModuleCreateInfo,
+    ShaderModuleHandle, ShaderStage, VertexAttributeDescription, VertexBindingDescription,
+    VertexStageInfo, VkGpu, VkShaderModule,
 };
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
@@ -54,7 +55,6 @@ pub fn read_file_to_shader_module<P: AsRef<Path>>(
     let create_info = ShaderModuleCreateInfo { code: &input_file };
     Ok(gpu.make_shader_module(&create_info)?)
 }
-
 
 pub fn load_image_from_path<P: AsRef<Path>>(
     path: P,
@@ -498,11 +498,27 @@ fn cubemap_main_loop(
     Ok((backing_image, view))
 }
 
-pub fn generate_irradiance_map(gpu: &VkGpu, source_cubemap: &Texture, resource_map: &mut ResourceMap, cube_mesh: &ResourceHandle<Mesh>) -> anyhow::Result<Texture> {
-    let size = Extent2D { width: 512, height: 512 };
+pub fn generate_irradiance_map(
+    gpu: &VkGpu,
+    source_cubemap: &Texture,
+    resource_map: &mut ResourceMap,
+    cube_mesh: &ResourceHandle<Mesh>,
+) -> anyhow::Result<Texture> {
+    let size = Extent2D {
+        width: 512,
+        height: 512,
+    };
     let input_texture_view = resource_map.get(&source_cubemap.image_view);
     let convolve = read_file_to_vk_module(&gpu, "./shaders/skybox_convolve_irradiance.spirv")?;
-    let (backing_image, view) = cubemap_main_loop(gpu, ImageFormat::RgbaFloat16, &input_texture_view.view, &convolve, size, resource_map, cube_mesh)?;
+    let (backing_image, view) = cubemap_main_loop(
+        gpu,
+        ImageFormat::RgbaFloat16,
+        &input_texture_view.view,
+        &convolve,
+        size,
+        resource_map,
+        cube_mesh,
+    )?;
     Texture::wrap(gpu, backing_image, view, resource_map)
 }
 
