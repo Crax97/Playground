@@ -126,6 +126,11 @@ impl App for TriangleApp {
                     extent: backbuffer.size,
                 },
             });
+
+            // pass.set_vertex_shader(&self.vertex_shader);
+            // pass.set_fragment_shader(&self.fragment_shader);
+            // pass.set_cull_mode(CullMode::None);
+            // pass.draw_indexed(&self.index_buffer, IndexType::Uint32, 0, 3, 0);
         }
         Ok(command_buffer)
     }
