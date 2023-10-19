@@ -28,6 +28,7 @@ pub struct GpuConfiguration<'a> {
     pub enable_debug_utilities: bool,
     pub window: Option<&'a Window>,
 }
+
 pub trait Gpu {
     fn make_buffer(
         &self,
@@ -36,9 +37,11 @@ pub trait Gpu {
     ) -> anyhow::Result<BufferHandle>;
     fn write_buffer(&self, buffer: BufferHandle, offset: u64, data: &[u8]) -> anyhow::Result<()>;
 
-    fn make_shader_module(&self, info: &ShaderModuleCreateInfo) -> anyhow::Result<ShaderModuleHandle>;
+    fn make_shader_module(
+        &self,
+        info: &ShaderModuleCreateInfo,
+    ) -> anyhow::Result<ShaderModuleHandle>;
 }
-
 
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

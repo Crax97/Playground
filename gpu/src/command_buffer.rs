@@ -31,14 +31,9 @@ where
     'g: 'c,
 {
     command_buffer: &'c mut VkCommandBuffer<'g>,
-    viewport_area: Option<Viewport>,
-    scissor_area: Option<Rect2D>,
-    front_face: FrontFace,
-    cull_mode: CullMode,
-    enable_depth_test: bool,
     has_draw_command: bool,
-    render_area: Rect2D,
-    depth_bias_setup: Option<(f32, f32, f32)>,
+
+    pipeline_state: PipelineState,
 }
 
 pub struct VkComputePassCommand<'c, 'g>
@@ -46,6 +41,35 @@ where
     'g: 'c,
 {
     command_buffer: &'c mut VkCommandBuffer<'g>,
+}
+
+struct PipelineState {
+    fragment_shader: ShaderModuleHandle,
+    vertex_shader: ShaderModuleHandle,
+
+    viewport_area: Option<Viewport>,
+    scissor_area: Option<Rect2D>,
+    front_face: FrontFace,
+    cull_mode: CullMode,
+    enable_depth_test: bool,
+    render_area: Rect2D,
+    depth_bias_setup: Option<(f32, f32, f32)>,
+}
+
+impl PipelineState {
+    fn new(info: &BeginRenderPassInfo) -> Self {
+        Self {
+            fragment_shader: Handle::null(),
+            vertex_shader: Handle::null(),
+            viewport_area: None,
+            scissor_area: None,
+            front_face: FrontFace::default(),
+            cull_mode: CullMode::default(),
+            render_area: info.render_area,
+            depth_bias_setup: None,
+            enable_depth_test: true,
+        }
+    }
 }
 
 mod inner {
@@ -467,17 +491,12 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         Self {
             command_buffer,
             has_draw_command: false,
-            viewport_area: None,
-            scissor_area: None,
-            front_face: FrontFace::default(),
-            cull_mode: CullMode::default(),
-            render_area: info.render_area,
-            depth_bias_setup: None,
-            enable_depth_test: true,
+            pipeline_state: PipelineState::new(info),
         }
     }
 
     pub fn bind_pipeline(&mut self, material: &VkGraphicsPipeline) {
+        todo!("Use the new, higher-level, api");
         let device = self.command_buffer.gpu.vk_logical_device();
         unsafe {
             device.cmd_bind_pipeline(
@@ -486,6 +505,14 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 material.pipeline,
             )
         }
+    }
+
+    pub fn set_vertex_shader(&mut self, vertex_shader: ShaderModuleHandle) {
+        self.pipeline_state.vertex_shader = vertex_shader;
+    }
+
+    pub fn set_fragment_shader(&mut self, fragment_shader: ShaderModuleHandle) {
+        self.pipeline_state.fragment_shader = fragment_shader;
     }
 
     pub fn draw_indexed(
@@ -534,49 +561,50 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
     }
 
     pub fn set_viewport(&mut self, viewport: Viewport) {
-        self.viewport_area = Some(viewport);
+        self.pipeline_state.viewport_area = Some(viewport);
     }
 
     pub fn set_depth_bias(&mut self, constant: f32, clamp: f32, slope: f32) {
-        self.depth_bias_setup = Some((constant, clamp, slope));
+        self.pipeline_state.depth_bias_setup = Some((constant, clamp, slope));
     }
 
     pub fn set_front_face(&mut self, front_face: FrontFace) {
-        self.front_face = front_face;
+        self.pipeline_state.front_face = front_face;
     }
 
     pub fn set_cull_mode(&mut self, cull_mode: CullMode) {
-        self.cull_mode = cull_mode;
+        self.pipeline_state.cull_mode = cull_mode;
     }
 
     pub fn set_enable_depth_test(&mut self, enable_depth_test: bool) {
-        self.enable_depth_test = enable_depth_test;
+        self.pipeline_state.enable_depth_test = enable_depth_test;
     }
 
     fn prepare_draw(&self) {
         let device = self.command_buffer.gpu.vk_logical_device();
 
         // Negate height because of Khronos brain farts
-        let height = self.render_area.extent.height as f32;
-        let viewport = match self.viewport_area {
+        let height = self.pipeline_state.render_area.extent.height as f32;
+        let viewport = match self.pipeline_state.viewport_area {
             Some(viewport) => viewport,
             None => Viewport {
                 x: 0 as f32,
                 y: height,
-                width: self.render_area.extent.width as f32,
+                width: self.pipeline_state.render_area.extent.width as f32,
                 height: -height,
                 min_depth: 0.0,
                 max_depth: 1.0,
             },
         };
-        let scissor = match self.scissor_area {
+        let scissor = match self.pipeline_state.scissor_area {
             Some(scissor) => scissor,
             None => Rect2D {
                 offset: Offset2D { x: 0, y: 0 },
-                extent: self.render_area.extent,
+                extent: self.pipeline_state.render_area.extent,
             },
         };
-        let (depth_constant, depth_clamp, depth_slope) = match self.depth_bias_setup {
+        let (depth_constant, depth_clamp, depth_slope) = match self.pipeline_state.depth_bias_setup
+        {
             Some((depth_constant, depth_clamp, depth_slope)) => {
                 (depth_constant, depth_clamp, depth_slope)
             }
@@ -592,9 +620,18 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             );
             device.cmd_set_viewport(self.command_buffer.inner(), 0, &[viewport.to_vk()]);
             device.cmd_set_scissor(self.command_buffer.inner(), 0, &[scissor.to_vk()]);
-            device.cmd_set_front_face(self.command_buffer.inner(), self.front_face.to_vk());
-            device.cmd_set_cull_mode(self.command_buffer.inner(), self.cull_mode.to_vk());
-            device.cmd_set_depth_test_enable(self.command_buffer.inner(), self.enable_depth_test);
+            device.cmd_set_front_face(
+                self.command_buffer.inner(),
+                self.pipeline_state.front_face.to_vk(),
+            );
+            device.cmd_set_cull_mode(
+                self.command_buffer.inner(),
+                self.pipeline_state.cull_mode.to_vk(),
+            );
+            device.cmd_set_depth_test_enable(
+                self.command_buffer.inner(),
+                self.pipeline_state.enable_depth_test,
+            );
         }
     }
 

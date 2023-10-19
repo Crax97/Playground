@@ -6,6 +6,8 @@ pub enum HandleType {
 
 pub trait Handle {
     fn new(id: u64) -> Self;
+    fn null() -> Self;
+    fn is_null(&self) -> bool;
     fn id(&self) -> u64;
     fn handle_type(&self) -> HandleType;
 }
@@ -19,9 +21,16 @@ macro_rules! define_handle {
 
         impl Handle for $st_name {
             fn new(id: u64) -> Self {
-                Self {
-                    id
-                }
+                assert!(id != 0, "ID 0 is reserved for null handles!");
+                Self { id }
+            }
+
+            fn null() -> Self {
+                Self { id: 0 }
+            }
+
+            fn is_null(&self) -> bool {
+                *self == Self::null()
             }
 
             fn id(&self) -> u64 {
@@ -32,8 +41,7 @@ macro_rules! define_handle {
                 $ty
             }
         }
-
-    }
+    };
 }
 
 define_handle!(BufferHandle, HandleType::Buffer);

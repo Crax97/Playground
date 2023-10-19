@@ -117,7 +117,7 @@ impl App for TriangleApp {
                 initial_layout: gpu::ImageLayout::ColorAttachment,
             }];
 
-            let pass = command_buffer.begin_render_pass(&gpu::BeginRenderPassInfo {
+            let mut pass = command_buffer.begin_render_pass(&gpu::BeginRenderPassInfo {
                 color_attachments: &color_attachments,
                 depth_attachment: None,
                 stencil_attachment: None,
@@ -127,8 +127,15 @@ impl App for TriangleApp {
                 },
             });
 
-            // pass.set_vertex_shader(&self.vertex_shader);
-            // pass.set_fragment_shader(&self.fragment_shader);
+            pass.set_vertex_shader(self.vertex_module);
+            pass.set_fragment_shader(self.fragment_module);
+            // pass.set_vertex_buffers(&self, &[&VertexBindingInfo {
+            //      handle: self.triangle_buffer,
+            //      location: 0,
+            //      offset: 0,
+            //      stride: std::mem::size_of::<[f32; 3]>(),
+            //      input_rate: InputRate::PerVertex,
+            // });
             // pass.set_cull_mode(CullMode::None);
             // pass.draw_indexed(&self.index_buffer, IndexType::Uint32, 0, 3, 0);
         }
