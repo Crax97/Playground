@@ -41,7 +41,7 @@ use crate::{
     PipelineBarrierInfo, PipelineStageFlags, QueueType, RenderPassDescription, SamplerCreateInfo,
     ShaderModuleCreateInfo, ToVk, TransitionInfo, VkCommandBuffer, VkCommandPool,
     VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
-    VkShaderModule,
+    VkShaderModule, ShaderModuleHandle,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -179,6 +179,7 @@ pub struct VkGpu {
     pub(crate) staging_buffer: VkBuffer,
 
     allocated_buffers: RefCell<GpuResourceMap<VkBuffer>>,
+    allocated_shader_modules: RefCell<GpuResourceMap<VkShaderModule>>,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -390,6 +391,8 @@ impl VkGpu {
             thread_local_state,
             staging_buffer,
             allocated_buffers: RefCell::new(GpuResourceMap::new()),
+            allocated_shader_modules: RefCell::new(GpuResourceMap::new()),
+
         })
     }
 
@@ -1608,5 +1611,15 @@ impl Gpu for VkGpu {
         let buffer = self.resolve_buffer(buffer);
         self.write_buffer_data_with_offset(buffer, offset, data)?;
         Ok(())
+    }
+
+    fn make_shader_module(&self, info: &ShaderModuleCreateInfo) -> anyhow::Result<crate::ShaderModuleHandle> {
+        let buffer = self.create_shader_module(info)?;
+        let handle = ShaderModuleHandle::new(buffer.inner.as_raw());
+        self.allocated_shader_modules
+            .borrow_mut()
+            .insert(handle.id, buffer);
+
+        Ok(handle)
     }
 }

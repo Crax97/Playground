@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum HandleType {
     Buffer,
+    ShaderModule,
 }
 
 pub trait Handle {
@@ -36,3 +37,4 @@ macro_rules! define_handle {
 }
 
 define_handle!(BufferHandle, HandleType::Buffer);
+define_handle!(ShaderModuleHandle, HandleType::ShaderModule);

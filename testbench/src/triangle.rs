@@ -4,7 +4,7 @@ mod utils;
 use app::{bootstrap, App};
 
 use engine::{Backbuffer, Camera};
-use gpu::{PresentMode, VkCommandBuffer, BufferHandle, Gpu, BufferCreateInfo, BufferUsageFlags, MemoryDomain};
+use gpu::{PresentMode, VkCommandBuffer, BufferHandle, Gpu, BufferCreateInfo, BufferUsageFlags, MemoryDomain, ShaderModuleHandle};
 use imgui::Ui;
 use nalgebra::*;
 use winit::event_loop::EventLoop;
@@ -20,6 +20,9 @@ struct VertexData {
 pub struct TriangleApp {
     triangle_buffer: BufferHandle,
     index_buffer: BufferHandle,
+
+    fragment_module: ShaderModuleHandle,
+    vertex_module: ShaderModuleHandle,
 }
 
 impl App for TriangleApp {
@@ -32,9 +35,9 @@ impl App for TriangleApp {
         Self: Sized,
     {
         let vertex_module =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/vertex_simple.spirv")?;
+            utils::read_file_to_shader_module(&app_state.gpu, "./shaders/vertex_simple.spirv")?;
         let fragment_module =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/fragment.spirv")?;
+            utils::read_file_to_shader_module(&app_state.gpu, "./shaders/fragment.spirv")?;
 
         let vertices = [
             -0.5, -0.5, 0.0,
@@ -63,6 +66,8 @@ impl App for TriangleApp {
             .select_present_mode(PresentMode::Mailbox)?;
 
         Ok(Self {
+            vertex_module,
+            fragment_module,
             triangle_buffer,
             index_buffer,
         })

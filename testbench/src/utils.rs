@@ -22,7 +22,7 @@ use gpu::{
     ImageCreateInfo, ImageFormat, ImageLayout, ImageSubresourceRange, ImageUsageFlags,
     ImageViewCreateInfo, MemoryDomain, Offset2D, PipelineStageFlags, PushConstantRange, Rect2D,
     RenderPassAttachment, SamplerCreateInfo, SamplerState, ShaderModuleCreateInfo, ShaderStage,
-    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo, VkGpu, VkShaderModule,
+    VertexAttributeDescription, VertexBindingDescription, VertexStageInfo, VkGpu, VkShaderModule, ShaderModuleHandle, Gpu,
 };
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
@@ -39,6 +39,22 @@ pub fn read_file_to_vk_module<P: AsRef<Path>>(
     let create_info = ShaderModuleCreateInfo { code: &input_file };
     Ok(gpu.create_shader_module(&create_info)?)
 }
+
+pub fn read_file_to_shader_module<P: AsRef<Path>>(
+    gpu: &VkGpu,
+    path: P,
+) -> anyhow::Result<ShaderModuleHandle> {
+    info!(
+        "Reading path from {:?}",
+        path.as_ref()
+            .canonicalize()
+            .expect("Failed to canonicalize path")
+    );
+    let input_file = std::fs::read(path)?;
+    let create_info = ShaderModuleCreateInfo { code: &input_file };
+    Ok(gpu.make_shader_module(&create_info)?)
+}
+
 
 pub fn load_image_from_path<P: AsRef<Path>>(
     path: P,
