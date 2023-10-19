@@ -54,6 +54,8 @@ struct PipelineState {
     enable_depth_test: bool,
     render_area: Rect2D,
     depth_bias_setup: Option<(f32, f32, f32)>,
+
+    vertex_inputs: Vec<VertexBindingInfo>,
 }
 
 impl PipelineState {
@@ -68,6 +70,8 @@ impl PipelineState {
             render_area: info.render_area,
             depth_bias_setup: None,
             enable_depth_test: true,
+
+            vertex_inputs: vec![],
         }
     }
 }
@@ -513,6 +517,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
 
     pub fn set_fragment_shader(&mut self, fragment_shader: ShaderModuleHandle) {
         self.pipeline_state.fragment_shader = fragment_shader;
+    }
+
+    pub fn set_vertex_buffers(&mut self, bindings: &[VertexBindingInfo]) {
+        self.pipeline_state.vertex_inputs = bindings.to_vec();
     }
 
     pub fn draw_indexed(

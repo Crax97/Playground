@@ -65,7 +65,15 @@ pub enum ImageLayout {
 
     PresentSrc,
 }
-
+#[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug)]
+pub struct VertexBindingInfo {
+    pub handle: BufferHandle,
+    pub location: u64,
+    pub offset: u64,
+    pub stride: usize,
+    pub format: ImageFormat,
+    pub input_rate: InputRate,
+}
 #[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug)]
 pub struct ImageCreateInfo<'a> {
     pub label: Option<&'a str>,
@@ -745,7 +753,7 @@ pub enum FrontFace {
     ClockWise,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub enum InputRate {
     PerVertex,
     PerInstance,

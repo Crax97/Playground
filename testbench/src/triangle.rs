@@ -6,8 +6,8 @@ use app::{bootstrap, App};
 use engine::Backbuffer;
 use gpu::{
     AccessFlags, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorAttachment, Gpu,
-    ImageAspectFlags, ImageMemoryBarrier, MemoryDomain, PipelineStageFlags, PresentMode,
-    ShaderModuleHandle, VkCommandBuffer,
+    ImageAspectFlags, ImageFormat, ImageMemoryBarrier, InputRate, MemoryDomain, PipelineStageFlags,
+    PresentMode, ShaderModuleHandle, VertexBindingInfo, VkCommandBuffer,
 };
 use imgui::Ui;
 use nalgebra::*;
@@ -129,13 +129,14 @@ impl App for TriangleApp {
 
             pass.set_vertex_shader(self.vertex_module);
             pass.set_fragment_shader(self.fragment_module);
-            // pass.set_vertex_buffers(&self, &[&VertexBindingInfo {
-            //      handle: self.triangle_buffer,
-            //      location: 0,
-            //      offset: 0,
-            //      stride: std::mem::size_of::<[f32; 3]>(),
-            //      input_rate: InputRate::PerVertex,
-            // });
+            pass.set_vertex_buffers(&[VertexBindingInfo {
+                handle: self.triangle_buffer,
+                location: 0,
+                offset: 0,
+                stride: std::mem::size_of::<[f32; 3]>(),
+                format: ImageFormat::RgbFloat32,
+                input_rate: InputRate::PerVertex,
+            }]);
             // pass.set_cull_mode(CullMode::None);
             // pass.draw_indexed(&self.index_buffer, IndexType::Uint32, 0, 3, 0);
         }
