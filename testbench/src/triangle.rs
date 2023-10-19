@@ -36,10 +36,10 @@ impl App for TriangleApp {
         let fragment_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/fragment.spirv")?;
 
-        let vertices = vec![
-            vector![-0.5, -0.5, 0.0],
-            vector![0.5, -0.5, 0.0],
-            vector![0.5, 0.5, 0.0],
+        let vertices = [
+            -0.5, -0.5, 0.0,
+            0.5, -0.5, 0.0,
+            0.5, 0.5, 0.0,
         ];
 
         let indices: [u32; 3] = [0, 1, 2];
@@ -49,12 +49,14 @@ impl App for TriangleApp {
             size: std::mem::size_of_val(&vertices) as _,
             usage: BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
         }, MemoryDomain::DeviceLocal)?;
+        app_state.gpu.write_buffer(triangle_buffer, 0, bytemuck::cast_slice(&vertices))?;
 
         let index_buffer = app_state.gpu.make_buffer(&BufferCreateInfo {
             label: Some("Triangle index buffer"),
             size: std::mem::size_of_val(&indices) as _,
             usage: BufferUsageFlags::INDEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
         }, MemoryDomain::DeviceLocal)?;
+        app_state.gpu.write_buffer(triangle_buffer, 0, bytemuck::cast_slice(&indices))?;
 
         engine::app_state_mut()
             .swapchain_mut()

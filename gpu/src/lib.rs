@@ -34,6 +34,7 @@ pub trait Gpu {
         buffer_info: &BufferCreateInfo,
         memory_domain: MemoryDomain,
     ) -> anyhow::Result<BufferHandle>;
+    fn write_buffer(&self, buffer: BufferHandle, offset: u64, data: &[u8]) -> anyhow::Result<()>;
 }
 
 
