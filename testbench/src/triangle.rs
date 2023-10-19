@@ -3,7 +3,7 @@ mod utils;
 
 use app::{bootstrap, App};
 
-use engine::{Backbuffer, Camera};
+use engine::{Backbuffer};
 use gpu::{PresentMode, VkCommandBuffer, BufferHandle, Gpu, BufferCreateInfo, BufferUsageFlags, MemoryDomain, ShaderModuleHandle};
 use imgui::Ui;
 use nalgebra::*;
@@ -73,19 +73,19 @@ impl App for TriangleApp {
         })
     }
 
-    fn draw(&mut self, backbuffer: &Backbuffer) -> anyhow::Result<VkCommandBuffer> {
+    fn draw(&mut self, _backbuffer: &Backbuffer) -> anyhow::Result<VkCommandBuffer> {
         todo!()
     }
 
     fn input(
         &mut self,
-        app_state: &engine::AppState,
-        event: winit::event::DeviceEvent,
+        _app_state: &engine::AppState,
+        _event: winit::event::DeviceEvent,
     ) -> anyhow::Result<()> {
         Ok(())
     }
 
-    fn update(&mut self, app_state: &mut engine::AppState, ui: &mut Ui) -> anyhow::Result<()> {
+    fn update(&mut self, _app_state: &mut engine::AppState, _ui: &mut Ui) -> anyhow::Result<()> {
         Ok(())
     }
 }
