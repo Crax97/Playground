@@ -5,6 +5,7 @@ mod gpu;
 mod pipeline;
 mod swapchain;
 mod types;
+mod handle;
 
 pub use crate::gpu::*;
 pub use allocator::*;
@@ -15,6 +16,7 @@ use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 pub use swapchain::VkSwapchain;
 pub use types::*;
+pub use handle::*;
 use winit::window::Window;
 
 pub const WHOLE_SIZE: u64 = u64::MAX;
