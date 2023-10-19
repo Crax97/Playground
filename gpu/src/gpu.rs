@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ptr::addr_of_mut;
 use std::{
     cell::RefCell,
@@ -40,7 +41,7 @@ use crate::{
     PipelineStageFlags, QueueType, RenderPassDescription, SamplerCreateInfo,
     ShaderModuleCreateInfo, ToVk, TransitionInfo, VkCommandBuffer, VkCommandPool,
     VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
-    VkShaderModule,
+    VkShaderModule, Gpu, BufferHandle, Handle as GpuHandle,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -159,6 +160,8 @@ pub struct VkGpu {
     pub(crate) state: Arc<GpuThreadSharedState>,
     pub(crate) thread_local_state: GpuThreadLocalState,
     pub(crate) staging_buffer: VkBuffer,
+
+    allocated_buffers: RefCell<HashMap<u64, VkBuffer>>
 }
 
 #[derive(Error, Debug, Clone)]
@@ -369,6 +372,7 @@ impl VkGpu {
             state,
             thread_local_state,
             staging_buffer,
+            allocated_buffers: RefCell::new(HashMap::new())
         })
     }
 
@@ -1554,5 +1558,19 @@ impl VkGpu {
 
     pub fn allocator(&self) -> Arc<RefCell<dyn GpuAllocator>> {
         self.state.gpu_memory_allocator.clone()
+    }
+}
+
+impl Gpu for VkGpu {
+    fn make_buffer(
+        &self,
+        buffer_info: &BufferCreateInfo,
+        memory_domain: MemoryDomain,
+    ) -> anyhow::Result<crate::BufferHandle> {
+        let buffer = self.create_buffer(buffer_info, memory_domain)?; 
+        let handle = BufferHandle::new(buffer.inner.as_raw());
+        self.allocated_buffers.borrow_mut().insert(handle.id, buffer);
+
+        Ok(handle)
     }
 }

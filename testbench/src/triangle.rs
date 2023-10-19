@@ -4,7 +4,7 @@ mod utils;
 use app::{bootstrap, App};
 
 use engine::{Backbuffer, Camera};
-use gpu::{PresentMode, VkCommandBuffer, BufferHandle};
+use gpu::{PresentMode, VkCommandBuffer, BufferHandle, Gpu, BufferCreateInfo, BufferUsageFlags, MemoryDomain};
 use imgui::Ui;
 use nalgebra::*;
 use winit::event_loop::EventLoop;
@@ -19,6 +19,7 @@ struct VertexData {
 
 pub struct TriangleApp {
     triangle_buffer: BufferHandle,
+    index_buffer: BufferHandle,
 }
 
 impl App for TriangleApp {
@@ -41,12 +42,27 @@ impl App for TriangleApp {
             vector![0.5, 0.5, 0.0],
         ];
 
+        let indices: [u32; 3] = [0, 1, 2];
+
+        let triangle_buffer = app_state.gpu.make_buffer(&BufferCreateInfo {
+            label: Some("Triangle buffer"),
+            size: std::mem::size_of_val(&vertices) as _,
+            usage: BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
+        }, MemoryDomain::DeviceLocal)?;
+
+        let index_buffer = app_state.gpu.make_buffer(&BufferCreateInfo {
+            label: Some("Triangle index buffer"),
+            size: std::mem::size_of_val(&indices) as _,
+            usage: BufferUsageFlags::INDEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
+        }, MemoryDomain::DeviceLocal)?;
+
         engine::app_state_mut()
             .swapchain_mut()
             .select_present_mode(PresentMode::Mailbox)?;
 
         Ok(Self {
-            triangle_buffer: todo!(),
+            triangle_buffer,
+            index_buffer,
         })
     }
 

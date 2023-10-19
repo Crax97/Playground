@@ -2,21 +2,21 @@ mod allocator;
 mod command_buffer;
 mod descriptor_set;
 mod gpu;
+mod handle;
 mod pipeline;
 mod swapchain;
 mod types;
-mod handle;
 
 pub use crate::gpu::*;
 pub use allocator::*;
 pub use bitflags::bitflags;
 pub use command_buffer::*;
+pub use handle::*;
 pub use pipeline::*;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 pub use swapchain::VkSwapchain;
 pub use types::*;
-pub use handle::*;
 use winit::window::Window;
 
 pub const WHOLE_SIZE: u64 = u64::MAX;
@@ -28,6 +28,14 @@ pub struct GpuConfiguration<'a> {
     pub enable_debug_utilities: bool,
     pub window: Option<&'a Window>,
 }
+pub trait Gpu {
+    fn make_buffer(
+        &self,
+        buffer_info: &BufferCreateInfo,
+        memory_domain: MemoryDomain,
+    ) -> anyhow::Result<BufferHandle>;
+}
+
 
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
