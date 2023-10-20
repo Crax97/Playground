@@ -44,9 +44,9 @@ use crate::{
     ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
     ImageViewCreateInfo, ImageViewCreateInfo2, ImageViewHandle, LogicOp, Offset2D, Offset3D,
     PipelineBarrierInfo, PipelineStageFlags, PipelineState, QueueType, Rect2D,
-    RenderPassDescription, SamplerCreateInfo, ShaderModuleCreateInfo, ShaderModuleHandle, ToVk,
-    TransitionInfo, VkCommandBuffer, VkCommandPool, VkComputePipeline, VkFramebuffer,
-    VkGraphicsPipeline, VkImageView, VkRenderPass, VkShaderModule,
+    RenderPassDescription, SamplerCreateInfo, SamplerHandle, ShaderModuleCreateInfo,
+    ShaderModuleHandle, ToVk, TransitionInfo, VkCommandBuffer, VkCommandPool, VkComputePipeline,
+    VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass, VkShaderModule,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -267,13 +267,15 @@ impl DescriptorSetLayoutCache {
     ) -> vk::DescriptorSetLayout {
         let mut descriptor_set_bindings = vec![];
         for (binding_idx, descriptor_binding) in info.bindings.iter().enumerate() {
-            let stage_flags = descriptor_binding.binding_stage.to_vk();
             for binding_location in &descriptor_binding.locations {
+                let stage_flags = binding_location.binding_stage.to_vk();
                 let descriptor_type = match binding_location.ty {
                     crate::DescriptorBindingType::BufferRange { .. } => {
                         DescriptorType::UNIFORM_BUFFER
-                    } //                    super::DescriptorType::UniformBuffer(_) => DescriptorType::UNIFORM_BUFFER,
-                      //                    super::DescriptorType::StorageBuffer(_) => DescriptorType::STORAGE_BUFFER,
+                    }
+                    crate::DescriptorBindingType::ImageView { .. } => {
+                        DescriptorType::COMBINED_IMAGE_SAMPLER
+                    } //                    super::DescriptorType::StorageBuffer(_) => DescriptorType::STORAGE_BUFFER,
                       //                    super::DescriptorType::Sampler(_) => DescriptorType::SAMPLER,
                       //                    super::DescriptorType::CombinedImageSampler(_) => {
                       //                        DescriptorType::COMBINED_IMAGE_SAMPLER
@@ -465,6 +467,7 @@ pub struct VkGpu {
     pub(crate) allocated_shader_modules: RefCell<GpuResourceMap<VkShaderModule>>,
     pub(crate) allocated_images: RefCell<GpuResourceMap<VkImage>>,
     pub(crate) allocated_image_views: RefCell<GpuResourceMap<VkImageView>>,
+    pub(crate) allocated_samplers: RefCell<GpuResourceMap<VkSampler>>,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -682,6 +685,7 @@ impl VkGpu {
             allocated_shader_modules: RefCell::new(GpuResourceMap::new()),
             allocated_images: RefCell::new(GpuResourceMap::new()),
             allocated_image_views: RefCell::new(GpuResourceMap::new()),
+            allocated_samplers: RefCell::new(GpuResourceMap::new()),
         })
     }
 
@@ -1901,6 +1905,9 @@ impl VkGpu {
     fn image_view_map(&self) -> *const GpuResourceMap<VkImageView> {
         self.allocated_image_views.as_ptr() as *const _
     }
+    fn sampler_map(&self) -> *const GpuResourceMap<VkSampler> {
+        self.allocated_samplers.as_ptr() as *const _
+    }
     pub(crate) fn resolve_buffer(&self, buffer: BufferHandle) -> &VkBuffer {
         let ptr = self.buffer_map();
         let map = unsafe { &*ptr };
@@ -1917,6 +1924,12 @@ impl VkGpu {
         let ptr = self.image_view_map();
         let map = unsafe { &*ptr };
         map.resolve(&view.id)
+    }
+
+    pub(crate) fn resolve_sampler(&self, handle: SamplerHandle) -> &VkSampler {
+        let ptr = self.sampler_map();
+        let map = unsafe { &*ptr };
+        map.resolve(&handle.id)
     }
 }
 
@@ -1995,6 +2008,16 @@ impl Gpu for VkGpu {
         self.allocated_image_views
             .borrow_mut()
             .insert(handle.id, view);
+        Ok(handle)
+    }
+
+    fn make_sampler(&self, info: &SamplerCreateInfo) -> anyhow::Result<crate::SamplerHandle> {
+        let sampler = self.create_sampler(info)?;
+        let handle = SamplerHandle::new(sampler.inner.as_raw());
+        self.allocated_samplers
+            .borrow_mut()
+            .insert(handle.id, sampler);
+
         Ok(handle)
     }
 }

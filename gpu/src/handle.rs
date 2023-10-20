@@ -4,6 +4,7 @@ pub enum HandleType {
     ShaderModule,
     Image,
     ImageView,
+    Sampler,
 }
 
 pub trait Handle {
@@ -50,3 +51,4 @@ define_handle!(BufferHandle, HandleType::Buffer);
 define_handle!(ShaderModuleHandle, HandleType::ShaderModule);
 define_handle!(ImageHandle, HandleType::Image);
 define_handle!(ImageViewHandle, HandleType::ImageView);
+define_handle!(SamplerHandle, HandleType::Sampler);

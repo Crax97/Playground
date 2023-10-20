@@ -196,23 +196,38 @@ impl PipelineState {
 }
 
 #[derive(Hash, Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
-pub(crate) enum DescriptorBindingType {
+pub enum DescriptorBindingType {
     BufferRange {
         handle: BufferHandle,
         offset: u64,
         range: usize,
     },
+
+    ImageView {
+        image_view_handle: ImageViewHandle,
+        sampler_handle: SamplerHandle,
+    },
 }
 
-#[derive(Hash, Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
-pub(crate) struct Binding {
-    pub(crate) ty: DescriptorBindingType,
+impl Default for DescriptorBindingType {
+    fn default() -> Self {
+        Self::BufferRange {
+            handle: BufferHandle::null(),
+            offset: 0,
+            range: 0,
+        }
+    }
 }
 
-#[derive(Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Default, Hash, Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
+pub struct Binding {
+    pub ty: DescriptorBindingType,
+    pub binding_stage: ShaderStage,
+}
+
+#[derive(Default, Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
 pub(crate) struct DescriptorBindings {
     pub(crate) locations: Vec<Binding>,
-    pub(crate) binding_stage: ShaderStage,
 }
 
 #[derive(Hash, Clone, Default, Eq, PartialEq, PartialOrd, Ord)]
@@ -935,6 +950,16 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             offset,
             size: std::mem::size_of_val(data) as _,
         }
+    }
+
+    pub fn bind_resources(&mut self, set: u32, bindings: &[Binding]) {
+        if self.descriptor_state.bindings.len() <= (set as _) {
+            self.descriptor_state
+                .bindings
+                .resize(set as usize + 1, DescriptorBindings::default());
+        }
+
+        self.descriptor_state.bindings[set as usize].locations = bindings.to_vec();
     }
 }
 

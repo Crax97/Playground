@@ -8,11 +8,11 @@ use app::{bootstrap, App};
 use engine::Backbuffer;
 use engine_macros::glsl;
 use gpu::{
-    AccessFlags, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorAttachment, CullMode, Gpu,
-    ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle, ImageMemoryBarrier,
+    AccessFlags, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorAttachment,
+    CullMode, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle, ImageMemoryBarrier,
     ImageUsageFlags, ImageViewCreateInfo2, ImageViewHandle, IndexType, InputRate, MemoryDomain,
-    PipelineStageFlags, PresentMode, ShaderModuleHandle, ShaderStage, VertexBindingInfo,
-    VkCommandBuffer,
+    PipelineStageFlags, PresentMode, SamplerCreateInfo, SamplerHandle, ShaderModuleHandle,
+    ShaderStage, VertexBindingInfo, VkCommandBuffer,
 };
 use imgui::Ui;
 use nalgebra::*;
@@ -73,6 +73,8 @@ pub struct TriangleApp {
 
     david_image: ImageHandle,
     david_image_view: ImageViewHandle,
+
+    david_sampler: SamplerHandle,
 
     fragment_module: ShaderModuleHandle,
     vertex_module: ShaderModuleHandle,
@@ -140,6 +142,19 @@ impl App for TriangleApp {
             },
         })?;
 
+        let david_sampler = app_state.gpu.make_sampler(&SamplerCreateInfo {
+            mag_filter: gpu::Filter::Linear,
+            min_filter: gpu::Filter::Linear,
+            address_u: gpu::SamplerAddressMode::ClampToEdge,
+            address_v: gpu::SamplerAddressMode::ClampToEdge,
+            address_w: gpu::SamplerAddressMode::ClampToEdge,
+            mip_lod_bias: 0.0,
+            compare_function: None,
+            min_lod: 0.0,
+            max_lod: 0.0,
+            border_color: [1.0; 4],
+        })?;
+
         let triangle_buffer = app_state.gpu.make_buffer(
             &BufferCreateInfo {
                 label: Some("Triangle buffer"),
@@ -189,6 +204,7 @@ impl App for TriangleApp {
 
             david_image,
             david_image_view,
+            david_sampler,
 
             y_rotation: 0.0,
         })
@@ -274,6 +290,16 @@ impl App for TriangleApp {
                 },
             ]);
             pass.set_index_buffer(self.index_buffer, IndexType::Uint32, 0);
+            pass.bind_resources(
+                0,
+                &[Binding {
+                    ty: gpu::DescriptorBindingType::ImageView {
+                        image_view_handle: self.david_image_view,
+                        sampler_handle: self.david_sampler,
+                    },
+                    binding_stage: ShaderStage::FRAGMENT,
+                }],
+            );
             pass.set_cull_mode(CullMode::None);
             pass.push_constants(
                 0,

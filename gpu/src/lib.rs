@@ -52,6 +52,8 @@ pub trait Gpu {
 
     fn make_image_view(&self, info: &ImageViewCreateInfo2) -> anyhow::Result<ImageViewHandle>;
 
+    fn make_sampler(&self, info: &SamplerCreateInfo) -> anyhow::Result<SamplerHandle>;
+
     fn make_shader_module(
         &self,
         info: &ShaderModuleCreateInfo,
