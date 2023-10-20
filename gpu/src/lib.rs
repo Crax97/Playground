@@ -65,12 +65,25 @@ pub enum ImageLayout {
 
     PresentSrc,
 }
+
+#[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug)]
+pub struct PipelineColorBlendAttachmentState {
+    pub blend_enable: bool,
+    pub src_color_blend_factor: BlendMode,
+    pub dst_color_blend_factor: BlendMode,
+    pub color_blend_op: BlendOp,
+    pub src_alpha_blend_factor: BlendMode,
+    pub dst_alpha_blend_factor: BlendMode,
+    pub alpha_blend_op: BlendOp,
+    pub color_write_mask: ColorComponentFlags,
+}
+
 #[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug)]
 pub struct VertexBindingInfo {
     pub handle: BufferHandle,
-    pub location: u64,
-    pub offset: u64,
-    pub stride: usize,
+    pub location: u32,
+    pub offset: u32,
+    pub stride: u32,
     pub format: ImageFormat,
     pub input_rate: InputRate,
 }
@@ -757,6 +770,15 @@ pub enum FrontFace {
 pub enum InputRate {
     PerVertex,
     PerInstance,
+}
+impl ToVk for InputRate {
+    type Inner = ash::vk::VertexInputRate;
+    fn to_vk(&self) -> ash::vk::VertexInputRate {
+        match self {
+            InputRate::PerVertex => Self::Inner::VERTEX,
+            InputRate::PerInstance => Self::Inner::INSTANCE,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Hash)]

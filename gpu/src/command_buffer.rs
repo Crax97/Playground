@@ -1,7 +1,10 @@
 use core::panic;
 use std::{ffi::CString, ops::Deref};
 
-use ash::vk::{RenderingAttachmentInfoKHR, RenderingFlags, RenderingInfoKHR, ResolveModeFlags};
+use ash::vk::{
+    PipelineInputAssemblyStateCreateFlags, PipelineInputAssemblyStateCreateInfo,
+    RenderingAttachmentInfoKHR, RenderingFlags, RenderingInfoKHR, ResolveModeFlags,
+};
 use ash::{
     extensions::ext::DebugUtils,
     prelude::VkResult,
@@ -47,20 +50,34 @@ where
 
 #[derive(Hash)]
 pub(crate) struct PipelineState {
-    fragment_shader: ShaderModuleHandle,
-    vertex_shader: ShaderModuleHandle,
-
-    scissor_area: Option<Rect2D>,
-    front_face: FrontFace,
-    cull_mode: CullMode,
-    enable_depth_test: bool,
-    render_area: Rect2D,
-
-    vertex_inputs: Vec<VertexBindingInfo>,
+    pub(crate) fragment_shader: ShaderModuleHandle,
+    pub(crate) vertex_shader: ShaderModuleHandle,
+    pub(crate) scissor_area: Option<Rect2D>,
+    pub(crate) front_face: FrontFace,
+    pub(crate) cull_mode: CullMode,
+    pub(crate) enable_depth_test: bool,
+    pub(crate) render_area: Rect2D,
+    pub(crate) vertex_inputs: Vec<VertexBindingInfo>,
+    pub(crate) color_blend_states: Vec<PipelineColorBlendAttachmentState>,
 }
 
 impl PipelineState {
     fn new(info: &BeginRenderPassInfo) -> Self {
+        // TODO: put this into pipeline state
+        let color_blend_states = info
+            .color_attachments
+            .iter()
+            .map(|_| PipelineColorBlendAttachmentState {
+                blend_enable: true,
+                src_color_blend_factor: BlendMode::One,
+                dst_color_blend_factor: BlendMode::One,
+                color_blend_op: BlendOp::Add,
+                src_alpha_blend_factor: BlendMode::One,
+                dst_alpha_blend_factor: BlendMode::One,
+                alpha_blend_op: BlendOp::Add,
+                color_write_mask: ColorComponentFlags::RGBA,
+            })
+            .collect();
         Self {
             fragment_shader: Handle::null(),
             vertex_shader: Handle::null(),
@@ -71,6 +88,131 @@ impl PipelineState {
             enable_depth_test: true,
 
             vertex_inputs: vec![],
+            color_blend_states,
+        }
+    }
+
+    pub(crate) fn input_assembly_state(&self) -> vk::PipelineInputAssemblyStateCreateInfo {
+        vk::PipelineInputAssemblyStateCreateInfo {
+            s_type: StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: PipelineInputAssemblyStateCreateFlags::empty(),
+            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+            primitive_restart_enable: vk::FALSE,
+        }
+    }
+
+    pub(crate) fn get_vertex_inputs_description(
+        &self,
+    ) -> (
+        Vec<vk::VertexInputBindingDescription>,
+        Vec<vk::VertexInputAttributeDescription>,
+    ) {
+        let mut inputs = vec![];
+        let mut attributes = vec![];
+
+        for (index, input) in self.vertex_inputs.iter().enumerate() {
+            inputs.push(vk::VertexInputBindingDescription {
+                binding: index as _,
+                stride: input.stride,
+                input_rate: input.input_rate.to_vk(),
+            });
+        }
+        for (index, input) in self.vertex_inputs.iter().enumerate() {
+            attributes.push(vk::VertexInputAttributeDescription {
+                location: input.location,
+                binding: index as _,
+                format: input.format.to_vk(),
+                offset: input.offset,
+            });
+        }
+
+        (inputs, attributes)
+    }
+
+    pub(crate) fn rasterization_state(&self) -> vk::PipelineRasterizationStateCreateInfo {
+        vk::PipelineRasterizationStateCreateInfo {
+            s_type: StructureType::PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineRasterizationStateCreateFlags::empty(),
+            depth_clamp_enable: vk::FALSE,
+            rasterizer_discard_enable: vk::FALSE,
+            polygon_mode: vk::PolygonMode::FILL,
+            cull_mode: self.cull_mode.to_vk(),
+            front_face: self.front_face.to_vk(),
+            depth_bias_enable: vk::FALSE,
+            depth_bias_constant_factor: 0.0,
+            depth_bias_clamp: 0.0,
+            depth_bias_slope_factor: 0.0,
+            line_width: 0.0,
+        }
+    }
+
+    pub(crate) fn multisample_state(&self) -> vk::PipelineMultisampleStateCreateInfo {
+        vk::PipelineMultisampleStateCreateInfo {
+            s_type: StructureType::PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineMultisampleStateCreateFlags::empty(),
+            rasterization_samples: SampleCount::Sample1.to_vk(),
+            sample_shading_enable: vk::FALSE,
+            min_sample_shading: 0.0,
+            p_sample_mask: std::ptr::null(),
+            alpha_to_coverage_enable: vk::FALSE,
+            alpha_to_one_enable: vk::FALSE,
+        }
+    }
+
+    pub(crate) fn depth_stencil_state(&self) -> vk::PipelineDepthStencilStateCreateInfo {
+        vk::PipelineDepthStencilStateCreateInfo {
+            s_type: StructureType::PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineDepthStencilStateCreateFlags::empty(),
+            depth_test_enable: self.enable_depth_test.to_vk(),
+            depth_write_enable: true.to_vk(),
+            depth_compare_op: CompareOp::Always.to_vk(),
+            depth_bounds_test_enable: false.to_vk(),
+            stencil_test_enable: false.to_vk(),
+            front: StencilOpState::default().to_vk(),
+            back: StencilOpState::default().to_vk(),
+            min_depth_bounds: 0.0,
+            max_depth_bounds: 1.0,
+        }
+    }
+
+    pub(crate) fn color_blend_state(&self) -> vk::PipelineColorBlendStateCreateInfo {
+        let color_attachments = self
+            .color_blend_states
+            .iter()
+            .map(|c| c.to_vk())
+            .collect::<Vec<_>>();
+        vk::PipelineColorBlendStateCreateInfo {
+            s_type: StructureType::PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineColorBlendStateCreateFlags::empty(),
+            logic_op_enable: false.to_vk(),
+            logic_op: LogicOp::NoOp.to_vk(),
+            attachment_count: color_attachments.len() as _,
+            p_attachments: color_attachments.as_ptr() as *const _,
+            blend_constants: [1.0, 1.0, 1.0, 1.0],
+        }
+    }
+
+    pub(crate) fn dynamic_state(&self) -> vk::PipelineDynamicStateCreateInfo {
+        let dynamic_states = [
+            vk::DynamicState::VIEWPORT,
+            vk::DynamicState::SCISSOR,
+            vk::DynamicState::FRONT_FACE,
+            vk::DynamicState::CULL_MODE,
+            vk::DynamicState::DEPTH_BIAS,
+            vk::DynamicState::DEPTH_BIAS_ENABLE,
+            vk::DynamicState::DEPTH_TEST_ENABLE,
+        ];
+        vk::PipelineDynamicStateCreateInfo {
+            s_type: StructureType::PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineDynamicStateCreateFlags::empty(),
+            dynamic_state_count: dynamic_states.len() as _,
+            p_dynamic_states: dynamic_states.as_ptr() as *const _,
         }
     }
 }
@@ -708,9 +850,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
     }
 
     fn find_matching_pipeline(&mut self) -> vk::Pipeline {
-        let pipeline_cache = &mut self.gpu.state.pipeline_cache;
-
-        pipeline_cache.get_pipeline(&self.pipeline_state)
+        self.gpu.get_pipeline(&self.pipeline_state)
     }
 
     pub fn set_index_buffer(

@@ -31,6 +31,18 @@ pub trait ToVk {
     fn to_vk(&self) -> Self::Inner;
 }
 
+impl ToVk for bool {
+    type Inner = vk::Bool32;
+
+    fn to_vk(&self) -> Self::Inner {
+        if *self {
+            vk::TRUE
+        } else {
+            vk::FALSE
+        }
+    }
+}
+
 macro_rules! case {
     ($value: expr, $target:expr, $outer:expr, $inner:expr) => {
         if $value.contains($outer) {
@@ -821,7 +833,6 @@ impl VkImage {
     pub fn extents(&self) -> Extent2D {
         self.extents
     }
-
 }
 impl Drop for VkImage {
     fn drop(&mut self) {
@@ -1306,5 +1317,47 @@ impl ToVk for CommandPoolCreateFlags {
         case!(self, result, Self::TRANSIENT, Self::Inner::TRANSIENT);
 
         result
+    }
+}
+
+impl ToVk for LogicOp {
+    type Inner = vk::LogicOp;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            LogicOp::Clear => Self::Inner::CLEAR,
+            LogicOp::And => Self::Inner::AND,
+            LogicOp::AndReverse => Self::Inner::AND_REVERSE,
+            LogicOp::Copy => Self::Inner::COPY,
+            LogicOp::AndInverted => Self::Inner::AND_INVERTED,
+            LogicOp::NoOp => Self::Inner::NO_OP,
+            LogicOp::Xor => Self::Inner::XOR,
+            LogicOp::Or => Self::Inner::OR,
+            LogicOp::Nor => Self::Inner::NOR,
+            LogicOp::Equivalent => Self::Inner::EQUIVALENT,
+            LogicOp::Invert => Self::Inner::INVERT,
+            LogicOp::OrReverse => Self::Inner::OR_REVERSE,
+            LogicOp::CopyInverted => Self::Inner::COPY_INVERTED,
+            LogicOp::OrInverted => Self::Inner::OR_INVERTED,
+            LogicOp::Nand => Self::Inner::NAND,
+            LogicOp::Set => Self::Inner::SET,
+        }
+    }
+}
+
+impl ToVk for PipelineColorBlendAttachmentState {
+    type Inner = vk::PipelineColorBlendAttachmentState;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            blend_enable: self.blend_enable.to_vk(),
+            src_color_blend_factor: self.src_color_blend_factor.to_vk(),
+            dst_color_blend_factor: self.dst_color_blend_factor.to_vk(),
+            color_blend_op: self.color_blend_op.to_vk(),
+            src_alpha_blend_factor: self.src_alpha_blend_factor.to_vk(),
+            dst_alpha_blend_factor: self.dst_alpha_blend_factor.to_vk(),
+            alpha_blend_op: self.alpha_blend_op.to_vk(),
+            color_write_mask: self.color_write_mask.to_vk(),
+        }
     }
 }

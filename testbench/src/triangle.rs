@@ -133,7 +133,7 @@ impl App for TriangleApp {
                 handle: self.triangle_buffer,
                 location: 0,
                 offset: 0,
-                stride: std::mem::size_of::<[f32; 3]>(),
+                stride: std::mem::size_of::<[f32; 3]>() as _,
                 format: ImageFormat::RgbFloat32,
                 input_rate: InputRate::PerVertex,
             }]);

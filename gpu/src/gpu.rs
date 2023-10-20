@@ -57,7 +57,7 @@ use super::{
 
 const KHRONOS_VALIDATION_LAYER: &str = "VK_LAYER_KHRONOS_validation";
 
-struct GpuResourceMap<T>(HashMap<u64, T>);
+pub(crate) struct GpuResourceMap<T>(HashMap<u64, T>);
 
 impl<T> GpuResourceMap<T> {
     fn resolve(&self, id: &u64) -> &T {
@@ -94,31 +94,95 @@ struct SupportedFeatures {
 }
 
 pub(crate) struct PipelineCache {
-    pipelines: HashMap<u64, vk::Pipeline>,
+    device: ash::Device,
+    pipelines: RefCell<HashMap<u64, vk::Pipeline>>,
 }
 
 impl PipelineCache {
-    pub(crate) fn get_pipeline(&mut self, pipeline_state: &PipelineState) -> vk::Pipeline {
+    pub(crate) fn get_pipeline(
+        &self,
+        pipeline_state: &PipelineState,
+        shader_cache: &GpuResourceMap<VkShaderModule>,
+        buffer_map: &GpuResourceMap<VkBuffer>,
+    ) -> vk::Pipeline {
+        let mut pipelines = self.pipelines.borrow_mut();
         let mut hasher = DefaultHasher::new();
         pipeline_state.hash(&mut hasher);
         let pipeline_hash = hasher.finish();
-        if self.pipelines.contains_key(&pipeline_hash) {
-            return self.pipelines[&pipeline_hash];
+        if pipelines.contains_key(&pipeline_hash) {
+            return pipelines[&pipeline_hash];
         }
 
-        let pipeline = self.create_pipeline(pipeline_state);
-        self.pipelines.insert(pipeline_hash, pipeline);
+        let pipeline = self.create_pipeline(pipeline_state, shader_cache, buffer_map);
+        pipelines.insert(pipeline_hash, pipeline);
         pipeline
     }
 
-    fn new() -> PipelineCache {
+    fn new(device: ash::Device) -> PipelineCache {
         Self {
-            pipelines: HashMap::new(),
+            device,
+            pipelines: RefCell::new(HashMap::new()),
         }
     }
 
-    fn create_pipeline(&self, pipeline_state: &PipelineState) -> vk::Pipeline {
-        todo!()
+    fn create_pipeline(
+        &self,
+        pipeline_state: &PipelineState,
+        shader_cache: &GpuResourceMap<VkShaderModule>,
+        buffer_map: &GpuResourceMap<VkBuffer>,
+    ) -> vk::Pipeline {
+        let mut stages = vec![];
+        stages.push(shader_cache.resolve(&pipeline_state.vertex_shader.id));
+        if !pipeline_state.fragment_shader.is_null() {
+            stages.push(shader_cache.resolve(&pipeline_state.fragment_shader.id));
+        }
+
+        let (vertex_input_bindings, vertex_attribute_descriptions) =
+            pipeline_state.get_vertex_inputs_description();
+
+        let vertex_input_state = vk::PipelineVertexInputStateCreateInfo {
+            s_type: StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineVertexInputStateCreateFlags::empty(),
+            vertex_binding_description_count: vertex_input_bindings.len() as _,
+            p_vertex_binding_descriptions: vertex_input_bindings.as_ptr() as *const _,
+            vertex_attribute_description_count: vertex_attribute_descriptions.len() as _,
+            p_vertex_attribute_descriptions: vertex_attribute_descriptions.as_ptr() as *const _,
+        };
+
+        let input_assembly_state = pipeline_state.input_assembly_state();
+        let rasterization_state = pipeline_state.rasterization_state();
+        let multisample_state = pipeline_state.multisample_state();
+        let depth_stencil_state = pipeline_state.depth_stencil_state();
+        let color_blend_state = pipeline_state.color_blend_state();
+        let dynamic_state = pipeline_state.dynamic_state();
+        let create_info = vk::GraphicsPipelineCreateInfo {
+            s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineCreateFlags::empty(),
+            stage_count: stages.len() as _,
+            p_stages: stages.as_ptr() as *const _,
+            p_vertex_input_state: addr_of!(vertex_input_state),
+            p_input_assembly_state: addr_of!(input_assembly_state),
+            p_tessellation_state: std::ptr::null(),
+            p_viewport_state: std::ptr::null(), // It's part of the dynamic state
+            p_rasterization_state: addr_of!(rasterization_state),
+            p_multisample_state: addr_of!(multisample_state),
+            p_depth_stencil_state: addr_of!(depth_stencil_state),
+            p_color_blend_state: addr_of!(color_blend_state),
+            p_dynamic_state: addr_of!(dynamic_state),
+            layout: todo!(),
+            render_pass: vk::RenderPass::null(),
+            subpass: 0,
+            base_pipeline_handle: vk::Pipeline::null(),
+            base_pipeline_index: 0,
+        };
+        let pipeline = unsafe {
+            self.device
+                .create_graphics_pipelines(vk::PipelineCache::null(), &[create_info], None)
+        }
+        .expect("Failed to create pipelines");
+        pipeline[0]
     }
 }
 
@@ -210,8 +274,8 @@ pub struct VkGpu {
     pub(crate) thread_local_state: GpuThreadLocalState,
     pub(crate) staging_buffer: VkBuffer,
 
-    allocated_buffers: RefCell<GpuResourceMap<VkBuffer>>,
-    allocated_shader_modules: RefCell<GpuResourceMap<VkShaderModule>>,
+    pub(crate) allocated_buffers: RefCell<GpuResourceMap<VkBuffer>>,
+    pub(crate) allocated_shader_modules: RefCell<GpuResourceMap<VkShaderModule>>,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -399,7 +463,7 @@ impl VkGpu {
         let state = Arc::new(GpuThreadSharedState {
             entry,
             instance,
-            logical_device,
+            logical_device: logical_device.clone(),
             physical_device,
             graphics_queue,
             async_compute_queue,
@@ -412,7 +476,7 @@ impl VkGpu {
             gpu_memory_allocator: Arc::new(RefCell::new(gpu_memory_allocator)),
             descriptor_set_allocator: Arc::new(RefCell::new(descriptor_set_allocator)),
             messenger,
-            pipeline_cache: PipelineCache::new(),
+            pipeline_cache: PipelineCache::new(logical_device),
             dynamic_rendering,
         });
 
@@ -960,6 +1024,14 @@ impl VkGpu {
     ) -> VkResult<DynamicRendering> {
         let dynamic_rendering = DynamicRendering::new(instance, device);
         Ok(dynamic_rendering)
+    }
+
+    pub(crate) fn get_pipeline(&self, pipeline_state: &PipelineState) -> vk::Pipeline {
+        self.state.pipeline_cache.get_pipeline(
+            &pipeline_state,
+            &self.allocated_shader_modules.borrow(),
+            &self.allocated_buffers.borrow(),
+        )
     }
 }
 
