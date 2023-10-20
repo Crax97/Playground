@@ -883,6 +883,21 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 device.cmd_bind_vertex_buffers(self.inner(), 0, &buffers, &offsets);
             }
         }
+
+        if self.descriptor_state.bindings.len() > 0 {
+            let descriptors = self.find_matching_descriptor_sets();
+            unsafe {
+                device.cmd_bind_descriptor_sets(
+                    self.inner(),
+                    PipelineBindPoint::GRAPHICS,
+                    layout,
+                    0,
+                    &descriptors,
+                    &[],
+                );
+            }
+        }
+
         unsafe {
             device.cmd_bind_pipeline(self.inner(), PipelineBindPoint::GRAPHICS, pipeline);
         }
@@ -909,6 +924,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         self.gpu.get_pipeline_layout(&self.descriptor_state)
     }
 
+    fn find_matching_descriptor_sets(&self) -> Vec<vk::DescriptorSet> {
+        self.gpu
+            .get_descriptor_sets(&self.descriptor_state.bindings)
+    }
     pub fn set_index_buffer(
         &self,
         index_buffer: BufferHandle,

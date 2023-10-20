@@ -111,13 +111,13 @@ impl App for TriangleApp {
             BufReader::new(std::fs::File::open("images/texture.jpg")?),
             image::ImageFormat::Jpeg,
         )?;
-        let david_image = david_image.into_rgba8();
+        let david_image_data = david_image.into_rgba8();
 
         let david_image = app_state.gpu.make_image(
             &ImageCreateInfo {
                 label: Some("David image"),
-                width: david_image.width(),
-                height: david_image.height(),
+                width: david_image_data.width(),
+                height: david_image_data.height(),
                 depth: 1,
                 mips: 1,
                 layers: 1,
@@ -154,6 +154,19 @@ impl App for TriangleApp {
             max_lod: 0.0,
             border_color: [1.0; 4],
         })?;
+
+        app_state.gpu.write_image(
+            david_image,
+            &david_image_data,
+            gpu::Rect2D {
+                offset: gpu::Offset2D::default(),
+                extent: gpu::Extent2D {
+                    width: david_image_data.width() as _,
+                    height: david_image_data.height() as _,
+                },
+            },
+            0,
+        )?;
 
         let triangle_buffer = app_state.gpu.make_buffer(
             &BufferCreateInfo {

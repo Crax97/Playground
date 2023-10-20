@@ -39,14 +39,15 @@ use thiserror::Error;
 use crate::{
     get_allocation_callbacks, BufferCreateInfo, BufferHandle, BufferImageCopyInfo,
     CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo,
-    ComputePipelineDescription, DescriptorSetState, Extent2D, FramebufferCreateInfo, GPUFence, Gpu,
-    GpuConfiguration, GraphicsPipelineDescription, Handle as GpuHandle, ImageCreateInfo,
-    ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
-    ImageViewCreateInfo, ImageViewCreateInfo2, ImageViewHandle, LogicOp, Offset2D, Offset3D,
-    PipelineBarrierInfo, PipelineStageFlags, PipelineState, QueueType, Rect2D,
-    RenderPassDescription, SamplerCreateInfo, SamplerHandle, ShaderModuleCreateInfo,
-    ShaderModuleHandle, ToVk, TransitionInfo, VkCommandBuffer, VkCommandPool, VkComputePipeline,
-    VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass, VkShaderModule,
+    ComputePipelineDescription, DescriptorBindings, DescriptorInfo, DescriptorSetState, Extent2D,
+    FramebufferCreateInfo, GPUFence, Gpu, GpuConfiguration, GraphicsPipelineDescription,
+    Handle as GpuHandle, ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout,
+    ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, ImageViewCreateInfo2,
+    ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
+    PipelineState, QueueType, Rect2D, RenderPassDescription, SamplerCreateInfo, SamplerHandle,
+    SamplerState, ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo,
+    VkCommandBuffer, VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline,
+    VkImageView, VkRenderPass, VkShaderModule,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -372,6 +373,36 @@ impl PipelineLayoutCache {
         }
     }
 }
+pub(crate) struct DescriptorSetCache {
+    device: ash::Device,
+    cache: RefCell<HashMap<u64, vk::DescriptorSet>>,
+}
+
+impl DescriptorSetCache {
+    fn new(device: ash::Device) -> Self {
+        Self {
+            device,
+            cache: RefCell::new(HashMap::new()),
+        }
+    }
+    pub(crate) fn get(&self, info: &DescriptorBindings) -> vk::DescriptorSet {
+        let mut cache = self.cache.borrow_mut();
+        let mut hasher = DefaultHasher::new();
+        info.hash(&mut hasher);
+        let hash = hasher.finish();
+        if cache.contains_key(&hash) {
+            return cache[&hash];
+        }
+
+        let layout = self.create_descriptor_set(info);
+        cache.insert(hash, layout);
+        layout
+    }
+
+    pub(crate) fn create_descriptor_set(&self, info: &DescriptorBindings) -> vk::DescriptorSet {
+        todo!()
+    }
+}
 
 /*
  * All the state that can be shared across threads
@@ -393,6 +424,7 @@ pub struct GpuThreadSharedState {
     pub(crate) pipeline_cache: PipelineCache,
     pub(crate) descriptor_set_layout_cache: DescriptorSetLayoutCache,
     pub(crate) pipeline_layout_cache: PipelineLayoutCache,
+    pub(crate) descriptor_set_cache: DescriptorSetCache,
     features: SupportedFeatures,
     messenger: Option<vk::DebugUtilsMessengerEXT>,
     pub dynamic_rendering: DynamicRendering,
@@ -670,7 +702,8 @@ impl VkGpu {
             messenger,
             pipeline_cache: PipelineCache::new(logical_device.clone()),
             pipeline_layout_cache: PipelineLayoutCache::new(logical_device.clone()),
-            descriptor_set_layout_cache: DescriptorSetLayoutCache::new(logical_device),
+            descriptor_set_layout_cache: DescriptorSetLayoutCache::new(logical_device.clone()),
+            descriptor_set_cache: DescriptorSetCache::new(logical_device),
             dynamic_rendering,
         });
 
@@ -1242,6 +1275,19 @@ impl VkGpu {
         self.state
             .pipeline_layout_cache
             .get_pipeline_layout(descriptor_state, &self.state.descriptor_set_layout_cache)
+    }
+
+    pub(crate) fn get_descriptor_sets(
+        &self,
+        bindings: &[DescriptorBindings],
+    ) -> Vec<vk::DescriptorSet> {
+        let mut descriptors = vec![];
+
+        for binding in bindings {
+            self.state.descriptor_set_cache.get(&binding);
+        }
+
+        descriptors
     }
 }
 
@@ -1974,6 +2020,28 @@ impl Gpu for VkGpu {
     ) -> anyhow::Result<ImageHandle> {
         let image = self.create_image(info, memory_domain, None)?;
         let handle = ImageHandle::new(image.inner.as_raw());
+
+        self.transition_image_layout(
+            &image,
+            TransitionInfo {
+                layout: ImageLayout::Undefined,
+                access_mask: AccessFlags::empty(),
+                stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+            },
+            TransitionInfo {
+                layout: ImageLayout::ShaderReadOnly,
+                access_mask: AccessFlags::empty(),
+                stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
+            },
+            ImageSubresourceRange {
+                aspect_mask: crate::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+        )?;
+
         self.allocated_images.borrow_mut().insert(handle.id, image);
 
         Ok(handle)
