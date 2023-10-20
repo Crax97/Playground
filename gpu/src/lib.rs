@@ -50,6 +50,8 @@ pub trait Gpu {
         layer: u32,
     ) -> anyhow::Result<()>;
 
+    fn make_image_view(&self, info: &ImageViewCreateInfo2) -> anyhow::Result<ImageViewHandle>;
+
     fn make_shader_module(
         &self,
         info: &ShaderModuleCreateInfo,
@@ -115,6 +117,14 @@ pub struct ImageCreateInfo<'a> {
 
 pub struct ImageViewCreateInfo<'a> {
     pub image: &'a VkImage,
+    pub view_type: ImageViewType,
+    pub format: ImageFormat,
+    pub components: ComponentMapping,
+    pub subresource_range: ImageSubresourceRange,
+}
+
+pub struct ImageViewCreateInfo2 {
+    pub image: ImageHandle,
     pub view_type: ImageViewType,
     pub format: ImageFormat,
     pub components: ComponentMapping,
@@ -940,11 +950,13 @@ pub struct ComputePipelineDescription<'a> {
     pub push_constant_ranges: &'a [PushConstantRange],
 }
 
+#[derive(Clone, Copy)]
 pub struct MemoryBarrier {
     pub src_access_mask: AccessFlags,
     pub dst_access_mask: AccessFlags,
 }
 
+#[derive(Clone, Copy)]
 pub struct ImageSubresourceRange {
     pub aspect_mask: ImageAspectFlags,
     pub base_mip_level: u32,

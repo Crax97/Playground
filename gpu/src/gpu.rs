@@ -42,11 +42,11 @@ use crate::{
     ComputePipelineDescription, DescriptorSetState, Extent2D, FramebufferCreateInfo, GPUFence, Gpu,
     GpuConfiguration, GraphicsPipelineDescription, Handle as GpuHandle, ImageCreateInfo,
     ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
-    ImageViewCreateInfo, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
-    PipelineState, QueueType, Rect2D, RenderPassDescription, SamplerCreateInfo,
-    ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo, VkCommandBuffer,
-    VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
-    VkShaderModule,
+    ImageViewCreateInfo, ImageViewCreateInfo2, ImageViewHandle, LogicOp, Offset2D, Offset3D,
+    PipelineBarrierInfo, PipelineStageFlags, PipelineState, QueueType, Rect2D,
+    RenderPassDescription, SamplerCreateInfo, ShaderModuleCreateInfo, ShaderModuleHandle, ToVk,
+    TransitionInfo, VkCommandBuffer, VkCommandPool, VkComputePipeline, VkFramebuffer,
+    VkGraphicsPipeline, VkImageView, VkRenderPass, VkShaderModule,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -1898,6 +1898,9 @@ impl VkGpu {
     fn image_map(&self) -> *const GpuResourceMap<VkImage> {
         self.allocated_images.as_ptr() as *const _
     }
+    fn image_view_map(&self) -> *const GpuResourceMap<VkImageView> {
+        self.allocated_image_views.as_ptr() as *const _
+    }
     pub(crate) fn resolve_buffer(&self, buffer: BufferHandle) -> &VkBuffer {
         let ptr = self.buffer_map();
         let map = unsafe { &*ptr };
@@ -1908,6 +1911,12 @@ impl VkGpu {
         let ptr = self.image_map();
         let map = unsafe { &*ptr };
         map.resolve(&image.id)
+    }
+
+    pub(crate) fn resolve_image_view(&self, view: ImageViewHandle) -> &VkImageView {
+        let ptr = self.image_view_map();
+        let map = unsafe { &*ptr };
+        map.resolve(&view.id)
     }
 }
 
@@ -1967,5 +1976,25 @@ impl Gpu for VkGpu {
         let image = self.resolve_image(handle);
         self.write_image_data(image, data, region.offset, region.extent, layer)?;
         Ok(())
+    }
+
+    fn make_image_view(
+        &self,
+        info: &ImageViewCreateInfo2,
+    ) -> anyhow::Result<crate::ImageViewHandle> {
+        let image = self.resolve_image(info.image);
+        let info = ImageViewCreateInfo {
+            image,
+            view_type: info.view_type,
+            format: info.format,
+            components: info.components,
+            subresource_range: info.subresource_range,
+        };
+        let view = self.create_image_view(&info)?;
+        let handle = ImageViewHandle::new(view.inner_image_view().as_raw());
+        self.allocated_image_views
+            .borrow_mut()
+            .insert(handle.id, view);
+        Ok(handle)
     }
 }

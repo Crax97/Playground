@@ -10,8 +10,9 @@ use engine_macros::glsl;
 use gpu::{
     AccessFlags, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorAttachment, CullMode, Gpu,
     ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle, ImageMemoryBarrier,
-    ImageUsageFlags, ImageViewHandle, IndexType, InputRate, MemoryDomain, PipelineStageFlags,
-    PresentMode, ShaderModuleHandle, ShaderStage, VertexBindingInfo, VkCommandBuffer,
+    ImageUsageFlags, ImageViewCreateInfo2, ImageViewHandle, IndexType, InputRate, MemoryDomain,
+    PipelineStageFlags, PresentMode, ShaderModuleHandle, ShaderStage, VertexBindingInfo,
+    VkCommandBuffer,
 };
 use imgui::Ui;
 use nalgebra::*;
@@ -125,6 +126,20 @@ impl App for TriangleApp {
             MemoryDomain::DeviceLocal,
         )?;
 
+        let david_image_view = app_state.gpu.make_image_view(&ImageViewCreateInfo2 {
+            image: david_image,
+            view_type: gpu::ImageViewType::Type2D,
+            format: ImageFormat::Rgba8,
+            components: gpu::ComponentMapping::default(),
+            subresource_range: gpu::ImageSubresourceRange {
+                aspect_mask: ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+        })?;
+
         let triangle_buffer = app_state.gpu.make_buffer(
             &BufferCreateInfo {
                 label: Some("Triangle buffer"),
@@ -173,7 +188,7 @@ impl App for TriangleApp {
             index_buffer,
 
             david_image,
-            david_image_view: todo!(),
+            david_image_view,
 
             y_rotation: 0.0,
         })
