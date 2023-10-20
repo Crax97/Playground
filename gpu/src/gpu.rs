@@ -134,9 +134,28 @@ impl PipelineCache {
         shader_cache: &GpuResourceMap<VkShaderModule>,
     ) -> vk::Pipeline {
         let mut stages = vec![];
-        stages.push(shader_cache.resolve(&pipeline_state.vertex_shader.id));
+        let main_name = std::ffi::CString::new("main").unwrap();
+        let vertex_shader = shader_cache.resolve(&pipeline_state.vertex_shader.id);
+        stages.push(vk::PipelineShaderStageCreateInfo {
+            s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineShaderStageCreateFlags::empty(),
+            stage: vk::ShaderStageFlags::VERTEX,
+            module: vertex_shader.inner,
+            p_name: main_name.as_ptr(),
+            p_specialization_info: std::ptr::null(),
+        });
         if !pipeline_state.fragment_shader.is_null() {
-            stages.push(shader_cache.resolve(&pipeline_state.fragment_shader.id));
+            let fragment_shader = shader_cache.resolve(&pipeline_state.fragment_shader.id);
+            stages.push(vk::PipelineShaderStageCreateInfo {
+                s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+                p_next: std::ptr::null(),
+                flags: vk::PipelineShaderStageCreateFlags::empty(),
+                stage: vk::ShaderStageFlags::FRAGMENT,
+                module: fragment_shader.inner,
+                p_name: main_name.as_ptr(),
+                p_specialization_info: std::ptr::null(),
+            });
         }
 
         let color_attachments = pipeline_state
@@ -172,6 +191,15 @@ impl PipelineCache {
             p_attachments: color_attachments.as_ptr() as *const _,
             blend_constants: [1.0, 1.0, 1.0, 1.0],
         };
+        let viewport_state = vk::PipelineViewportStateCreateInfo {
+            s_type: StructureType::PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineViewportStateCreateFlags::empty(),
+            viewport_count: 1,
+            p_viewports: std::ptr::null(),
+            scissor_count: 1,
+            p_scissors: std::ptr::null(),
+        };
         let dynamic_state = pipeline_state.dynamic_state();
         let create_info = vk::GraphicsPipelineCreateInfo {
             s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
@@ -182,7 +210,7 @@ impl PipelineCache {
             p_vertex_input_state: addr_of!(vertex_input_state),
             p_input_assembly_state: addr_of!(input_assembly_state),
             p_tessellation_state: std::ptr::null(),
-            p_viewport_state: std::ptr::null(), // It's part of the dynamic state
+            p_viewport_state: addr_of!(viewport_state), // It's part of the dynamic state
             p_rasterization_state: addr_of!(rasterization_state),
             p_multisample_state: addr_of!(multisample_state),
             p_depth_stencil_state: addr_of!(depth_stencil_state),

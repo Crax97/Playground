@@ -88,7 +88,7 @@ impl PipelineState {
 
     pub(crate) fn input_assembly_state(&self) -> vk::PipelineInputAssemblyStateCreateInfo {
         vk::PipelineInputAssemblyStateCreateInfo {
-            s_type: StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+            s_type: StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
             p_next: std::ptr::null(),
             flags: PipelineInputAssemblyStateCreateFlags::empty(),
             topology: vk::PrimitiveTopology::TRIANGLE_LIST,
@@ -138,7 +138,7 @@ impl PipelineState {
             depth_bias_constant_factor: 0.0,
             depth_bias_clamp: 0.0,
             depth_bias_slope_factor: 0.0,
-            line_width: 0.0,
+            line_width: 1.0,
         }
     }
 
@@ -170,24 +170,6 @@ impl PipelineState {
             back: StencilOpState::default().to_vk(),
             min_depth_bounds: 0.0,
             max_depth_bounds: 1.0,
-        }
-    }
-
-    pub(crate) fn color_blend_state(&self) -> vk::PipelineColorBlendStateCreateInfo {
-        let color_attachments = self
-            .color_blend_states
-            .iter()
-            .map(|c| c.to_vk())
-            .collect::<Vec<_>>();
-        vk::PipelineColorBlendStateCreateInfo {
-            s_type: StructureType::PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::PipelineColorBlendStateCreateFlags::empty(),
-            logic_op_enable: false.to_vk(),
-            logic_op: LogicOp::NoOp.to_vk(),
-            attachment_count: color_attachments.len() as _,
-            p_attachments: color_attachments.as_ptr() as *const _,
-            blend_constants: [1.0, 1.0, 1.0, 1.0],
         }
     }
 
@@ -696,6 +678,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         first_instance: u32,
     ) {
         self.prepare_draw();
+
         self.has_draw_command = true;
         self.command_buffer.has_recorded_anything = true;
         let device = self.command_buffer.gpu.vk_logical_device();
@@ -853,6 +836,24 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         let layout = self.find_matching_pipeline_layout();
         let pipeline = self.find_matching_pipeline(layout);
         let device = self.gpu.vk_logical_device();
+        {
+            let buffers = self
+                .pipeline_state
+                .vertex_inputs
+                .iter()
+                .map(|b| self.gpu.resolve_buffer(b.handle).inner)
+                .collect::<Vec<_>>();
+            let offsets = self
+                .pipeline_state
+                .vertex_inputs
+                .iter()
+                .map(|_| 0)
+                .collect::<Vec<_>>();
+
+            unsafe {
+                device.cmd_bind_vertex_buffers(self.inner(), 0, &buffers, &offsets);
+            }
+        }
         unsafe {
             device.cmd_bind_pipeline(self.inner(), PipelineBindPoint::GRAPHICS, pipeline);
         }

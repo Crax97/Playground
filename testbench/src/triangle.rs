@@ -4,6 +4,7 @@ mod utils;
 use app::{bootstrap, App};
 
 use engine::Backbuffer;
+use engine_macros::glsl;
 use gpu::{
     AccessFlags, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorAttachment, CullMode, Gpu,
     ImageAspectFlags, ImageFormat, ImageMemoryBarrier, IndexType, InputRate, MemoryDomain,
@@ -12,6 +13,34 @@ use gpu::{
 use imgui::Ui;
 use nalgebra::*;
 use winit::event_loop::EventLoop;
+
+const VERTEX_SHADER: &[u32] = glsl!(
+    source = "
+#version 460
+
+layout(location = 0) in vec3 in_position;
+
+void main() {
+    gl_Position = vec4(in_position, 1.0);
+}
+    ",
+    kind = vertex,
+    entry_point = "main"
+);
+
+const FRAGMENT_SHADER: &[u32] = glsl!(
+    source = "
+#version 460
+
+layout(location = 0) out vec4 color;
+
+void main() {
+    color = vec4(0.33, 0.45, 0.41, 1.0);
+}
+    ",
+    kind = fragment,
+    entry_point = "main"
+);
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -38,14 +67,20 @@ impl App for TriangleApp {
     where
         Self: Sized,
     {
-        let vertex_module =
-            utils::read_file_to_shader_module(&app_state.gpu, "./shaders/vertex_simple.spirv")?;
-        let fragment_module =
-            utils::read_file_to_shader_module(&app_state.gpu, "./shaders/fragment.spirv")?;
+        let vertex_module = app_state
+            .gpu
+            .make_shader_module(&gpu::ShaderModuleCreateInfo {
+                code: bytemuck::cast_slice(VERTEX_SHADER),
+            })?;
+        let fragment_module = app_state
+            .gpu
+            .make_shader_module(&gpu::ShaderModuleCreateInfo {
+                code: bytemuck::cast_slice(FRAGMENT_SHADER),
+            })?;
 
-        let vertices = [-0.5, -0.5, 0.0, 0.5, -0.5, 0.0, 0.5, 0.5, 0.0];
+        let vertices = [0.5f32, -0.5, 0.0, 0.0, 0.5, 0.0, -0.5, -0.5, 0.0];
 
-        let indices: [u32; 3] = [0, 1, 2];
+        let indices = [0u32, 1, 2];
 
         let triangle_buffer = app_state.gpu.make_buffer(
             &BufferCreateInfo {
@@ -69,7 +104,7 @@ impl App for TriangleApp {
         )?;
         app_state
             .gpu
-            .write_buffer(triangle_buffer, 0, bytemuck::cast_slice(&indices))?;
+            .write_buffer(index_buffer, 0, bytemuck::cast_slice(&indices))?;
 
         engine::app_state_mut()
             .swapchain_mut()
