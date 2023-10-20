@@ -25,7 +25,7 @@ layout(push_constant) uniform constants {
 };
 
 void main() {
-    gl_Position = vec4(in_position, 1.0);
+    gl_Position = render_matrix * vec4(in_position, 1.0);
 }
     ",
     kind = vertex,
@@ -60,6 +60,8 @@ pub struct TriangleApp {
 
     fragment_module: ShaderModuleHandle,
     vertex_module: ShaderModuleHandle,
+
+    y_rotation: f32,
 }
 
 impl App for TriangleApp {
@@ -82,7 +84,7 @@ impl App for TriangleApp {
                 code: bytemuck::cast_slice(FRAGMENT_SHADER),
             })?;
 
-        let vertices = [0.5f32, -0.5, 0.0, 0.0, 0.5, 0.0, -0.5, -0.5, 0.0];
+        let vertices = [0.5f32, 0.0, 0.0, 0.0, 0.0, 0.5, -0.5, 0.0, 0.0];
 
         let indices = [0u32, 1, 2];
 
@@ -119,6 +121,7 @@ impl App for TriangleApp {
             fragment_module,
             triangle_buffer,
             index_buffer,
+            y_rotation: 0.0,
         })
     }
 
@@ -166,7 +169,20 @@ impl App for TriangleApp {
                 },
             });
 
-            let model = Matrix4::<f32>::identity().data.0;
+            let projection = Matrix4::<f32>::new_perspective(
+                backbuffer.size.width as f32 / backbuffer.size.height as f32,
+                90.0f32.to_radians(),
+                0.001,
+                1000.0,
+            );
+            let view = Matrix4::look_at_rh(
+                &point![0.0, 0.0, 0.0],
+                &point![0.0, 0.0, 1.0],
+                &vector![0.0, 1.0, 0.0],
+            );
+            let model = Matrix4::<f32>::new_translation(&vector![0.0, -0.4, 1.0])
+                * Matrix4::new_rotation(vector![0.0, self.y_rotation, 0.0]);
+            let mvp = projection * view * model;
 
             pass.set_vertex_shader(self.vertex_module);
             pass.set_fragment_shader(self.fragment_module);
@@ -180,7 +196,12 @@ impl App for TriangleApp {
             }]);
             pass.set_index_buffer(self.index_buffer, IndexType::Uint32, 0);
             pass.set_cull_mode(CullMode::None);
-            pass.push_constants(0, bytemuck::cast_slice(&[model]), ShaderStage::VERTEX);
+            pass.push_constants(
+                0,
+                0,
+                bytemuck::cast_slice(mvp.as_slice()),
+                ShaderStage::VERTEX,
+            );
             pass.draw_indexed_handle(3, 1, 0, 0, 0)?;
         }
         Ok(command_buffer)
@@ -194,7 +215,8 @@ impl App for TriangleApp {
         Ok(())
     }
 
-    fn update(&mut self, _app_state: &mut engine::AppState, _ui: &mut Ui) -> anyhow::Result<()> {
+    fn update(&mut self, app_state: &mut engine::AppState, _ui: &mut Ui) -> anyhow::Result<()> {
+        self.y_rotation += app_state.time.delta_frame() * 6.0;
         Ok(())
     }
 }

@@ -913,7 +913,13 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         }
     }
 
-    pub fn push_constants(&mut self, index: u32, data: &[u8], shader_stage: ShaderStage) {
+    pub fn push_constants(
+        &mut self,
+        index: u32,
+        offset: u32,
+        data: &[u8],
+        shader_stage: ShaderStage,
+    ) {
         // Ensure enough push constant range descriptions are allocated
         if self.descriptor_state.push_constant_range.len() <= (index as _) {
             self.descriptor_state
@@ -926,7 +932,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
 
         self.descriptor_state.push_constant_range[index as usize] = PushConstantRange {
             stage_flags: shader_stage,
-            offset: 0,
+            offset,
             size: std::mem::size_of_val(data) as _,
         }
     }
