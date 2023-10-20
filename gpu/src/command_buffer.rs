@@ -2,19 +2,12 @@ use core::panic;
 use std::{ffi::CString, ops::Deref};
 
 use ash::vk::{
-    PipelineInputAssemblyStateCreateFlags, PipelineInputAssemblyStateCreateInfo,
-    RenderingAttachmentInfoKHR, RenderingFlags, RenderingInfoKHR, ResolveModeFlags,
+    self, ClearDepthStencilValue, CommandBufferAllocateInfo, CommandBufferBeginInfo,
+    CommandBufferLevel, CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags,
+    PipelineBindPoint, PipelineInputAssemblyStateCreateFlags, RenderingAttachmentInfoKHR,
+    RenderingFlags, RenderingInfoKHR, ResolveModeFlags, StructureType, SubmitInfo,
 };
-use ash::{
-    extensions::ext::DebugUtils,
-    prelude::VkResult,
-    vk::{
-        self, ClearDepthStencilValue, CommandBufferAllocateInfo, CommandBufferBeginInfo,
-        CommandBufferLevel, CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags,
-        PipelineBindPoint, StructureType, SubmitInfo,
-    },
-    RawPtr,
-};
+use ash::{extensions::ext::DebugUtils, prelude::VkResult, RawPtr};
 
 use crate::pipeline::VkPipelineInfo;
 use crate::*;
@@ -39,6 +32,7 @@ where
     depth_bias_setup: Option<(f32, f32, f32)>,
 
     pipeline_state: PipelineState,
+    descriptor_state: DescriptorSetState,
 }
 
 pub struct VkComputePassCommand<'c, 'g>
@@ -215,6 +209,32 @@ impl PipelineState {
             p_dynamic_states: DYNAMIC_STATES.as_ptr() as *const _,
         }
     }
+}
+
+#[derive(Hash, Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
+pub(crate) enum DescriptorBindingType {
+    BufferRange {
+        handle: BufferHandle,
+        offset: u64,
+        range: usize,
+    },
+}
+
+#[derive(Hash, Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
+pub(crate) struct Binding {
+    pub(crate) ty: DescriptorBindingType,
+}
+
+#[derive(Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
+pub(crate) struct DescriptorBindings {
+    pub(crate) locations: Vec<Binding>,
+    pub(crate) binding_stage: ShaderStage,
+}
+
+#[derive(Hash, Clone, Default, Eq, PartialEq, PartialOrd, Ord)]
+pub(crate) struct DescriptorSetState {
+    pub(crate) bindings: Vec<DescriptorBindings>,
+    pub(crate) push_constant_range: Vec<PushConstantRange>,
 }
 
 mod inner {
@@ -639,6 +659,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             viewport_area: None,
             depth_bias_setup: None,
             pipeline_state: PipelineState::new(info),
+            descriptor_state: DescriptorSetState::default(),
         }
     }
 
@@ -829,7 +850,8 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         first_instance: u32,
     ) -> anyhow::Result<()> {
         self.has_draw_command = true;
-        let pipeline = self.find_matching_pipeline();
+        let layout = self.find_matching_pipeline_layout();
+        let pipeline = self.find_matching_pipeline(layout);
         let device = self.gpu.vk_logical_device();
         unsafe {
             device.cmd_bind_pipeline(self.inner(), PipelineBindPoint::GRAPHICS, pipeline);
@@ -849,8 +871,12 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         Ok(())
     }
 
-    fn find_matching_pipeline(&mut self) -> vk::Pipeline {
-        self.gpu.get_pipeline(&self.pipeline_state)
+    fn find_matching_pipeline(&mut self, pipeline_layout: vk::PipelineLayout) -> vk::Pipeline {
+        self.gpu.get_pipeline(&self.pipeline_state, pipeline_layout)
+    }
+
+    fn find_matching_pipeline_layout(&self) -> vk::PipelineLayout {
+        self.gpu.get_pipeline_layout(&self.descriptor_state)
     }
 
     pub fn set_index_buffer(

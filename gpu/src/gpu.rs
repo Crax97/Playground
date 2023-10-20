@@ -11,7 +11,9 @@ use std::{
 
 use anyhow::{bail, Result};
 use ash::extensions::khr::DynamicRendering;
-use ash::vk::{PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR};
+use ash::vk::{
+    DescriptorType, PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR,
+};
 use ash::{
     extensions::ext::DebugUtils,
     prelude::*,
@@ -37,13 +39,13 @@ use thiserror::Error;
 use crate::{
     get_allocation_callbacks, BufferCreateInfo, BufferHandle, BufferImageCopyInfo,
     CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo,
-    ComputePipelineDescription, Extent2D, FramebufferCreateInfo, GPUFence, Gpu, GpuConfiguration,
-    GraphicsPipelineDescription, Handle as GpuHandle, ImageCreateInfo, ImageFormat, ImageLayout,
-    ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, LogicOp, Offset2D, Offset3D,
-    PipelineBarrierInfo, PipelineStageFlags, PipelineState, QueueType, RenderPassDescription,
-    SamplerCreateInfo, ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo,
-    VkCommandBuffer, VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline,
-    VkImageView, VkRenderPass, VkShaderModule,
+    ComputePipelineDescription, DescriptorSetState, Extent2D, FramebufferCreateInfo, GPUFence, Gpu,
+    GpuConfiguration, GraphicsPipelineDescription, Handle as GpuHandle, ImageCreateInfo,
+    ImageFormat, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
+    LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags, PipelineState, QueueType,
+    RenderPassDescription, SamplerCreateInfo, ShaderModuleCreateInfo, ShaderModuleHandle, ToVk,
+    TransitionInfo, VkCommandBuffer, VkCommandPool, VkComputePipeline, VkFramebuffer,
+    VkGraphicsPipeline, VkImageView, VkRenderPass, VkShaderModule,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -102,8 +104,8 @@ impl PipelineCache {
     pub(crate) fn get_pipeline(
         &self,
         pipeline_state: &PipelineState,
+        layout: vk::PipelineLayout,
         shader_cache: &GpuResourceMap<VkShaderModule>,
-        buffer_map: &GpuResourceMap<VkBuffer>,
     ) -> vk::Pipeline {
         let mut pipelines = self.pipelines.borrow_mut();
         let mut hasher = DefaultHasher::new();
@@ -113,12 +115,12 @@ impl PipelineCache {
             return pipelines[&pipeline_hash];
         }
 
-        let pipeline = self.create_pipeline(pipeline_state, shader_cache, buffer_map);
+        let pipeline = self.create_pipeline(pipeline_state, layout, shader_cache);
         pipelines.insert(pipeline_hash, pipeline);
         pipeline
     }
 
-    fn new(device: ash::Device) -> PipelineCache {
+    fn new(device: ash::Device) -> Self {
         Self {
             device,
             pipelines: RefCell::new(HashMap::new()),
@@ -128,8 +130,8 @@ impl PipelineCache {
     fn create_pipeline(
         &self,
         pipeline_state: &PipelineState,
+        layout: vk::PipelineLayout,
         shader_cache: &GpuResourceMap<VkShaderModule>,
-        buffer_map: &GpuResourceMap<VkBuffer>,
     ) -> vk::Pipeline {
         let mut stages = vec![];
         stages.push(shader_cache.resolve(&pipeline_state.vertex_shader.id));
@@ -186,7 +188,7 @@ impl PipelineCache {
             p_depth_stencil_state: addr_of!(depth_stencil_state),
             p_color_blend_state: addr_of!(color_blend_state),
             p_dynamic_state: addr_of!(dynamic_state),
-            layout: todo!(),
+            layout,
             render_pass: vk::RenderPass::null(),
             subpass: 0,
             base_pipeline_handle: vk::Pipeline::null(),
@@ -198,6 +200,145 @@ impl PipelineCache {
         }
         .expect("Failed to create pipelines");
         pipeline[0]
+    }
+}
+
+pub(crate) struct DescriptorSetLayoutCache {
+    device: ash::Device,
+    descriptor_set_layouts: RefCell<HashMap<u64, vk::DescriptorSetLayout>>,
+}
+
+impl DescriptorSetLayoutCache {
+    fn new(device: ash::Device) -> Self {
+        Self {
+            device,
+            descriptor_set_layouts: RefCell::new(HashMap::new()),
+        }
+    }
+    pub(crate) fn get_descriptor_set_layout(
+        &self,
+        info: &DescriptorSetState,
+    ) -> vk::DescriptorSetLayout {
+        let mut descriptor_set_layouts = self.descriptor_set_layouts.borrow_mut();
+        let mut hasher = DefaultHasher::new();
+        info.hash(&mut hasher);
+        let descriptor_set_hash = hasher.finish();
+        if descriptor_set_layouts.contains_key(&descriptor_set_hash) {
+            return descriptor_set_layouts[&descriptor_set_hash];
+        }
+
+        let descriptor_set_layout = self.create_descriptor_set_layout(info);
+        descriptor_set_layouts.insert(descriptor_set_hash, descriptor_set_layout);
+        descriptor_set_layout
+    }
+
+    pub(crate) fn create_descriptor_set_layout(
+        &self,
+        info: &DescriptorSetState,
+    ) -> vk::DescriptorSetLayout {
+        let mut descriptor_set_bindings = vec![];
+        for (binding_idx, descriptor_binding) in info.bindings.iter().enumerate() {
+            let stage_flags = descriptor_binding.binding_stage.to_vk();
+            for binding_location in &descriptor_binding.locations {
+                let descriptor_type = match binding_location.ty {
+                    crate::DescriptorBindingType::BufferRange { .. } => {
+                        DescriptorType::UNIFORM_BUFFER
+                    } //                    super::DescriptorType::UniformBuffer(_) => DescriptorType::UNIFORM_BUFFER,
+                      //                    super::DescriptorType::StorageBuffer(_) => DescriptorType::STORAGE_BUFFER,
+                      //                    super::DescriptorType::Sampler(_) => DescriptorType::SAMPLER,
+                      //                    super::DescriptorType::CombinedImageSampler(_) => {
+                      //                        DescriptorType::COMBINED_IMAGE_SAMPLER
+                      //                    }
+                };
+                let binding = vk::DescriptorSetLayoutBinding {
+                    binding: binding_idx as _,
+                    descriptor_type,
+                    descriptor_count: 1,
+                    stage_flags,
+                    p_immutable_samplers: std::ptr::null(),
+                };
+                descriptor_set_bindings.push(binding);
+            }
+        }
+        unsafe {
+            self.device
+                .create_descriptor_set_layout(
+                    &vk::DescriptorSetLayoutCreateInfo {
+                        s_type: StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                        p_next: std::ptr::null(),
+                        flags: vk::DescriptorSetLayoutCreateFlags::empty(),
+                        binding_count: descriptor_set_bindings.len() as _,
+                        p_bindings: descriptor_set_bindings.as_ptr(),
+                    },
+                    None,
+                )
+                .expect("Failure in descriptor set layout creation")
+        }
+    }
+}
+
+pub(crate) struct PipelineLayoutCache {
+    device: ash::Device,
+    cache: RefCell<HashMap<u64, vk::PipelineLayout>>,
+}
+
+impl PipelineLayoutCache {
+    fn new(device: ash::Device) -> Self {
+        Self {
+            device,
+            cache: RefCell::new(HashMap::new()),
+        }
+    }
+    pub(crate) fn get_pipeline_layout(
+        &self,
+        info: &DescriptorSetState,
+        descriptor_set_layout_cache: &DescriptorSetLayoutCache,
+    ) -> vk::PipelineLayout {
+        let mut cache = self.cache.borrow_mut();
+        let mut hasher = DefaultHasher::new();
+        info.hash(&mut hasher);
+        let hash = hasher.finish();
+        if cache.contains_key(&hash) {
+            return cache[&hash];
+        }
+
+        let layout = self.create_pipeline_layout(info, descriptor_set_layout_cache);
+        cache.insert(hash, layout);
+        layout
+    }
+
+    pub(crate) fn create_pipeline_layout(
+        &self,
+        info: &DescriptorSetState,
+        descriptor_set_layout_cache: &DescriptorSetLayoutCache,
+    ) -> vk::PipelineLayout {
+        let descriptor_set_layout = descriptor_set_layout_cache.get_descriptor_set_layout(info);
+
+        let constant_ranges = info
+            .push_constant_range
+            .iter()
+            .map(|c| vk::PushConstantRange {
+                stage_flags: c.stage_flags.to_vk(),
+                offset: c.offset,
+                size: c.size,
+            })
+            .collect::<Vec<_>>();
+
+        let create_info = vk::PipelineLayoutCreateInfo {
+            s_type: StructureType::PIPELINE_LAYOUT_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineLayoutCreateFlags::empty(),
+            set_layout_count: 1,
+            p_set_layouts: addr_of!(descriptor_set_layout),
+            push_constant_range_count: constant_ranges.len() as _,
+            p_push_constant_ranges: constant_ranges.as_ptr() as *const _,
+        };
+
+        unsafe {
+            self.device
+                .create_pipeline_layout(&create_info, get_allocation_callbacks())
+                .expect("Failed to create pipeline layout")
+        }
     }
 }
 
@@ -219,6 +360,8 @@ pub struct GpuThreadSharedState {
     pub debug_utilities: Option<DebugUtils>,
     pub(crate) vk_pipeline_cache: vk::PipelineCache,
     pub(crate) pipeline_cache: PipelineCache,
+    pub(crate) descriptor_set_layout_cache: DescriptorSetLayoutCache,
+    pub(crate) pipeline_layout_cache: PipelineLayoutCache,
     features: SupportedFeatures,
     messenger: Option<vk::DebugUtilsMessengerEXT>,
     pub dynamic_rendering: DynamicRendering,
@@ -491,7 +634,9 @@ impl VkGpu {
             gpu_memory_allocator: Arc::new(RefCell::new(gpu_memory_allocator)),
             descriptor_set_allocator: Arc::new(RefCell::new(descriptor_set_allocator)),
             messenger,
-            pipeline_cache: PipelineCache::new(logical_device),
+            pipeline_cache: PipelineCache::new(logical_device.clone()),
+            pipeline_layout_cache: PipelineLayoutCache::new(logical_device.clone()),
+            descriptor_set_layout_cache: DescriptorSetLayoutCache::new(logical_device),
             dynamic_rendering,
         });
 
@@ -1041,12 +1186,25 @@ impl VkGpu {
         Ok(dynamic_rendering)
     }
 
-    pub(crate) fn get_pipeline(&self, pipeline_state: &PipelineState) -> vk::Pipeline {
+    pub(crate) fn get_pipeline(
+        &self,
+        pipeline_state: &PipelineState,
+        layout: vk::PipelineLayout,
+    ) -> vk::Pipeline {
         self.state.pipeline_cache.get_pipeline(
             &pipeline_state,
+            layout,
             &self.allocated_shader_modules.borrow(),
-            &self.allocated_buffers.borrow(),
         )
+    }
+
+    pub(crate) fn get_pipeline_layout(
+        &self,
+        descriptor_state: &DescriptorSetState,
+    ) -> vk::PipelineLayout {
+        self.state
+            .pipeline_layout_cache
+            .get_pipeline_layout(descriptor_state, &self.state.descriptor_set_layout_cache)
     }
 }
 
