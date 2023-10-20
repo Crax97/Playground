@@ -20,12 +20,17 @@ const VERTEX_SHADER: &[u32] = glsl!(
 #version 460
 
 layout(location = 0) in vec3 in_position;
+layout(location = 1) in vec2 in_uv;
+
 layout(push_constant) uniform constants {
     mat4 render_matrix;
 };
 
+layout(location = 0) out vec2 uv;
+
 void main() {
     gl_Position = render_matrix * vec4(in_position, 1.0);
+    uv = in_uv;
 }
     ",
     kind = vertex,
@@ -38,8 +43,10 @@ const FRAGMENT_SHADER: &[u32] = glsl!(
 
 layout(location = 0) out vec4 color;
 
+layout(location = 0) in vec2 uv;
+
 void main() {
-    color = vec4(0.33, 0.45, 0.41, 1.0);
+    color = vec4(uv, 0.0, 1.0);
 }
     ",
     kind = fragment,
@@ -56,6 +63,7 @@ struct VertexData {
 
 pub struct TriangleApp {
     triangle_buffer: BufferHandle,
+    uv_buffer: BufferHandle,
     index_buffer: BufferHandle,
 
     fragment_module: ShaderModuleHandle,
@@ -86,6 +94,7 @@ impl App for TriangleApp {
 
         let vertices = [0.5f32, 0.0, 0.0, 0.0, 0.0, 0.5, -0.5, 0.0, 0.0];
 
+        let uvs = [0.0f32, 0.0, 0.0, 1.0, 1.0, 0.0];
         let indices = [0u32, 1, 2];
 
         let triangle_buffer = app_state.gpu.make_buffer(
@@ -99,6 +108,18 @@ impl App for TriangleApp {
         app_state
             .gpu
             .write_buffer(triangle_buffer, 0, bytemuck::cast_slice(&vertices))?;
+
+        let uv_buffer = app_state.gpu.make_buffer(
+            &BufferCreateInfo {
+                label: Some("Uv buffer"),
+                size: std::mem::size_of_val(&uvs) as _,
+                usage: BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
+            },
+            MemoryDomain::DeviceLocal,
+        )?;
+        app_state
+            .gpu
+            .write_buffer(uv_buffer, 0, bytemuck::cast_slice(&uvs))?;
 
         let index_buffer = app_state.gpu.make_buffer(
             &BufferCreateInfo {
@@ -118,6 +139,7 @@ impl App for TriangleApp {
 
         Ok(Self {
             vertex_module,
+            uv_buffer,
             fragment_module,
             triangle_buffer,
             index_buffer,
@@ -186,14 +208,24 @@ impl App for TriangleApp {
 
             pass.set_vertex_shader(self.vertex_module);
             pass.set_fragment_shader(self.fragment_module);
-            pass.set_vertex_buffers(&[VertexBindingInfo {
-                handle: self.triangle_buffer,
-                location: 0,
-                offset: 0,
-                stride: std::mem::size_of::<[f32; 3]>() as _,
-                format: ImageFormat::RgbFloat32,
-                input_rate: InputRate::PerVertex,
-            }]);
+            pass.set_vertex_buffers(&[
+                VertexBindingInfo {
+                    handle: self.triangle_buffer,
+                    location: 0,
+                    offset: 0,
+                    stride: std::mem::size_of::<[f32; 3]>() as _,
+                    format: ImageFormat::RgbFloat32,
+                    input_rate: InputRate::PerVertex,
+                },
+                VertexBindingInfo {
+                    handle: self.uv_buffer,
+                    location: 1,
+                    offset: 0,
+                    stride: std::mem::size_of::<[f32; 2]>() as _,
+                    format: ImageFormat::RgFloat32,
+                    input_rate: InputRate::PerVertex,
+                },
+            ]);
             pass.set_index_buffer(self.index_buffer, IndexType::Uint32, 0);
             pass.set_cull_mode(CullMode::None);
             pass.push_constants(
