@@ -1,15 +1,17 @@
 mod app;
 mod utils;
 
+use std::io::BufReader;
+
 use app::{bootstrap, App};
 
 use engine::Backbuffer;
 use engine_macros::glsl;
 use gpu::{
     AccessFlags, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorAttachment, CullMode, Gpu,
-    ImageAspectFlags, ImageFormat, ImageMemoryBarrier, IndexType, InputRate, MemoryDomain,
-    PipelineStageFlags, PresentMode, ShaderModuleHandle, ShaderStage, VertexBindingInfo,
-    VkCommandBuffer,
+    ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle, ImageMemoryBarrier,
+    ImageUsageFlags, ImageViewHandle, IndexType, InputRate, MemoryDomain, PipelineStageFlags,
+    PresentMode, ShaderModuleHandle, ShaderStage, VertexBindingInfo, VkCommandBuffer,
 };
 use imgui::Ui;
 use nalgebra::*;
@@ -41,12 +43,14 @@ const FRAGMENT_SHADER: &[u32] = glsl!(
     source = "
 #version 460
 
+layout(set = 0, binding = 0) uniform sampler2D tex;
+
 layout(location = 0) out vec4 color;
 
 layout(location = 0) in vec2 uv;
 
 void main() {
-    color = vec4(uv, 0.0, 1.0);
+    color = texture(tex, uv);
 }
     ",
     kind = fragment,
@@ -65,6 +69,9 @@ pub struct TriangleApp {
     triangle_buffer: BufferHandle,
     uv_buffer: BufferHandle,
     index_buffer: BufferHandle,
+
+    david_image: ImageHandle,
+    david_image_view: ImageViewHandle,
 
     fragment_module: ShaderModuleHandle,
     vertex_module: ShaderModuleHandle,
@@ -96,6 +103,27 @@ impl App for TriangleApp {
 
         let uvs = [0.0f32, 0.0, 0.0, 1.0, 1.0, 0.0];
         let indices = [0u32, 1, 2];
+
+        let david_image = image::load(
+            BufReader::new(std::fs::File::open("images/texture.jpg")?),
+            image::ImageFormat::Jpeg,
+        )?;
+        let david_image = david_image.into_rgba8();
+
+        let david_image = app_state.gpu.make_image(
+            &ImageCreateInfo {
+                label: Some("David image"),
+                width: david_image.width(),
+                height: david_image.height(),
+                depth: 1,
+                mips: 1,
+                layers: 1,
+                samples: gpu::SampleCount::Sample1,
+                format: ImageFormat::Rgba8,
+                usage: ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST,
+            },
+            MemoryDomain::DeviceLocal,
+        )?;
 
         let triangle_buffer = app_state.gpu.make_buffer(
             &BufferCreateInfo {
@@ -143,6 +171,10 @@ impl App for TriangleApp {
             fragment_module,
             triangle_buffer,
             index_buffer,
+
+            david_image,
+            david_image_view: todo!(),
+
             y_rotation: 0.0,
         })
     }

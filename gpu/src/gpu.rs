@@ -41,11 +41,12 @@ use crate::{
     CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo,
     ComputePipelineDescription, DescriptorSetState, Extent2D, FramebufferCreateInfo, GPUFence, Gpu,
     GpuConfiguration, GraphicsPipelineDescription, Handle as GpuHandle, ImageCreateInfo,
-    ImageFormat, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
-    LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags, PipelineState, QueueType,
-    RenderPassDescription, SamplerCreateInfo, ShaderModuleCreateInfo, ShaderModuleHandle, ToVk,
-    TransitionInfo, VkCommandBuffer, VkCommandPool, VkComputePipeline, VkFramebuffer,
-    VkGraphicsPipeline, VkImageView, VkRenderPass, VkShaderModule,
+    ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
+    ImageViewCreateInfo, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
+    PipelineState, QueueType, Rect2D, RenderPassDescription, SamplerCreateInfo,
+    ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo, VkCommandBuffer,
+    VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
+    VkShaderModule,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -462,6 +463,8 @@ pub struct VkGpu {
 
     pub(crate) allocated_buffers: RefCell<GpuResourceMap<VkBuffer>>,
     pub(crate) allocated_shader_modules: RefCell<GpuResourceMap<VkShaderModule>>,
+    pub(crate) allocated_images: RefCell<GpuResourceMap<VkImage>>,
+    pub(crate) allocated_image_views: RefCell<GpuResourceMap<VkImageView>>,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -677,6 +680,8 @@ impl VkGpu {
             staging_buffer,
             allocated_buffers: RefCell::new(GpuResourceMap::new()),
             allocated_shader_modules: RefCell::new(GpuResourceMap::new()),
+            allocated_images: RefCell::new(GpuResourceMap::new()),
+            allocated_image_views: RefCell::new(GpuResourceMap::new()),
         })
     }
 
@@ -1890,14 +1895,36 @@ impl VkGpu {
     fn buffer_map(&self) -> *const GpuResourceMap<VkBuffer> {
         self.allocated_buffers.as_ptr() as *const _
     }
+    fn image_map(&self) -> *const GpuResourceMap<VkImage> {
+        self.allocated_images.as_ptr() as *const _
+    }
     pub(crate) fn resolve_buffer(&self, buffer: BufferHandle) -> &VkBuffer {
         let ptr = self.buffer_map();
         let map = unsafe { &*ptr };
         map.resolve(&buffer.id)
     }
+
+    pub(crate) fn resolve_image(&self, image: ImageHandle) -> &VkImage {
+        let ptr = self.image_map();
+        let map = unsafe { &*ptr };
+        map.resolve(&image.id)
+    }
 }
 
 impl Gpu for VkGpu {
+    fn make_shader_module(
+        &self,
+        info: &ShaderModuleCreateInfo,
+    ) -> anyhow::Result<crate::ShaderModuleHandle> {
+        let buffer = self.create_shader_module(info)?;
+        let handle = ShaderModuleHandle::new(buffer.inner.as_raw());
+        self.allocated_shader_modules
+            .borrow_mut()
+            .insert(handle.id, buffer);
+
+        Ok(handle)
+    }
+
     fn make_buffer(
         &self,
         buffer_info: &BufferCreateInfo,
@@ -1918,16 +1945,27 @@ impl Gpu for VkGpu {
         Ok(())
     }
 
-    fn make_shader_module(
+    fn make_image(
         &self,
-        info: &ShaderModuleCreateInfo,
-    ) -> anyhow::Result<crate::ShaderModuleHandle> {
-        let buffer = self.create_shader_module(info)?;
-        let handle = ShaderModuleHandle::new(buffer.inner.as_raw());
-        self.allocated_shader_modules
-            .borrow_mut()
-            .insert(handle.id, buffer);
+        info: &ImageCreateInfo,
+        memory_domain: MemoryDomain,
+    ) -> anyhow::Result<ImageHandle> {
+        let image = self.create_image(info, memory_domain, None)?;
+        let handle = ImageHandle::new(image.inner.as_raw());
+        self.allocated_images.borrow_mut().insert(handle.id, image);
 
         Ok(handle)
+    }
+
+    fn write_image(
+        &self,
+        handle: ImageHandle,
+        data: &[u8],
+        region: Rect2D,
+        layer: u32,
+    ) -> anyhow::Result<()> {
+        let image = self.resolve_image(handle);
+        self.write_image_data(image, data, region.offset, region.extent, layer)?;
+        Ok(())
     }
 }

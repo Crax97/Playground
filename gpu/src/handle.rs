@@ -2,6 +2,8 @@
 pub enum HandleType {
     Buffer,
     ShaderModule,
+    Image,
+    ImageView,
 }
 
 pub trait Handle {
@@ -46,3 +48,5 @@ macro_rules! define_handle {
 
 define_handle!(BufferHandle, HandleType::Buffer);
 define_handle!(ShaderModuleHandle, HandleType::ShaderModule);
+define_handle!(ImageHandle, HandleType::Image);
+define_handle!(ImageViewHandle, HandleType::ImageView);

@@ -37,6 +37,19 @@ pub trait Gpu {
     ) -> anyhow::Result<BufferHandle>;
     fn write_buffer(&self, buffer: BufferHandle, offset: u64, data: &[u8]) -> anyhow::Result<()>;
 
+    fn make_image(
+        &self,
+        info: &ImageCreateInfo,
+        memory_domain: MemoryDomain,
+    ) -> anyhow::Result<ImageHandle>;
+    fn write_image(
+        &self,
+        handle: ImageHandle,
+        data: &[u8],
+        region: Rect2D,
+        layer: u32,
+    ) -> anyhow::Result<()>;
+
     fn make_shader_module(
         &self,
         info: &ShaderModuleCreateInfo,
