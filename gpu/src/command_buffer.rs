@@ -198,7 +198,7 @@ impl PipelineState {
     }
 
     pub(crate) fn dynamic_state(&self) -> vk::PipelineDynamicStateCreateInfo {
-        let dynamic_states = [
+        const DYNAMIC_STATES: &'static [vk::DynamicState] = &[
             vk::DynamicState::VIEWPORT,
             vk::DynamicState::SCISSOR,
             vk::DynamicState::FRONT_FACE,
@@ -211,8 +211,8 @@ impl PipelineState {
             s_type: StructureType::PIPELINE_DYNAMIC_STATE_CREATE_INFO,
             p_next: std::ptr::null(),
             flags: vk::PipelineDynamicStateCreateFlags::empty(),
-            dynamic_state_count: dynamic_states.len() as _,
-            p_dynamic_states: dynamic_states.as_ptr() as *const _,
+            dynamic_state_count: DYNAMIC_STATES.len() as _,
+            p_dynamic_states: DYNAMIC_STATES.as_ptr() as *const _,
         }
     }
 }

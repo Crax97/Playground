@@ -39,7 +39,7 @@ use crate::{
     CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo,
     ComputePipelineDescription, Extent2D, FramebufferCreateInfo, GPUFence, Gpu, GpuConfiguration,
     GraphicsPipelineDescription, Handle as GpuHandle, ImageCreateInfo, ImageFormat, ImageLayout,
-    ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, Offset2D, Offset3D,
+    ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, LogicOp, Offset2D, Offset3D,
     PipelineBarrierInfo, PipelineStageFlags, PipelineState, QueueType, RenderPassDescription,
     SamplerCreateInfo, ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo,
     VkCommandBuffer, VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline,
@@ -137,6 +137,12 @@ impl PipelineCache {
             stages.push(shader_cache.resolve(&pipeline_state.fragment_shader.id));
         }
 
+        let color_attachments = pipeline_state
+            .color_blend_states
+            .iter()
+            .map(|c| c.to_vk())
+            .collect::<Vec<_>>();
+
         let (vertex_input_bindings, vertex_attribute_descriptions) =
             pipeline_state.get_vertex_inputs_description();
 
@@ -154,7 +160,16 @@ impl PipelineCache {
         let rasterization_state = pipeline_state.rasterization_state();
         let multisample_state = pipeline_state.multisample_state();
         let depth_stencil_state = pipeline_state.depth_stencil_state();
-        let color_blend_state = pipeline_state.color_blend_state();
+        let color_blend_state = vk::PipelineColorBlendStateCreateInfo {
+            s_type: StructureType::PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineColorBlendStateCreateFlags::empty(),
+            logic_op_enable: false.to_vk(),
+            logic_op: LogicOp::NoOp.to_vk(),
+            attachment_count: color_attachments.len() as _,
+            p_attachments: color_attachments.as_ptr() as *const _,
+            blend_constants: [1.0, 1.0, 1.0, 1.0],
+        };
         let dynamic_state = pipeline_state.dynamic_state();
         let create_info = vk::GraphicsPipelineCreateInfo {
             s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
