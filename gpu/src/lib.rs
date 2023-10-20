@@ -418,7 +418,7 @@ pub enum ImageViewType {
     TypeCubeArray,
 }
 
-#[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PushConstantRange {
     pub stage_flags: ShaderStage,
     pub offset: u32,
@@ -445,6 +445,12 @@ bitflags! {
         const COMPUTE = 0b10_0000;
         const ALL_GRAPHICS = 0x0000_001F;
         const ALL = 0x7FFF_FFFF;
+    }
+}
+
+impl Default for ShaderStage {
+    fn default() -> Self {
+        ShaderStage::empty()
     }
 }
 

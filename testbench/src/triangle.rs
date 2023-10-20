@@ -8,7 +8,8 @@ use engine_macros::glsl;
 use gpu::{
     AccessFlags, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorAttachment, CullMode, Gpu,
     ImageAspectFlags, ImageFormat, ImageMemoryBarrier, IndexType, InputRate, MemoryDomain,
-    PipelineStageFlags, PresentMode, ShaderModuleHandle, VertexBindingInfo, VkCommandBuffer,
+    PipelineStageFlags, PresentMode, ShaderModuleHandle, ShaderStage, VertexBindingInfo,
+    VkCommandBuffer,
 };
 use imgui::Ui;
 use nalgebra::*;
@@ -19,6 +20,9 @@ const VERTEX_SHADER: &[u32] = glsl!(
 #version 460
 
 layout(location = 0) in vec3 in_position;
+layout(push_constant) uniform constants {
+    mat4 render_matrix;
+};
 
 void main() {
     gl_Position = vec4(in_position, 1.0);
@@ -162,6 +166,8 @@ impl App for TriangleApp {
                 },
             });
 
+            let model = Matrix4::<f32>::identity().data.0;
+
             pass.set_vertex_shader(self.vertex_module);
             pass.set_fragment_shader(self.fragment_module);
             pass.set_vertex_buffers(&[VertexBindingInfo {
@@ -174,6 +180,7 @@ impl App for TriangleApp {
             }]);
             pass.set_index_buffer(self.index_buffer, IndexType::Uint32, 0);
             pass.set_cull_mode(CullMode::None);
+            pass.push_constants(0, bytemuck::cast_slice(&[model]), ShaderStage::VERTEX);
             pass.draw_indexed_handle(3, 1, 0, 0, 0)?;
         }
         Ok(command_buffer)

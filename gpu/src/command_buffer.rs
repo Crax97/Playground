@@ -33,6 +33,8 @@ where
 
     pipeline_state: PipelineState,
     descriptor_state: DescriptorSetState,
+
+    push_constant_data: Vec<Vec<u8>>,
 }
 
 pub struct VkComputePassCommand<'c, 'g>
@@ -642,6 +644,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             depth_bias_setup: None,
             pipeline_state: PipelineState::new(info),
             descriptor_state: DescriptorSetState::default(),
+            push_constant_data: vec![],
         }
     }
 
@@ -851,6 +854,17 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 .collect::<Vec<_>>();
 
             unsafe {
+                for (idx, constant_range) in
+                    self.descriptor_state.push_constant_range.iter().enumerate()
+                {
+                    device.cmd_push_constants(
+                        self.inner(),
+                        layout,
+                        constant_range.stage_flags.to_vk(),
+                        constant_range.offset,
+                        &self.push_constant_data[idx],
+                    );
+                }
                 device.cmd_bind_vertex_buffers(self.inner(), 0, &buffers, &offsets);
             }
         }
@@ -896,6 +910,24 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 offset as _,
                 index_type.to_vk(),
             );
+        }
+    }
+
+    pub fn push_constants(&mut self, index: u32, data: &[u8], shader_stage: ShaderStage) {
+        // Ensure enough push constant range descriptions are allocated
+        if self.descriptor_state.push_constant_range.len() <= (index as _) {
+            self.descriptor_state
+                .push_constant_range
+                .resize(index as usize + 1, PushConstantRange::default());
+            self.push_constant_data.resize(index as usize + 1, vec![]);
+        }
+
+        self.push_constant_data[index as usize] = data.to_vec();
+
+        self.descriptor_state.push_constant_range[index as usize] = PushConstantRange {
+            stage_flags: shader_stage,
+            offset: 0,
+            size: std::mem::size_of_val(data) as _,
         }
     }
 }
