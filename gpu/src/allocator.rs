@@ -48,7 +48,7 @@ pub struct AllocationRequirements {
     pub memory_domain: MemoryDomain,
 }
 
-#[derive(Eq, Ord, PartialOrd, PartialEq)]
+#[derive(Clone, Eq, Ord, PartialOrd, PartialEq)]
 pub struct MemoryAllocation {
     pub device_memory: DeviceMemory,
     pub offset: u64,

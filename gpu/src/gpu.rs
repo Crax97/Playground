@@ -684,7 +684,7 @@ pub struct VkGpu {
     pub(crate) thread_local_state: GpuThreadLocalState,
     pub(crate) staging_buffer: VkBuffer,
 
-    pub(crate) allocated_resources: GpuResourceMap,
+    pub(crate) allocated_resources: RefCell<GpuResourceMap>,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -899,7 +899,7 @@ impl VkGpu {
             state,
             thread_local_state,
             staging_buffer,
-            allocated_resources: GpuResourceMap::new(),
+            allocated_resources: RefCell::new(GpuResourceMap::new()),
         })
     }
 
@@ -1442,9 +1442,11 @@ impl VkGpu {
         pipeline_state: &PipelineState,
         layout: vk::PipelineLayout,
     ) -> vk::Pipeline {
-        self.state
-            .pipeline_cache
-            .get_pipeline(&pipeline_state, layout, &self.allocated_resources)
+        self.state.pipeline_cache.get_pipeline(
+            &pipeline_state,
+            layout,
+            &self.allocated_resources.borrow(),
+        )
     }
 
     pub(crate) fn get_pipeline_layout(
@@ -1467,10 +1469,11 @@ impl VkGpu {
                 .state
                 .descriptor_set_layout_cache
                 .get_descriptor_set_layout(set);
-            let descriptor =
-                self.state
-                    .descriptor_set_cache
-                    .get(&set, layout, &self.allocated_resources);
+            let descriptor = self.state.descriptor_set_cache.get(
+                &set,
+                layout,
+                &self.allocated_resources.borrow(),
+            );
             descriptors.push(descriptor)
         }
 
@@ -2135,7 +2138,7 @@ impl Gpu for VkGpu {
     ) -> anyhow::Result<crate::ShaderModuleHandle> {
         let buffer = self.create_shader_module(info)?;
         let handle = ShaderModuleHandle::new(buffer.inner.as_raw());
-        self.allocated_resources.insert(handle, buffer);
+        self.allocated_resources.borrow_mut().insert(handle, buffer);
 
         Ok(handle)
     }
@@ -2147,14 +2150,14 @@ impl Gpu for VkGpu {
     ) -> anyhow::Result<crate::BufferHandle> {
         let buffer = self.create_buffer(buffer_info, memory_domain)?;
         let handle = BufferHandle::new(buffer.inner.as_raw());
-        self.allocated_resources.insert(handle, buffer);
+        self.allocated_resources.borrow_mut().insert(handle, buffer);
 
         Ok(handle)
     }
 
     fn write_buffer(&self, buffer: BufferHandle, offset: u64, data: &[u8]) -> anyhow::Result<()> {
-        let buffer = self.allocated_resources.resolve(buffer);
-        self.write_buffer_data_with_offset(buffer, offset, data)?;
+        let buffer = self.allocated_resources.borrow().resolve(buffer);
+        self.write_buffer_data_with_offset(&buffer, offset, data)?;
         Ok(())
     }
 
@@ -2187,7 +2190,7 @@ impl Gpu for VkGpu {
             },
         )?;
 
-        self.allocated_resources.insert(handle, image);
+        self.allocated_resources.borrow_mut().insert(handle, image);
 
         Ok(handle)
     }
@@ -2199,8 +2202,8 @@ impl Gpu for VkGpu {
         region: Rect2D,
         layer: u32,
     ) -> anyhow::Result<()> {
-        let image = self.allocated_resources.resolve(handle);
-        self.write_image_data(image, data, region.offset, region.extent, layer)?;
+        let image = self.allocated_resources.borrow().resolve::<VkImage>(handle);
+        self.write_image_data(&image, data, region.offset, region.extent, layer)?;
         Ok(())
     }
 
@@ -2208,9 +2211,9 @@ impl Gpu for VkGpu {
         &self,
         info: &ImageViewCreateInfo2,
     ) -> anyhow::Result<crate::ImageViewHandle> {
-        let image = self.allocated_resources.resolve(info.image);
+        let image = self.allocated_resources.borrow().resolve(info.image);
         let info = ImageViewCreateInfo {
-            image,
+            image: &image,
             view_type: info.view_type,
             format: info.format,
             components: info.components,
@@ -2218,14 +2221,16 @@ impl Gpu for VkGpu {
         };
         let view = self.create_image_view(&info)?;
         let handle = ImageViewHandle::new(view.inner_image_view().as_raw());
-        self.allocated_resources.insert(handle, view);
+        self.allocated_resources.borrow_mut().insert(handle, view);
         Ok(handle)
     }
 
     fn make_sampler(&self, info: &SamplerCreateInfo) -> anyhow::Result<crate::SamplerHandle> {
         let sampler = self.create_sampler(info)?;
         let handle = SamplerHandle::new(sampler.inner.as_raw());
-        self.allocated_resources.insert(handle, sampler);
+        self.allocated_resources
+            .borrow_mut()
+            .insert(handle, sampler);
 
         Ok(handle)
     }

@@ -1,6 +1,6 @@
 use std::{
     any::Any,
-    cell::{RefCell, RefMut},
+    cell::{Ref, RefCell, RefMut},
     collections::HashMap,
 };
 
@@ -23,21 +23,13 @@ pub mod utils {
 
 pub struct AllocatedResourceMap<T>(HashMap<u64, T>);
 
-impl<T: HasAssociatedHandle> AllocatedResourceMap<T> {
-    pub fn resolve(&self, handle: T::AssociatedHandle) -> &T {
+impl<T: HasAssociatedHandle + Clone> AllocatedResourceMap<T> {
+    pub fn resolve(&self, handle: T::AssociatedHandle) -> T {
         let res = self
             .0
             .get(&handle.id())
             .expect("Failed to resolve resource");
-        res
-    }
-
-    pub fn resolve_mut(&mut self, handle: T::AssociatedHandle) -> &mut T {
-        let res = self
-            .0
-            .get_mut(&handle.id())
-            .expect("Failed to resolve resource");
-        res
+        res.clone()
     }
 
     pub fn insert(&mut self, handle: T::AssociatedHandle, res: T) {
@@ -50,48 +42,45 @@ impl<T: HasAssociatedHandle> AllocatedResourceMap<T> {
 }
 
 pub struct GpuResourceMap {
-    maps: RefCell<HashMap<HandleType, Box<dyn Any>>>,
+    maps: HashMap<HandleType, Box<dyn Any>>,
 }
 
 impl GpuResourceMap {
     pub fn new() -> Self {
         Self {
-            maps: RefCell::new(HashMap::new()),
+            maps: HashMap::new(),
         }
     }
-    pub fn insert<T: HasAssociatedHandle + 'static>(
-        &self,
+    pub fn insert<T: HasAssociatedHandle + Clone + 'static>(
+        &mut self,
         handle: T::AssociatedHandle,
         resource: T,
     ) {
+        if !self.maps.contains_key(&T::AssociatedHandle::handle_type()) {
+            self.maps.insert(
+                T::AssociatedHandle::handle_type(),
+                Box::new(RefCell::new(AllocatedResourceMap::<T>::new())),
+            );
+        }
         self.get_map().insert(handle, resource)
     }
-    pub fn resolve<T: HasAssociatedHandle + 'static>(&self, handle: T::AssociatedHandle) -> &T {
+    pub fn resolve<T: HasAssociatedHandle + Clone + 'static>(
+        &self,
+        handle: T::AssociatedHandle,
+    ) -> T {
         self.get_map().resolve(handle)
     }
 
-    pub fn resolve_mut<T: HasAssociatedHandle + 'static>(
-        &mut self,
-        handle: T::AssociatedHandle,
-    ) -> &mut T {
-        self.get_map().resolve_mut(handle)
-    }
-
-    pub fn get_map<T: HasAssociatedHandle + 'static>(&self) -> &mut AllocatedResourceMap<T> {
-        {
-            let mut map = self.maps.borrow_mut();
-            map.entry(T::AssociatedHandle::handle_type())
-                .or_insert(Box::new(RefCell::new(AllocatedResourceMap::<T>::new())));
-        }
-
-        let maps = self.maps.borrow();
-        let map = maps
+    pub fn get_map<T: HasAssociatedHandle + Clone + 'static>(
+        &self,
+    ) -> RefMut<AllocatedResourceMap<T>> {
+        let map = self
+            .maps
             .get(&T::AssociatedHandle::handle_type())
             .unwrap()
             .downcast_ref::<RefCell<AllocatedResourceMap<T>>>()
             .unwrap();
 
-        let map = map.as_ptr();
-        unsafe { &mut *map }
+        map.borrow_mut()
     }
 }

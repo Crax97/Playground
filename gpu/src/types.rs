@@ -556,8 +556,10 @@ macro_rules! impl_raii_wrapper_to_vk {
         }
     };
 }
+
 macro_rules! define_raii_wrapper {
     ((struct $name:ident { $($mem_name:ident : $mem_ty : ty,)* }, $vk_type:ty, $drop_fn:path) {($arg_name:ident : $arg_typ:ty,) => $create_impl_block:tt}) => {
+        #[derive(Clone)]
         pub struct $name {
             device: ash::Device,
             pub(super) inner: $vk_type,
@@ -577,13 +579,6 @@ macro_rules! define_raii_wrapper {
             }
         }
 
-        impl Drop for $name {
-            fn drop(&mut self) {
-                unsafe {
-                    $drop_fn(&self.device, self.inner, self::get_allocation_callbacks());
-                }
-            }
-        }
 
         impl Deref for $name {
             type Target = $vk_type;
@@ -692,6 +687,7 @@ impl VkCommandPool {
     }
 }
 
+#[derive(Clone)]
 pub struct VkBuffer {
     device: ash::Device,
     pub(super) inner: vk::Buffer,
@@ -719,14 +715,6 @@ impl VkBuffer {
 
     pub(crate) fn size(&self) -> usize {
         self.allocation.size as _
-    }
-}
-impl Drop for VkBuffer {
-    fn drop(&mut self) {
-        self.allocator.borrow_mut().deallocate(&self.allocation);
-        unsafe {
-            ash::Device::destroy_buffer(&self.device, self.inner, self::get_allocation_callbacks());
-        }
     }
 }
 impl Deref for VkBuffer {
@@ -783,6 +771,7 @@ impl VkBuffer {
 impl_raii_wrapper_hash!(VkBuffer);
 impl_raii_wrapper_to_vk!(VkBuffer, vk::Buffer);
 
+#[derive(Clone)]
 pub struct VkImage {
     device: ash::Device,
     pub(super) inner: vk::Image,
@@ -832,19 +821,6 @@ impl VkImage {
 
     pub fn extents(&self) -> Extent2D {
         self.extents
-    }
-}
-impl Drop for VkImage {
-    fn drop(&mut self) {
-        if let (Some(allocator), Some(allocation)) = (&self.allocator, &self.allocation) {
-            allocator.borrow_mut().deallocate(allocation);
-            unsafe {
-                self.device
-                    .destroy_image(self.inner, self::get_allocation_callbacks());
-            }
-        } else {
-            // this is a wrapped image
-        }
     }
 }
 
@@ -912,14 +888,6 @@ impl VkDescriptorSet {
             allocation,
             allocator,
         })
-    }
-}
-impl Drop for VkDescriptorSet {
-    fn drop(&mut self) {
-        self.allocator
-            .borrow_mut()
-            .deallocate(&self.allocation)
-            .expect("Failed to deallocate descriptor set");
     }
 }
 impl Deref for VkDescriptorSet {

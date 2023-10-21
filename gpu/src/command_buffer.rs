@@ -914,6 +914,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 .map(|b| {
                     self.gpu
                         .allocated_resources
+                        .borrow()
                         .resolve::<VkBuffer>(b.handle)
                         .inner
                 })
@@ -994,6 +995,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         let index_buffer = self
             .gpu
             .allocated_resources
+            .borrow()
             .resolve::<VkBuffer>(index_buffer);
         let device = self.gpu.vk_logical_device();
         unsafe {
