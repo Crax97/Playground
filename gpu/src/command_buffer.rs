@@ -226,16 +226,45 @@ pub struct Binding {
 }
 
 #[derive(Default, Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
-pub(crate) struct DescriptorBindings {
-    pub(crate) locations: Vec<Binding>,
+pub(crate) struct DescriptorSetInfo2 {
+    pub(crate) bindings: Vec<Binding>,
 }
 
 #[derive(Hash, Clone, Default, Eq, PartialEq, PartialOrd, Ord)]
 pub(crate) struct DescriptorSetState {
-    pub(crate) bindings: Vec<DescriptorBindings>,
+    pub(crate) sets: Vec<DescriptorSetInfo2>,
     pub(crate) push_constant_range: Vec<PushConstantRange>,
 }
 
+impl DescriptorSetInfo2 {
+    pub(crate) fn descriptor_set_layout_bindings(&self) -> Vec<vk::DescriptorSetLayoutBinding> {
+        let mut descriptor_set_bindings = vec![];
+        for (binding_index, binding) in self.bindings.iter().enumerate() {
+            let stage_flags = binding.binding_stage.to_vk();
+            let descriptor_type = match binding.ty {
+                crate::DescriptorBindingType::BufferRange { .. } => {
+                    vk::DescriptorType::UNIFORM_BUFFER
+                }
+                crate::DescriptorBindingType::ImageView { .. } => {
+                    vk::DescriptorType::COMBINED_IMAGE_SAMPLER
+                } //                    super::DescriptorType::StorageBuffer(_) => DescriptorType::STORAGE_BUFFER,
+                  //                    super::DescriptorType::Sampler(_) => DescriptorType::SAMPLER,
+                  //                    super::DescriptorType::CombinedImageSampler(_) => {
+                  //                        DescriptorType::COMBINED_IMAGE_SAMPLER
+                  //                    }
+            };
+            let binding = vk::DescriptorSetLayoutBinding {
+                binding: binding_index as _,
+                descriptor_type,
+                descriptor_count: 1,
+                stage_flags,
+                p_immutable_samplers: std::ptr::null(),
+            };
+            descriptor_set_bindings.push(binding);
+        }
+        descriptor_set_bindings
+    }
+}
 mod inner {
     use ash::vk::ShaderStageFlags;
 
@@ -884,7 +913,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             }
         }
 
-        if self.descriptor_state.bindings.len() > 0 {
+        if self.descriptor_state.sets.len() > 0 {
             let descriptors = self.find_matching_descriptor_sets();
             unsafe {
                 device.cmd_bind_descriptor_sets(
@@ -925,8 +954,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
     }
 
     fn find_matching_descriptor_sets(&self) -> Vec<vk::DescriptorSet> {
-        self.gpu
-            .get_descriptor_sets(&self.descriptor_state.bindings)
+        self.gpu.get_descriptor_sets(&self.descriptor_state)
     }
     pub fn set_index_buffer(
         &self,
@@ -972,13 +1000,13 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
     }
 
     pub fn bind_resources(&mut self, set: u32, bindings: &[Binding]) {
-        if self.descriptor_state.bindings.len() <= (set as _) {
+        if self.descriptor_state.sets.len() <= (set as _) {
             self.descriptor_state
-                .bindings
-                .resize(set as usize + 1, DescriptorBindings::default());
+                .sets
+                .resize(set as usize + 1, DescriptorSetInfo2::default());
         }
 
-        self.descriptor_state.bindings[set as usize].locations = bindings.to_vec();
+        self.descriptor_state.sets[set as usize].bindings = bindings.to_vec();
     }
 }
 

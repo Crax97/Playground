@@ -39,15 +39,15 @@ use thiserror::Error;
 use crate::{
     get_allocation_callbacks, BufferCreateInfo, BufferHandle, BufferImageCopyInfo,
     CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo,
-    ComputePipelineDescription, DescriptorBindings, DescriptorInfo, DescriptorSetState, Extent2D,
+    ComputePipelineDescription, DescriptorSetInfo2, DescriptorSetState, Extent2D,
     FramebufferCreateInfo, GPUFence, Gpu, GpuConfiguration, GraphicsPipelineDescription,
     Handle as GpuHandle, ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout,
     ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, ImageViewCreateInfo2,
     ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
     PipelineState, QueueType, Rect2D, RenderPassDescription, SamplerCreateInfo, SamplerHandle,
-    SamplerState, ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo,
-    VkCommandBuffer, VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline,
-    VkImageView, VkRenderPass, VkShaderModule,
+    ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo, VkCommandBuffer,
+    VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
+    VkShaderModule,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -247,7 +247,7 @@ impl DescriptorSetLayoutCache {
     }
     pub(crate) fn get_descriptor_set_layout(
         &self,
-        info: &DescriptorSetState,
+        info: &DescriptorSetInfo2,
     ) -> vk::DescriptorSetLayout {
         let mut descriptor_set_layouts = self.descriptor_set_layouts.borrow_mut();
         let mut hasher = DefaultHasher::new();
@@ -264,34 +264,9 @@ impl DescriptorSetLayoutCache {
 
     pub(crate) fn create_descriptor_set_layout(
         &self,
-        info: &DescriptorSetState,
+        info: &DescriptorSetInfo2,
     ) -> vk::DescriptorSetLayout {
-        let mut descriptor_set_bindings = vec![];
-        for (binding_idx, descriptor_binding) in info.bindings.iter().enumerate() {
-            for binding_location in &descriptor_binding.locations {
-                let stage_flags = binding_location.binding_stage.to_vk();
-                let descriptor_type = match binding_location.ty {
-                    crate::DescriptorBindingType::BufferRange { .. } => {
-                        DescriptorType::UNIFORM_BUFFER
-                    }
-                    crate::DescriptorBindingType::ImageView { .. } => {
-                        DescriptorType::COMBINED_IMAGE_SAMPLER
-                    } //                    super::DescriptorType::StorageBuffer(_) => DescriptorType::STORAGE_BUFFER,
-                      //                    super::DescriptorType::Sampler(_) => DescriptorType::SAMPLER,
-                      //                    super::DescriptorType::CombinedImageSampler(_) => {
-                      //                        DescriptorType::COMBINED_IMAGE_SAMPLER
-                      //                    }
-                };
-                let binding = vk::DescriptorSetLayoutBinding {
-                    binding: binding_idx as _,
-                    descriptor_type,
-                    descriptor_count: 1,
-                    stage_flags,
-                    p_immutable_samplers: std::ptr::null(),
-                };
-                descriptor_set_bindings.push(binding);
-            }
-        }
+        let descriptor_set_bindings = info.descriptor_set_layout_bindings();
         unsafe {
             self.device
                 .create_descriptor_set_layout(
@@ -344,8 +319,11 @@ impl PipelineLayoutCache {
         info: &DescriptorSetState,
         descriptor_set_layout_cache: &DescriptorSetLayoutCache,
     ) -> vk::PipelineLayout {
-        let descriptor_set_layout = descriptor_set_layout_cache.get_descriptor_set_layout(info);
-
+        let mut descriptor_set_layouts = vec![];
+        for set in &info.sets {
+            let layout = descriptor_set_layout_cache.get_descriptor_set_layout(set);
+            descriptor_set_layouts.push(layout);
+        }
         let constant_ranges = info
             .push_constant_range
             .iter()
@@ -360,8 +338,8 @@ impl PipelineLayoutCache {
             s_type: StructureType::PIPELINE_LAYOUT_CREATE_INFO,
             p_next: std::ptr::null(),
             flags: vk::PipelineLayoutCreateFlags::empty(),
-            set_layout_count: 1,
-            p_set_layouts: addr_of!(descriptor_set_layout),
+            set_layout_count: descriptor_set_layouts.len() as _,
+            p_set_layouts: descriptor_set_layouts.as_ptr() as *const _,
             push_constant_range_count: constant_ranges.len() as _,
             p_push_constant_ranges: constant_ranges.as_ptr() as *const _,
         };
@@ -376,6 +354,8 @@ impl PipelineLayoutCache {
 pub(crate) struct DescriptorSetCache {
     device: ash::Device,
     cache: RefCell<HashMap<u64, vk::DescriptorSet>>,
+
+    pools: RefCell<HashMap<u64, vk::DescriptorPool>>,
 }
 
 impl DescriptorSetCache {
@@ -383,9 +363,14 @@ impl DescriptorSetCache {
         Self {
             device,
             cache: RefCell::new(HashMap::new()),
+            pools: RefCell::new(HashMap::new()),
         }
     }
-    pub(crate) fn get(&self, info: &DescriptorBindings) -> vk::DescriptorSet {
+    pub(crate) fn get(
+        &self,
+        info: &DescriptorSetInfo2,
+        layout: &vk::DescriptorSetLayout,
+    ) -> vk::DescriptorSet {
         let mut cache = self.cache.borrow_mut();
         let mut hasher = DefaultHasher::new();
         info.hash(&mut hasher);
@@ -394,12 +379,37 @@ impl DescriptorSetCache {
             return cache[&hash];
         }
 
-        let layout = self.create_descriptor_set(info);
+        let layout = self.create_descriptor_set(info, layout);
         cache.insert(hash, layout);
         layout
     }
 
-    pub(crate) fn create_descriptor_set(&self, info: &DescriptorBindings) -> vk::DescriptorSet {
+    pub(crate) fn create_descriptor_set(
+        &self,
+        info: &DescriptorSetInfo2,
+        layout: &vk::DescriptorSetLayout,
+    ) -> vk::DescriptorSet {
+        let descriptor_set_bindings = info.descriptor_set_layout_bindings();
+        let descriptor_pool = self.get_descriptor_pool(info, descriptor_set_bindings);
+
+        unsafe {
+            self.device
+                .allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo {
+                    s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
+                    p_next: std::ptr::null(),
+                    descriptor_pool,
+                    descriptor_set_count: 1,
+                    p_set_layouts: addr_of!(layout) as *const _,
+                })
+                .expect("Failed to allocate descriptor set")[0]
+        }
+    }
+
+    fn get_descriptor_pool(
+        &self,
+        info: &DescriptorSetInfo2,
+        bindings: Vec<vk::DescriptorSetLayoutBinding>,
+    ) -> vk::DescriptorPool {
         todo!()
     }
 }
@@ -1279,12 +1289,16 @@ impl VkGpu {
 
     pub(crate) fn get_descriptor_sets(
         &self,
-        bindings: &[DescriptorBindings],
+        descriptor_set_state: &DescriptorSetState,
     ) -> Vec<vk::DescriptorSet> {
         let mut descriptors = vec![];
 
-        for binding in bindings {
-            self.state.descriptor_set_cache.get(&binding);
+        for set in &descriptor_set_state.sets {
+            let layout = self
+                .state
+                .descriptor_set_layout_cache
+                .get_descriptor_set_layout(set);
+            self.state.descriptor_set_cache.get(&set, &layout);
         }
 
         descriptors
