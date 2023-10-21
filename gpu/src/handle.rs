@@ -12,7 +12,7 @@ pub trait Handle {
     fn null() -> Self;
     fn is_null(&self) -> bool;
     fn id(&self) -> u64;
-    fn handle_type(&self) -> HandleType;
+    fn handle_type() -> HandleType;
 }
 
 macro_rules! define_handle {
@@ -40,7 +40,7 @@ macro_rules! define_handle {
                 self.id
             }
 
-            fn handle_type(&self) -> HandleType {
+            fn handle_type() -> HandleType {
                 $ty
             }
         }
