@@ -393,6 +393,9 @@ impl DescriptorSetCache {
         &self,
         info: &DescriptorSetInfo2,
         layout: vk::DescriptorSetLayout,
+        buffer_map: &GpuResourceMap<VkBuffer>,
+        sampler_map: &GpuResourceMap<VkSampler>,
+        image_view_map: &GpuResourceMap<VkImageView>,
     ) -> vk::DescriptorSet {
         let mut cache = self.cache.borrow_mut();
         let mut hasher = DefaultHasher::new();
@@ -404,6 +407,7 @@ impl DescriptorSetCache {
 
         let descriptor_set = self.create_descriptor_set(info, layout);
         let set = descriptor_set.set;
+        self.write_descriptor_set(set, info, buffer_map, sampler_map, image_view_map);
         cache.insert(hash, descriptor_set);
         set
     }
@@ -414,8 +418,6 @@ impl DescriptorSetCache {
         layout: vk::DescriptorSetLayout,
     ) -> DescriptorSetAllocation {
         let descriptor_set = self.allocate_descriptor_set(info, layout);
-
-        // write descriptor set
 
         descriptor_set
     }
@@ -517,6 +519,87 @@ impl DescriptorSetCache {
             set: descriptor_set,
             pool_hash,
             pool_index,
+        }
+    }
+
+    fn write_descriptor_set(
+        &self,
+        set: vk::DescriptorSet,
+        info: &DescriptorSetInfo2,
+        buffer_map: &GpuResourceMap<VkBuffer>,
+        sampler_map: &GpuResourceMap<VkSampler>,
+        image_view_map: &GpuResourceMap<VkImageView>,
+    ) {
+        let mut buffer_descriptors = vec![];
+        let mut image_descriptors = vec![];
+        info.bindings
+            .iter()
+            .enumerate()
+            .for_each(|(i, b)| match b.ty {
+                crate::DescriptorBindingType::BufferRange {
+                    handle,
+                    offset,
+                    range,
+                } => buffer_descriptors.push((
+                    i,
+                    DescriptorBufferInfo {
+                        buffer: buffer_map.resolve(&handle.id).inner,
+                        offset,
+                        range: if range as vk::DeviceSize == crate::WHOLE_SIZE {
+                            vk::WHOLE_SIZE
+                        } else {
+                            range as _
+                        },
+                    },
+                    vk::DescriptorType::UNIFORM_BUFFER,
+                )),
+                crate::DescriptorBindingType::ImageView {
+                    image_view_handle,
+                    sampler_handle,
+                } => image_descriptors.push((
+                    i,
+                    DescriptorImageInfo {
+                        sampler: sampler_map.resolve(&sampler_handle.id).inner,
+                        image_view: image_view_map.resolve(&image_view_handle.id).inner,
+                        image_layout: ImageLayout::ShaderReadOnly.to_vk(),
+                    },
+                    vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                )),
+            });
+
+        let mut write_descriptor_sets = vec![];
+
+        for (bind, desc, ty) in &buffer_descriptors {
+            write_descriptor_sets.push(WriteDescriptorSet {
+                s_type: StructureType::WRITE_DESCRIPTOR_SET,
+                p_next: null(),
+                dst_set: set,
+                dst_binding: *bind as _,
+                dst_array_element: 0,
+                descriptor_count: 1,
+                descriptor_type: *ty,
+                p_image_info: std::ptr::null(),
+                p_buffer_info: addr_of!(*desc),
+                p_texel_buffer_view: std::ptr::null(),
+            });
+        }
+        for (bind, desc, ty) in &image_descriptors {
+            write_descriptor_sets.push(WriteDescriptorSet {
+                s_type: StructureType::WRITE_DESCRIPTOR_SET,
+                p_next: null(),
+                dst_set: set,
+                dst_binding: *bind as _,
+                dst_array_element: 0,
+                descriptor_count: 1,
+                descriptor_type: *ty,
+                p_image_info: addr_of!(*desc),
+                p_buffer_info: std::ptr::null(),
+                p_texel_buffer_view: std::ptr::null(),
+            });
+        }
+        unsafe {
+            self.device
+                .update_descriptor_sets(&write_descriptor_sets, &[]);
         }
     }
 }
@@ -1405,7 +1488,13 @@ impl VkGpu {
                 .state
                 .descriptor_set_layout_cache
                 .get_descriptor_set_layout(set);
-            let descriptor = self.state.descriptor_set_cache.get(&set, layout);
+            let descriptor = self.state.descriptor_set_cache.get(
+                &set,
+                layout,
+                &self.allocated_buffers.borrow_mut(),
+                &self.allocated_samplers.borrow_mut(),
+                &self.allocated_image_views.borrow_mut(),
+            );
             descriptors.push(descriptor)
         }
 
