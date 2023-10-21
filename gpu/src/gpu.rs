@@ -36,18 +36,21 @@ use log::{error, trace, warn};
 use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 
+use crate::gpu_resource_manager::{
+    utils::associate_to_handle, GpuResourceMap, HasAssociatedHandle,
+};
 use crate::{
     get_allocation_callbacks, BufferCreateInfo, BufferHandle, BufferImageCopyInfo,
     CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo,
-    ComputePipelineDescription, DescriptorSetInfo2, DescriptorSetLayoutDescription,
-    DescriptorSetState, Extent2D, FramebufferCreateInfo, GPUFence, Gpu, GpuConfiguration,
-    GraphicsPipelineDescription, Handle as GpuHandle, ImageCreateInfo, ImageFormat, ImageHandle,
-    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
-    ImageViewCreateInfo2, ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo,
-    PipelineStageFlags, PipelineState, QueueType, Rect2D, RenderPassDescription, SamplerCreateInfo,
-    SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo,
-    VkCommandBuffer, VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline,
-    VkImageView, VkRenderPass, VkShaderModule,
+    ComputePipelineDescription, DescriptorSetInfo2, DescriptorSetState, Extent2D,
+    FramebufferCreateInfo, GPUFence, Gpu, GpuConfiguration, GraphicsPipelineDescription,
+    Handle as GpuHandle, ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout,
+    ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, ImageViewCreateInfo2,
+    ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
+    PipelineState, QueueType, Rect2D, RenderPassDescription, SamplerCreateInfo, SamplerHandle,
+    ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo, VkCommandBuffer,
+    VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
+    VkShaderModule,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -61,22 +64,11 @@ use super::{
 
 const KHRONOS_VALIDATION_LAYER: &str = "VK_LAYER_KHRONOS_validation";
 
-pub(crate) struct GpuResourceMap<T>(HashMap<u64, T>);
-
-impl<T> GpuResourceMap<T> {
-    fn resolve(&self, id: &u64) -> &T {
-        let res = self.0.get(id).expect("Failed to resolve resource");
-        res
-    }
-
-    fn insert(&mut self, id: u64, res: T) {
-        self.0.insert(id, res);
-    }
-
-    fn new() -> GpuResourceMap<T> {
-        Self(HashMap::new())
-    }
-}
+associate_to_handle!(VkBuffer, BufferHandle);
+associate_to_handle!(VkImage, ImageHandle);
+associate_to_handle!(VkImageView, ImageViewHandle);
+associate_to_handle!(VkSampler, SamplerHandle);
+associate_to_handle!(VkShaderModule, ShaderModuleHandle);
 
 pub struct GpuDescription {
     name: String,
@@ -137,7 +129,7 @@ impl PipelineCache {
     ) -> vk::Pipeline {
         let mut stages = vec![];
         let main_name = std::ffi::CString::new("main").unwrap();
-        let vertex_shader = shader_cache.resolve(&pipeline_state.vertex_shader.id);
+        let vertex_shader = shader_cache.resolve(pipeline_state.vertex_shader);
         stages.push(vk::PipelineShaderStageCreateInfo {
             s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
             p_next: std::ptr::null(),
@@ -148,7 +140,7 @@ impl PipelineCache {
             p_specialization_info: std::ptr::null(),
         });
         if !pipeline_state.fragment_shader.is_null() {
-            let fragment_shader = shader_cache.resolve(&pipeline_state.fragment_shader.id);
+            let fragment_shader = shader_cache.resolve(pipeline_state.fragment_shader);
             stages.push(vk::PipelineShaderStageCreateInfo {
                 s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -543,7 +535,7 @@ impl DescriptorSetCache {
                 } => buffer_descriptors.push((
                     i,
                     DescriptorBufferInfo {
-                        buffer: buffer_map.resolve(&handle.id).inner,
+                        buffer: buffer_map.resolve(handle).inner,
                         offset,
                         range: if range as vk::DeviceSize == crate::WHOLE_SIZE {
                             vk::WHOLE_SIZE
@@ -559,8 +551,8 @@ impl DescriptorSetCache {
                 } => image_descriptors.push((
                     i,
                     DescriptorImageInfo {
-                        sampler: sampler_map.resolve(&sampler_handle.id).inner,
-                        image_view: image_view_map.resolve(&image_view_handle.id).inner,
+                        sampler: sampler_map.resolve(sampler_handle).inner,
+                        image_view: image_view_map.resolve(image_view_handle).inner,
                         image_layout: ImageLayout::ShaderReadOnly.to_vk(),
                     },
                     vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
@@ -2168,25 +2160,25 @@ impl VkGpu {
     pub(crate) fn resolve_buffer(&self, buffer: BufferHandle) -> &VkBuffer {
         let ptr = self.buffer_map();
         let map = unsafe { &*ptr };
-        map.resolve(&buffer.id)
+        map.resolve(buffer)
     }
 
     pub(crate) fn resolve_image(&self, image: ImageHandle) -> &VkImage {
         let ptr = self.image_map();
         let map = unsafe { &*ptr };
-        map.resolve(&image.id)
+        map.resolve(image)
     }
 
     pub(crate) fn resolve_image_view(&self, view: ImageViewHandle) -> &VkImageView {
         let ptr = self.image_view_map();
         let map = unsafe { &*ptr };
-        map.resolve(&view.id)
+        map.resolve(view)
     }
 
     pub(crate) fn resolve_sampler(&self, handle: SamplerHandle) -> &VkSampler {
         let ptr = self.sampler_map();
         let map = unsafe { &*ptr };
-        map.resolve(&handle.id)
+        map.resolve(handle)
     }
 }
 
@@ -2199,7 +2191,7 @@ impl Gpu for VkGpu {
         let handle = ShaderModuleHandle::new(buffer.inner.as_raw());
         self.allocated_shader_modules
             .borrow_mut()
-            .insert(handle.id, buffer);
+            .insert(handle, buffer);
 
         Ok(handle)
     }
@@ -2211,9 +2203,7 @@ impl Gpu for VkGpu {
     ) -> anyhow::Result<crate::BufferHandle> {
         let buffer = self.create_buffer(buffer_info, memory_domain)?;
         let handle = BufferHandle::new(buffer.inner.as_raw());
-        self.allocated_buffers
-            .borrow_mut()
-            .insert(handle.id, buffer);
+        self.allocated_buffers.borrow_mut().insert(handle, buffer);
 
         Ok(handle)
     }
@@ -2253,7 +2243,7 @@ impl Gpu for VkGpu {
             },
         )?;
 
-        self.allocated_images.borrow_mut().insert(handle.id, image);
+        self.allocated_images.borrow_mut().insert(handle, image);
 
         Ok(handle)
     }
@@ -2284,18 +2274,14 @@ impl Gpu for VkGpu {
         };
         let view = self.create_image_view(&info)?;
         let handle = ImageViewHandle::new(view.inner_image_view().as_raw());
-        self.allocated_image_views
-            .borrow_mut()
-            .insert(handle.id, view);
+        self.allocated_image_views.borrow_mut().insert(handle, view);
         Ok(handle)
     }
 
     fn make_sampler(&self, info: &SamplerCreateInfo) -> anyhow::Result<crate::SamplerHandle> {
         let sampler = self.create_sampler(info)?;
         let handle = SamplerHandle::new(sampler.inner.as_raw());
-        self.allocated_samplers
-            .borrow_mut()
-            .insert(handle.id, sampler);
+        self.allocated_samplers.borrow_mut().insert(handle, sampler);
 
         Ok(handle)
     }
