@@ -907,7 +907,7 @@ pub enum CullMode {
     FrontAndBack,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum BindingType {
     Uniform,
     Storage,
@@ -915,7 +915,7 @@ pub enum BindingType {
     CombinedImageSampler,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct BindingElement {
     pub binding_type: BindingType,
     pub index: u32,

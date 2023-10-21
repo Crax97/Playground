@@ -236,22 +236,45 @@ pub(crate) struct DescriptorSetState {
     pub(crate) push_constant_range: Vec<PushConstantRange>,
 }
 
+#[derive(Hash, Clone, Default, Eq, PartialEq, PartialOrd, Ord)]
+pub(crate) struct DescriptorSetLayoutDescription {
+    pub(crate) elements: Vec<BindingElement>,
+}
+
 impl DescriptorSetInfo2 {
-    pub(crate) fn descriptor_set_layout_bindings(&self) -> Vec<vk::DescriptorSetLayoutBinding> {
-        let mut descriptor_set_bindings = vec![];
+    pub(crate) fn descriptor_set_layout(&self) -> DescriptorSetLayoutDescription {
+        let mut descriptor_set_bindings = DescriptorSetLayoutDescription::default();
         for (binding_index, binding) in self.bindings.iter().enumerate() {
-            let stage_flags = binding.binding_stage.to_vk();
+            let stage_flags = binding.binding_stage;
             let descriptor_type = match binding.ty {
-                crate::DescriptorBindingType::BufferRange { .. } => {
-                    vk::DescriptorType::UNIFORM_BUFFER
-                }
-                crate::DescriptorBindingType::ImageView { .. } => {
-                    vk::DescriptorType::COMBINED_IMAGE_SAMPLER
-                } //                    super::DescriptorType::StorageBuffer(_) => DescriptorType::STORAGE_BUFFER,
-                  //                    super::DescriptorType::Sampler(_) => DescriptorType::SAMPLER,
-                  //                    super::DescriptorType::CombinedImageSampler(_) => {
-                  //                        DescriptorType::COMBINED_IMAGE_SAMPLER
-                  //                    }
+                crate::DescriptorBindingType::BufferRange { .. } => BindingType::Uniform,
+                crate::DescriptorBindingType::ImageView { .. } => BindingType::CombinedImageSampler, //                    super::DescriptorType::StorageBuffer(_) => DescriptorType::STORAGE_BUFFER,
+                                                                                                     //                    super::DescriptorType::Sampler(_) => DescriptorType::SAMPLER,
+                                                                                                     //                    super::DescriptorType::CombinedImageSampler(_) => {
+                                                                                                     //                        DescriptorType::COMBINED_IMAGE_SAMPLER
+                                                                                                     //                    }
+            };
+            let binding = BindingElement {
+                binding_type: descriptor_type,
+                index: binding_index as _,
+                stage: stage_flags,
+            };
+            descriptor_set_bindings.elements.push(binding);
+        }
+        descriptor_set_bindings
+    }
+}
+
+impl DescriptorSetLayoutDescription {
+    pub(crate) fn vk_set_layout_bindings(&self) -> Vec<vk::DescriptorSetLayoutBinding> {
+        let mut descriptor_set_bindings = vec![];
+        for (binding_index, binding) in self.elements.iter().enumerate() {
+            let stage_flags = binding.stage.to_vk();
+            let descriptor_type = match binding.binding_type {
+                BindingType::Uniform => vk::DescriptorType::UNIFORM_BUFFER,
+                BindingType::Storage => vk::DescriptorType::STORAGE_BUFFER,
+                BindingType::CombinedImageSampler => vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                BindingType::Sampler => vk::DescriptorType::SAMPLER,
             };
             let binding = vk::DescriptorSetLayoutBinding {
                 binding: binding_index as _,

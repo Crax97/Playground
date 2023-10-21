@@ -39,15 +39,15 @@ use thiserror::Error;
 use crate::{
     get_allocation_callbacks, BufferCreateInfo, BufferHandle, BufferImageCopyInfo,
     CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo,
-    ComputePipelineDescription, DescriptorSetInfo2, DescriptorSetState, Extent2D,
-    FramebufferCreateInfo, GPUFence, Gpu, GpuConfiguration, GraphicsPipelineDescription,
-    Handle as GpuHandle, ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout,
-    ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, ImageViewCreateInfo2,
-    ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
-    PipelineState, QueueType, Rect2D, RenderPassDescription, SamplerCreateInfo, SamplerHandle,
-    ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo, VkCommandBuffer,
-    VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
-    VkShaderModule,
+    ComputePipelineDescription, DescriptorSetInfo2, DescriptorSetLayoutDescription,
+    DescriptorSetState, Extent2D, FramebufferCreateInfo, GPUFence, Gpu, GpuConfiguration,
+    GraphicsPipelineDescription, Handle as GpuHandle, ImageCreateInfo, ImageFormat, ImageHandle,
+    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
+    ImageViewCreateInfo2, ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo,
+    PipelineStageFlags, PipelineState, QueueType, Rect2D, RenderPassDescription, SamplerCreateInfo,
+    SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo,
+    VkCommandBuffer, VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline,
+    VkImageView, VkRenderPass, VkShaderModule,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -266,7 +266,7 @@ impl DescriptorSetLayoutCache {
         &self,
         info: &DescriptorSetInfo2,
     ) -> vk::DescriptorSetLayout {
-        let descriptor_set_bindings = info.descriptor_set_layout_bindings();
+        let descriptor_set_bindings = info.descriptor_set_layout().vk_set_layout_bindings();
         unsafe {
             self.device
                 .create_descriptor_set_layout(
@@ -351,11 +351,34 @@ impl PipelineLayoutCache {
         }
     }
 }
+
+struct DescriptorPoolAllocation {
+    pool: vk::DescriptorPool,
+    max_descriptors: u32,
+    allocated_descriptors: u32,
+}
+
+pub(crate) struct DescriptorSetAllocation {
+    pub(crate) set: vk::DescriptorSet,
+    pub(crate) pool_index: usize,
+    pub(crate) pool_hash: u64,
+}
+
+impl DescriptorPoolAllocation {
+    fn new(pool: vk::DescriptorPool, max_descriptors: u32) -> Self {
+        Self {
+            pool,
+            max_descriptors,
+            allocated_descriptors: 0,
+        }
+    }
+}
+
 pub(crate) struct DescriptorSetCache {
     device: ash::Device,
-    cache: RefCell<HashMap<u64, vk::DescriptorSet>>,
+    cache: RefCell<HashMap<u64, DescriptorSetAllocation>>,
 
-    pools: RefCell<HashMap<u64, vk::DescriptorPool>>,
+    pools: RefCell<HashMap<u64, Vec<DescriptorPoolAllocation>>>,
 }
 
 impl DescriptorSetCache {
@@ -369,48 +392,132 @@ impl DescriptorSetCache {
     pub(crate) fn get(
         &self,
         info: &DescriptorSetInfo2,
-        layout: &vk::DescriptorSetLayout,
+        layout: vk::DescriptorSetLayout,
     ) -> vk::DescriptorSet {
         let mut cache = self.cache.borrow_mut();
         let mut hasher = DefaultHasher::new();
         info.hash(&mut hasher);
         let hash = hasher.finish();
         if cache.contains_key(&hash) {
-            return cache[&hash];
+            return cache[&hash].set;
         }
 
-        let layout = self.create_descriptor_set(info, layout);
-        cache.insert(hash, layout);
-        layout
+        let descriptor_set = self.create_descriptor_set(info, layout);
+        let set = descriptor_set.set;
+        cache.insert(hash, descriptor_set);
+        set
     }
 
     pub(crate) fn create_descriptor_set(
         &self,
         info: &DescriptorSetInfo2,
-        layout: &vk::DescriptorSetLayout,
-    ) -> vk::DescriptorSet {
-        let descriptor_set_bindings = info.descriptor_set_layout_bindings();
-        let descriptor_pool = self.get_descriptor_pool(info, descriptor_set_bindings);
+        layout: vk::DescriptorSetLayout,
+    ) -> DescriptorSetAllocation {
+        let descriptor_set = self.allocate_descriptor_set(info, layout);
 
-        unsafe {
+        // write descriptor set
+
+        descriptor_set
+    }
+
+    fn allocate_descriptor_set(
+        &self,
+        info: &DescriptorSetInfo2,
+        layout: vk::DescriptorSetLayout,
+    ) -> DescriptorSetAllocation {
+        let mut cache = self.pools.borrow_mut();
+        let descriptor_set_bindings = info.descriptor_set_layout();
+
+        let mut hasher = DefaultHasher::new();
+        descriptor_set_bindings.hash(&mut hasher);
+        let pool_hash = hasher.finish();
+        let pools = &mut cache.entry(pool_hash).or_default();
+        let (pool_index, descriptor_pool) = {
+            if let Some((idx, pool)) = pools
+                .iter_mut()
+                .enumerate()
+                .find(|(_, p)| p.allocated_descriptors < p.max_descriptors)
+            {
+                (idx, pool)
+            } else {
+                const MAX_DESCRIPTORS: u32 = 100;
+                let mut samplers = 0;
+                let mut combined_image_samplers = 0;
+                let mut uniform_buffers = 0;
+                let mut storage_buffers = 0;
+
+                for binding in &descriptor_set_bindings.elements {
+                    match binding.binding_type {
+                        crate::BindingType::Uniform => uniform_buffers += 1,
+                        crate::BindingType::Storage => storage_buffers += 1,
+                        crate::BindingType::Sampler => samplers += 1,
+                        crate::BindingType::CombinedImageSampler => combined_image_samplers += 1,
+                    }
+                }
+
+                let mut pool_sizes = vec![];
+                if samplers > 0 {
+                    pool_sizes.push(vk::DescriptorPoolSize {
+                        ty: vk::DescriptorType::SAMPLER,
+                        descriptor_count: samplers as _,
+                    });
+                }
+                if combined_image_samplers > 0 {
+                    pool_sizes.push(vk::DescriptorPoolSize {
+                        ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                        descriptor_count: combined_image_samplers as _,
+                    });
+                }
+                if uniform_buffers > 0 {
+                    pool_sizes.push(vk::DescriptorPoolSize {
+                        ty: vk::DescriptorType::UNIFORM_BUFFER,
+                        descriptor_count: uniform_buffers as _,
+                    });
+                }
+                if storage_buffers > 0 {
+                    pool_sizes.push(vk::DescriptorPoolSize {
+                        ty: vk::DescriptorType::STORAGE_BUFFER,
+                        descriptor_count: storage_buffers as _,
+                    });
+                }
+                let pool = unsafe {
+                    self.device.create_descriptor_pool(
+                        &vk::DescriptorPoolCreateInfo {
+                            s_type: StructureType::DESCRIPTOR_POOL_CREATE_INFO,
+                            p_next: std::ptr::null(),
+                            flags: vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET,
+                            max_sets: MAX_DESCRIPTORS,
+                            pool_size_count: pool_sizes.len() as _,
+                            p_pool_sizes: pool_sizes.as_ptr() as *const _,
+                        },
+                        get_allocation_callbacks(),
+                    )
+                }
+                .expect("Failed to create pool");
+                let pool_allocation = DescriptorPoolAllocation::new(pool, MAX_DESCRIPTORS);
+                let idx = pools.len();
+
+                pools.push(pool_allocation);
+                (idx, &mut pools[idx])
+            }
+        };
+        let descriptor_set = unsafe {
             self.device
                 .allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo {
                     s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
                     p_next: std::ptr::null(),
-                    descriptor_pool,
+                    descriptor_pool: descriptor_pool.pool,
                     descriptor_set_count: 1,
                     p_set_layouts: addr_of!(layout) as *const _,
                 })
                 .expect("Failed to allocate descriptor set")[0]
+        };
+        descriptor_pool.allocated_descriptors += 1;
+        DescriptorSetAllocation {
+            set: descriptor_set,
+            pool_hash,
+            pool_index,
         }
-    }
-
-    fn get_descriptor_pool(
-        &self,
-        info: &DescriptorSetInfo2,
-        bindings: Vec<vk::DescriptorSetLayoutBinding>,
-    ) -> vk::DescriptorPool {
-        todo!()
     }
 }
 
@@ -1298,7 +1405,8 @@ impl VkGpu {
                 .state
                 .descriptor_set_layout_cache
                 .get_descriptor_set_layout(set);
-            self.state.descriptor_set_cache.get(&set, &layout);
+            let descriptor = self.state.descriptor_set_cache.get(&set, layout);
+            descriptors.push(descriptor)
         }
 
         descriptors
