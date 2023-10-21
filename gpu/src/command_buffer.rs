@@ -911,7 +911,12 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 .pipeline_state
                 .vertex_inputs
                 .iter()
-                .map(|b| self.gpu.resolve_buffer(b.handle).inner)
+                .map(|b| {
+                    self.gpu
+                        .allocated_resources
+                        .resolve::<VkBuffer>(b.handle)
+                        .inner
+                })
                 .collect::<Vec<_>>();
             let offsets = self
                 .pipeline_state
@@ -986,7 +991,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         offset: usize,
     ) {
         assert!(!index_buffer.is_null());
-        let index_buffer = self.gpu.resolve_buffer(index_buffer);
+        let index_buffer = self
+            .gpu
+            .allocated_resources
+            .resolve::<VkBuffer>(index_buffer);
         let device = self.gpu.vk_logical_device();
         unsafe {
             device.cmd_bind_index_buffer(
