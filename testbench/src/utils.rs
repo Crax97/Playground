@@ -19,17 +19,17 @@ use gpu::{
     AccessFlags, BeginRenderPassInfo, BindingElement, BlendState, ColorAttachment,
     ComponentMapping, DepthStencilState, DescriptorInfo, DescriptorSetInfo, Extent2D,
     FragmentStageInfo, GlobalBinding, Gpu, GraphicsPipelineDescription, ImageAspectFlags,
-    ImageCreateInfo, ImageFormat, ImageLayout, ImageSubresourceRange, ImageUsageFlags,
-    ImageViewCreateInfo, MemoryDomain, Offset2D, PipelineStageFlags, PushConstantRange, Rect2D,
-    RenderPassAttachment, SamplerCreateInfo, SamplerState, ShaderModuleCreateInfo,
-    ShaderModuleHandle, ShaderStage, VertexAttributeDescription, VertexBindingDescription,
-    VertexStageInfo, VkGpu, VkShaderModule,
+    ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout, ImageSubresourceRange, ImageUsageFlags,
+    ImageViewCreateInfo, ImageViewHandle, MemoryDomain, Offset2D, PipelineStageFlags,
+    PushConstantRange, Rect2D, RenderPassAttachment, SamplerCreateInfo, SamplerState,
+    ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage, VertexAttributeDescription,
+    VertexBindingDescription, VertexStageInfo, VkGpu, VkShaderModule,
 };
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
     gpu: &VkGpu,
     path: P,
-) -> anyhow::Result<VkShaderModule> {
+) -> anyhow::Result<ShaderModuleHandle> {
     info!(
         "Reading path from {:?}",
         path.as_ref()
@@ -38,7 +38,7 @@ pub fn read_file_to_vk_module<P: AsRef<Path>>(
     );
     let input_file = std::fs::read(path)?;
     let create_info = ShaderModuleCreateInfo { code: &input_file };
-    Ok(gpu.create_shader_module(&create_info)?)
+    Ok(gpu.make_shader_module(&create_info)?)
 }
 
 pub fn read_file_to_shader_module<P: AsRef<Path>>(
@@ -147,7 +147,7 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
     let size = output_size;
     let cube_image_format = ImageFormat::RgbaFloat16;
     let hdr_image = load_image_from_path(path, cube_image_format)?;
-    let hdr_texture = gpu.create_image(
+    let hdr_texture = gpu.make_image(
         &ImageCreateInfo {
             label: None,
             width: hdr_image.width,
@@ -160,10 +160,10 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
             usage: ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST,
         },
         MemoryDomain::DeviceLocal,
-        Some(&hdr_image.bytes),
+        // Some(&hdr_image.bytes),
     )?;
-    let hdr_texture_view = gpu.create_image_view(&ImageViewCreateInfo {
-        image: &hdr_texture,
+    let hdr_texture_view = gpu.make_image_view(&ImageViewCreateInfo {
+        image: hdr_texture,
         view_type: gpu::ImageViewType::Type2D,
         format: cube_image_format,
         components: ComponentMapping::default(),
@@ -193,14 +193,14 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
 fn cubemap_main_loop(
     gpu: &VkGpu,
     cube_image_format: ImageFormat,
-    input_texture_view: &gpu::VkImageView,
-    fragment_shader_to_apply: &VkShaderModule,
+    input_texture_view: &ImageViewHandle,
+    fragment_shader_to_apply: &ShaderModuleHandle,
     size: Extent2D,
     resource_map: &ResourceMap,
     cube_mesh: &ResourceHandle<Mesh>,
-) -> Result<(gpu::VkImage, gpu::VkImageView), anyhow::Error> {
+) -> Result<(ImageHandle, ImageViewHandle), anyhow::Error> {
     let vertex_module = read_file_to_vk_module(&gpu, "./shaders/vertex_simple.spirv")?;
-    let backing_image = gpu.create_image(
+    let backing_image = gpu.make_image(
         &ImageCreateInfo {
             label: Some("Cubemap"),
             width: size.width,
@@ -215,7 +215,7 @@ fn cubemap_main_loop(
                 | ImageUsageFlags::COLOR_ATTACHMENT,
         },
         MemoryDomain::DeviceLocal,
-        None,
+        // None,
     )?;
     let skybox_pipeline = gpu.create_graphics_pipeline(&GraphicsPipelineDescription {
         global_bindings: &[GlobalBinding {
@@ -280,11 +280,11 @@ fn cubemap_main_loop(
         ],
         vertex_stage: Some(VertexStageInfo {
             entry_point: "main",
-            module: &vertex_module,
+            module: vertex_module.clone(),
         }),
         fragment_stage: Some(FragmentStageInfo {
             entry_point: "main",
-            module: &fragment_shader_to_apply,
+            module: fragment_shader_to_apply.clone(),
             color_attachments: &[RenderPassAttachment {
                 format: cube_image_format,
                 samples: gpu::SampleCount::Sample1,
@@ -311,7 +311,7 @@ fn cubemap_main_loop(
             size: std::mem::size_of::<Matrix4<f32>>() as _,
         }],
     })?;
-    let skybox_sampler = gpu.create_sampler(&SamplerCreateInfo {
+    let skybox_sampler = gpu.make_sampler(&SamplerCreateInfo {
         mag_filter: gpu::Filter::Linear,
         min_filter: gpu::Filter::Linear,
         address_u: gpu::SamplerAddressMode::ClampToBorder,
@@ -325,8 +325,8 @@ fn cubemap_main_loop(
     })?;
 
     let make_image_view = |i| {
-        gpu.create_image_view(&gpu::ImageViewCreateInfo {
-            image: &backing_image,
+        gpu.make_image_view(&gpu::ImageViewCreateInfo {
+            image: backing_image.clone(),
             view_type: gpu::ImageViewType::Type2D,
             format: cube_image_format,
             components: gpu::ComponentMapping::default(),
@@ -338,7 +338,7 @@ fn cubemap_main_loop(
                 level_count: 1,
             },
         })
-        .unwrap()
+        .expect("Failed to create image view")
     };
     let make_pov = |forward: Vector3<f32>, up| engine::PerFrameData {
         eye: point![0.0, 0.0, 0.0, 0.0],
@@ -391,8 +391,8 @@ fn cubemap_main_loop(
         descriptors: &[DescriptorInfo {
             binding: 0,
             element_type: gpu::DescriptorType::CombinedImageSampler(SamplerState {
-                sampler: &skybox_sampler,
-                image_view: &input_texture_view,
+                sampler: skybox_sampler.clone(),
+                image_view: input_texture_view.clone(),
                 image_layout: ImageLayout::ShaderReadOnly,
             }),
             binding_stage: ShaderStage::VERTEX | ShaderStage::FRAGMENT,
@@ -402,7 +402,7 @@ fn cubemap_main_loop(
     for (i, view) in views.iter().enumerate() {
         let mvp = povs[i].projection * povs[i].view;
         let views = vec![ColorAttachment {
-            image_view: view,
+            image_view: view.clone(),
             load_op: gpu::ColorLoadOp::Clear([0.0; 4]),
             store_op: gpu::AttachmentStoreOp::Store,
             initial_layout: gpu::ImageLayout::ColorAttachment,
@@ -434,24 +434,25 @@ fn cubemap_main_loop(
                 0,
                 &[&skybox_descriptor_set],
             );
-            render_pass_command.bind_index_buffer(
-                &mesh.primitives[0].index_buffer,
-                0,
-                gpu::IndexType::Uint32,
-            );
-            render_pass_command.bind_vertex_buffer(
-                0,
-                &[
-                    &mesh.primitives[0].position_component,
-                    &mesh.primitives[0].color_component,
-                    &mesh.primitives[0].normal_component,
-                    &mesh.primitives[0].tangent_component,
-                    &mesh.primitives[0].uv_component,
-                ],
-                &[0, 0, 0, 0, 0],
-            );
+            //            render_pass_command.bind_index_buffer(
+            //                &mesh.primitives[0].index_buffer,
+            //                0,
+            //                gpu::IndexType::Uint32,
+            //            );
+            //            render_pass_command.bind_vertex_buffer(
+            //                0,
+            //                &[
+            //                    &mesh.primitives[0].position_component,
+            //                    &mesh.primitives[0].color_component,
+            //                    &mesh.primitives[0].normal_component,
+            //                    &mesh.primitives[0].tangent_component,
+            //                    &mesh.primitives[0].uv_component,
+            //                ],
+            //                &[0, 0, 0, 0, 0],
+            //            );
             render_pass_command.push_constant(&skybox_pipeline, &[mvp], 0);
             render_pass_command.draw_indexed(mesh.primitives[0].index_count, 1, 0, 0, 0);
+
         }
         command_buffer.submit(&gpu::CommandBufferSubmitInfo {
             wait_semaphores: &[],
@@ -482,8 +483,8 @@ fn cubemap_main_loop(
             layer_count: 6,
         },
     )?;
-    let view = gpu.create_image_view(&gpu::ImageViewCreateInfo {
-        image: &backing_image,
+    let view = gpu.make_image_view(&gpu::ImageViewCreateInfo {
+        image: backing_image.clone(),
         view_type: gpu::ImageViewType::Cube,
         format: cube_image_format,
         components: gpu::ComponentMapping::default(),

@@ -129,15 +129,16 @@ impl App for PlanesApp {
         )?;
         let texture = resource_map.add(texture);
 
-        let mut scene_renderer = DeferredRenderingPipeline::new(&app_state.gpu, &mut resource_map, cube.clone())?;
+        let mut scene_renderer =
+            DeferredRenderingPipeline::new(&app_state.gpu, &mut resource_map, cube.clone())?;
 
         let master = scene_renderer.create_material(
             &app_state.gpu,
             MaterialDescription {
                 name: "Simple",
                 domain: MaterialDomain::Surface,
-                fragment_module: &fragment_module,
-                vertex_module: &vertex_module,
+                fragment_module,
+                vertex_module,
                 texture_inputs: &[TextureInput {
                     name: "texSampler".to_owned(),
                     format: gpu::ImageFormat::Rgba8,

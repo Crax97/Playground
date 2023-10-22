@@ -562,16 +562,24 @@ macro_rules! define_raii_wrapper {
         #[derive(Clone)]
         pub struct $name {
             pub(super) inner: $vk_type,
+            pub(super) label: Option<String>,
             $(pub(super) $mem_name : $mem_ty,)*
+        }
+
+        impl std::fmt::Debug for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_fmt(format_args!("{:?}", &self.label))
+            }
         }
 
         impl $name {
 
-            pub(super) fn create(device: ash::Device, $arg_name : $arg_typ, $($mem_name : $mem_ty,)*) -> VkResult<Self> {
+            pub(super) fn create(device: ash::Device, label: Option<&str>, $arg_name : $arg_typ, $($mem_name : $mem_ty,)*) -> VkResult<Self> {
 
                 let inner = $create_impl_block(&device)?;
                 Ok(Self {
                     inner,
+                    label: label.map(|s| s.to_owned()),
                     $($mem_name),*
                 })
             }
@@ -632,13 +640,13 @@ define_raii_wrapper!((struct GPUFence {}, vk::Fence, ash::Device::destroy_fence)
 
 impl GPUFence {
     pub fn new(gpu: &VkGpu, create_info: &FenceCreateInfo) -> VkResult<Self> {
-        Self::create(gpu.vk_logical_device(), create_info)
+        Self::create(gpu.vk_logical_device(), None, create_info)
     }
 }
 
 impl GPUSemaphore {
     pub fn new(gpu: &VkGpu, create_info: &SemaphoreCreateInfo) -> VkResult<Self> {
-        Self::create(gpu.vk_logical_device(), create_info)
+        Self::create(gpu.vk_logical_device(), None, create_info)
     }
 }
 
@@ -688,20 +696,29 @@ impl VkCommandPool {
 #[derive(Clone)]
 pub struct VkBuffer {
     device: ash::Device,
+    pub(super) label: Option<String>,
     pub(super) inner: vk::Buffer,
     pub(super) memory_domain: MemoryDomain,
     pub(super) allocation: MemoryAllocation,
 }
 
+impl std::fmt::Debug for VkBuffer {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("Buffer - {:?}", &self.label))
+    }
+}
+
 impl VkBuffer {
     pub(super) fn create(
         device: ash::Device,
+        label: Option<&str>,
         buffer: Buffer,
         memory_domain: MemoryDomain,
         allocation: MemoryAllocation,
     ) -> VkResult<Self> {
         Ok(Self {
             device,
+            label: label.map(|s| s.to_owned()),
             inner: buffer,
             memory_domain,
             allocation,
@@ -768,19 +785,27 @@ impl_raii_wrapper_to_vk!(VkBuffer, vk::Buffer);
 
 #[derive(Clone)]
 pub struct VkImage {
+    pub(super) label: Option<String>,
     pub(super) inner: vk::Image,
     pub(super) allocation: Option<MemoryAllocation>,
     pub(super) extents: Extent2D,
     pub(super) format: ImageFormat,
 }
+impl std::fmt::Debug for VkImage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("Image - {:?}", &self.label))
+    }
+}
 impl VkImage {
     pub(super) fn create(
         image: vk::Image,
+        label: Option<&str>,
         allocation: MemoryAllocation,
         extents: Extent2D,
         format: ImageFormat,
     ) -> VkResult<Self> {
         Ok(Self {
+            label: label.map(|s| s.to_owned()),
             inner: image,
             allocation: Some(allocation),
             extents,
@@ -790,12 +815,14 @@ impl VkImage {
 
     pub(super) fn wrap(
         device: ash::Device,
+        label: Option<&str>,
         inner: vk::Image,
         extents: Extent2D,
         format: ImageFormat,
     ) -> Self {
         Self {
             inner,
+            label: label.map(|s| s.to_owned()),
             allocation: None,
             extents,
             format,

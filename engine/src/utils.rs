@@ -1,3 +1,7 @@
+pub fn to_u8_slice<T>(vals: &[T]) -> &[u8] {
+    unsafe { std::slice::from_raw_parts(vals.as_ptr() as *const u8, std::mem::size_of_val(vals)) }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct TiledTexture2DSection {
     pub x: u32,

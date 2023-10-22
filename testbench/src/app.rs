@@ -151,7 +151,7 @@ fn draw_imgui(
     let data = imgui_data.imgui.render();
     {
         let color = vec![ColorAttachment {
-            image_view: backbuffer.image_view,
+            image_view: backbuffer.image_view.clone(),
             load_op: gpu::ColorLoadOp::Load,
             store_op: gpu::AttachmentStoreOp::Store,
             initial_layout: ImageLayout::ColorAttachment,
@@ -180,7 +180,7 @@ fn draw_imgui(
             new_layout: ImageLayout::PresentSrc,
             src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
             dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-            image: backbuffer.image,
+            image: backbuffer.image.clone(),
             subresource_range: ImageSubresourceRange {
                 aspect_mask: ImageAspectFlags::COLOR,
                 base_mip_level: 0,

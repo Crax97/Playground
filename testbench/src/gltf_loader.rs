@@ -8,7 +8,7 @@ use engine::{
 use gltf::image::Data;
 use gltf::Document;
 use gpu::{
-    ComponentMapping, Filter, ImageAspectFlags, ImageCreateInfo, ImageSubresourceRange,
+    ComponentMapping, Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageSubresourceRange,
     ImageUsageFlags, ImageViewCreateInfo, ImageViewType, MemoryDomain, SamplerAddressMode,
     SamplerCreateInfo, VkGpu,
 };
@@ -242,8 +242,8 @@ impl GltfLoader {
             MaterialDescription {
                 name: "PbrMaterial",
                 domain: MaterialDomain::Surface,
-                fragment_module: &fragment_module,
-                vertex_module: &vertex_module,
+                fragment_module,
+                vertex_module,
                 texture_inputs: &[
                     TextureInput {
                         name: "base_texture".to_owned(),
@@ -299,14 +299,14 @@ impl GltfLoader {
                 layers: 1,
                 samples: gpu::SampleCount::Sample1,
             };
-            let gpu_image = gpu.create_image(
+            let gpu_image = gpu.make_image(
                 &image_create_info,
                 MemoryDomain::DeviceLocal,
-                Some(&gltf_image.pixels),
+                // Some(&gltf_image.pixels),
             )?;
 
-            let gpu_image_view = gpu.create_image_view(&ImageViewCreateInfo {
-                image: &gpu_image,
+            let gpu_image_view = gpu.make_image_view(&ImageViewCreateInfo {
+                image: gpu_image.clone(),
                 view_type: ImageViewType::Type2D,
                 format,
                 components: ComponentMapping::default(),
@@ -415,13 +415,13 @@ impl GltfLoader {
                 },
                 ..Default::default()
             };
-            let sam = gpu.create_sampler(&sam_desc)?;
+            let sam = gpu.make_sampler(&sam_desc)?;
             allocated_samplers.push(resource_map.add(SamplerResource(sam)))
         }
 
         if allocated_samplers.is_empty() {
             // add default sampler
-            let sam = gpu.create_sampler(&SamplerCreateInfo {
+            let sam = gpu.make_sampler(&SamplerCreateInfo {
                 address_u: SamplerAddressMode::Repeat,
                 address_v: SamplerAddressMode::Repeat,
                 mag_filter: Filter::Linear,

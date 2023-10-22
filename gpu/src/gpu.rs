@@ -44,12 +44,13 @@ use crate::{
     CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo,
     ComputePipelineDescription, Context, DescriptorSetInfo2, DescriptorSetState, Extent2D,
     FramebufferCreateInfo, GPUFence, Gpu, GpuConfiguration, GpuResourceMap,
-    GraphicsPipelineDescription, Handle as GpuHandle, ImageCreateInfo, ImageFormat, ImageHandle,
-    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, ImageViewHandle,
-    LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags, PipelineState, QueueType,
-    Rect2D, RenderPassDescription, SamplerCreateInfo, SamplerHandle, ShaderModuleCreateInfo,
-    ShaderModuleHandle, ToVk, TransitionInfo, VkCommandBuffer, VkCommandPool, VkComputePipeline,
-    VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass, VkShaderModule,
+    GraphicsPipelineDescription, Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat,
+    ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
+    ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
+    PipelineState, QueueType, Rect2D, RenderPassDescription, SamplerCreateInfo, SamplerHandle,
+    ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo, VkCommandBuffer,
+    VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
+    VkShaderModule,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -594,27 +595,29 @@ impl DescriptorSetCache {
     }
 }
 
-struct DestroyedResource<T> {
+struct DestroyedResource<T: std::fmt::Debug> {
     resource: T,
     destroyed_frame_counter: u64,
+    handle_type: HandleType,
 }
-impl<T> DestroyedResource<T> {
+impl<T: std::fmt::Debug> DestroyedResource<T> {
     const DESTROYED_FRAME_COUNTER: u64 = 3;
-    fn new(resource: T) -> Self {
+    fn new(resource: T, handle_type: HandleType) -> Self {
         Self {
             resource,
             destroyed_frame_counter: Self::DESTROYED_FRAME_COUNTER,
+            handle_type,
         }
     }
 }
 
 #[derive(Default)]
 pub struct DestroyedResources {
-    destroyed_shader_modules: Vec<DestroyedResource<vk::ShaderModule>>,
-    destroyed_buffers: Vec<DestroyedResource<VkBuffer>>,
-    destroyed_images: Vec<DestroyedResource<VkImage>>,
-    destroyed_image_views: Vec<DestroyedResource<vk::ImageView>>,
-    destroyed_samplers: Vec<DestroyedResource<vk::Sampler>>,
+    destroyed_shader_modules: RefCell<Vec<DestroyedResource<vk::ShaderModule>>>,
+    destroyed_buffers: RefCell<Vec<DestroyedResource<VkBuffer>>>,
+    destroyed_images: RefCell<Vec<DestroyedResource<VkImage>>>,
+    destroyed_image_views: RefCell<Vec<DestroyedResource<VkImageView>>>,
+    destroyed_samplers: RefCell<Vec<DestroyedResource<vk::Sampler>>>,
 }
 
 /*
@@ -642,7 +645,7 @@ pub struct GpuThreadSharedState {
     messenger: Option<vk::DebugUtilsMessengerEXT>,
     pub dynamic_rendering: DynamicRendering,
     pub allocated_resources: RefCell<GpuResourceMap>,
-    pub destroyed_resources: RefCell<DestroyedResources>,
+    pub destroyed_resources: DestroyedResources,
 }
 
 impl Drop for GpuThreadSharedState {
@@ -710,27 +713,27 @@ impl Context for GpuThreadSharedState {
         match resource_type {
             crate::HandleType::Buffer => self
                 .allocated_resources
-                .borrow_mut()
+                .borrow()
                 .get_map_mut::<VkBuffer>()
                 .increment_resource_count(id),
             crate::HandleType::ShaderModule => self
                 .allocated_resources
-                .borrow_mut()
+                .borrow()
                 .get_map_mut::<VkShaderModule>()
                 .increment_resource_count(id),
             crate::HandleType::Image => self
                 .allocated_resources
-                .borrow_mut()
+                .borrow()
                 .get_map_mut::<VkImage>()
                 .increment_resource_count(id),
             crate::HandleType::ImageView => self
                 .allocated_resources
-                .borrow_mut()
+                .borrow()
                 .get_map_mut::<VkImageView>()
                 .increment_resource_count(id),
             crate::HandleType::Sampler => self
                 .allocated_resources
-                .borrow_mut()
+                .borrow()
                 .get_map_mut::<VkSampler>()
                 .increment_resource_count(id),
         }
@@ -741,66 +744,69 @@ impl Context for GpuThreadSharedState {
             crate::HandleType::Buffer => {
                 if let Some(buffer) = self
                     .allocated_resources
-                    .borrow_mut()
+                    .borrow()
                     .get_map_mut::<VkBuffer>()
                     .decrement_resource_count(id)
                 {
                     self.destroyed_resources
-                        .borrow_mut()
                         .destroyed_buffers
-                        .push(DestroyedResource::new(buffer))
+                        .borrow_mut()
+                        .push(DestroyedResource::new(buffer, HandleType::Buffer))
                 }
             }
             crate::HandleType::ShaderModule => {
                 if let Some(shader_module) = self
                     .allocated_resources
-                    .borrow_mut()
+                    .borrow()
                     .get_map_mut::<VkShaderModule>()
                     .decrement_resource_count(id)
                 {
                     self.destroyed_resources
-                        .borrow_mut()
                         .destroyed_shader_modules
-                        .push(DestroyedResource::new(shader_module.inner))
+                        .borrow_mut()
+                        .push(DestroyedResource::new(
+                            shader_module.inner,
+                            HandleType::ShaderModule,
+                        ))
                 }
             }
             crate::HandleType::Image => {
                 if let Some(image) = self
                     .allocated_resources
-                    .borrow_mut()
+                    .borrow()
                     .get_map_mut::<VkImage>()
                     .decrement_resource_count(id)
                 {
                     self.destroyed_resources
-                        .borrow_mut()
                         .destroyed_images
-                        .push(DestroyedResource::new(image))
+                        .borrow_mut()
+                        .push(DestroyedResource::new(image, HandleType::Image))
                 }
             }
             crate::HandleType::ImageView => {
                 if let Some(view) = self
                     .allocated_resources
-                    .borrow_mut()
+                    .borrow()
                     .get_map_mut::<VkImageView>()
                     .decrement_resource_count(id)
                 {
                     self.destroyed_resources
-                        .borrow_mut()
                         .destroyed_image_views
-                        .push(DestroyedResource::new(view.inner))
+                        .borrow_mut()
+                        .push(DestroyedResource::new(view, HandleType::ImageView))
                 }
             }
             crate::HandleType::Sampler => {
                 if let Some(sampler) = self
                     .allocated_resources
-                    .borrow_mut()
+                    .borrow()
                     .get_map_mut::<VkSampler>()
                     .decrement_resource_count(id)
                 {
                     self.destroyed_resources
-                        .borrow_mut()
                         .destroyed_samplers
-                        .push(DestroyedResource::new(sampler.inner))
+                        .borrow_mut()
+                        .push(DestroyedResource::new(sampler.inner, HandleType::Sampler))
                 }
             }
         }
@@ -1017,7 +1023,7 @@ impl VkGpu {
             descriptor_set_cache: DescriptorSetCache::new(logical_device),
             dynamic_rendering,
             allocated_resources: RefCell::new(GpuResourceMap::new()),
-            destroyed_resources: RefCell::new(DestroyedResources::default()),
+            destroyed_resources: DestroyedResources::default(),
         });
 
         let thread_local_state = GpuThreadLocalState::new(state.clone())?;
@@ -1518,7 +1524,7 @@ impl VkGpu {
             p_code,
         };
 
-        let shader = VkShaderModule::create(self.vk_logical_device(), &create_info)?;
+        let shader = VkShaderModule::create(self.vk_logical_device(), None, &create_info)?;
 
         Ok(shader)
     }
@@ -1679,6 +1685,7 @@ fn create_staging_buffer(state: &Arc<GpuThreadSharedState>) -> VkResult<BufferHa
 
     let buffer = VkBuffer::create(
         state.logical_device.clone(),
+        Some("Staging buffer"),
         buffer,
         MemoryDomain::HostVisible,
         allocation,
@@ -1746,7 +1753,13 @@ impl VkGpu {
 
         self.set_object_debug_name(create_info.label, buffer)?;
 
-        VkBuffer::create(self.vk_logical_device(), buffer, memory_domain, allocation)
+        VkBuffer::create(
+            self.vk_logical_device(),
+            create_info.label,
+            buffer,
+            memory_domain,
+            allocation,
+        )
     }
 
     fn set_object_debug_name<T: Handle>(
@@ -1990,6 +2003,7 @@ impl VkGpu {
 
         let image = VkImage::create(
             image,
+            create_info.label,
             allocation,
             Extent2D {
                 width: create_info.width,
@@ -2071,6 +2085,7 @@ impl VkGpu {
         };
         VkImageView::create(
             self.vk_logical_device(),
+            None,
             &vk_create_info,
             gpu_view_format,
             create_info.image.clone(),
@@ -2078,7 +2093,7 @@ impl VkGpu {
         )
     }
     pub fn create_sampler(&self, create_info: &SamplerCreateInfo) -> VkResult<VkSampler> {
-        VkSampler::create(self.vk_logical_device(), create_info)
+        VkSampler::create(self.vk_logical_device(), None, create_info)
     }
 
     pub fn create_framebuffer(
@@ -2105,7 +2120,7 @@ impl VkGpu {
             layers: 1,
         };
 
-        VkFramebuffer::create(self.vk_logical_device(), &create_info)
+        VkFramebuffer::create(self.vk_logical_device(), None, &create_info)
     }
 
     pub fn copy_buffer(
@@ -2270,24 +2285,26 @@ impl VkGpu {
         self.state.gpu_memory_allocator.clone()
     }
 
-    fn update_cycle_for_deleted_resources<T, F: Fn(&T)>(
+    fn update_cycle_for_deleted_resources<T: std::fmt::Debug, F: Fn(&T)>(
         &self,
         deleted_resources: &mut Vec<DestroyedResource<T>>,
         fun: F,
     ) {
-        deleted_resources.iter_mut().for_each(|r| {
-            r.destroyed_frame_counter -= 1;
-        });
-
         deleted_resources.retain(|el| {
             if el.destroyed_frame_counter == 0 {
-                println!("Destroyed!");
+                debug!(
+                    "Destroyed resource {:?} of type {:?}",
+                    el.resource, el.handle_type
+                );
                 fun(&el.resource);
                 false
             } else {
                 true
             }
-        })
+        });
+        deleted_resources.iter_mut().for_each(|r| {
+            r.destroyed_frame_counter -= 1;
+        });
     }
 }
 
@@ -2297,8 +2314,8 @@ impl Gpu for VkGpu {
             &mut self
                 .state
                 .destroyed_resources
-                .borrow_mut()
-                .destroyed_shader_modules,
+                .destroyed_shader_modules
+                .borrow_mut(),
             |sm| unsafe {
                 self.vk_logical_device()
                     .destroy_shader_module(*sm, get_allocation_callbacks())
@@ -2308,19 +2325,19 @@ impl Gpu for VkGpu {
             &mut self
                 .state
                 .destroyed_resources
-                .borrow_mut()
-                .destroyed_image_views,
+                .destroyed_image_views
+                .borrow_mut(),
             |view| unsafe {
                 self.vk_logical_device()
-                    .destroy_image_view(*view, get_allocation_callbacks());
+                    .destroy_image_view(view.inner, get_allocation_callbacks());
             },
         );
         self.update_cycle_for_deleted_resources(
             &mut self
                 .state
                 .destroyed_resources
-                .borrow_mut()
-                .destroyed_samplers,
+                .destroyed_samplers
+                .borrow_mut(),
             |sam| unsafe {
                 self.vk_logical_device()
                     .destroy_sampler(*sam, get_allocation_callbacks());
@@ -2330,8 +2347,8 @@ impl Gpu for VkGpu {
             &mut self
                 .state
                 .destroyed_resources
-                .borrow_mut()
-                .destroyed_buffers,
+                .destroyed_buffers
+                .borrow_mut(),
             |buf| unsafe {
                 self.vk_logical_device()
                     .destroy_buffer(buf.inner, get_allocation_callbacks());
@@ -2342,15 +2359,18 @@ impl Gpu for VkGpu {
             },
         );
         self.update_cycle_for_deleted_resources(
-            &mut self.state.destroyed_resources.borrow_mut().destroyed_images,
-            |img| unsafe {
-                self.vk_logical_device()
-                    .destroy_image(img.inner, get_allocation_callbacks());
+            &mut self.state.destroyed_resources.destroyed_images.borrow_mut(),
+            |img| {
+                // Otherwise it's a wrapped image, e.g a swapchain image
                 if let Some(allocation) = &img.allocation {
-                    self.state
-                        .gpu_memory_allocator
-                        .borrow_mut()
-                        .deallocate(allocation);
+                    unsafe {
+                        self.vk_logical_device()
+                            .destroy_image(img.inner, get_allocation_callbacks());
+                        self.state
+                            .gpu_memory_allocator
+                            .borrow_mut()
+                            .deallocate(allocation);
+                    }
                 }
             },
         );
@@ -2588,6 +2608,7 @@ impl Gpu for VkGpu {
             };
             VkImageView::create(
                 this.vk_logical_device(),
+                None,
                 &vk_create_info,
                 gpu_view_format,
                 info.image.clone(),

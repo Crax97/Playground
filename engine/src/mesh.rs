@@ -1,7 +1,9 @@
 use nalgebra::{Vector2, Vector3};
 
-use gpu::{BufferCreateInfo, BufferUsageFlags, MemoryDomain, VkBuffer, VkGpu};
+use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain, VkBuffer, VkGpu};
 use resource_map::Resource;
+
+use crate::utils::to_u8_slice;
 
 pub struct MeshPrimitiveCreateInfo {
     pub indices: Vec<u32>,
@@ -18,12 +20,12 @@ pub struct MeshCreateInfo<'a> {
 }
 
 pub struct MeshPrimitive {
-    pub index_buffer: VkBuffer,
-    pub position_component: VkBuffer,
-    pub color_component: VkBuffer,
-    pub normal_component: VkBuffer,
-    pub tangent_component: VkBuffer,
-    pub uv_component: VkBuffer,
+    pub index_buffer: BufferHandle,
+    pub position_component: BufferHandle,
+    pub color_component: BufferHandle,
+    pub normal_component: BufferHandle,
+    pub tangent_component: BufferHandle,
+    pub uv_component: BufferHandle,
 
     pub index_count: u32,
 }
@@ -44,7 +46,7 @@ impl Mesh {
                     .map(|s| s.to_owned())
                     .unwrap_or_else(|| "GPU Mesh".to_owned())
                     + &format!(" - primitive {idx}");
-                let index_buffer = gpu.create_buffer(
+                let index_buffer = gpu.make_buffer(
                     &BufferCreateInfo {
                         label: Some(&(label.clone() + ": Index buffer")),
                         size: std::mem::size_of::<u32>() * create_info.indices.len().max(1),
@@ -52,8 +54,8 @@ impl Mesh {
                     },
                     MemoryDomain::DeviceLocal,
                 )?;
-                gpu.write_buffer_data(&index_buffer, &create_info.indices)?;
-                let position_component = gpu.create_buffer(
+                gpu.write_buffer(&index_buffer, 0, bytemuck::cast_slice(&create_info.indices))?;
+                let position_component = gpu.make_buffer(
                     &BufferCreateInfo {
                         label: Some(&(label.clone() + ": Position buffer")),
                         size: std::mem::size_of::<Vector3<f32>>()
@@ -62,8 +64,8 @@ impl Mesh {
                     },
                     MemoryDomain::DeviceLocal,
                 )?;
-                gpu.write_buffer_data(&position_component, &create_info.positions)?;
-                let color_component = gpu.create_buffer(
+                gpu.write_buffer(&position_component, 0, to_u8_slice(&create_info.positions))?;
+                let color_component = gpu.make_buffer(
                     &BufferCreateInfo {
                         label: Some(&(label.clone() + ": Color buffer")),
                         size: std::mem::size_of::<Vector3<f32>>()
@@ -72,8 +74,8 @@ impl Mesh {
                     },
                     MemoryDomain::DeviceLocal,
                 )?;
-                gpu.write_buffer_data(&color_component, &create_info.colors)?;
-                let normal_component = gpu.create_buffer(
+                gpu.write_buffer(&color_component, 0, to_u8_slice(&&create_info.colors))?;
+                let normal_component = gpu.make_buffer(
                     &BufferCreateInfo {
                         label: Some(&(label.clone() + ": Normal buffer")),
                         size: std::mem::size_of::<Vector3<f32>>()
@@ -82,8 +84,8 @@ impl Mesh {
                     },
                     MemoryDomain::DeviceLocal,
                 )?;
-                gpu.write_buffer_data(&normal_component, &create_info.normals)?;
-                let tangent_component = gpu.create_buffer(
+                gpu.write_buffer(&normal_component, 0, to_u8_slice(&&create_info.normals))?;
+                let tangent_component = gpu.make_buffer(
                     &BufferCreateInfo {
                         label: Some(&(label.clone() + ": Tangent buffer")),
                         size: std::mem::size_of::<Vector3<f32>>()
@@ -92,8 +94,8 @@ impl Mesh {
                     },
                     MemoryDomain::DeviceLocal,
                 )?;
-                gpu.write_buffer_data(&tangent_component, &create_info.tangents)?;
-                let uv_component = gpu.create_buffer(
+                gpu.write_buffer(&tangent_component, 0, to_u8_slice(&&create_info.tangents))?;
+                let uv_component = gpu.make_buffer(
                     &BufferCreateInfo {
                         label: Some(&(label + ": TexCoord[0] buffer")),
                         size: std::mem::size_of::<Vector2<f32>>() * create_info.uvs.len().max(1),
@@ -101,7 +103,7 @@ impl Mesh {
                     },
                     MemoryDomain::DeviceLocal,
                 )?;
-                gpu.write_buffer_data(&uv_component, &create_info.uvs)?;
+                gpu.write_buffer(&uv_component, 0, to_u8_slice(&create_info.uvs))?;
                 Ok(MeshPrimitive {
                     index_buffer,
                     position_component,

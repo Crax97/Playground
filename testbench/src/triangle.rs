@@ -10,7 +10,7 @@ use engine_macros::glsl;
 use gpu::{
     AccessFlags, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorAttachment,
     CullMode, Gpu, Handle, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle,
-    ImageMemoryBarrier, ImageUsageFlags, ImageViewCreateInfo2, ImageViewHandle, IndexType,
+    ImageMemoryBarrier, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, IndexType,
     InputRate, MemoryDomain, PipelineStageFlags, PresentMode, SamplerCreateInfo, SamplerHandle,
     ShaderModuleHandle, ShaderStage, VertexBindingInfo, VkCommandBuffer,
 };
@@ -128,7 +128,7 @@ impl App for TriangleApp {
             MemoryDomain::DeviceLocal,
         )?;
 
-        let david_image_view = app_state.gpu.make_image_view(&ImageViewCreateInfo2 {
+        let david_image_view = app_state.gpu.make_image_view(&ImageViewCreateInfo {
             image: david_image.clone(),
             view_type: gpu::ImageViewType::Type2D,
             format: ImageFormat::Rgba8,
@@ -239,7 +239,7 @@ impl App for TriangleApp {
                 new_layout: gpu::ImageLayout::ColorAttachment,
                 src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
                 dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-                image: &backbuffer.image,
+                image: backbuffer.image.clone(),
                 subresource_range: gpu::ImageSubresourceRange {
                     aspect_mask: ImageAspectFlags::COLOR,
                     base_mip_level: 0,
@@ -251,7 +251,7 @@ impl App for TriangleApp {
         });
         {
             let color_attachments = vec![ColorAttachment {
-                image_view: backbuffer.image_view,
+                image_view: backbuffer.image_view.clone(),
                 load_op: gpu::ColorLoadOp::Clear([0.3, 0.0, 0.3, 1.0]),
                 store_op: gpu::AttachmentStoreOp::Store,
                 initial_layout: gpu::ImageLayout::ColorAttachment,

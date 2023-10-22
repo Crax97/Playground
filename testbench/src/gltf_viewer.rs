@@ -256,8 +256,8 @@ impl App for GLTFViewer {
                     format: ImageFormat::Rgba8,
                 }],
                 material_parameters: HashMap::new(),
-                fragment_module: &skybox_fragment,
-                vertex_module: &vertex_module,
+                fragment_module: skybox_fragment,
+                vertex_module,
             },
         )?;
         let skybox_master = resource_map.add(skybox_material);

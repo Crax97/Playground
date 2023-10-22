@@ -59,6 +59,7 @@ impl SwapchainFrame {
     fn new(device: Device) -> anyhow::Result<Self> {
         let in_flight_fence = GPUFence::create(
             device.clone(),
+            Some("In Flight Fence"),
             &FenceCreateInfo {
                 flags: FenceCreateFlags::SIGNALED,
             },
@@ -66,6 +67,7 @@ impl SwapchainFrame {
 
         let render_finished_semaphore = GPUSemaphore::create(
             device.clone(),
+            Some("Render finished semaphore"),
             &SemaphoreCreateInfo {
                 s_type: StructureType::SEMAPHORE_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -75,6 +77,7 @@ impl SwapchainFrame {
 
         let image_available_semaphore = GPUSemaphore::create(
             device,
+            Some("Image available semaphore"),
             &SemaphoreCreateInfo {
                 s_type: StructureType::SEMAPHORE_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -125,6 +128,7 @@ impl VkSwapchain {
 
         let next_image_fence = GPUFence::create(
             state.logical_device.clone(),
+            Some("Next image fence"),
             &FenceCreateInfo {
                 flags: FenceCreateFlags::empty(),
             },
@@ -417,6 +421,7 @@ impl VkSwapchain {
             .map(|i| {
                 VkImage::wrap(
                     self.state.logical_device.clone(),
+                    Some("Swapchain image"),
                     *i,
                     self.extents(),
                     self.present_format().into(),
@@ -472,6 +477,7 @@ impl VkSwapchain {
             };
             let view = VkImageView::create(
                 self.state.logical_device.clone(),
+                Some("Swapchain Image View"),
                 &view_info,
                 view_info.format.into(),
                 image.clone(),

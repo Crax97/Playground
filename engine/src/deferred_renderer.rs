@@ -366,27 +366,27 @@ impl DeferredRenderingPipeline {
                         ),
                         [0.0, 0.3, 0.4, 1.0],
                     );
-                    ctx.render_pass_command.bind_descriptor_sets(
-                        pipeline,
-                        1,
-                        &[&material.user_descriptor_set],
-                    );
-                    ctx.render_pass_command.bind_index_buffer(
-                        &draw_call.prim.index_buffer,
-                        0,
-                        IndexType::Uint32,
-                    );
-                    ctx.render_pass_command.bind_vertex_buffer(
-                        0,
-                        &[
-                            &draw_call.prim.position_component,
-                            &draw_call.prim.color_component,
-                            &draw_call.prim.normal_component,
-                            &draw_call.prim.tangent_component,
-                            &draw_call.prim.uv_component,
-                        ],
-                        &[0, 0, 0, 0, 0],
-                    );
+                    //                    ctx.render_pass_command.bind_descriptor_sets(
+                    //                        pipeline,
+                    //                        1,
+                    //                        &[&material.user_descriptor_set],
+                    //                    );
+                    //                    ctx.render_pass_command.bind_index_buffer(
+                    //                        &draw_call.prim.index_buffer,
+                    //                        0,
+                    //                        IndexType::Uint32,
+                    //                    );
+                    //                    ctx.render_pass_command.bind_vertex_buffer(
+                    //                        0,
+                    //                        &[
+                    //                            &draw_call.prim.position_component,
+                    //                            &draw_call.prim.color_component,
+                    //                            &draw_call.prim.normal_component,
+                    //                            &draw_call.prim.tangent_component,
+                    //                            &draw_call.prim.uv_component,
+                    //                        ],
+                    //                        &[0, 0, 0, 0, 0],
+                    //                    );
                     ctx.render_pass_command.push_constant(
                         pipeline,
                         &ObjectDrawInfo {
@@ -512,15 +512,15 @@ impl DeferredRenderingPipeline {
         let pipeline = skybox_master
             .get_pipeline(PipelineTarget::ColorAndDepth)
             .expect("failed to fetch pipeline {pipeline_target:?}");
-        render_context.render_pass_command.bind_pipeline(pipeline);
-        render_context.render_pass_command.bind_descriptor_sets(
-            pipeline,
-            0,
-            &[render_context
-                .read_descriptor_set
-                .expect("No descriptor set???")],
-        );
-
+        //        render_context.render_pass_command.bind_pipeline(pipeline);
+        //        render_context.render_pass_command.bind_descriptor_sets(
+        //            pipeline,
+        //            0,
+        //            &[render_context
+        //                .read_descriptor_set
+        //                .expect("No descriptor set???")],
+        //        );
+        //
         let skybox_label = render_context.render_pass_command.begin_debug_region(
             &format!(
                 "Rendering scene skybox with material {} ",
@@ -528,27 +528,27 @@ impl DeferredRenderingPipeline {
             ),
             [0.0, 0.3, 0.4, 1.0],
         );
-        render_context.render_pass_command.bind_descriptor_sets(
-            pipeline,
-            1,
-            &[&skybox_material.user_descriptor_set],
-        );
-        render_context.render_pass_command.bind_index_buffer(
-            &skybox_mesh.primitives[0].index_buffer,
-            0,
-            IndexType::Uint32,
-        );
-        render_context.render_pass_command.bind_vertex_buffer(
-            0,
-            &[
-                &skybox_mesh.primitives[0].position_component,
-                &skybox_mesh.primitives[0].color_component,
-                &skybox_mesh.primitives[0].normal_component,
-                &skybox_mesh.primitives[0].tangent_component,
-                &skybox_mesh.primitives[0].uv_component,
-            ],
-            &[0, 0, 0, 0, 0],
-        );
+        //        render_context.render_pass_command.bind_descriptor_sets(
+        //            pipeline,
+        //            1,
+        //            &[&skybox_material.user_descriptor_set],
+        //        );
+        //        render_context.render_pass_command.bind_index_buffer(
+        //            &skybox_mesh.primitives[0].index_buffer,
+        //            0,
+        //            IndexType::Uint32,
+        //        );
+        //        render_context.render_pass_command.bind_vertex_buffer(
+        //            0,
+        //            &[
+        //                &skybox_mesh.primitives[0].position_component,
+        //                &skybox_mesh.primitives[0].color_component,
+        //                &skybox_mesh.primitives[0].normal_component,
+        //                &skybox_mesh.primitives[0].tangent_component,
+        //                &skybox_mesh.primitives[0].uv_component,
+        //            ],
+        //            &[0, 0, 0, 0, 0],
+        //        );
         render_context.render_pass_command.push_constant(
             pipeline,
             &ObjectDrawInfo {

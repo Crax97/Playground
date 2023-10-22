@@ -7,7 +7,7 @@ use gpu::{
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 use std::collections::HashMap;
 
-use crate::texture::Texture;
+use crate::{texture::Texture, utils::to_u8_slice};
 
 use super::master_material::MasterMaterial;
 
@@ -71,11 +71,7 @@ impl MaterialInstance {
         })
     }
 
-    pub fn write_parameters<T: Sized + Copy + Pod + Zeroable>(
-        &self,
-        gpu: &VkGpu,
-        block: T,
-    ) -> anyhow::Result<()> {
+    pub fn write_parameters<T: Sized + Copy>(&self, gpu: &VkGpu, block: T) -> anyhow::Result<()> {
         assert!(
             std::mem::size_of::<T>() <= self.parameter_block_size
                 && self.parameter_buffer.is_some()
@@ -83,7 +79,7 @@ impl MaterialInstance {
         gpu.write_buffer(
             self.parameter_buffer.as_ref().unwrap(),
             0,
-            bytemuck::cast_slice(&[block]),
+            to_u8_slice(&[block]),
         )?;
         Ok(())
     }

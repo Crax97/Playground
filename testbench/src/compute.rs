@@ -3,7 +3,7 @@ use gpu::DescriptorType::{StorageBuffer, UniformBuffer};
 use gpu::{
     BindingElement, BindingType, BufferCreateInfo, BufferRange, BufferUsageFlags,
     CommandBufferSubmitInfo, ComputePipelineDescription, DescriptorInfo, DescriptorSetInfo,
-    GPUFence, GlobalBinding, GpuConfiguration, MemoryDomain, PipelineStageFlags, QueueType,
+    GPUFence, GlobalBinding, Gpu, GpuConfiguration, MemoryDomain, PipelineStageFlags, QueueType,
     ShaderModuleCreateInfo, ShaderStage, VkGpu,
 };
 use std::mem::{size_of, size_of_val};
@@ -33,7 +33,7 @@ fn main() -> anyhow::Result<()> {
         window: None,
     })?;
 
-    let module = gpu.create_shader_module(&ShaderModuleCreateInfo {
+    let module = gpu.make_shader_module(&ShaderModuleCreateInfo {
         code: bytemuck::cast_slice(COMPUTE_SUM),
     })?;
 
@@ -45,7 +45,7 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     let command_pipeline = gpu.create_compute_pipeline(&ComputePipelineDescription {
-        module: &module,
+        module,
         entry_point: "main",
         bindings: &[GlobalBinding {
             set_index: 0,
@@ -65,7 +65,7 @@ fn main() -> anyhow::Result<()> {
         push_constant_ranges: &[],
     })?;
 
-    let output_buffer = gpu.create_buffer(
+    let output_buffer = gpu.make_buffer(
         &BufferCreateInfo {
             label: Some("test buffer"),
             size: size_of::<u32>(),
@@ -75,7 +75,7 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     let inputs = [5, 2];
-    let input_buffer = gpu.create_buffer(
+    let input_buffer = gpu.make_buffer(
         &BufferCreateInfo {
             label: Some("test buffer"),
             size: size_of_val(&inputs),
@@ -83,14 +83,14 @@ fn main() -> anyhow::Result<()> {
         },
         MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
     )?;
-    input_buffer.write_data::<u32>(0, &inputs);
+    gpu.write_buffer(&input_buffer, 0, bytemuck::cast_slice(&inputs));
 
     let descriptor_set = gpu.create_descriptor_set(&DescriptorSetInfo {
         descriptors: &[
             DescriptorInfo {
                 binding: 0,
                 element_type: UniformBuffer(BufferRange {
-                    handle: &input_buffer,
+                    handle: input_buffer.clone(),
                     offset: 0,
                     size: gpu::WHOLE_SIZE,
                 }),
@@ -99,7 +99,7 @@ fn main() -> anyhow::Result<()> {
             DescriptorInfo {
                 binding: 1,
                 element_type: StorageBuffer(BufferRange {
-                    handle: &output_buffer,
+                    handle: output_buffer.clone(),
                     offset: 0,
                     size: gpu::WHOLE_SIZE,
                 }),
@@ -128,8 +128,8 @@ fn main() -> anyhow::Result<()> {
 
     //gpu.wait_device_idle()?;
 
-    let output = output_buffer.read::<u32>(0);
-    let inputs = input_buffer.read::<[u32; 2]>(0);
-    println!("Output is: {output}, inputs are {inputs:?}");
+    //let output = output_buffer.read::<u32>(0);
+    //let inputs = input_buffer.read::<[u32; 2]>(0);
+    //println!("Output is: {output}, inputs are {inputs:?}");
     Ok(())
 }

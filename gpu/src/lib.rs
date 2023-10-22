@@ -941,9 +941,9 @@ pub struct GraphicsPipelineDescription<'a> {
     pub push_constant_ranges: &'a [PushConstantRange],
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct ComputePipelineDescription<'a> {
-    pub module: &'a ShaderModuleHandle,
+    pub module: ShaderModuleHandle,
     pub entry_point: &'a str,
     pub bindings: &'a [GlobalBinding<'a>],
     pub push_constant_ranges: &'a [PushConstantRange],
