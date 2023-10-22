@@ -160,7 +160,7 @@ pub struct BufferImageCopyInfo {
 #[derive(Clone, Copy)]
 pub struct FramebufferCreateInfo<'a> {
     pub render_pass: &'a VkRenderPass,
-    pub attachments: &'a [&'a VkImageView],
+    pub attachments: &'a [ImageViewHandle],
     pub width: u32,
     pub height: u32,
 }
@@ -670,42 +670,42 @@ pub struct BufferRange {
 }
 
 #[derive(Clone, Hash)]
-pub struct SamplerState<'a> {
-    pub sampler: &'a VkSampler,
-    pub image_view: &'a VkImageView,
+pub struct SamplerState {
+    pub sampler: SamplerHandle,
+    pub image_view: ImageViewHandle,
     pub image_layout: ImageLayout,
 }
 
 #[derive(Clone)]
-pub enum DescriptorType<'a> {
+pub enum DescriptorType {
     UniformBuffer(BufferRange),
     StorageBuffer(BufferRange),
-    Sampler(SamplerState<'a>),
-    CombinedImageSampler(SamplerState<'a>),
+    Sampler(SamplerState),
+    CombinedImageSampler(SamplerState),
 }
 
-impl<'a> std::hash::Hash for DescriptorType<'a> {
+impl std::hash::Hash for DescriptorType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
     }
 }
 
-impl<'a> Debug for DescriptorType<'a> {
+impl Debug for DescriptorType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{:?}", core::mem::discriminant(self)))
     }
 }
 
 #[derive(Clone, Hash, Debug)]
-pub struct DescriptorInfo<'a> {
+pub struct DescriptorInfo {
     pub binding: u32,
-    pub element_type: DescriptorType<'a>,
+    pub element_type: DescriptorType,
     pub binding_stage: ShaderStage,
 }
 
 #[derive(Clone, Hash)]
 pub struct DescriptorSetInfo<'a> {
-    pub descriptors: &'a [DescriptorInfo<'a>],
+    pub descriptors: &'a [DescriptorInfo],
 }
 
 #[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash)]
@@ -827,7 +827,7 @@ pub struct VertexBindingDescription<'a> {
 #[derive(Clone, Copy)]
 pub struct VertexStageInfo<'a> {
     pub entry_point: &'a str,
-    pub module: &'a VkShaderModule,
+    pub module: &'a ShaderModuleHandle,
 }
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
@@ -875,7 +875,7 @@ pub struct DepthStencilAttachment {}
 #[derive(Clone, Copy)]
 pub struct FragmentStageInfo<'a> {
     pub entry_point: &'a str,
-    pub module: &'a VkShaderModule,
+    pub module: &'a ShaderModuleHandle,
     pub color_attachments: &'a [RenderPassAttachment],
     pub depth_stencil_attachments: &'a [DepthStencilAttachment],
 }
@@ -943,7 +943,7 @@ pub struct GraphicsPipelineDescription<'a> {
 
 #[derive(Clone, Copy)]
 pub struct ComputePipelineDescription<'a> {
-    pub module: &'a VkShaderModule,
+    pub module: &'a ShaderModuleHandle,
     pub entry_point: &'a str,
     pub bindings: &'a [GlobalBinding<'a>],
     pub push_constant_ranges: &'a [PushConstantRange],
@@ -1045,35 +1045,35 @@ pub enum AttachmentStoreOp {
     Store,
 }
 
-#[derive(Clone, Copy)]
-pub struct ColorAttachment<'a> {
-    pub image_view: &'a VkImageView,
+#[derive(Clone)]
+pub struct ColorAttachment {
+    pub image_view: ImageViewHandle,
     pub load_op: ColorLoadOp,
     pub store_op: AttachmentStoreOp,
     pub initial_layout: ImageLayout,
 }
 
-#[derive(Clone, Copy)]
-pub struct DepthAttachment<'a> {
-    pub image_view: &'a VkImageView,
+#[derive(Clone)]
+pub struct DepthAttachment {
+    pub image_view: ImageViewHandle,
     pub load_op: DepthLoadOp,
     pub store_op: AttachmentStoreOp,
     pub initial_layout: ImageLayout,
 }
 
-#[derive(Clone, Copy)]
-pub struct StencilAttachment<'a> {
-    pub image_view: &'a VkImageView,
+#[derive(Clone)]
+pub struct StencilAttachment {
+    pub image_view: ImageViewHandle,
     pub load_op: StencilLoadOp,
     pub store_op: AttachmentStoreOp,
     pub initial_layout: ImageLayout,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct BeginRenderPassInfo<'a> {
-    pub color_attachments: &'a [ColorAttachment<'a>],
-    pub depth_attachment: Option<DepthAttachment<'a>>,
-    pub stencil_attachment: Option<StencilAttachment<'a>>,
+    pub color_attachments: &'a [ColorAttachment],
+    pub depth_attachment: Option<DepthAttachment>,
+    pub stencil_attachment: Option<StencilAttachment>,
     pub render_area: Rect2D,
 }
 

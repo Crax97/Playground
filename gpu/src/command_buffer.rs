@@ -651,7 +651,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             .map(|attch| RenderingAttachmentInfoKHR {
                 s_type: StructureType::RENDERING_ATTACHMENT_INFO,
                 p_next: std::ptr::null(),
-                image_view: attch.image_view.inner,
+                image_view: command_buffer
+                    .gpu
+                    .resolve_resource::<VkImageView>(&attch.image_view)
+                    .inner,
                 image_layout: attch.initial_layout.to_vk(),
                 resolve_mode: ResolveModeFlags::NONE,
                 resolve_image_view: vk::ImageView::null(),
@@ -667,51 +670,59 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             })
             .collect();
 
-        let depth_attachment = info
-            .depth_attachment
-            .map(|attch| RenderingAttachmentInfoKHR {
-                s_type: StructureType::RENDERING_ATTACHMENT_INFO,
-                p_next: std::ptr::null(),
-                image_view: attch.image_view.inner,
-                image_layout: attch.initial_layout.to_vk(),
-                resolve_mode: ResolveModeFlags::NONE,
-                resolve_image_view: vk::ImageView::null(),
-                resolve_image_layout: ImageLayout::Undefined.to_vk(),
-                load_op: attch.load_op.to_vk(),
-                store_op: attch.store_op.to_vk(),
-                clear_value: match attch.load_op {
-                    DepthLoadOp::Clear(d) => ash::vk::ClearValue {
-                        depth_stencil: ClearDepthStencilValue {
-                            depth: d,
-                            stencil: 255,
+        let depth_attachment =
+            info.depth_attachment
+                .as_ref()
+                .map(|attch| RenderingAttachmentInfoKHR {
+                    s_type: StructureType::RENDERING_ATTACHMENT_INFO,
+                    p_next: std::ptr::null(),
+                    image_view: command_buffer
+                        .gpu
+                        .resolve_resource::<VkImageView>(&attch.image_view)
+                        .inner,
+                    image_layout: attch.initial_layout.to_vk(),
+                    resolve_mode: ResolveModeFlags::NONE,
+                    resolve_image_view: vk::ImageView::null(),
+                    resolve_image_layout: ImageLayout::Undefined.to_vk(),
+                    load_op: attch.load_op.to_vk(),
+                    store_op: attch.store_op.to_vk(),
+                    clear_value: match attch.load_op {
+                        DepthLoadOp::Clear(d) => ash::vk::ClearValue {
+                            depth_stencil: ClearDepthStencilValue {
+                                depth: d,
+                                stencil: 255,
+                            },
                         },
+                        _ => ash::vk::ClearValue::default(),
                     },
-                    _ => ash::vk::ClearValue::default(),
-                },
-            });
+                });
 
-        let stencil_attachment = info
-            .stencil_attachment
-            .map(|attch| RenderingAttachmentInfoKHR {
-                s_type: StructureType::RENDERING_ATTACHMENT_INFO,
-                p_next: std::ptr::null(),
-                image_view: attch.image_view.inner,
-                image_layout: attch.initial_layout.to_vk(),
-                resolve_mode: ResolveModeFlags::NONE,
-                resolve_image_view: vk::ImageView::null(),
-                resolve_image_layout: ImageLayout::Undefined.to_vk(),
-                load_op: attch.load_op.to_vk(),
-                store_op: attch.store_op.to_vk(),
-                clear_value: match attch.load_op {
-                    StencilLoadOp::Clear(s) => ash::vk::ClearValue {
-                        depth_stencil: ClearDepthStencilValue {
-                            depth: 0.0,
-                            stencil: s as _,
+        let stencil_attachment =
+            info.stencil_attachment
+                .as_ref()
+                .map(|attch| RenderingAttachmentInfoKHR {
+                    s_type: StructureType::RENDERING_ATTACHMENT_INFO,
+                    p_next: std::ptr::null(),
+                    image_view: command_buffer
+                        .gpu
+                        .resolve_resource::<VkImageView>(&attch.image_view)
+                        .inner,
+                    image_layout: attch.initial_layout.to_vk(),
+                    resolve_mode: ResolveModeFlags::NONE,
+                    resolve_image_view: vk::ImageView::null(),
+                    resolve_image_layout: ImageLayout::Undefined.to_vk(),
+                    load_op: attch.load_op.to_vk(),
+                    store_op: attch.store_op.to_vk(),
+                    clear_value: match attch.load_op {
+                        StencilLoadOp::Clear(s) => ash::vk::ClearValue {
+                            depth_stencil: ClearDepthStencilValue {
+                                depth: 0.0,
+                                stencil: s as _,
+                            },
                         },
+                        _ => ash::vk::ClearValue::default(),
                     },
-                    _ => ash::vk::ClearValue::default(),
-                },
-            });
+                });
 
         let create_info = RenderingInfoKHR {
             s_type: StructureType::RENDERING_INFO_KHR,

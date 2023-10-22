@@ -1426,8 +1426,8 @@ impl VkGpu {
             super::DescriptorType::Sampler(sam) => image_descriptors.push((
                 i.binding,
                 DescriptorImageInfo {
-                    sampler: sam.sampler.inner,
-                    image_view: sam.image_view.inner,
+                    sampler: self.resolve_resource::<VkSampler>(&sam.sampler).inner,
+                    image_view: self.resolve_resource::<VkImageView>(&sam.image_view).inner,
                     image_layout: sam.image_layout.to_vk(),
                 },
                 vk::DescriptorType::SAMPLER,
@@ -1435,8 +1435,8 @@ impl VkGpu {
             super::DescriptorType::CombinedImageSampler(sam) => image_descriptors.push((
                 i.binding,
                 DescriptorImageInfo {
-                    sampler: sam.sampler.inner,
-                    image_view: sam.image_view.inner,
+                    sampler: self.resolve_resource::<VkSampler>(&sam.sampler).inner,
+                    image_view: self.resolve_resource::<VkImageView>(&sam.image_view).inner,
                     image_layout: sam.image_layout.to_vk(),
                 },
                 vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
@@ -1682,7 +1682,6 @@ fn create_staging_buffer(state: &Arc<GpuThreadSharedState>) -> VkResult<BufferHa
         buffer,
         MemoryDomain::HostVisible,
         allocation,
-        state.gpu_memory_allocator.clone(),
     )?;
     let handle = BufferHandle::new(buffer.inner.as_raw(), state.clone());
     state
@@ -1747,13 +1746,7 @@ impl VkGpu {
 
         self.set_object_debug_name(create_info.label, buffer)?;
 
-        VkBuffer::create(
-            self.vk_logical_device(),
-            buffer,
-            memory_domain,
-            allocation,
-            self.state.gpu_memory_allocator.clone(),
-        )
+        VkBuffer::create(self.vk_logical_device(), buffer, memory_domain, allocation)
     }
 
     fn set_object_debug_name<T: Handle>(
@@ -1996,10 +1989,8 @@ impl VkGpu {
         self.set_object_debug_name(create_info.label, image)?;
 
         let image = VkImage::create(
-            self,
             image,
             allocation,
-            self.state.gpu_memory_allocator.clone(),
             Extent2D {
                 width: create_info.width,
                 height: create_info.height,
@@ -2094,7 +2085,11 @@ impl VkGpu {
         &self,
         create_info: &FramebufferCreateInfo,
     ) -> VkResult<VkFramebuffer> {
-        let attachments: Vec<_> = create_info.attachments.iter().map(|a| a.inner).collect();
+        let attachments: Vec<_> = create_info
+            .attachments
+            .iter()
+            .map(|a| self.resolve_resource::<VkImageView>(&a).inner)
+            .collect();
         let create_info = vk::FramebufferCreateInfo {
             s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
             p_next: std::ptr::null(),

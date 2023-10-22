@@ -296,6 +296,7 @@ impl<'a> GraphicsPipelineDescription<'a> {
     }
 }
 
+#[deprecated(note = "This will be removed in favour of the higher-level api")]
 pub struct VkGraphicsPipeline {
     pub(super) pipeline: vk::Pipeline,
     pub(super) pipeline_layout: PipelineLayout,
@@ -339,7 +340,7 @@ impl VkGraphicsPipeline {
         };
 
         if let Some(vs) = pipeline_description.vertex_stage {
-            let module = vs.module.inner;
+            let module = gpu.resolve_resource::<VkShaderModule>(&vs.module).inner;
             stages.push(PipelineShaderStageCreateInfo {
                 s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -351,7 +352,7 @@ impl VkGraphicsPipeline {
             })
         }
         if let Some(fs) = pipeline_description.fragment_stage {
-            let module = fs.module.inner;
+            let module = gpu.resolve_resource::<VkShaderModule>(&fs.module).inner;
             stages.push(PipelineShaderStageCreateInfo {
                 s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -606,6 +607,7 @@ impl Drop for VkGraphicsPipeline {
     }
 }
 
+#[deprecated(note = "This will be removed in favour of the higher-level api")]
 pub struct VkComputePipeline {
     pub(super) pipeline: vk::Pipeline,
     pub(super) pipeline_layout: PipelineLayout,
@@ -621,7 +623,9 @@ impl VkComputePipeline {
             s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
             p_next: std::ptr::null(),
             stage: ShaderStageFlags::COMPUTE,
-            module: description.module.inner,
+            module: gpu
+                .resolve_resource::<VkShaderModule>(&description.module)
+                .inner,
             p_name: entry_point.as_ptr(),
             p_specialization_info: std::ptr::null(),
             flags: PipelineShaderStageCreateFlags::empty(),

@@ -561,7 +561,6 @@ macro_rules! define_raii_wrapper {
     ((struct $name:ident { $($mem_name:ident : $mem_ty : ty,)* }, $vk_type:ty, $drop_fn:path) {($arg_name:ident : $arg_typ:ty,) => $create_impl_block:tt}) => {
         #[derive(Clone)]
         pub struct $name {
-            device: ash::Device,
             pub(super) inner: $vk_type,
             $(pub(super) $mem_name : $mem_ty,)*
         }
@@ -572,7 +571,6 @@ macro_rules! define_raii_wrapper {
 
                 let inner = $create_impl_block(&device)?;
                 Ok(Self {
-                    device,
                     inner,
                     $($mem_name),*
                 })
@@ -693,7 +691,6 @@ pub struct VkBuffer {
     pub(super) inner: vk::Buffer,
     pub(super) memory_domain: MemoryDomain,
     pub(super) allocation: MemoryAllocation,
-    pub(super) allocator: Arc<RefCell<dyn GpuAllocator>>,
 }
 
 impl VkBuffer {
@@ -702,14 +699,12 @@ impl VkBuffer {
         buffer: Buffer,
         memory_domain: MemoryDomain,
         allocation: MemoryAllocation,
-        allocator: Arc<RefCell<dyn GpuAllocator>>,
     ) -> VkResult<Self> {
         Ok(Self {
             device,
             inner: buffer,
             memory_domain,
             allocation,
-            allocator,
         })
     }
 
@@ -773,27 +768,21 @@ impl_raii_wrapper_to_vk!(VkBuffer, vk::Buffer);
 
 #[derive(Clone)]
 pub struct VkImage {
-    device: ash::Device,
     pub(super) inner: vk::Image,
     pub(super) allocation: Option<MemoryAllocation>,
-    pub(super) allocator: Option<Arc<RefCell<dyn GpuAllocator>>>,
     pub(super) extents: Extent2D,
     pub(super) format: ImageFormat,
 }
 impl VkImage {
     pub(super) fn create(
-        gpu: &VkGpu,
         image: vk::Image,
         allocation: MemoryAllocation,
-        allocator: Arc<RefCell<dyn GpuAllocator>>,
         extents: Extent2D,
         format: ImageFormat,
     ) -> VkResult<Self> {
         Ok(Self {
-            device: gpu.state.logical_device.clone(),
             inner: image,
             allocation: Some(allocation),
-            allocator: Some(allocator),
             extents,
             format,
         })
@@ -806,10 +795,8 @@ impl VkImage {
         format: ImageFormat,
     ) -> Self {
         Self {
-            device,
             inner,
             allocation: None,
-            allocator: None,
             extents,
             format,
         }
