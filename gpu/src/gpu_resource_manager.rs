@@ -2,7 +2,10 @@ use std::{
     any::Any,
     cell::{Ref, RefCell, RefMut},
     collections::HashMap,
+    sync::atomic::{AtomicU32, Ordering},
 };
+
+use log::debug;
 
 use crate::{Handle, HandleType};
 
@@ -21,23 +24,66 @@ pub mod utils {
     pub(crate) use associate_to_handle;
 }
 
-pub struct AllocatedResourceMap<T>(HashMap<u64, T>);
+struct RefCounted<T> {
+    resource: T,
+    ref_count: AtomicU32,
+}
+
+pub trait Context {
+    fn increment_resource_refcount(&self, id: u64, resource_type: HandleType);
+    fn decrement_resource_refcount(&self, id: u64, resource_type: HandleType);
+}
+
+pub struct AllocatedResourceMap<T>(HashMap<u64, RefCounted<T>>);
 
 impl<T: HasAssociatedHandle + Clone> AllocatedResourceMap<T> {
-    pub fn resolve(&self, handle: T::AssociatedHandle) -> T {
+    pub fn new() -> AllocatedResourceMap<T> {
+        Self(HashMap::new())
+    }
+
+    pub fn resolve(&self, handle: &T::AssociatedHandle) -> T {
         let res = self
             .0
             .get(&handle.id())
             .expect("Failed to resolve resource");
-        res.clone()
+        res.resource.clone()
     }
 
-    pub fn insert(&mut self, handle: T::AssociatedHandle, res: T) {
-        self.0.insert(handle.id(), res);
+    pub fn insert(&mut self, handle: &T::AssociatedHandle, resource: T) {
+        self.0.insert(
+            handle.id(),
+            RefCounted {
+                resource,
+                ref_count: 1.into(),
+            },
+        );
     }
 
-    pub fn new() -> AllocatedResourceMap<T> {
-        Self(HashMap::new())
+    pub fn increment_resource_count(&mut self, id: u64) {
+        self.0
+            .get_mut(&id)
+            .expect("Failed to resolve resource")
+            .ref_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    pub fn decrement_resource_count(&mut self, id: u64) -> Option<T> {
+        let old_refcount = self
+            .0
+            .get_mut(&id)
+            .expect("Failed to resolve resource")
+            .ref_count
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+
+        if old_refcount == 0 {
+            // Resource lost last reference
+            debug!(
+                "Resource {:?} - {id} lost it's last reference",
+                &T::AssociatedHandle::handle_type()
+            );
+            self.0.remove(&id).map(|v| v.resource)
+        } else {
+            None
+        }
     }
 }
 
@@ -53,7 +99,7 @@ impl GpuResourceMap {
     }
     pub fn insert<T: HasAssociatedHandle + Clone + 'static>(
         &mut self,
-        handle: T::AssociatedHandle,
+        handle: &T::AssociatedHandle,
         resource: T,
     ) {
         if !self.maps.contains_key(&T::AssociatedHandle::handle_type()) {
@@ -66,11 +112,10 @@ impl GpuResourceMap {
     }
     pub fn resolve<T: HasAssociatedHandle + Clone + 'static>(
         &self,
-        handle: T::AssociatedHandle,
+        handle: &T::AssociatedHandle,
     ) -> T {
         self.get_map().resolve(handle)
     }
-
     pub fn get_map<T: HasAssociatedHandle + Clone + 'static>(
         &self,
     ) -> RefMut<AllocatedResourceMap<T>> {

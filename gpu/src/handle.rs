@@ -1,3 +1,6 @@
+use crate::Context;
+use std::sync::Arc;
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum HandleType {
     Buffer,
@@ -7,8 +10,8 @@ pub enum HandleType {
     Sampler,
 }
 
-pub trait Handle {
-    fn new(id: u64) -> Self;
+pub trait Handle: std::fmt::Debug {
+    fn new(id: u64, context: Arc<dyn Context>) -> Self;
     fn null() -> Self;
     fn is_null(&self) -> bool;
     fn id(&self) -> u64;
@@ -17,19 +20,57 @@ pub trait Handle {
 
 macro_rules! define_handle {
     ($st_name:ident, $ty:expr) => {
-        #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
         pub struct $st_name {
             pub(crate) id: u64,
+            pub(crate) context: Option<Arc<dyn Context>>,
+        }
+
+        impl std::hash::Hash for $st_name {
+            fn hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
+                self.id.hash(hasher)
+            }
+        }
+
+        impl PartialEq for $st_name {
+            fn eq(&self, other: &Self) -> bool {
+                self.id == other.id
+            }
+        }
+
+        impl Eq for $st_name {}
+
+        impl PartialOrd for $st_name {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                self.id.partial_cmp(&other.id)
+            }
+        }
+
+        impl Ord for $st_name {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.id.cmp(&other.id)
+            }
+        }
+
+        impl std::fmt::Debug for $st_name {
+            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_fmt(format_args!("{:?} - id {}", &Self::handle_type(), self.id))
+            }
         }
 
         impl Handle for $st_name {
-            fn new(id: u64) -> Self {
+            fn new(id: u64, context: Arc<dyn Context>) -> Self {
                 assert!(id != 0, "ID 0 is reserved for null handles!");
-                Self { id }
+                Self {
+                    id,
+                    context: Some(context),
+                }
             }
 
             fn null() -> Self {
-                Self { id: 0 }
+                Self {
+                    id: 0,
+                    context: None,
+                }
             }
 
             fn is_null(&self) -> bool {
@@ -42,6 +83,28 @@ macro_rules! define_handle {
 
             fn handle_type() -> HandleType {
                 $ty
+            }
+        }
+
+        impl Clone for $st_name {
+            fn clone(&self) -> Self {
+                match &self.context {
+                    Some(context) => {
+                        context.increment_resource_refcount(self.id, Self::handle_type());
+                        Self {
+                            id: self.id,
+                            context: self.context.clone(),
+                        }
+                    }
+                    None => Self::null(),
+                }
+            }
+        }
+        impl Drop for $st_name {
+            fn drop(&mut self) {
+                if let Some(context) = &self.context {
+                    context.decrement_resource_refcount(self.id, Self::handle_type());
+                }
             }
         }
     };

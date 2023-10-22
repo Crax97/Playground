@@ -37,7 +37,7 @@ pub trait Gpu {
         buffer_info: &BufferCreateInfo,
         memory_domain: MemoryDomain,
     ) -> anyhow::Result<BufferHandle>;
-    fn write_buffer(&self, buffer: BufferHandle, offset: u64, data: &[u8]) -> anyhow::Result<()>;
+    fn write_buffer(&self, buffer: &BufferHandle, offset: u64, data: &[u8]) -> anyhow::Result<()>;
 
     fn make_image(
         &self,
@@ -46,7 +46,7 @@ pub trait Gpu {
     ) -> anyhow::Result<ImageHandle>;
     fn write_image(
         &self,
-        handle: ImageHandle,
+        handle: &ImageHandle,
         data: &[u8],
         region: Rect2D,
         layer: u32,
@@ -97,7 +97,7 @@ pub struct PipelineColorBlendAttachmentState {
     pub color_write_mask: ColorComponentFlags,
 }
 
-#[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug)]
+#[derive(Clone, Hash, Eq, Ord, PartialOrd, PartialEq, Debug)]
 pub struct VertexBindingInfo {
     pub handle: BufferHandle,
     pub location: u32,

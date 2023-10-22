@@ -195,7 +195,7 @@ impl PipelineState {
     }
 }
 
-#[derive(Hash, Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
 pub enum DescriptorBindingType {
     BufferRange {
         handle: BufferHandle,
@@ -219,7 +219,7 @@ impl Default for DescriptorBindingType {
     }
 }
 
-#[derive(Default, Hash, Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Default, Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
 pub struct Binding {
     pub ty: DescriptorBindingType,
     pub binding_stage: ShaderStage,
@@ -913,9 +913,9 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 .iter()
                 .map(|b| {
                     self.gpu
-                        .allocated_resources
+                        .allocated_resources()
                         .borrow()
-                        .resolve::<VkBuffer>(b.handle)
+                        .resolve::<VkBuffer>(&b.handle)
                         .inner
                 })
                 .collect::<Vec<_>>();
@@ -994,9 +994,9 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         assert!(!index_buffer.is_null());
         let index_buffer = self
             .gpu
-            .allocated_resources
+            .allocated_resources()
             .borrow()
-            .resolve::<VkBuffer>(index_buffer);
+            .resolve::<VkBuffer>(&index_buffer);
         let device = self.gpu.vk_logical_device();
         unsafe {
             device.cmd_bind_index_buffer(
