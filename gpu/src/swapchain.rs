@@ -1,6 +1,7 @@
 use std::cell::Cell;
 use std::{mem::MaybeUninit, num::NonZeroU32, ptr::addr_of, sync::Arc};
 
+use ash::vk::Handle;
 use ash::{
     extensions::khr::Surface,
     prelude::VkResult,
@@ -19,8 +20,8 @@ use raw_window_handle::{
 use winit::window::Window;
 
 use crate::{
-    Extent2D, FenceCreateFlags, FenceCreateInfo, ImageAspectFlags, ImageSubresourceRange,
-    PresentMode, ToVk, VkGpu, VkImage, VkImageView,
+    Extent2D, FenceCreateFlags, FenceCreateInfo, ImageAspectFlags, ImageHandle,
+    ImageSubresourceRange, ImageViewHandle, PresentMode, ToVk, VkGpu, VkImage, VkImageView,
 };
 
 use super::{GPUFence, GPUSemaphore, GpuThreadSharedState};
@@ -100,8 +101,8 @@ pub struct VkSwapchain {
     pub(super) supported_presentation_formats: Vec<SurfaceFormatKHR>,
     pub(super) surface_capabilities: SurfaceCapabilitiesKHR,
     pub current_swapchain: SwapchainKHR,
-    pub(super) current_swapchain_images: Vec<VkImage>,
-    pub(super) current_swapchain_image_views: Vec<MaybeUninit<VkImageView>>,
+    pub(super) current_swapchain_images: Vec<ImageHandle>,
+    pub(super) current_swapchain_image_views: Vec<ImageViewHandle>,
     pub(super) frames_in_flight: Vec<SwapchainFrame>,
 
     current_swapchain_index: Cell<u32>,
@@ -167,7 +168,7 @@ impl VkSwapchain {
         Ok(me)
     }
 
-    pub fn acquire_next_image(&mut self) -> anyhow::Result<(&VkImage, &VkImageView)> {
+    pub fn acquire_next_image(&mut self) -> anyhow::Result<(ImageHandle, ImageViewHandle)> {
         let current_frame = &self.frames_in_flight[self.current_frame.get()];
         let wait_semaphore = current_frame.image_available_semaphore.inner;
 
@@ -208,8 +209,8 @@ impl VkSwapchain {
                 let image_idx = self.current_swapchain_index.get() as usize;
                 return Ok(unsafe {
                     (
-                        &self.current_swapchain_images[image_idx],
-                        image_view.assume_init_ref(),
+                        self.current_swapchain_images[image_idx].clone(),
+                        image_view.clone(),
                     )
                 });
             } else {
@@ -421,6 +422,15 @@ impl VkSwapchain {
                     self.present_format().into(),
                 )
             })
+            .map(|img| {
+                let handle =
+                    <ImageHandle as crate::Handle>::new(img.inner.as_raw(), self.state.clone());
+                self.state
+                    .allocated_resources
+                    .borrow_mut()
+                    .insert(&handle, img);
+                handle
+            })
             .collect();
         Ok(())
     }
@@ -429,14 +439,20 @@ impl VkSwapchain {
         self.current_swapchain_image_views.clear();
         self.current_swapchain_image_views
             .resize_with(self.current_swapchain_images.len(), || {
-                MaybeUninit::zeroed()
+                <ImageViewHandle as crate::Handle>::null()
             });
         for (i, image) in self.current_swapchain_images.iter().enumerate() {
+            let vk_image = self
+                .state
+                .allocated_resources
+                .borrow()
+                .resolve::<VkImage>(&image)
+                .inner;
             let view_info = ash::vk::ImageViewCreateInfo {
                 s_type: StructureType::IMAGE_VIEW_CREATE_INFO,
                 p_next: std::ptr::null(),
                 flags: ImageViewCreateFlags::empty(),
-                image: image.inner,
+                image: vk_image,
                 view_type: ImageViewType::TYPE_2D,
                 format: self.present_format.format,
                 components: ComponentMapping {
@@ -454,13 +470,20 @@ impl VkSwapchain {
                 }
                 .to_vk(),
             };
-            self.current_swapchain_image_views[i] = MaybeUninit::new(VkImageView::create(
+            let view = VkImageView::create(
                 self.state.logical_device.clone(),
                 &view_info,
                 view_info.format.into(),
-                image.inner,
+                image.clone(),
                 self.present_extent,
-            )?);
+            )?;
+            let view_handle =
+                <ImageViewHandle as crate::Handle>::new(view.as_raw(), self.state.clone());
+            self.state
+                .allocated_resources
+                .borrow_mut()
+                .insert(&view_handle, view);
+            self.current_swapchain_image_views[i] = view_handle;
         }
 
         Ok(())

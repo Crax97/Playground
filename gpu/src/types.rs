@@ -835,7 +835,7 @@ impl_raii_wrapper_to_vk!(VkImage, vk::Image);
 
 define_raii_wrapper!((struct VkImageView{
     format: ImageFormat,
-    owner_image: vk::Image,
+    owner_image: ImageHandle,
     extents: Extent2D,
 }, vk::ImageView, ash::Device::destroy_image_view) {
     (create_info: &vk::ImageViewCreateInfo,) => {
@@ -851,8 +851,8 @@ impl VkImageView {
     pub fn inner_image_view(&self) -> vk::ImageView {
         self.inner
     }
-    pub fn inner_image(&self) -> vk::Image {
-        self.owner_image
+    pub fn owner_image_handle(&self) -> ImageHandle {
+        self.owner_image.clone()
     }
 
     pub fn format(&self) -> ImageFormat {
@@ -1170,25 +1170,6 @@ impl ToVk for ImageSubresourceRange {
             level_count: self.level_count,
             base_array_layer: self.base_array_layer,
             layer_count: self.layer_count,
-        }
-    }
-}
-
-impl<'a> ToVk for ImageMemoryBarrier<'a> {
-    type Inner = vk::ImageMemoryBarrier;
-
-    fn to_vk(&self) -> Self::Inner {
-        Self::Inner {
-            s_type: StructureType::IMAGE_MEMORY_BARRIER,
-            p_next: std::ptr::null(),
-            src_access_mask: self.src_access_mask.to_vk(),
-            dst_access_mask: self.dst_access_mask.to_vk(),
-            src_queue_family_index: self.src_queue_family_index,
-            dst_queue_family_index: self.dst_queue_family_index,
-            old_layout: self.old_layout.to_vk(),
-            new_layout: self.new_layout.to_vk(),
-            image: self.image.inner,
-            subresource_range: self.subresource_range.to_vk(),
         }
     }
 }

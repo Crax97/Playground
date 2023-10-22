@@ -109,7 +109,7 @@ impl GpuResourceMap {
                 Box::new(RefCell::new(AllocatedResourceMap::<T>::new())),
             );
         }
-        self.get_map().insert(handle, resource)
+        self.get_map_mut().insert(handle, resource)
     }
     pub fn resolve<T: HasAssociatedHandle + Clone + 'static>(
         &self,
@@ -118,7 +118,7 @@ impl GpuResourceMap {
         assert!(!handle.is_null());
         self.get_map().resolve(handle)
     }
-    pub fn get_map<T: HasAssociatedHandle + Clone + 'static>(
+    pub fn get_map_mut<T: HasAssociatedHandle + Clone + 'static>(
         &self,
     ) -> RefMut<AllocatedResourceMap<T>> {
         let map = self
@@ -129,5 +129,17 @@ impl GpuResourceMap {
             .unwrap();
 
         map.borrow_mut()
+    }
+    pub fn get_map<T: HasAssociatedHandle + Clone + 'static>(
+        &self,
+    ) -> Ref<AllocatedResourceMap<T>> {
+        let map = self
+            .maps
+            .get(&T::AssociatedHandle::handle_type())
+            .unwrap()
+            .downcast_ref::<RefCell<AllocatedResourceMap<T>>>()
+            .unwrap();
+
+        map.borrow()
     }
 }

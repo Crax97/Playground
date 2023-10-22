@@ -54,7 +54,7 @@ pub trait Gpu {
         layer: u32,
     ) -> anyhow::Result<()>;
 
-    fn make_image_view(&self, info: &ImageViewCreateInfo2) -> anyhow::Result<ImageViewHandle>;
+    fn make_image_view(&self, info: &ImageViewCreateInfo) -> anyhow::Result<ImageViewHandle>;
 
     fn make_sampler(&self, info: &SamplerCreateInfo) -> anyhow::Result<SamplerHandle>;
 
@@ -121,21 +121,14 @@ pub struct ImageCreateInfo<'a> {
     pub usage: ImageUsageFlags,
 }
 
-pub struct ImageViewCreateInfo<'a> {
-    pub image: &'a VkImage,
-    pub view_type: ImageViewType,
-    pub format: ImageFormat,
-    pub components: ComponentMapping,
-    pub subresource_range: ImageSubresourceRange,
-}
-
-pub struct ImageViewCreateInfo2 {
+pub struct ImageViewCreateInfo {
     pub image: ImageHandle,
     pub view_type: ImageViewType,
     pub format: ImageFormat,
     pub components: ComponentMapping,
     pub subresource_range: ImageSubresourceRange,
 }
+
 pub struct BufferCreateInfo<'a> {
     pub label: Option<&'a str>,
     pub size: usize,
@@ -150,9 +143,9 @@ pub struct TransitionInfo {
 }
 
 #[derive(Clone, Hash)]
-pub struct BufferImageCopyInfo<'a> {
+pub struct BufferImageCopyInfo {
     pub source: BufferHandle,
-    pub dest: &'a VkImage,
+    pub dest: ImageHandle,
     pub dest_layout: ImageLayout,
     pub image_offset: Offset3D,
     pub image_extent: Extent3D,
@@ -1002,14 +995,14 @@ pub struct BufferMemoryBarrier {
     pub size: u64,
 }
 
-pub struct ImageMemoryBarrier<'a> {
+pub struct ImageMemoryBarrier {
     pub src_access_mask: AccessFlags,
     pub dst_access_mask: AccessFlags,
     pub old_layout: ImageLayout,
     pub new_layout: ImageLayout,
     pub src_queue_family_index: u32,
     pub dst_queue_family_index: u32,
-    pub image: &'a VkImage,
+    pub image: ImageHandle,
     pub subresource_range: ImageSubresourceRange,
 }
 
@@ -1019,7 +1012,7 @@ pub struct PipelineBarrierInfo<'a> {
     pub dst_stage_mask: PipelineStageFlags,
     pub memory_barriers: &'a [MemoryBarrier],
     pub buffer_memory_barriers: &'a [BufferMemoryBarrier],
-    pub image_memory_barriers: &'a [ImageMemoryBarrier<'a>],
+    pub image_memory_barriers: &'a [ImageMemoryBarrier],
 }
 
 #[derive(Clone, Copy, Debug, Default)]
