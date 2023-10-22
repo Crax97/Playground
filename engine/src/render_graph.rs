@@ -8,19 +8,20 @@ use std::{
 
 use gpu::{
     AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, BindingElement,
-    BindingType, BlendMode, BlendOp, BlendState, BufferCreateInfo, BufferRange, BufferUsageFlags,
-    ColorAttachment, ColorComponentFlags, ColorLoadOp, ComponentMapping, CullMode, DepthAttachment,
-    DepthLoadOp, DepthStencilAttachment, DepthStencilState, DescriptorInfo, DescriptorSetInfo,
-    Extent2D, Filter, FragmentStageInfo, FramebufferCreateInfo, FrontFace, GlobalBinding,
-    GraphicsPipelineDescription, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageLayout,
-    ImageMemoryBarrier, ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewType,
-    LogicOp, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineBindPoint, PipelineStageFlags,
-    PolygonMode, PrimitiveTopology, PushConstantRange, Rect2D, RenderPassAttachment,
-    RenderPassDescription, SampleCount, SamplerAddressMode, SamplerCreateInfo, StencilAttachment,
-    StencilLoadOp, SubpassDependency, SubpassDescription, TransitionInfo, VertexBindingDescription,
-    VertexStageInfo, VkBuffer, VkCommandBuffer, VkDescriptorSet, VkFramebuffer, VkGpu,
-    VkGraphicsPipeline, VkImage, VkImageView, VkRenderPass, VkRenderPassCommand, VkSampler,
-    VkShaderModule,
+    BindingType, BlendMode, BlendOp, BlendState, BufferCreateInfo, BufferHandle, BufferRange,
+    BufferUsageFlags, ColorAttachment, ColorComponentFlags, ColorLoadOp, ComponentMapping,
+    CullMode, DepthAttachment, DepthLoadOp, DepthStencilAttachment, DepthStencilState,
+    DescriptorInfo, DescriptorSetInfo, Extent2D, Filter, FragmentStageInfo, FramebufferCreateInfo,
+    FrontFace, GlobalBinding, Gpu, GraphicsPipelineDescription, ImageAspectFlags, ImageCreateInfo,
+    ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
+    ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, ImageViewType, LogicOp, MemoryDomain,
+    Offset2D, PipelineBarrierInfo, PipelineBindPoint, PipelineStageFlags, PolygonMode,
+    PrimitiveTopology, PushConstantRange, Rect2D, RenderPassAttachment, RenderPassDescription,
+    SampleCount, SamplerAddressMode, SamplerCreateInfo, SamplerHandle, ShaderModuleHandle,
+    StencilAttachment, StencilLoadOp, SubpassDependency, SubpassDescription, TransitionInfo,
+    VertexBindingDescription, VertexStageInfo, VkBuffer, VkCommandBuffer, VkDescriptorSet,
+    VkFramebuffer, VkGpu, VkGraphicsPipeline, VkImage, VkImageView, VkRenderPass,
+    VkRenderPassCommand, VkSampler, VkShaderModule,
 };
 
 use indexmap::IndexSet;
@@ -226,33 +227,33 @@ impl<R: Sized + GraphResource, ID: Hash + Eq + PartialEq + Ord + PartialOrd + Cl
     }
 }
 
-enum ExternalShaderResource<'a> {
-    ImageView(&'a VkImageView),
-    Buffer(&'a VkBuffer),
+enum ExternalShaderResource {
+    ImageView(ImageViewHandle),
+    Buffer(BufferHandle),
 }
 
-impl<'a> ExternalShaderResource<'a> {
-    fn as_image_view(&self) -> &VkImageView {
+impl ExternalShaderResource {
+    fn as_image_view(&self) -> ImageViewHandle {
         match self {
-            ExternalShaderResource::ImageView(v) => v,
+            ExternalShaderResource::ImageView(v) => v.clone(),
             _ => panic!("This resource is not an image view!"),
         }
     }
-    fn as_buffer(&self) -> &VkBuffer {
+    fn as_buffer(&self) -> BufferHandle {
         match self {
-            ExternalShaderResource::Buffer(b) => b,
+            ExternalShaderResource::Buffer(b) => b.clone(),
             _ => panic!("This resource is not a buffer!"),
         }
     }
 }
 
 #[derive(Default)]
-struct ExternalResources<'a> {
-    external_images: HashMap<ResourceId, &'a VkImage>,
-    external_shader_resources: HashMap<ResourceId, ExternalShaderResource<'a>>,
+struct ExternalResources {
+    external_images: HashMap<ResourceId, ImageHandle>,
+    external_shader_resources: HashMap<ResourceId, ExternalShaderResource>,
 }
 
-impl<'a> ExternalResources<'a> {
+impl ExternalResources {
     fn get_shader_resource(&self, resource_id: &ResourceId) -> &ExternalShaderResource {
         self.external_shader_resources
             .get(resource_id)
@@ -260,34 +261,34 @@ impl<'a> ExternalResources<'a> {
     }
 }
 
-impl<'a> ExternalResources<'a> {
+impl ExternalResources {
     pub fn inject_external_image(
         &mut self,
         id: &ResourceId,
-        image: &'a VkImage,
-        view: &'a VkImageView,
+        image: ImageHandle,
+        view: ImageViewHandle,
     ) {
         self.external_images.insert(*id, image);
         self.external_shader_resources
             .insert(*id, ExternalShaderResource::ImageView(view));
     }
 
-    pub fn inject_external_buffer(&mut self, id: &ResourceId, buffer: &'a VkBuffer) {
+    pub fn inject_external_buffer(&mut self, id: &ResourceId, buffer: BufferHandle) {
         self.external_shader_resources
             .insert(*id, ExternalShaderResource::Buffer(buffer));
     }
 }
 
 pub struct GraphImage {
-    image: VkImage,
+    image: ImageHandle,
     desc: ImageDescription,
 }
 
 impl GraphResource for GraphImage {
-    type Inner = VkImage;
+    type Inner = ImageHandle;
     type Desc = ImageDescription;
 
-    fn construct(image: VkImage, desc: Self::Desc) -> Self
+    fn construct(image: ImageHandle, desc: Self::Desc) -> Self
     where
         Self: Sized,
     {
@@ -316,7 +317,7 @@ impl<'a> CreateFrom<'a, ImageDescription> for GraphImage {
             }
         };
         let image = gpu
-            .create_image(
+            .make_image(
                 &ImageCreateInfo {
                     label: None,
                     width: image_info.width,
@@ -331,7 +332,6 @@ impl<'a> CreateFrom<'a, ImageDescription> for GraphImage {
                     samples: SampleCount::Sample1,
                 },
                 MemoryDomain::DeviceLocal,
-                None,
             )
             .expect("Failed to create image resource");
         Ok(GraphImage::construct(image, *desc))
@@ -351,15 +351,15 @@ impl AsRef<SamplerState> for SamplerState {
 }
 
 pub struct GraphSampler {
-    image: VkSampler,
+    image: SamplerHandle,
     desc: SamplerState,
 }
 
 impl GraphResource for GraphSampler {
-    type Inner = VkSampler;
+    type Inner = SamplerHandle;
     type Desc = SamplerState;
 
-    fn construct(image: VkSampler, desc: Self::Desc) -> Self
+    fn construct(image: SamplerHandle, desc: Self::Desc) -> Self
     where
         Self: Sized,
     {
@@ -381,7 +381,7 @@ impl GraphResource for GraphSampler {
 impl<'a> CreateFrom<'a, SamplerState> for GraphSampler {
     fn create(gpu: &VkGpu, samp: &'a SamplerState) -> anyhow::Result<Self> {
         let sam = gpu
-            .create_sampler(&SamplerCreateInfo {
+            .make_sampler(&SamplerCreateInfo {
                 mag_filter: samp.filtering_mode,
                 min_filter: samp.filtering_mode,
                 address_u: SamplerAddressMode::Repeat,
@@ -399,15 +399,15 @@ impl<'a> CreateFrom<'a, SamplerState> for GraphSampler {
 }
 
 pub struct GraphImageView {
-    image: VkImageView,
+    image: ImageViewHandle,
     desc: ImageDescription,
 }
 
 impl GraphResource for GraphImageView {
-    type Inner = VkImageView;
+    type Inner = ImageViewHandle;
     type Desc = ImageDescription;
 
-    fn construct(image: VkImageView, desc: Self::Desc) -> Self
+    fn construct(image: ImageViewHandle, desc: Self::Desc) -> Self
     where
         Self: Sized,
     {
@@ -428,7 +428,7 @@ impl GraphResource for GraphImageView {
 
 pub struct GraphImageViewCreateInfo<'a> {
     desc: &'a ImageDescription,
-    image: &'a VkImage,
+    image: ImageHandle,
 }
 impl<'a> AsRef<ImageDescription> for GraphImageViewCreateInfo<'a> {
     fn as_ref(&self) -> &ImageDescription {
@@ -438,8 +438,8 @@ impl<'a> AsRef<ImageDescription> for GraphImageViewCreateInfo<'a> {
 impl<'a> CreateFrom<'a, GraphImageViewCreateInfo<'_>> for GraphImageView {
     fn create(gpu: &VkGpu, desc: &'a GraphImageViewCreateInfo) -> anyhow::Result<Self> {
         let view = gpu
-            .create_image_view(&ImageViewCreateInfo {
-                image: desc.image,
+            .make_image_view(&ImageViewCreateInfo {
+                image: desc.image.clone(),
                 view_type: ImageViewType::Type2D,
                 format: desc.desc.format,
                 components: ComponentMapping::default(),
@@ -457,7 +457,7 @@ impl<'a> CreateFrom<'a, GraphImageViewCreateInfo<'_>> for GraphImageView {
 }
 
 pub struct GraphBuffer {
-    inner: VkBuffer,
+    inner: BufferHandle,
     desc: BufferDescription,
 }
 
@@ -468,7 +468,7 @@ impl AsRef<BufferDescription> for BufferDescription {
 }
 
 impl GraphResource for GraphBuffer {
-    type Inner = VkBuffer;
+    type Inner = BufferHandle;
     type Desc = BufferDescription;
 
     fn construct(inner: Self::Inner, desc: Self::Desc) -> Self
@@ -492,7 +492,7 @@ impl GraphResource for GraphBuffer {
 
 impl<'a> CreateFrom<'a, BufferDescription> for GraphBuffer {
     fn create(gpu: &VkGpu, desc: &'a BufferDescription) -> anyhow::Result<Self> {
-        let buffer = gpu.create_buffer(
+        let buffer = gpu.make_buffer(
             &BufferCreateInfo {
                 label: None,
                 size: desc.length as _,
@@ -768,7 +768,7 @@ impl<'a> CreateFrom<'a, RenderGraphFramebufferCreateInfo<'a>> for GraphFramebuff
         let fb = gpu
             .create_framebuffer(&FramebufferCreateInfo {
                 render_pass: desc.render_pass,
-                attachments: desc.render_targets,
+                attachments: todo!(),
                 width: desc.extents.width,
                 height: desc.extents.height,
             })
@@ -808,7 +808,7 @@ impl GraphResource for GraphDescriptorSet {
 
 struct DescriptorSetCreateInfo<'a> {
     hash: u64,
-    inputs: &'a [DescriptorInfo<'a>],
+    inputs: &'a [DescriptorInfo],
 }
 
 impl<'a> AsRef<u64> for DescriptorSetCreateInfo<'a> {
@@ -881,7 +881,7 @@ pub struct GraphRunContext<'a, 'e> {
     current_iteration: u64,
 
     callbacks: Callbacks<'e>,
-    external_resources: ExternalResources<'e>,
+    external_resources: ExternalResources,
     command_buffer: &'e mut VkCommandBuffer<'a>,
 }
 
@@ -915,13 +915,13 @@ impl<'a, 'e> GraphRunContext<'a, 'e> {
     pub(crate) fn inject_external_image(
         &mut self,
         handle: &ResourceId,
-        image: &'e VkImage,
-        view: &'e VkImageView,
+        image: ImageHandle,
+        view: ImageViewHandle,
     ) {
         self.external_resources
             .inject_external_image(handle, image, view);
     }
-    pub(crate) fn injext_external_buffer(&mut self, handle: &ResourceId, buffer: &'e VkBuffer) {
+    pub(crate) fn injext_external_buffer(&mut self, handle: &ResourceId, buffer: BufferHandle) {
         self.external_resources
             .inject_external_buffer(handle, buffer);
     }
@@ -1074,7 +1074,7 @@ pub struct ResourceInfo {
 
 #[derive(Hash)]
 pub struct ModuleInfo<'a> {
-    pub module: &'a VkShaderModule,
+    pub module: ShaderModuleHandle,
     pub entry_point: &'a str,
 }
 
@@ -1199,7 +1199,7 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
         vertex_stage: if let RenderStage::Graphics { vertex, .. } = &description.stage {
             Some(VertexStageInfo {
                 entry_point: vertex.entry_point,
-                module: vertex.module,
+                module: vertex.module.clone(),
             })
         } else {
             None
@@ -1211,7 +1211,7 @@ pub(crate) fn create_pipeline_for_graph_renderpass(
         {
             Some(FragmentStageInfo {
                 entry_point: fragment.entry_point,
-                module: fragment.module,
+                module: fragment.module.clone(),
                 color_attachments: &color_attachments,
                 depth_stencil_attachments: &depth_stencil_attachments,
             })
@@ -1856,32 +1856,32 @@ impl GpuRunner {
         graph: &RenderGraph,
         id: &ResourceId,
         allocator: &'r mut DefaultResourceAllocator,
-    ) -> anyhow::Result<&'e VkImage>
+    ) -> anyhow::Result<ImageHandle>
     where
         'r: 'e,
     {
         if ctx.external_resources.external_images.contains_key(id) {
-            Ok(ctx.external_resources.external_images[id])
+            Ok(ctx.external_resources.external_images[id].clone())
         } else {
             let desc = match &graph.allocations[id].ty {
                 AllocationType::Image(d) => *d,
                 _ => panic!("Type is not an image!"),
             };
-            Ok(allocator.images.get(ctx, &desc, id)?.resource())
+            Ok(allocator.images.get(ctx, &desc, id)?.resource().clone())
         }
     }
     fn get_image_unchecked<'r, 'e>(
         external_resources: &'e ExternalResources,
         id: &ResourceId,
         allocator: &'r DefaultResourceAllocator,
-    ) -> &'e VkImage
+    ) -> ImageHandle
     where
         'r: 'e,
     {
         if external_resources.external_images.contains_key(id) {
-            external_resources.external_images[id]
+            external_resources.external_images[id].clone()
         } else {
-            allocator.images.get_unchecked(id).resource()
+            allocator.images.get_unchecked(id).resource().clone()
         }
     }
 }
@@ -2300,7 +2300,10 @@ fn ensure_graph_allocated_resources_exist(
                     let image = resource_allocator.images.get(ctx, d, writes)?.resource();
                     resource_allocator.image_views.get(
                         ctx,
-                        &GraphImageViewCreateInfo { desc: d, image },
+                        &GraphImageViewCreateInfo {
+                            desc: d,
+                            image: image.clone(),
+                        },
                         writes,
                     )?;
                 }
@@ -2319,7 +2322,10 @@ fn ensure_graph_allocated_resources_exist(
                     let image = resource_allocator.images.get(ctx, d, res)?.resource();
                     resource_allocator.image_views.get(
                         ctx,
-                        &GraphImageViewCreateInfo { desc: d, image },
+                        &GraphImageViewCreateInfo {
+                            desc: d,
+                            image: image.clone(),
+                        },
                         res,
                     )?;
                 }
@@ -2338,7 +2344,10 @@ fn ensure_graph_allocated_resources_exist(
                     let image = resource_allocator.images.get(ctx, d, res)?.resource();
                     resource_allocator.image_views.get(
                         ctx,
-                        &GraphImageViewCreateInfo { desc: d, image },
+                        &GraphImageViewCreateInfo {
+                            desc: d,
+                            image: image.clone(),
+                        },
                         res,
                     )?;
                 }
@@ -2380,15 +2389,15 @@ fn ensure_graph_allocated_samplers_exists(
     Ok(())
 }
 
-fn resolve_render_image_views_unchecked<'e, 'a>(
+fn resolve_render_image_views_unchecked<'a, 'e>(
     info: &RenderPassInfo,
     graph: &RenderGraph,
-    external_resources: &'e ExternalResources<'e>,
+    external_resources: &'e ExternalResources,
     image_views_allocator: &'a ImageViewAllocator,
 ) -> (
-    Vec<ColorAttachment<'e>>,
-    Option<DepthAttachment<'e>>,
-    Option<StencilAttachment<'e>>,
+    Vec<ColorAttachment>,
+    Option<DepthAttachment>,
+    Option<StencilAttachment>,
 )
 where
     'a: 'e,
@@ -2406,7 +2415,10 @@ where
                 .get_shader_resource(writes)
                 .as_image_view()
         } else {
-            image_views_allocator.get_unchecked(writes).resource()
+            image_views_allocator
+                .get_unchecked(writes)
+                .resource()
+                .clone()
         };
 
         let image_desc = if let AllocationType::Image(d) = resource_info.ty {
@@ -2415,14 +2427,14 @@ where
             continue;
         };
 
-        if view.format().is_color() {
+        if image_desc.format.is_color() {
             colors.push(ColorAttachment {
                 image_view: view,
                 load_op: image_desc.clear_value.color_op(),
                 store_op: gpu::AttachmentStoreOp::Store,
                 initial_layout: ImageLayout::ColorAttachment,
             });
-        } else if view.format().is_depth() {
+        } else if image_desc.format.is_depth() {
             depth = Some(DepthAttachment {
                 image_view: view,
                 load_op: image_desc.clear_value.depth_op(),
@@ -2447,17 +2459,28 @@ where
                 .get_shader_resource(reads)
                 .as_image_view()
         } else {
-            image_views_allocator.get_unchecked(reads).resource()
+            image_views_allocator
+                .get_unchecked(reads)
+                .resource()
+                .clone()
         };
 
-        if view.format().is_color() {
+        let resource_info = graph.get_resource_info(reads).expect("Resource not found!");
+
+        let image_desc = if let AllocationType::Image(d) = resource_info.ty {
+            d
+        } else {
+            continue;
+        };
+
+        if image_desc.format.is_color() {
             colors.push(ColorAttachment {
                 image_view: view,
                 load_op: ColorLoadOp::Load,
                 store_op: gpu::AttachmentStoreOp::Store,
                 initial_layout: ImageLayout::ColorAttachment,
             });
-        } else if view.format().is_depth() {
+        } else if image_desc.format.is_depth() {
             depth = Some(DepthAttachment {
                 image_view: view,
                 load_op: DepthLoadOp::Load,
@@ -2508,14 +2531,14 @@ fn resolve_input_descriptor_set<'a>(
                 let view = if resource_info.external {
                     ctx.external_resources.external_shader_resources[read].as_image_view()
                 } else {
-                    image_view_allocator.get_unchecked(read).resource()
+                    image_view_allocator.get_unchecked(read).resource().clone()
                 };
 
                 view.hash(&mut hasher);
                 descriptors.push(DescriptorInfo {
                     binding: idx as _,
                     element_type: gpu::DescriptorType::CombinedImageSampler(gpu::SamplerState {
-                        sampler: sampler_allocator.get_unchecked(read).resource(),
+                        sampler: sampler_allocator.get_unchecked(read).resource().clone(),
                         image_view: view,
                         image_layout: ImageLayout::ShaderReadOnly,
                     }),
@@ -2526,7 +2549,7 @@ fn resolve_input_descriptor_set<'a>(
                 let buffer = if resource_info.external {
                     ctx.external_resources.external_shader_resources[read].as_buffer()
                 } else {
-                    buffer_allocator.get_unchecked(read).resource()
+                    buffer_allocator.get_unchecked(read).resource().clone()
                 };
                 buffer.hash(&mut hasher);
                 let range = BufferRange {

@@ -1,6 +1,8 @@
+use bytemuck::{Pod, Zeroable};
 use gpu::{
-    BufferCreateInfo, BufferRange, BufferUsageFlags, DescriptorInfo, DescriptorSetInfo,
-    DescriptorType, ImageLayout, MemoryDomain, VkBuffer, VkDescriptorSet, VkGpu,
+    BufferCreateInfo, BufferHandle, BufferRange, BufferUsageFlags, DescriptorInfo,
+    DescriptorSetInfo, DescriptorType, Gpu, ImageLayout, MemoryDomain, VkBuffer, VkDescriptorSet,
+    VkGpu,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 use std::collections::HashMap;
@@ -18,7 +20,7 @@ pub struct MaterialInstanceDescription<'a> {
 pub struct MaterialInstance {
     pub(crate) name: String,
     pub(crate) owner: ResourceHandle<MasterMaterial>,
-    pub(crate) parameter_buffer: Option<VkBuffer>,
+    pub(crate) parameter_buffer: Option<BufferHandle>,
     pub(crate) user_descriptor_set: VkDescriptorSet,
     #[allow(dead_code)]
     pub(crate) current_inputs: HashMap<String, ResourceHandle<Texture>>,
@@ -41,7 +43,7 @@ impl MaterialInstance {
         let master_owner = resource_map.get(&owner);
 
         let parameter_buffer = if !master_owner.material_parameters.is_empty() {
-            Some(gpu.create_buffer(
+            Some(gpu.make_buffer(
                 &BufferCreateInfo {
                     label: Some(&format!("{} - Parameter buffer", description.name)),
                     size: master_owner.parameter_block_size,
@@ -69,12 +71,20 @@ impl MaterialInstance {
         })
     }
 
-    pub fn write_parameters<T: Sized + Copy>(&self, gpu: &VkGpu, block: T) -> anyhow::Result<()> {
+    pub fn write_parameters<T: Sized + Copy + Pod + Zeroable>(
+        &self,
+        gpu: &VkGpu,
+        block: T,
+    ) -> anyhow::Result<()> {
         assert!(
             std::mem::size_of::<T>() <= self.parameter_block_size
                 && self.parameter_buffer.is_some()
         );
-        gpu.write_buffer_data(self.parameter_buffer.as_ref().unwrap(), &[block])?;
+        gpu.write_buffer(
+            self.parameter_buffer.as_ref().unwrap(),
+            0,
+            bytemuck::cast_slice(&[block]),
+        )?;
         Ok(())
     }
 
@@ -83,7 +93,7 @@ impl MaterialInstance {
         resource_map: &ResourceMap,
         master: &MasterMaterial,
         description: &MaterialInstanceDescription<'_>,
-        param_buffer: &Option<VkBuffer>,
+        param_buffer: &Option<BufferHandle>,
     ) -> anyhow::Result<VkDescriptorSet> {
         let mut descriptors: Vec<_> = master
             .texture_inputs
@@ -94,8 +104,8 @@ impl MaterialInstance {
                 DescriptorInfo {
                     binding: i as _,
                     element_type: DescriptorType::CombinedImageSampler(gpu::SamplerState {
-                        sampler: &resource_map.get(&tex.sampler).0,
-                        image_view: &resource_map.get(&tex.image_view).view,
+                        sampler: resource_map.get(&tex.sampler).0.clone(),
+                        image_view: resource_map.get(&tex.image_view).view.clone(),
                         image_layout: ImageLayout::ShaderReadOnly,
                     }),
                     binding_stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
@@ -108,7 +118,7 @@ impl MaterialInstance {
                 binding: descriptors.len() as _,
                 binding_stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
                 element_type: DescriptorType::UniformBuffer(BufferRange {
-                    handle: buffer,
+                    handle: buffer.clone(),
                     offset: 0,
                     size: gpu::WHOLE_SIZE,
                 }),

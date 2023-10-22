@@ -1,3 +1,4 @@
+use bytemuck::{Pod, Zeroable};
 use engine_macros::glsl;
 use std::{collections::HashMap, mem::size_of};
 
@@ -13,11 +14,12 @@ use crate::{
 };
 
 use gpu::{
-    AttachmentStoreOp, BindingType, BlendMode, BlendOp, BlendState, BufferCreateInfo,
+    AttachmentStoreOp, BindingType, BlendMode, BlendOp, BlendState, BufferCreateInfo, BufferHandle,
     BufferUsageFlags, ColorComponentFlags, ColorLoadOp, CompareOp, DepthStencilState, Extent2D,
-    FragmentStageInfo, ImageFormat, ImageLayout, IndexType, MemoryDomain, PushConstantRange,
-    RenderPassAttachment, SampleCount, ShaderModuleCreateInfo, ShaderStage, StencilLoadOp,
-    StencilOpState, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu, VkShaderModule, VkSwapchain,
+    FragmentStageInfo, Gpu, ImageFormat, ImageLayout, IndexType, MemoryDomain, PushConstantRange,
+    RenderPassAttachment, SampleCount, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
+    StencilLoadOp, StencilOpState, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu,
+    VkShaderModule, VkSwapchain,
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -72,12 +74,18 @@ struct FxaaShaderParams {
     iterations: u32,
 }
 
+unsafe impl Pod for FxaaShaderParams {}
+unsafe impl Zeroable for FxaaShaderParams {}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct ObjectDrawInfo {
     pub model: Matrix4<f32>,
     pub camera_index: u32,
 }
+
+unsafe impl Pod for ObjectDrawInfo {}
+unsafe impl Zeroable for ObjectDrawInfo {}
 
 #[derive(Clone, Copy)]
 pub struct FxaaSettings {
@@ -86,6 +94,9 @@ pub struct FxaaSettings {
     pub fxaa_quality_edge_threshold_min: f32,
     pub iterations: u32,
 }
+
+unsafe impl Pod for FxaaSettings {}
+unsafe impl Zeroable for FxaaSettings {}
 
 impl Default for FxaaSettings {
     fn default() -> Self {
@@ -108,6 +119,9 @@ pub struct PerFrameData {
     pub viewport_size_offset: Vector4<f32>,
 }
 
+unsafe impl Pod for PerFrameData {}
+unsafe impl Zeroable for PerFrameData {}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct GpuLightInfo {
@@ -117,6 +131,9 @@ struct GpuLightInfo {
     extras: Vector4<f32>,
     ty_shadowcaster: [i32; 4],
 }
+
+unsafe impl Pod for GpuLightInfo {}
+unsafe impl Zeroable for GpuLightInfo {}
 
 impl From<&Light> for GpuLightInfo {
     fn from(light: &Light) -> Self {
@@ -167,8 +184,8 @@ impl From<&Light> for GpuLightInfo {
 }
 
 struct FrameBuffers {
-    camera_buffer: VkBuffer,
-    light_buffer: VkBuffer,
+    camera_buffer: BufferHandle,
+    light_buffer: BufferHandle,
 }
 
 struct DrawCall<'a> {
@@ -180,16 +197,16 @@ struct DrawCall<'a> {
 pub struct DeferredRenderingPipeline {
     frame_buffers: Vec<FrameBuffers>,
     render_graph: RenderGraph,
-    screen_quad: VkShaderModule,
-    texture_copy: VkShaderModule,
-    gbuffer_combine: VkShaderModule,
-    tonemap_fs: VkShaderModule,
+    screen_quad: ShaderModuleHandle,
+    texture_copy: ShaderModuleHandle,
+    gbuffer_combine: ShaderModuleHandle,
+    tonemap_fs: ShaderModuleHandle,
 
     fxaa_settings: FxaaSettings,
 
     runner: GpuRunner,
-    fxaa_vs: VkShaderModule,
-    fxaa_fs: VkShaderModule,
+    fxaa_vs: ShaderModuleHandle,
+    fxaa_fs: ShaderModuleHandle,
     in_flight_frame: usize,
     max_frames_in_flight: usize,
     light_iteration: u64,
@@ -224,7 +241,7 @@ impl DeferredRenderingPipeline {
                         | BufferUsageFlags::UNIFORM_BUFFER
                         | BufferUsageFlags::TRANSFER_DST,
                 };
-                gpu.create_buffer(
+                gpu.make_buffer(
                     &create_info,
                     MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
                 )?
@@ -237,7 +254,7 @@ impl DeferredRenderingPipeline {
                         | BufferUsageFlags::STORAGE_BUFFER
                         | BufferUsageFlags::TRANSFER_DST,
                 };
-                gpu.create_buffer(
+                gpu.make_buffer(
                     &create_info,
                     MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
                 )?
@@ -250,23 +267,23 @@ impl DeferredRenderingPipeline {
 
         let render_graph = RenderGraph::new();
 
-        let fxaa_vs = gpu.create_shader_module(&ShaderModuleCreateInfo {
+        let fxaa_vs = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(FXAA_VS),
         })?;
-        let fxaa_fs = gpu.create_shader_module(&ShaderModuleCreateInfo {
+        let fxaa_fs = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(FXAA_FS),
         })?;
 
-        let screen_quad = gpu.create_shader_module(&ShaderModuleCreateInfo {
+        let screen_quad = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(SCREEN_QUAD),
         })?;
-        let gbuffer_combine = gpu.create_shader_module(&ShaderModuleCreateInfo {
+        let gbuffer_combine = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(GBUFFER_COMBINE),
         })?;
-        let tonemap_fs = gpu.create_shader_module(&ShaderModuleCreateInfo {
+        let tonemap_fs = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(TONEMAP),
         })?;
-        let texture_copy = gpu.create_shader_module(&ShaderModuleCreateInfo {
+        let texture_copy = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(TEXTURE_COPY),
         })?;
 
@@ -600,18 +617,18 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         super::app_state()
             .gpu
-            .write_buffer_data_with_offset(
+            .write_buffer(
                 &current_buffers.camera_buffer,
                 0,
-                &[per_frame_data.len() as u32 - 1],
+                bytemuck::cast_slice(&[per_frame_data.len() as u32 - 1]),
             )
             .unwrap();
         super::app_state()
             .gpu
-            .write_buffer_data_with_offset(
+            .write_buffer(
                 &current_buffers.camera_buffer,
                 size_of::<u32>() as u64 * 4,
-                &per_frame_data,
+                bytemuck::cast_slice(&per_frame_data),
             )
             .unwrap();
 
@@ -624,22 +641,26 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         super::app_state()
             .gpu
-            .write_buffer_data_with_offset(&current_buffers.light_buffer, 0, &[ambient])
-            .unwrap();
-        super::app_state()
-            .gpu
-            .write_buffer_data_with_offset(
+            .write_buffer(
                 &current_buffers.light_buffer,
-                std::mem::size_of::<Vector4<f32>>() as _,
-                &[self.active_lights.len() as u32],
+                0,
+                bytemuck::cast_slice(&[ambient.x, ambient.y, ambient.z, ambient.w]),
             )
             .unwrap();
         super::app_state()
             .gpu
-            .write_buffer_data_with_offset(
+            .write_buffer(
+                &current_buffers.light_buffer,
+                std::mem::size_of::<Vector4<f32>>() as _,
+                bytemuck::cast_slice(&[self.active_lights.len() as u32]),
+            )
+            .unwrap();
+        super::app_state()
+            .gpu
+            .write_buffer(
                 &current_buffers.light_buffer,
                 std::mem::size_of::<Vector4<f32>>() as u64 + size_of::<u32>() as u64 * 4,
-                &self.active_lights,
+                bytemuck::cast_slice(&self.active_lights),
             )
             .unwrap();
 
@@ -932,11 +953,11 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 vertex_inputs: &[],
                 stage: RenderStage::Graphics {
                     vertex: ModuleInfo {
-                        module: &self.screen_quad,
+                        module: self.screen_quad.clone(),
                         entry_point: "main",
                     },
                     fragment: ModuleInfo {
-                        module: &self.gbuffer_combine,
+                        module: self.gbuffer_combine.clone(),
                         entry_point: "main",
                     },
                 },
@@ -970,11 +991,11 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 vertex_inputs: &[],
                 stage: RenderStage::Graphics {
                     vertex: ModuleInfo {
-                        module: &self.screen_quad,
+                        module: self.screen_quad.clone(),
                         entry_point: "main",
                     },
                     fragment: ModuleInfo {
-                        module: &self.tonemap_fs,
+                        module: self.tonemap_fs.clone(),
                         entry_point: "main",
                     },
                 },
@@ -1008,11 +1029,11 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 vertex_inputs: &[],
                 stage: RenderStage::Graphics {
                     vertex: ModuleInfo {
-                        module: &self.fxaa_vs,
+                        module: self.fxaa_vs.clone(),
                         entry_point: "main",
                     },
                     fragment: ModuleInfo {
-                        module: &self.fxaa_fs,
+                        module: self.fxaa_fs.clone(),
                         entry_point: "main",
                     },
                 },
@@ -1049,11 +1070,11 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 vertex_inputs: &[],
                 stage: RenderStage::Graphics {
                     vertex: ModuleInfo {
-                        module: &self.screen_quad,
+                        module: self.screen_quad.clone(),
                         entry_point: "main",
                     },
                     fragment: ModuleInfo {
-                        module: &self.texture_copy,
+                        module: self.texture_copy.clone(),
                         entry_point: "main",
                     },
                 },
@@ -1187,10 +1208,14 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let image_view = resource_map.get(&irradiance_map_texture.image_view);
         let image = &resource_map.get(&image_view.image).0;
 
-        context.inject_external_image(&irradiance_map, image, &image_view.view);
-        context.inject_external_image(&swapchain_image, backbuffer.image, backbuffer.image_view);
-        context.injext_external_buffer(&camera_buffer, &current_buffers.camera_buffer);
-        context.injext_external_buffer(&light_buffer, &current_buffers.light_buffer);
+        context.inject_external_image(&irradiance_map, image.clone(), image_view.view.clone());
+        context.inject_external_image(
+            &swapchain_image,
+            backbuffer.image.clone(),
+            backbuffer.image_view.clone(),
+        );
+        context.injext_external_buffer(&camera_buffer, current_buffers.camera_buffer.clone());
+        context.injext_external_buffer(&light_buffer, current_buffers.light_buffer.clone());
         //#endregion
         self.render_graph.run(context, &mut self.runner)?;
 
@@ -1326,7 +1351,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             material_parameters: material_description.material_parameters,
             vertex_info: &VertexStageInfo {
                 entry_point: "main",
-                module: material_description.vertex_module,
+                module: material_description.vertex_module.clone(),
             },
             fragment_info: &FragmentStageInfo {
                 entry_point: "main",

@@ -1,6 +1,9 @@
 use std::num::NonZeroU32;
 
-use gpu::{Extent2D, ImageFormat, VkCommandBuffer, VkGpu, VkImage, VkImageView};
+use gpu::{
+    Extent2D, ImageFormat, ImageHandle, ImageViewHandle, VkCommandBuffer, VkGpu, VkImage,
+    VkImageView,
+};
 use nalgebra::{vector, Matrix4, Point3, Vector2, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
 
@@ -268,11 +271,11 @@ impl Scene {
     }
 }
 
-pub struct Backbuffer<'a> {
+pub struct Backbuffer {
     pub size: Extent2D,
     pub format: ImageFormat,
-    pub image: &'a VkImage,
-    pub image_view: &'a VkImageView,
+    pub image: ImageHandle,
+    pub image_view: ImageViewHandle,
 }
 
 pub trait RenderingPipeline {

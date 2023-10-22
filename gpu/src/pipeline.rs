@@ -246,7 +246,7 @@ impl<'a> GraphicsPipelineDescription<'a> {
     fn get_output_attachments(&self) -> Vec<PipelineColorBlendAttachmentState> {
         let mut pipeline_color_blend_attachment_states = vec![];
 
-        if let Some(fs) = self.fragment_stage {
+        if let Some(fs) = &self.fragment_stage {
             for attachment in fs.color_attachments.iter() {
                 pipeline_color_blend_attachment_states.push(PipelineColorBlendAttachmentState {
                     blend_enable: vk_bool(attachment.blend_state.blend_enable),
@@ -328,18 +328,18 @@ impl VkGraphicsPipeline {
         let color_blend_attachments = pipeline_description.get_output_attachments();
         let mut stages = vec![];
 
-        let vs_entry = if let Some(vs) = pipeline_description.vertex_stage {
+        let vs_entry = if let Some(vs) = &pipeline_description.vertex_stage {
             CString::new(vs.entry_point).unwrap()
         } else {
             CString::new("").unwrap()
         };
-        let fs_entry = if let Some(fs) = pipeline_description.vertex_stage {
+        let fs_entry = if let Some(fs) = &pipeline_description.vertex_stage {
             CString::new(fs.entry_point).unwrap()
         } else {
             CString::new("").unwrap()
         };
 
-        if let Some(vs) = pipeline_description.vertex_stage {
+        if let Some(vs) = &pipeline_description.vertex_stage {
             let module = gpu.resolve_resource::<VkShaderModule>(&vs.module).inner;
             stages.push(PipelineShaderStageCreateInfo {
                 s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -351,7 +351,7 @@ impl VkGraphicsPipeline {
                 p_specialization_info: std::ptr::null(),
             })
         }
-        if let Some(fs) = pipeline_description.fragment_stage {
+        if let Some(fs) = &pipeline_description.fragment_stage {
             let module = gpu.resolve_resource::<VkShaderModule>(&fs.module).inner;
             stages.push(PipelineShaderStageCreateInfo {
                 s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -523,6 +523,7 @@ impl VkGraphicsPipeline {
 
             let color_attachment = pipeline_description
                 .fragment_stage
+                .as_ref()
                 .map(|frag| {
                     frag.color_attachments
                         .iter()

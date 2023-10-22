@@ -1,11 +1,11 @@
 use gpu::{
-    ComponentMapping, Filter, ImageAspectFlags, ImageCreateInfo, ImageFormat,
-    ImageSubresourceRange, ImageUsageFlags, ImageViewType, MemoryDomain, SamplerAddressMode,
-    SamplerCreateInfo, VkGpu, VkImage, VkImageView, VkSampler,
+    ComponentMapping, Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle,
+    ImageSubresourceRange, ImageUsageFlags, ImageViewHandle, ImageViewType, MemoryDomain,
+    SamplerAddressMode, SamplerCreateInfo, SamplerHandle, VkGpu, VkImage, VkImageView, VkSampler,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 
-pub struct ImageResource(pub VkImage);
+pub struct ImageResource(pub ImageHandle);
 impl Resource for ImageResource {
     fn get_description(&self) -> &str {
         "GPU Image"
@@ -13,7 +13,7 @@ impl Resource for ImageResource {
 }
 
 pub struct TextureImageView {
-    pub view: VkImageView,
+    pub view: ImageViewHandle,
     pub image: ResourceHandle<ImageResource>,
 }
 impl Resource for TextureImageView {
@@ -22,7 +22,7 @@ impl Resource for TextureImageView {
     }
 }
 
-pub struct SamplerResource(pub VkSampler);
+pub struct SamplerResource(pub SamplerHandle);
 impl Resource for SamplerResource {
     fn get_description(&self) -> &str {
         "GPU Sampler"
@@ -42,13 +42,13 @@ impl Texture {
         label: Option<&str>,
         format: ImageFormat,
         view_type: ImageViewType,
-    ) -> anyhow::Result<(VkImage, VkImageView, VkSampler)> {
+    ) -> anyhow::Result<(ImageHandle, ImageViewHandle, SamplerHandle)> {
         let layers = match view_type {
             ImageViewType::Type2D => 1,
             ImageViewType::Cube => 6,
             _ => unimplemented!(),
         };
-        let image = gpu.create_image(
+        let image = gpu.make_image(
             &ImageCreateInfo {
                 label,
                 width,
@@ -62,11 +62,10 @@ impl Texture {
                 usage: ImageUsageFlags::TRANSFER_DST | ImageUsageFlags::SAMPLED,
             },
             MemoryDomain::DeviceLocal,
-            data,
         )?;
 
-        let rgba_view = gpu.create_image_view(&gpu::ImageViewCreateInfo {
-            image: &image,
+        let rgba_view = gpu.make_image_view(&gpu::ImageViewCreateInfo {
+            image: image.clone(),
             view_type,
             format,
             components: ComponentMapping::default(),
@@ -79,7 +78,7 @@ impl Texture {
             },
         })?;
 
-        let sampler = gpu.create_sampler(&SamplerCreateInfo {
+        let sampler = gpu.make_sampler(&SamplerCreateInfo {
             mag_filter: Filter::Linear,
             min_filter: Filter::Linear,
             address_u: SamplerAddressMode::Repeat,
@@ -96,11 +95,11 @@ impl Texture {
 
     pub fn wrap(
         gpu: &VkGpu,
-        image: VkImage,
-        view: VkImageView,
+        image: ImageHandle,
+        view: ImageViewHandle,
         resource_map: &mut ResourceMap,
     ) -> anyhow::Result<Self> {
-        let sampler = gpu.create_sampler(&SamplerCreateInfo {
+        let sampler = gpu.make_sampler(&SamplerCreateInfo {
             mag_filter: Filter::Linear,
             min_filter: Filter::Linear,
             address_u: SamplerAddressMode::Repeat,

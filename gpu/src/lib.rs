@@ -824,10 +824,10 @@ pub struct VertexBindingDescription<'a> {
     pub attributes: &'a [VertexAttributeDescription],
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct VertexStageInfo<'a> {
     pub entry_point: &'a str,
-    pub module: &'a ShaderModuleHandle,
+    pub module: ShaderModuleHandle,
 }
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
@@ -872,10 +872,10 @@ pub struct RenderPassAttachment {
 
 #[derive(Clone, Copy, Debug)]
 pub struct DepthStencilAttachment {}
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct FragmentStageInfo<'a> {
     pub entry_point: &'a str,
-    pub module: &'a ShaderModuleHandle,
+    pub module: ShaderModuleHandle,
     pub color_attachments: &'a [RenderPassAttachment],
     pub depth_stencil_attachments: &'a [DepthStencilAttachment],
 }
@@ -925,7 +925,7 @@ pub struct GlobalBinding<'a> {
     pub elements: &'a [BindingElement],
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 pub struct GraphicsPipelineDescription<'a> {
     pub global_bindings: &'a [GlobalBinding<'a>],
     pub vertex_inputs: &'a [VertexBindingDescription<'a>],

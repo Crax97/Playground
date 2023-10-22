@@ -205,10 +205,10 @@ impl MasterMaterial {
                     },
                 ],
                 vertex_inputs: Self::get_inputs_for_material_domain(&description.domain),
-                vertex_stage: Some(*description.vertex_info),
+                vertex_stage: Some(description.vertex_info.clone()),
                 fragment_stage: match target {
                     PipelineTarget::ColorAndDepth | PipelineTarget::PostProcess => {
-                        Some(*description.fragment_info)
+                        Some(description.fragment_info.clone())
                     }
                     PipelineTarget::DepthOnly => None,
                 },
@@ -268,8 +268,8 @@ impl MasterMaterial {
                 },
             ],
             vertex_inputs: Self::get_inputs_for_material_domain(&description.domain),
-            vertex_stage: Some(*description.vertex_info),
-            fragment_stage: Some(*description.fragment_info),
+            vertex_stage: Some(description.vertex_info.clone()),
+            fragment_stage: Some(description.fragment_info.clone()),
             input_topology: gpu::PrimitiveTopology::TriangleList,
             primitive_restart: description.primitive_restart,
             polygon_mode: description.polygon_mode,
