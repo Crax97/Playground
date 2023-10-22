@@ -811,7 +811,7 @@ impl Context for GpuThreadSharedState {
 pub struct VkGpu {
     pub(crate) state: Arc<GpuThreadSharedState>,
     pub(crate) thread_local_state: GpuThreadLocalState,
-    pub(crate) staging_buffer: VkBuffer,
+    pub(crate) staging_buffer: BufferHandle,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -1401,7 +1401,7 @@ impl VkGpu {
             super::DescriptorType::UniformBuffer(buf) => buffer_descriptors.push((
                 i.binding,
                 DescriptorBufferInfo {
-                    buffer: buf.handle.inner,
+                    buffer: self.resolve_resource::<VkBuffer>(&buf.handle).inner,
                     offset: buf.offset,
                     range: if buf.size == crate::WHOLE_SIZE {
                         vk::WHOLE_SIZE
@@ -1414,7 +1414,7 @@ impl VkGpu {
             super::DescriptorType::StorageBuffer(buf) => buffer_descriptors.push((
                 i.binding,
                 DescriptorBufferInfo {
-                    buffer: buf.handle.inner,
+                    buffer: self.resolve_resource::<VkBuffer>(&buf.handle).inner,
                     offset: buf.offset,
                     range: if buf.size == crate::WHOLE_SIZE {
                         vk::WHOLE_SIZE
@@ -1611,6 +1611,13 @@ impl VkGpu {
 
         descriptors
     }
+
+    pub(crate) fn resolve_resource<T: HasAssociatedHandle + Clone + 'static>(
+        &self,
+        source: &T::AssociatedHandle,
+    ) -> T {
+        self.state.allocated_resources.borrow().resolve(source)
+    }
 }
 
 fn find_supported_features(
@@ -1641,7 +1648,7 @@ fn find_supported_features(
     supported_features
 }
 
-fn create_staging_buffer(state: &Arc<GpuThreadSharedState>) -> VkResult<VkBuffer> {
+fn create_staging_buffer(state: &Arc<GpuThreadSharedState>) -> VkResult<BufferHandle> {
     let mb_64 = 1024 * 1024 * 64;
     let create_info: vk::BufferCreateInfo = vk::BufferCreateInfo {
         s_type: StructureType::BUFFER_CREATE_INFO,
@@ -1678,7 +1685,12 @@ fn create_staging_buffer(state: &Arc<GpuThreadSharedState>) -> VkResult<VkBuffer
         allocation,
         state.gpu_memory_allocator.clone(),
     )?;
-    Ok(buffer)
+    let handle = BufferHandle::new(buffer.inner.as_raw(), state.clone());
+    state
+        .allocated_resources
+        .borrow_mut()
+        .insert(&handle, buffer);
+    Ok(handle)
 }
 
 impl VkGpu {
@@ -1785,13 +1797,9 @@ impl VkGpu {
         if buffer.memory_domain.contains(MemoryDomain::HostVisible) {
             buffer.write_data(offset, data);
         } else {
-            self.staging_buffer.write_data(0, data);
-            self.copy_buffer(
-                &self.staging_buffer,
-                buffer,
-                offset,
-                std::mem::size_of_val(data),
-            )?;
+            let staging_buffer = self.resolve_resource::<VkBuffer>(&self.staging_buffer);
+            staging_buffer.write_data(0, data);
+            self.copy_buffer(&staging_buffer, buffer, offset, std::mem::size_of_val(data))?;
         }
         Ok(())
     }
@@ -1825,10 +1833,11 @@ impl VkGpu {
             },
         )?;
 
-        if data.len() < self.staging_buffer.size() {
-            self.staging_buffer.write_data(0, &data);
+        let staging_buffer = self.resolve_resource::<VkBuffer>(&self.staging_buffer);
+        if data.len() < staging_buffer.size() {
+            staging_buffer.write_data(0, &data);
             self.copy_buffer_to_image(&BufferImageCopyInfo {
-                source: &self.staging_buffer,
+                source: self.staging_buffer.clone(),
                 dest: &image,
                 dest_layout: ImageLayout::TransferDst,
                 image_offset: Offset3D {
@@ -1859,17 +1868,17 @@ impl VkGpu {
                 MemoryDomain::DeviceLocal,
             )?;
             let mut written = 0;
+            let staging_buffer = self.resolve_resource::<VkBuffer>(&self.staging_buffer);
             while written < data.len() {
                 let remain = data.len() - written;
-                let written_this_iteration = if remain > self.staging_buffer.size() {
-                    self.staging_buffer.size()
+                let written_this_iteration = if remain > staging_buffer.size() {
+                    staging_buffer.size()
                 } else {
                     remain
                 };
-                self.staging_buffer
-                    .write_data(0, &data[written..written + written_this_iteration]);
+                staging_buffer.write_data(0, &data[written..written + written_this_iteration]);
                 self.copy_buffer(
-                    &self.staging_buffer,
+                    &staging_buffer,
                     &intermediary_buffer,
                     written as _,
                     written_this_iteration,
@@ -1878,7 +1887,7 @@ impl VkGpu {
                 written += written_this_iteration;
             }
             self.copy_buffer_to_image(&BufferImageCopyInfo {
-                source: &self.staging_buffer,
+                source: self.staging_buffer.clone(),
                 dest: &image,
                 dest_layout: ImageLayout::TransferDst,
                 image_offset: Offset3D {

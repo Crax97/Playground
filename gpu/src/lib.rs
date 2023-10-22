@@ -149,9 +149,9 @@ pub struct TransitionInfo {
     pub stage_mask: PipelineStageFlags,
 }
 
-#[derive(Clone, Copy, Hash)]
+#[derive(Clone, Hash)]
 pub struct BufferImageCopyInfo<'a> {
-    pub source: &'a VkBuffer,
+    pub source: BufferHandle,
     pub dest: &'a VkImage,
     pub dest_layout: ImageLayout,
     pub image_offset: Offset3D,
@@ -670,8 +670,8 @@ impl QueueType {
 }
 
 #[derive(Clone, Hash)]
-pub struct BufferRange<'a> {
-    pub handle: &'a VkBuffer,
+pub struct BufferRange {
+    pub handle: BufferHandle,
     pub offset: u64,
     pub size: u64,
 }
@@ -685,8 +685,8 @@ pub struct SamplerState<'a> {
 
 #[derive(Clone)]
 pub enum DescriptorType<'a> {
-    UniformBuffer(BufferRange<'a>),
-    StorageBuffer(BufferRange<'a>),
+    UniformBuffer(BufferRange),
+    StorageBuffer(BufferRange),
     Sampler(SamplerState<'a>),
     CombinedImageSampler(SamplerState<'a>),
 }
@@ -992,12 +992,12 @@ pub struct CommandBufferSubmitInfo<'a> {
     pub fence: Option<&'a GPUFence>,
 }
 
-pub struct BufferMemoryBarrier<'a> {
+pub struct BufferMemoryBarrier {
     pub src_access_mask: AccessFlags,
     pub dst_access_mask: AccessFlags,
     pub src_queue_family_index: u32,
     pub dst_queue_family_index: u32,
-    pub buffer: &'a VkBuffer,
+    pub buffer: BufferHandle,
     pub offset: u64,
     pub size: u64,
 }
@@ -1018,7 +1018,7 @@ pub struct PipelineBarrierInfo<'a> {
     pub src_stage_mask: PipelineStageFlags,
     pub dst_stage_mask: PipelineStageFlags,
     pub memory_barriers: &'a [MemoryBarrier],
-    pub buffer_memory_barriers: &'a [BufferMemoryBarrier<'a>],
+    pub buffer_memory_barriers: &'a [BufferMemoryBarrier],
     pub image_memory_barriers: &'a [ImageMemoryBarrier<'a>],
 }
 

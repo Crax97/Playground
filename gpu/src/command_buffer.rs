@@ -373,7 +373,23 @@ impl<'g> VkCommandBuffer<'g> {
         let buffer_memory_barriers: Vec<_> = barrier_info
             .buffer_memory_barriers
             .iter()
-            .map(|b| b.to_vk())
+            .map(|b| vk::BufferMemoryBarrier {
+                s_type: StructureType::BUFFER_MEMORY_BARRIER,
+                p_next: std::ptr::null(),
+                src_access_mask: b.src_access_mask.to_vk(),
+                dst_access_mask: b.dst_access_mask.to_vk(),
+                src_queue_family_index: b.src_queue_family_index,
+                dst_queue_family_index: b.dst_queue_family_index,
+                buffer: self
+                    .gpu
+                    .state
+                    .allocated_resources
+                    .borrow()
+                    .resolve::<VkBuffer>(&b.buffer)
+                    .inner,
+                offset: b.offset,
+                size: b.size,
+            })
             .collect();
         let image_memory_barriers: Vec<_> = barrier_info
             .image_memory_barriers
@@ -494,10 +510,11 @@ impl<'g> VkCommandBuffer<'g> {
 
     pub fn copy_buffer_to_image(&mut self, info: &BufferImageCopyInfo) -> VkResult<()> {
         self.has_recorded_anything = true;
+        let source = self.gpu.resolve_resource::<VkBuffer>(&info.source).inner;
         unsafe {
             self.gpu.vk_logical_device().cmd_copy_buffer_to_image(
                 self.inner(),
-                info.source.inner,
+                source,
                 info.dest.inner,
                 info.dest_layout.to_vk(),
                 &[vk::BufferImageCopy {

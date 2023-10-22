@@ -1174,24 +1174,6 @@ impl ToVk for ImageSubresourceRange {
     }
 }
 
-impl<'a> ToVk for BufferMemoryBarrier<'a> {
-    type Inner = vk::BufferMemoryBarrier;
-
-    fn to_vk(&self) -> Self::Inner {
-        Self::Inner {
-            s_type: StructureType::BUFFER_MEMORY_BARRIER,
-            p_next: std::ptr::null(),
-            src_access_mask: self.src_access_mask.to_vk(),
-            dst_access_mask: self.dst_access_mask.to_vk(),
-            src_queue_family_index: self.src_queue_family_index,
-            dst_queue_family_index: self.dst_queue_family_index,
-            buffer: self.buffer.inner,
-            offset: self.offset,
-            size: self.size,
-        }
-    }
-}
-
 impl<'a> ToVk for ImageMemoryBarrier<'a> {
     type Inner = vk::ImageMemoryBarrier;
 
