@@ -1,4 +1,4 @@
-use gpu::{VkGpu, VkSwapchain};
+use gpu::{Gpu, VkGpu, VkSwapchain};
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::Time;
@@ -26,6 +26,7 @@ impl AppState {
 
     pub fn begin_frame(&mut self) -> anyhow::Result<()> {
         self.time.begin_frame();
+        self.gpu.update();
         Ok(())
     }
 

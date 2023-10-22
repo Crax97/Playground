@@ -32,6 +32,8 @@ pub struct GpuConfiguration<'a> {
 }
 
 pub trait Gpu {
+    fn update(&self);
+
     fn make_buffer(
         &self,
         buffer_info: &BufferCreateInfo,

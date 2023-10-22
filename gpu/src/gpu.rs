@@ -32,7 +32,7 @@ use ash::{
     *,
 };
 
-use log::{error, trace, warn};
+use log::{debug, error, trace, warn};
 use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 
@@ -595,6 +595,29 @@ impl DescriptorSetCache {
     }
 }
 
+struct DestroyedResource<T> {
+    resource: T,
+    destroyed_frame_counter: u64,
+}
+impl<T> DestroyedResource<T> {
+    const DESTROYED_FRAME_COUNTER: u64 = 3;
+    fn new(resource: T) -> Self {
+        Self {
+            resource,
+            destroyed_frame_counter: Self::DESTROYED_FRAME_COUNTER,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct DestroyedResources {
+    destroyed_shader_modules: Vec<DestroyedResource<vk::ShaderModule>>,
+    destroyed_buffers: Vec<DestroyedResource<VkBuffer>>,
+    destroyed_images: Vec<DestroyedResource<VkImage>>,
+    destroyed_image_views: Vec<DestroyedResource<vk::ImageView>>,
+    destroyed_samplers: Vec<DestroyedResource<vk::Sampler>>,
+}
+
 /*
  * All the state that can be shared across threads
  * */
@@ -620,6 +643,7 @@ pub struct GpuThreadSharedState {
     messenger: Option<vk::DebugUtilsMessengerEXT>,
     pub dynamic_rendering: DynamicRendering,
     pub allocated_resources: RefCell<GpuResourceMap>,
+    pub destroyed_resources: RefCell<DestroyedResources>,
 }
 
 impl Drop for GpuThreadSharedState {
@@ -682,8 +706,6 @@ impl GpuThreadLocalState {
     }
 }
 
-pub struct VulkanContext {}
-
 impl Context for GpuThreadSharedState {
     fn increment_resource_refcount(&self, id: u64, resource_type: crate::HandleType) {
         match resource_type {
@@ -716,37 +738,71 @@ impl Context for GpuThreadSharedState {
     }
 
     fn decrement_resource_refcount(&self, id: u64, resource_type: crate::HandleType) {
-        // TODO: Handle correctly deallocation
         match resource_type {
             crate::HandleType::Buffer => {
-                self.allocated_resources
+                if let Some(buffer) = self
+                    .allocated_resources
                     .borrow_mut()
                     .get_map::<VkBuffer>()
-                    .decrement_resource_count(id);
+                    .decrement_resource_count(id)
+                {
+                    self.destroyed_resources
+                        .borrow_mut()
+                        .destroyed_buffers
+                        .push(DestroyedResource::new(buffer))
+                }
             }
             crate::HandleType::ShaderModule => {
-                self.allocated_resources
+                if let Some(shader_module) = self
+                    .allocated_resources
                     .borrow_mut()
                     .get_map::<VkShaderModule>()
-                    .decrement_resource_count(id);
+                    .decrement_resource_count(id)
+                {
+                    self.destroyed_resources
+                        .borrow_mut()
+                        .destroyed_shader_modules
+                        .push(DestroyedResource::new(shader_module.inner))
+                }
             }
             crate::HandleType::Image => {
-                self.allocated_resources
+                if let Some(image) = self
+                    .allocated_resources
                     .borrow_mut()
                     .get_map::<VkImage>()
-                    .decrement_resource_count(id);
+                    .decrement_resource_count(id)
+                {
+                    self.destroyed_resources
+                        .borrow_mut()
+                        .destroyed_images
+                        .push(DestroyedResource::new(image))
+                }
             }
             crate::HandleType::ImageView => {
-                self.allocated_resources
+                if let Some(view) = self
+                    .allocated_resources
                     .borrow_mut()
                     .get_map::<VkImageView>()
-                    .decrement_resource_count(id);
+                    .decrement_resource_count(id)
+                {
+                    self.destroyed_resources
+                        .borrow_mut()
+                        .destroyed_image_views
+                        .push(DestroyedResource::new(view.inner))
+                }
             }
             crate::HandleType::Sampler => {
-                self.allocated_resources
+                if let Some(sampler) = self
+                    .allocated_resources
                     .borrow_mut()
                     .get_map::<VkSampler>()
-                    .decrement_resource_count(id);
+                    .decrement_resource_count(id)
+                {
+                    self.destroyed_resources
+                        .borrow_mut()
+                        .destroyed_samplers
+                        .push(DestroyedResource::new(sampler.inner))
+                }
             }
         }
     }
@@ -962,6 +1018,7 @@ impl VkGpu {
             descriptor_set_cache: DescriptorSetCache::new(logical_device),
             dynamic_rendering,
             allocated_resources: RefCell::new(GpuResourceMap::new()),
+            destroyed_resources: RefCell::new(DestroyedResources::default()),
         });
 
         let thread_local_state = GpuThreadLocalState::new(state.clone())?;
@@ -2204,9 +2261,93 @@ impl VkGpu {
     pub fn allocator(&self) -> Arc<RefCell<dyn GpuAllocator>> {
         self.state.gpu_memory_allocator.clone()
     }
+
+    fn update_cycle_for_deleted_resources<T, F: Fn(&T)>(
+        &self,
+        deleted_resources: &mut Vec<DestroyedResource<T>>,
+        fun: F,
+    ) {
+        deleted_resources.iter_mut().for_each(|r| {
+            r.destroyed_frame_counter -= 1;
+        });
+
+        deleted_resources.retain(|el| {
+            if el.destroyed_frame_counter == 0 {
+                println!("Destroyed!");
+                fun(&el.resource);
+                false
+            } else {
+                true
+            }
+        })
+    }
 }
 
 impl Gpu for VkGpu {
+    fn update(&self) {
+        self.update_cycle_for_deleted_resources(
+            &mut self
+                .state
+                .destroyed_resources
+                .borrow_mut()
+                .destroyed_shader_modules,
+            |sm| unsafe {
+                self.vk_logical_device()
+                    .destroy_shader_module(*sm, get_allocation_callbacks())
+            },
+        );
+        self.update_cycle_for_deleted_resources(
+            &mut self
+                .state
+                .destroyed_resources
+                .borrow_mut()
+                .destroyed_image_views,
+            |view| unsafe {
+                self.vk_logical_device()
+                    .destroy_image_view(*view, get_allocation_callbacks());
+            },
+        );
+        self.update_cycle_for_deleted_resources(
+            &mut self
+                .state
+                .destroyed_resources
+                .borrow_mut()
+                .destroyed_samplers,
+            |sam| unsafe {
+                self.vk_logical_device()
+                    .destroy_sampler(*sam, get_allocation_callbacks());
+            },
+        );
+        self.update_cycle_for_deleted_resources(
+            &mut self
+                .state
+                .destroyed_resources
+                .borrow_mut()
+                .destroyed_buffers,
+            |buf| unsafe {
+                self.vk_logical_device()
+                    .destroy_buffer(buf.inner, get_allocation_callbacks());
+                self.state
+                    .gpu_memory_allocator
+                    .borrow_mut()
+                    .deallocate(&buf.allocation);
+            },
+        );
+        self.update_cycle_for_deleted_resources(
+            &mut self.state.destroyed_resources.borrow_mut().destroyed_images,
+            |img| unsafe {
+                self.vk_logical_device()
+                    .destroy_image(img.inner, get_allocation_callbacks());
+                if let Some(allocation) = &img.allocation {
+                    self.state
+                        .gpu_memory_allocator
+                        .borrow_mut()
+                        .deallocate(allocation);
+                }
+            },
+        );
+    }
+
     fn make_shader_module(
         &self,
         info: &ShaderModuleCreateInfo,

@@ -74,7 +74,7 @@ impl<T: HasAssociatedHandle + Clone> AllocatedResourceMap<T> {
             .ref_count
             .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
-        if old_refcount == 0 {
+        if old_refcount == 1 {
             // Resource lost last reference
             debug!(
                 "Resource {:?} - {id} lost it's last reference",
@@ -102,6 +102,7 @@ impl GpuResourceMap {
         handle: &T::AssociatedHandle,
         resource: T,
     ) {
+        assert!(!handle.is_null());
         if !self.maps.contains_key(&T::AssociatedHandle::handle_type()) {
             self.maps.insert(
                 T::AssociatedHandle::handle_type(),
@@ -114,6 +115,7 @@ impl GpuResourceMap {
         &self,
         handle: &T::AssociatedHandle,
     ) -> T {
+        assert!(!handle.is_null());
         self.get_map().resolve(handle)
     }
     pub fn get_map<T: HasAssociatedHandle + Clone + 'static>(
