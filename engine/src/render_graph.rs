@@ -7,21 +7,21 @@ use std::{
 };
 
 use gpu::{
-    AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, BindingElement,
-    BindingType, BlendMode, BlendOp, BlendState, BufferCreateInfo, BufferHandle, BufferRange,
-    BufferUsageFlags, ColorAttachment, ColorComponentFlags, ColorLoadOp, ComponentMapping,
-    CullMode, DepthAttachment, DepthLoadOp, DepthStencilAttachment, DepthStencilState,
-    DescriptorInfo, DescriptorSetInfo, Extent2D, Filter, FragmentStageInfo, FramebufferCreateInfo,
-    FrontFace, GlobalBinding, Gpu, GraphicsPipelineDescription, ImageAspectFlags, ImageCreateInfo,
-    ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
-    ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, ImageViewType, LogicOp, MemoryDomain,
-    Offset2D, PipelineBarrierInfo, PipelineBindPoint, PipelineStageFlags, PolygonMode,
-    PrimitiveTopology, PushConstantRange, Rect2D, RenderPassAttachment, RenderPassDescription,
-    SampleCount, SamplerAddressMode, SamplerCreateInfo, SamplerHandle, ShaderModuleHandle,
-    StencilAttachment, StencilLoadOp, SubpassDependency, SubpassDescription, TransitionInfo,
-    VertexBindingDescription, VertexStageInfo, VkBuffer, VkCommandBuffer, VkDescriptorSet,
-    VkFramebuffer, VkGpu, VkGraphicsPipeline, VkImage, VkImageView, VkRenderPass,
-    VkRenderPassCommand, VkSampler, VkShaderModule,
+    AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, Binding,
+    BindingElement, BindingType, BlendMode, BlendOp, BlendState, BufferCreateInfo, BufferHandle,
+    BufferRange, BufferUsageFlags, ColorAttachment, ColorComponentFlags, ColorLoadOp,
+    ComponentMapping, CullMode, DepthAttachment, DepthLoadOp, DepthStencilAttachment,
+    DepthStencilState, DescriptorInfo, DescriptorSetInfo, Extent2D, Filter, FragmentStageInfo,
+    FramebufferCreateInfo, FrontFace, GlobalBinding, Gpu, GraphicsPipelineDescription,
+    ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier,
+    ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, ImageViewType,
+    LogicOp, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineBindPoint, PipelineStageFlags,
+    PolygonMode, PrimitiveTopology, PushConstantRange, Rect2D, RenderPassAttachment,
+    RenderPassDescription, SampleCount, SamplerAddressMode, SamplerCreateInfo, SamplerHandle,
+    ShaderModuleHandle, ShaderStage, StencilAttachment, StencilLoadOp, SubpassDependency,
+    SubpassDescription, TransitionInfo, VertexBindingDescription, VertexStageInfo, VkBuffer,
+    VkCommandBuffer, VkDescriptorSet, VkFramebuffer, VkGpu, VkGraphicsPipeline, VkImage,
+    VkImageView, VkRenderPass, VkRenderPassCommand, VkSampler, VkShaderModule,
 };
 
 use indexmap::IndexSet;
@@ -1127,111 +1127,6 @@ pub struct RenderGraphPipelineDescription<'a> {
     pub fragment_state: FragmentState<'a>,
 }
 
-pub(crate) fn create_pipeline_for_graph_renderpass(
-    graph: &RenderGraph,
-    pass_info: &RenderPassInfo,
-    gpu: &VkGpu,
-    description: &RenderGraphPipelineDescription,
-) -> anyhow::Result<VkGraphicsPipeline> {
-    let mut set_zero_bindings = vec![];
-    for (idx, read) in pass_info.shader_reads.iter().enumerate() {
-        let resource = graph.get_resource_info(read)?;
-        set_zero_bindings.push(BindingElement {
-            binding_type: match resource.ty {
-                AllocationType::Image(_) => gpu::BindingType::CombinedImageSampler,
-                AllocationType::Buffer(d) => d.ty.into(),
-            },
-            index: idx as _,
-            stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
-        });
-    }
-
-    let (mut color_attachments, mut depth_stencil_attachments) = (vec![], vec![]);
-
-    for (_, write) in pass_info.attachment_writes.iter().enumerate() {
-        let resource = graph.get_resource_info(write)?;
-
-        match resource.ty {
-            AllocationType::Image(desc) => {
-                let format = desc.format;
-                let samples = match desc.samples {
-                    1 => SampleCount::Sample1,
-                    2 => SampleCount::Sample2,
-                    4 => SampleCount::Sample4,
-                    8 => SampleCount::Sample8,
-                    16 => SampleCount::Sample16,
-                    32 => SampleCount::Sample32,
-                    64 => SampleCount::Sample64,
-                    _ => panic!("Invalid sample count! {}", desc.samples),
-                };
-                if desc.format.is_color() {
-                    color_attachments.push(RenderPassAttachment {
-                        format,
-                        samples,
-                        load_op: ColorLoadOp::DontCare,
-                        store_op: AttachmentStoreOp::Store,
-                        stencil_load_op: StencilLoadOp::DontCare,
-                        stencil_store_op: AttachmentStoreOp::DontCare,
-                        initial_layout: ImageLayout::Undefined,
-                        final_layout: ImageLayout::ColorAttachment,
-                        blend_state: if let Some(state) = pass_info.blend_state {
-                            state
-                        } else {
-                            BlendState::default()
-                        },
-                    });
-                } else {
-                    depth_stencil_attachments.push(DepthStencilAttachment {});
-                }
-            }
-            AllocationType::Buffer { .. } => {
-                todo!("Add support for storage buffers")
-            }
-        }
-    }
-
-    let description = GraphicsPipelineDescription {
-        global_bindings: &[GlobalBinding {
-            set_index: 0,
-            elements: &set_zero_bindings,
-        }],
-        vertex_inputs: description.vertex_inputs,
-        vertex_stage: if let RenderStage::Graphics { vertex, .. } = &description.stage {
-            Some(VertexStageInfo {
-                entry_point: vertex.entry_point,
-                module: vertex.module.clone(),
-            })
-        } else {
-            None
-        },
-        fragment_stage: if let RenderStage::Graphics {
-            vertex: _,
-            fragment,
-        } = &description.stage
-        {
-            Some(FragmentStageInfo {
-                entry_point: fragment.entry_point,
-                module: fragment.module.clone(),
-                color_attachments: &color_attachments,
-                depth_stencil_attachments: &depth_stencil_attachments,
-            })
-        } else {
-            None
-        },
-
-        input_topology: description.fragment_state.input_topology,
-        primitive_restart: description.fragment_state.primitive_restart,
-        polygon_mode: description.fragment_state.polygon_mode,
-        cull_mode: description.fragment_state.cull_mode,
-        front_face: description.fragment_state.front_face,
-        depth_stencil_state: description.fragment_state.depth_stencil_state,
-        logic_op: description.fragment_state.logic_op,
-        push_constant_ranges: description.fragment_state.push_constant_ranges,
-    };
-
-    Ok(gpu.create_graphics_pipeline(&description)?)
-}
-
 pub struct RenderGraph {
     passes: HashMap<RenderPassHandle, RenderPassInfo>,
     allocations: HashMap<ResourceId, ResourceInfo>,
@@ -1440,8 +1335,7 @@ pub enum GraphOperation {
 pub struct RenderPassContext<'p, 'g> {
     pub render_graph: &'p RenderGraph,
     pub render_pass_command: VkRenderPassCommand<'p, 'g>,
-    pub read_descriptor_set: Option<&'p VkDescriptorSet>,
-    pub pipeline: Option<&'p VkGraphicsPipeline>,
+    pub bindings: &'p [Binding],
 }
 pub struct EndContext<'p, 'g> {
     pub command_buffer: &'p mut VkCommandBuffer<'g>,
@@ -1763,30 +1657,6 @@ impl RenderGraph {
         pipeline_handle: &RenderPassHandle,
     ) -> Option<&VkGraphicsPipeline> {
         self.render_pass_pipelines.get(pipeline_handle)
-    }
-
-    pub(crate) fn define_pipeline_for_renderpass(
-        &mut self,
-        gpu: &VkGpu,
-        pass_handle: &RenderPassHandle,
-        pipeline_label: &'static str,
-        pipeline_description: &RenderGraphPipelineDescription<'_>,
-    ) -> anyhow::Result<()> {
-        if !self.render_pass_pipelines.contains_key(pass_handle) {
-            let pass_info = &self.passes[pass_handle];
-
-            let pipeline =
-                create_pipeline_for_graph_renderpass(self, pass_info, gpu, pipeline_description)?;
-
-            trace!(
-                "Created new pipeline '{}' for render pass '{}'",
-                pipeline_label,
-                pass_handle.label
-            );
-            self.render_pass_pipelines.insert(*pass_handle, pipeline);
-        }
-
-        Ok(())
     }
 
     fn mark_resource_usages(&mut self, compiled: &CompiledRenderGraph) {
@@ -2219,7 +2089,7 @@ impl RenderGraphRunner for GpuRunner {
                     &resource_allocator.image_views,
                 );
 
-                let read_descriptor_set = resolve_input_descriptor_set(
+                let bindings = resolve_shader_inputs(
                     ctx,
                     graph,
                     info,
@@ -2246,22 +2116,10 @@ impl RenderGraphRunner for GpuRunner {
                         },
                     });
 
-                let pipeline = graph.get_pipeline(rp);
-                if let Some(pipeline) = pipeline {
-                    render_pass_command.bind_pipeline(pipeline);
-                    if let Some(resource) = read_descriptor_set {
-                        render_pass_command.bind_descriptor_sets(
-                            pipeline,
-                            0,
-                            &[resource.resource()],
-                        )
-                    }
-                }
                 let mut context = RenderPassContext {
                     render_graph: graph,
                     render_pass_command,
-                    pipeline,
-                    read_descriptor_set: read_descriptor_set.map(|r| r.resource()),
+                    bindings: &bindings,
                 };
 
                 if let Some(cb) = cb {
@@ -2499,7 +2357,7 @@ where
     (colors, depth, stencil)
 }
 
-fn resolve_input_descriptor_set<'a>(
+fn resolve_shader_inputs<'a>(
     ctx: &GraphRunContext,
     graph: &RenderGraph,
     info: &RenderPassInfo,
@@ -2507,12 +2365,11 @@ fn resolve_input_descriptor_set<'a>(
     buffer_allocator: &'a BufferAllocator,
     sampler_allocator: &'a mut SampleAllocator,
     descriptor_view_allocator: &'a mut DescriptorSetAllocator,
-) -> Option<&'a GraphDescriptorSet> {
-    let mut hasher = DefaultHasher::new();
+) -> Vec<Binding> {
     if info.shader_reads.is_empty() {
-        return None;
+        return vec![];
     }
-    let mut descriptors = vec![];
+    let mut bindings = vec![];
     for (_, read) in info.shader_reads.iter().enumerate() {
         let resource_info = graph.get_resource_info(read).expect("No resource found");
 
@@ -2534,16 +2391,13 @@ fn resolve_input_descriptor_set<'a>(
                     image_view_allocator.get_unchecked(read).resource().clone()
                 };
 
-                view.hash(&mut hasher);
-                descriptors.push(DescriptorInfo {
-                    binding: idx as _,
-                    element_type: gpu::DescriptorType::CombinedImageSampler(gpu::SamplerState {
-                        sampler: sampler_allocator.get_unchecked(read).resource().clone(),
-                        image_view: view,
-                        image_layout: ImageLayout::ShaderReadOnly,
-                    }),
-                    binding_stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
-                })
+                bindings.push(Binding {
+                    ty: gpu::DescriptorBindingType::ImageView {
+                        image_view_handle: view.clone(),
+                        sampler_handle: sampler_allocator.get_unchecked(read).resource().clone(),
+                    },
+                    binding_stage: ShaderStage::ALL_GRAPHICS,
+                });
             }
             AllocationType::Buffer(desc) => {
                 let buffer = if resource_info.external {
@@ -2551,37 +2405,26 @@ fn resolve_input_descriptor_set<'a>(
                 } else {
                     buffer_allocator.get_unchecked(read).resource().clone()
                 };
-                buffer.hash(&mut hasher);
-                let range = BufferRange {
-                    handle: buffer,
-                    offset: 0,
-                    size: gpu::WHOLE_SIZE,
-                };
-                descriptors.push(DescriptorInfo {
-                    binding: idx as _,
-                    element_type: if desc.ty == BufferType::Uniform {
-                        gpu::DescriptorType::UniformBuffer(range)
-                    } else {
-                        gpu::DescriptorType::StorageBuffer(range)
+                bindings.push(Binding {
+                    ty: match desc.ty {
+                        BufferType::Storage => gpu::DescriptorBindingType::StorageBuffer {
+                            handle: buffer,
+                            offset: 0,
+                            range: gpu::WHOLE_SIZE as _,
+                        },
+
+                        BufferType::Uniform => gpu::DescriptorBindingType::UniformBuffer {
+                            handle: buffer,
+                            offset: 0,
+                            range: gpu::WHOLE_SIZE as _,
+                        },
                     },
-                    binding_stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
-                })
+                    binding_stage: ShaderStage::ALL_GRAPHICS,
+                });
             }
         }
     }
-
-    let hash = hasher.finish();
-    let res = descriptor_view_allocator
-        .get(
-            ctx,
-            &DescriptorSetCreateInfo {
-                hash,
-                inputs: &descriptors,
-            },
-            &hash,
-        )
-        .unwrap();
-    Some(res)
+    bindings
 }
 
 #[cfg(test)]

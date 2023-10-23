@@ -8,6 +8,7 @@ use ash::vk::{
     RenderingFlags, RenderingInfoKHR, ResolveModeFlags, StructureType, SubmitInfo,
 };
 use ash::{extensions::ext::DebugUtils, prelude::VkResult, RawPtr};
+use log::warn;
 
 use crate::pipeline::VkPipelineInfo;
 use crate::*;
@@ -22,6 +23,14 @@ pub struct VkCommandBuffer<'g> {
     target_queue: vk::Queue,
 }
 
+#[derive(Clone)]
+pub(crate) struct BeginRenderPassInfoOwned {
+    pub color_attachments: Vec<ColorAttachment>,
+    pub depth_attachment: Option<DepthAttachment>,
+    pub stencil_attachment: Option<StencilAttachment>,
+    pub render_area: Rect2D,
+}
+
 pub struct VkRenderPassCommand<'c, 'g>
 where
     'g: 'c,
@@ -33,6 +42,7 @@ where
 
     pipeline_state: PipelineState,
     descriptor_state: DescriptorSetState,
+    render_pass_info: BeginRenderPassInfoOwned,
 
     push_constant_data: Vec<Vec<u8>>,
 }
@@ -197,12 +207,17 @@ impl PipelineState {
 
 #[derive(Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
 pub enum DescriptorBindingType {
-    BufferRange {
+    UniformBuffer {
         handle: BufferHandle,
         offset: u64,
         range: usize,
     },
 
+    StorageBuffer {
+        handle: BufferHandle,
+        offset: u64,
+        range: usize,
+    },
     ImageView {
         image_view_handle: ImageViewHandle,
         sampler_handle: SamplerHandle,
@@ -211,7 +226,7 @@ pub enum DescriptorBindingType {
 
 impl Default for DescriptorBindingType {
     fn default() -> Self {
-        Self::BufferRange {
+        Self::UniformBuffer {
             handle: BufferHandle::null(),
             offset: 0,
             range: 0,
@@ -247,7 +262,8 @@ impl DescriptorSetInfo2 {
         for (binding_index, binding) in self.bindings.iter().enumerate() {
             let stage_flags = binding.binding_stage;
             let descriptor_type = match binding.ty {
-                crate::DescriptorBindingType::BufferRange { .. } => BindingType::Uniform,
+                crate::DescriptorBindingType::UniformBuffer { .. } => BindingType::Uniform,
+                crate::DescriptorBindingType::StorageBuffer { .. } => BindingType::Storage,
                 crate::DescriptorBindingType::ImageView { .. } => BindingType::CombinedImageSampler, //                    super::DescriptorType::StorageBuffer(_) => DescriptorType::STORAGE_BUFFER,
                                                                                                      //                    super::DescriptorType::Sampler(_) => DescriptorType::SAMPLER,
                                                                                                      //                    super::DescriptorType::CombinedImageSampler(_) => {
@@ -638,7 +654,8 @@ impl<'g> VkCommandBuffer<'g> {
 impl<'g> Drop for VkCommandBuffer<'g> {
     fn drop(&mut self) {
         if !self.has_been_submitted {
-            panic!("CommandBuffer::submit hasn't been called!");
+            warn!("CommandBuffer::submit has not been called!");
+            return;
         }
     }
 }
@@ -752,6 +769,12 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             pipeline_state: PipelineState::new(info),
             descriptor_state: DescriptorSetState::default(),
             push_constant_data: vec![],
+            render_pass_info: BeginRenderPassInfoOwned {
+                color_attachments: info.color_attachments.to_vec(),
+                depth_attachment: info.depth_attachment.clone(),
+                stencil_attachment: info.stencil_attachment.clone(),
+                render_area: info.render_area,
+            },
         }
     }
 
@@ -943,29 +966,11 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         first_instance: u32,
     ) -> anyhow::Result<()> {
         self.has_draw_command = true;
+        self.command_buffer.has_recorded_anything = true;
         let layout = self.find_matching_pipeline_layout();
         let pipeline = self.find_matching_pipeline(layout);
         let device = self.gpu.vk_logical_device();
         {
-            let buffers = self
-                .pipeline_state
-                .vertex_inputs
-                .iter()
-                .map(|b| {
-                    self.gpu
-                        .allocated_resources()
-                        .borrow()
-                        .resolve::<VkBuffer>(&b.handle)
-                        .inner
-                })
-                .collect::<Vec<_>>();
-            let offsets = self
-                .pipeline_state
-                .vertex_inputs
-                .iter()
-                .map(|_| 0)
-                .collect::<Vec<_>>();
-
             unsafe {
                 for (idx, constant_range) in
                     self.descriptor_state.push_constant_range.iter().enumerate()
@@ -978,7 +983,27 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                         &self.push_constant_data[idx],
                     );
                 }
-                device.cmd_bind_vertex_buffers(self.inner(), 0, &buffers, &offsets);
+                if self.pipeline_state.vertex_inputs.len() > 0 {
+                    let buffers = self
+                        .pipeline_state
+                        .vertex_inputs
+                        .iter()
+                        .map(|b| {
+                            self.gpu
+                                .allocated_resources()
+                                .borrow()
+                                .resolve::<VkBuffer>(&b.handle)
+                                .inner
+                        })
+                        .collect::<Vec<_>>();
+                    let offsets = self
+                        .pipeline_state
+                        .vertex_inputs
+                        .iter()
+                        .map(|_| 0)
+                        .collect::<Vec<_>>();
+                    device.cmd_bind_vertex_buffers(self.inner(), 0, &buffers, &offsets);
+                }
             }
         }
 
@@ -1014,8 +1039,89 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         Ok(())
     }
 
-    fn find_matching_pipeline(&mut self, pipeline_layout: vk::PipelineLayout) -> vk::Pipeline {
-        self.gpu.get_pipeline(&self.pipeline_state, pipeline_layout)
+    pub fn draw_handle(
+        &mut self,
+        num_vertices: u32,
+        instances: u32,
+        first_vertex: u32,
+        first_instance: u32,
+    ) -> anyhow::Result<()> {
+        self.has_draw_command = true;
+        let layout = self.find_matching_pipeline_layout();
+        let pipeline = self.find_matching_pipeline(layout);
+        let device = self.gpu.vk_logical_device();
+        {
+            unsafe {
+                for (idx, constant_range) in
+                    self.descriptor_state.push_constant_range.iter().enumerate()
+                {
+                    device.cmd_push_constants(
+                        self.inner(),
+                        layout,
+                        constant_range.stage_flags.to_vk(),
+                        constant_range.offset,
+                        &self.push_constant_data[idx],
+                    );
+                }
+                if self.pipeline_state.vertex_inputs.len() > 0 {
+                    let buffers = self
+                        .pipeline_state
+                        .vertex_inputs
+                        .iter()
+                        .map(|b| {
+                            self.gpu
+                                .allocated_resources()
+                                .borrow()
+                                .resolve::<VkBuffer>(&b.handle)
+                                .inner
+                        })
+                        .collect::<Vec<_>>();
+                    let offsets = self
+                        .pipeline_state
+                        .vertex_inputs
+                        .iter()
+                        .map(|_| 0)
+                        .collect::<Vec<_>>();
+
+                    device.cmd_bind_vertex_buffers(self.inner(), 0, &buffers, &offsets);
+                }
+            }
+        }
+
+        if self.descriptor_state.sets.len() > 0 {
+            let descriptors = self.find_matching_descriptor_sets();
+            unsafe {
+                device.cmd_bind_descriptor_sets(
+                    self.inner(),
+                    PipelineBindPoint::GRAPHICS,
+                    layout,
+                    0,
+                    &descriptors,
+                    &[],
+                );
+            }
+        }
+
+        unsafe {
+            device.cmd_bind_pipeline(self.inner(), PipelineBindPoint::GRAPHICS, pipeline);
+        }
+        self.prepare_draw();
+        unsafe {
+            device.cmd_draw(
+                self.inner(),
+                num_vertices,
+                instances,
+                first_vertex,
+                first_instance,
+            );
+        }
+
+        Ok(())
+    }
+
+    fn find_matching_pipeline(&mut self, layout: vk::PipelineLayout) -> vk::Pipeline {
+        self.gpu
+            .get_pipeline(&self.pipeline_state, &self.render_pass_info, layout)
     }
 
     fn find_matching_pipeline_layout(&self) -> vk::PipelineLayout {

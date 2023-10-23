@@ -3,8 +3,8 @@ use std::{collections::HashMap, hash::Hash, mem::size_of, num::NonZeroU32};
 use gpu::{
     BindingElement, BindingType, CompareOp, CullMode, DepthStencilState, FragmentStageInfo,
     FrontFace, GlobalBinding, GraphicsPipelineDescription, ImageFormat, LogicOp, PolygonMode,
-    PushConstantRange, StencilOpState, VertexAttributeDescription, VertexBindingDescription,
-    VertexStageInfo, VkGpu, VkGraphicsPipeline,
+    PushConstantRange, ShaderModuleHandle, StencilOpState, VertexAttributeDescription,
+    VertexBindingDescription, VertexStageInfo, VkGpu, VkGraphicsPipeline,
 };
 use nalgebra::{Vector2, Vector3};
 use resource_map::Resource;
@@ -41,10 +41,18 @@ pub struct MasterMaterialDescription<'a> {
     pub push_constant_ranges: &'a [PushConstantRange],
 }
 
+// Different pipeline targets may have different shader permutations
+// E.g a depth target should have one vertex shader, but no fragment shaders
+#[derive(Eq, PartialEq)]
+pub struct ShaderPermutation {
+    pub vertex_shader: ShaderModuleHandle,
+    pub fragment_shader: Option<ShaderModuleHandle>,
+}
+
 #[derive(Eq, PartialEq)]
 pub struct MasterMaterial {
     pub(crate) name: String,
-    pub(crate) pipelines: HashMap<PipelineTarget, VkGraphicsPipeline>,
+    pub(crate) shader_permutations: HashMap<PipelineTarget, ShaderPermutation>,
     pub(crate) texture_inputs: Vec<TextureInput>,
     pub(crate) material_parameters: HashMap<String, MaterialParameterOffsetSize>,
     pub(crate) parameter_block_size: usize,
@@ -64,21 +72,21 @@ impl Resource for MasterMaterial {
 
 impl MasterMaterial {
     pub fn new(gpu: &VkGpu, description: &MasterMaterialDescription) -> anyhow::Result<Self> {
-        let pipelines = Self::create_pipelines(gpu, description)?;
+        let shader_permutations = Self::create_shader_permutations(gpu, description)?;
         let parameter_block_size = size_of::<f32>() * 4 * description.material_parameters.len();
         Ok(MasterMaterial {
             name: description.name.to_owned(),
-            pipelines,
+            shader_permutations,
             texture_inputs: description.texture_inputs.to_vec(),
             material_parameters: description.material_parameters.clone(),
             parameter_block_size,
         })
     }
 
-    fn create_pipelines(
+    fn create_shader_permutations(
         gpu: &VkGpu,
         description: &MasterMaterialDescription<'_>,
-    ) -> anyhow::Result<HashMap<PipelineTarget, VkGraphicsPipeline>> {
+    ) -> anyhow::Result<HashMap<PipelineTarget, ShaderPermutation>> {
         let global_elements: Vec<_> = description
             .global_inputs
             .iter()
@@ -109,11 +117,14 @@ impl MasterMaterial {
 
         match description.domain {
             MaterialDomain::Surface => {
-                Self::create_surface_pipelines(gpu, description, global_elements, user_elements)
+                Self::create_surface_permutations(gpu, description, global_elements, user_elements)
             }
-            MaterialDomain::PostProcess => {
-                Self::create_post_process_pipeline(gpu, description, global_elements, user_elements)
-            }
+            MaterialDomain::PostProcess => Self::create_post_process_permutations(
+                gpu,
+                description,
+                global_elements,
+                user_elements,
+            ),
         }
     }
 
@@ -181,114 +192,49 @@ impl MasterMaterial {
         }
     }
 
-    pub(crate) fn get_pipeline(&self, target: PipelineTarget) -> Option<&VkGraphicsPipeline> {
-        self.pipelines.get(&target)
+    pub(crate) fn get_permutation(&self, target: PipelineTarget) -> Option<&ShaderPermutation> {
+        self.shader_permutations.get(&target)
     }
 
-    fn create_surface_pipelines(
+    fn create_surface_permutations(
         gpu: &VkGpu,
         description: &MasterMaterialDescription,
         global_elements: Vec<BindingElement>,
         user_elements: Vec<BindingElement>,
-    ) -> anyhow::Result<HashMap<PipelineTarget, VkGraphicsPipeline>> {
+    ) -> anyhow::Result<HashMap<PipelineTarget, ShaderPermutation>> {
         let mut pipelines = HashMap::new();
-        for target in [PipelineTarget::ColorAndDepth, PipelineTarget::DepthOnly] {
-            let pipeline = gpu.create_graphics_pipeline(&GraphicsPipelineDescription {
-                global_bindings: &[
-                    GlobalBinding {
-                        set_index: 0,
-                        elements: &global_elements,
-                    },
-                    GlobalBinding {
-                        set_index: 1,
-                        elements: &user_elements,
-                    },
-                ],
-                vertex_inputs: Self::get_inputs_for_material_domain(&description.domain),
-                vertex_stage: Some(description.vertex_info.clone()),
-                fragment_stage: match target {
-                    PipelineTarget::ColorAndDepth | PipelineTarget::PostProcess => {
-                        Some(description.fragment_info.clone())
-                    }
-                    PipelineTarget::DepthOnly => None,
-                },
-                input_topology: gpu::PrimitiveTopology::TriangleList,
-                primitive_restart: description.primitive_restart,
-                polygon_mode: description.polygon_mode,
-                cull_mode: description.cull_mode,
-                front_face: description.front_face,
-                depth_stencil_state: match target {
-                    PipelineTarget::ColorAndDepth | PipelineTarget::PostProcess => {
-                        DepthStencilState {
-                            depth_test_enable: true,
-                            depth_write_enable: false,
-                            depth_compare_op: CompareOp::Equal,
-                            stencil_test_enable: false,
-                            front: StencilOpState::default(),
-                            back: StencilOpState::default(),
-                            min_depth_bounds: 0.0,
-                            max_depth_bounds: 1.0,
-                        }
-                    }
-                    PipelineTarget::DepthOnly => DepthStencilState {
-                        depth_test_enable: true,
-                        depth_write_enable: true,
-                        depth_compare_op: CompareOp::Less,
-                        stencil_test_enable: false,
-                        front: StencilOpState::default(),
-                        back: StencilOpState::default(),
-                        min_depth_bounds: 0.0,
-                        max_depth_bounds: 1.0,
-                    },
-                },
-                logic_op: description.logic_op,
-                push_constant_ranges: description.push_constant_ranges,
-            })?;
-            pipelines.insert(target, pipeline);
-        }
 
+        pipelines.insert(
+            PipelineTarget::DepthOnly,
+            ShaderPermutation {
+                vertex_shader: description.vertex_info.module.clone(),
+                fragment_shader: None,
+            },
+        );
+
+        pipelines.insert(
+            PipelineTarget::ColorAndDepth,
+            ShaderPermutation {
+                vertex_shader: description.vertex_info.module.clone(),
+                fragment_shader: Some(description.fragment_info.module.clone()),
+            },
+        );
         Ok(pipelines)
     }
-    fn create_post_process_pipeline(
+    fn create_post_process_permutations(
         gpu: &VkGpu,
         description: &MasterMaterialDescription,
         global_elements: Vec<BindingElement>,
         user_elements: Vec<BindingElement>,
-    ) -> anyhow::Result<HashMap<PipelineTarget, VkGraphicsPipeline>> {
+    ) -> anyhow::Result<HashMap<PipelineTarget, ShaderPermutation>> {
         let mut pipelines = HashMap::new();
-        let pipeline = gpu.create_graphics_pipeline(&GraphicsPipelineDescription {
-            global_bindings: &[
-                GlobalBinding {
-                    set_index: 0,
-                    elements: &global_elements,
-                },
-                GlobalBinding {
-                    set_index: 1,
-                    elements: &user_elements,
-                },
-            ],
-            vertex_inputs: Self::get_inputs_for_material_domain(&description.domain),
-            vertex_stage: Some(description.vertex_info.clone()),
-            fragment_stage: Some(description.fragment_info.clone()),
-            input_topology: gpu::PrimitiveTopology::TriangleList,
-            primitive_restart: description.primitive_restart,
-            polygon_mode: description.polygon_mode,
-            cull_mode: description.cull_mode,
-            front_face: description.front_face,
-            depth_stencil_state: DepthStencilState {
-                depth_test_enable: true,
-                depth_write_enable: false,
-                depth_compare_op: CompareOp::Equal,
-                stencil_test_enable: false,
-                front: StencilOpState::default(),
-                back: StencilOpState::default(),
-                min_depth_bounds: 0.0,
-                max_depth_bounds: 1.0,
+        pipelines.insert(
+            PipelineTarget::PostProcess,
+            ShaderPermutation {
+                vertex_shader: description.vertex_info.module.clone(),
+                fragment_shader: Some(description.fragment_info.module.clone()),
             },
-            logic_op: description.logic_op,
-            push_constant_ranges: description.push_constant_ranges,
-        })?;
-        pipelines.insert(PipelineTarget::PostProcess, pipeline);
+        );
 
         Ok(pipelines)
     }

@@ -14,12 +14,12 @@ use crate::{
 };
 
 use gpu::{
-    AttachmentStoreOp, BindingType, BlendMode, BlendOp, BlendState, BufferCreateInfo, BufferHandle,
-    BufferUsageFlags, ColorComponentFlags, ColorLoadOp, CompareOp, DepthStencilState, Extent2D,
-    FragmentStageInfo, Gpu, ImageFormat, ImageLayout, IndexType, MemoryDomain, PushConstantRange,
-    RenderPassAttachment, SampleCount, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
-    StencilLoadOp, StencilOpState, VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu,
-    VkShaderModule, VkSwapchain,
+    AttachmentStoreOp, Binding, BindingType, BlendMode, BlendOp, BlendState, BufferCreateInfo,
+    BufferHandle, BufferUsageFlags, ColorComponentFlags, ColorLoadOp, CompareOp, DepthStencilState,
+    Extent2D, FragmentStageInfo, Gpu, Handle, ImageFormat, ImageLayout, IndexType, InputRate,
+    MemoryDomain, PushConstantRange, RenderPassAttachment, SampleCount, ShaderModuleCreateInfo,
+    ShaderModuleHandle, ShaderStage, StencilLoadOp, StencilOpState, VertexBindingInfo,
+    VertexStageInfo, VkBuffer, VkCommandBuffer, VkGpu, VkShaderModule, VkSwapchain,
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -342,18 +342,41 @@ impl DeferredRenderingPipeline {
         draw_hashmap: &HashMap<&MasterMaterial, Vec<DrawCall>>,
         camera_index: u32,
         ctx: &mut RenderPassContext,
+        camera_buffer: &BufferHandle,
+        light_buffer: &BufferHandle,
     ) {
         let mut total_primitives_rendered = 0;
         for (master, material_draw_calls) in draw_hashmap.iter() {
             {
-                let pipeline = master
-                    .get_pipeline(pipeline_target)
-                    .expect("failed to fetch pipeline {pipeline_target:?}");
-                ctx.render_pass_command.bind_pipeline(pipeline);
-                ctx.render_pass_command.bind_descriptor_sets(
-                    pipeline,
+                let permutation = master
+                    .get_permutation(pipeline_target)
+                    .expect("failed to fetch permutation {pipeline_target:?}");
+                ctx.render_pass_command
+                    .set_vertex_shader(permutation.vertex_shader.clone());
+                if let Some(fragment_shader) = &permutation.fragment_shader {
+                    ctx.render_pass_command
+                        .set_fragment_shader(fragment_shader.clone());
+                }
+                ctx.render_pass_command.bind_resources(
                     0,
-                    &[ctx.read_descriptor_set.expect("No descriptor set???")],
+                    &[
+                        Binding {
+                            ty: gpu::DescriptorBindingType::StorageBuffer {
+                                handle: camera_buffer.clone(),
+                                offset: 0,
+                                range: gpu::WHOLE_SIZE as _,
+                            },
+                            binding_stage: ShaderStage::ALL_GRAPHICS,
+                        },
+                        Binding {
+                            ty: gpu::DescriptorBindingType::UniformBuffer {
+                                handle: light_buffer.clone(),
+                                offset: 0,
+                                range: 100 * size_of::<PerFrameData>(),
+                            },
+                            binding_stage: ShaderStage::ALL_GRAPHICS,
+                        },
+                    ],
                 );
 
                 for (idx, draw_call) in material_draw_calls.iter().enumerate() {
@@ -366,37 +389,98 @@ impl DeferredRenderingPipeline {
                         ),
                         [0.0, 0.3, 0.4, 1.0],
                     );
-                    //                    ctx.render_pass_command.bind_descriptor_sets(
-                    //                        pipeline,
-                    //                        1,
-                    //                        &[&material.user_descriptor_set],
-                    //                    );
-                    //                    ctx.render_pass_command.bind_index_buffer(
-                    //                        &draw_call.prim.index_buffer,
-                    //                        0,
-                    //                        IndexType::Uint32,
-                    //                    );
-                    //                    ctx.render_pass_command.bind_vertex_buffer(
-                    //                        0,
-                    //                        &[
-                    //                            &draw_call.prim.position_component,
-                    //                            &draw_call.prim.color_component,
-                    //                            &draw_call.prim.normal_component,
-                    //                            &draw_call.prim.tangent_component,
-                    //                            &draw_call.prim.uv_component,
-                    //                        ],
-                    //                        &[0, 0, 0, 0, 0],
-                    //                    );
-                    ctx.render_pass_command.push_constant(
-                        pipeline,
-                        &ObjectDrawInfo {
-                            model: draw_call.transform,
-                            camera_index,
-                        },
+
+                    ctx.render_pass_command.set_index_buffer(
+                        draw_call.prim.index_buffer.clone(),
+                        IndexType::Uint32,
                         0,
                     );
-                    ctx.render_pass_command
-                        .draw_indexed(draw_call.prim.index_count, 1, 0, 0, 0);
+
+                    let mut user_bindings = master
+                        .texture_inputs
+                        .iter()
+                        .enumerate()
+                        .map(|(i, tex)| {
+                            let texture_parameter = &material.current_inputs[&tex.name];
+                            let tex = resource_map.get(texture_parameter);
+
+                            // TODO: these can be avoided
+                            let view = resource_map.get(&tex.image_view);
+                            let sampler = resource_map.get(&tex.sampler);
+                            Binding {
+                                ty: gpu::DescriptorBindingType::ImageView {
+                                    image_view_handle: view.view.clone(),
+                                    sampler_handle: sampler.0.clone(),
+                                },
+                                binding_stage: ShaderStage::ALL_GRAPHICS,
+                            }
+                        })
+                        .collect::<Vec<_>>();
+
+                    if material.parameter_buffer.is_valid() {
+                        user_bindings.push(Binding {
+                            ty: gpu::DescriptorBindingType::UniformBuffer {
+                                handle: material.parameter_buffer.clone(),
+                                offset: 0,
+                                range: gpu::WHOLE_SIZE as _,
+                            },
+                            binding_stage: ShaderStage::ALL_GRAPHICS,
+                        });
+                    }
+
+                    ctx.render_pass_command.set_vertex_buffers(&[
+                        VertexBindingInfo {
+                            handle: draw_call.prim.position_component.clone(),
+                            location: 0,
+                            offset: 0,
+                            stride: std::mem::size_of::<Vector3<f32>>() as _,
+                            format: ImageFormat::RgbFloat32,
+                            input_rate: InputRate::PerVertex,
+                        },
+                        VertexBindingInfo {
+                            handle: draw_call.prim.color_component.clone(),
+                            location: 1,
+                            offset: 0,
+                            stride: std::mem::size_of::<Vector3<f32>>() as _,
+                            format: ImageFormat::RgbFloat32,
+                            input_rate: InputRate::PerVertex,
+                        },
+                        VertexBindingInfo {
+                            handle: draw_call.prim.normal_component.clone(),
+                            location: 2,
+                            offset: 0,
+                            stride: std::mem::size_of::<Vector3<f32>>() as _,
+                            format: ImageFormat::RgbFloat32,
+                            input_rate: InputRate::PerVertex,
+                        },
+                        VertexBindingInfo {
+                            handle: draw_call.prim.tangent_component.clone(),
+                            location: 3,
+                            offset: 0,
+                            stride: std::mem::size_of::<Vector3<f32>>() as _,
+                            format: ImageFormat::RgbFloat32,
+                            input_rate: InputRate::PerVertex,
+                        },
+                        VertexBindingInfo {
+                            handle: draw_call.prim.uv_component.clone(),
+                            location: 4,
+                            offset: 0,
+                            stride: std::mem::size_of::<Vector2<f32>>() as _,
+                            format: ImageFormat::RgFloat32,
+                            input_rate: InputRate::PerVertex,
+                        },
+                    ]);
+                    ctx.render_pass_command.bind_resources(1, &user_bindings);
+                    ctx.render_pass_command.push_constants(
+                        0,
+                        0,
+                        bytemuck::cast_slice(&[ObjectDrawInfo {
+                            model: draw_call.transform,
+                            camera_index,
+                        }]),
+                        ShaderStage::ALL_GRAPHICS,
+                    );
+                    ctx.render_pass_command.draw_indexed_handle(1, 0, 0, 0, 0);
 
                     primitive_label.end();
                     total_primitives_rendered += 1;
@@ -501,6 +585,7 @@ impl DeferredRenderingPipeline {
         skybox_mesh: &Mesh,
         skybox_material: &MaterialInstance,
         skybox_master: &MasterMaterial,
+        resource_map: &ResourceMap,
     ) {
         render_context
             .render_pass_command
@@ -509,18 +594,21 @@ impl DeferredRenderingPipeline {
             .render_pass_command
             .set_cull_mode(gpu::CullMode::Front);
         const SKYBOX_SCALE: f32 = 1.0;
-        let pipeline = skybox_master
-            .get_pipeline(PipelineTarget::ColorAndDepth)
+        let permutation = skybox_master
+            .get_permutation(PipelineTarget::ColorAndDepth)
             .expect("failed to fetch pipeline {pipeline_target:?}");
-        //        render_context.render_pass_command.bind_pipeline(pipeline);
-        //        render_context.render_pass_command.bind_descriptor_sets(
-        //            pipeline,
-        //            0,
-        //            &[render_context
-        //                .read_descriptor_set
-        //                .expect("No descriptor set???")],
-        //        );
-        //
+        render_context
+            .render_pass_command
+            .set_vertex_shader(permutation.vertex_shader.clone());
+        render_context.render_pass_command.set_fragment_shader(
+            permutation
+                .fragment_shader
+                .clone()
+                .expect("No fragment shader in skybox material"),
+        );
+        render_context
+            .render_pass_command
+            .bind_resources(0, render_context.bindings);
         let skybox_label = render_context.render_pass_command.begin_debug_region(
             &format!(
                 "Rendering scene skybox with material {} ",
@@ -528,50 +616,104 @@ impl DeferredRenderingPipeline {
             ),
             [0.0, 0.3, 0.4, 1.0],
         );
-        //        render_context.render_pass_command.bind_descriptor_sets(
-        //            pipeline,
-        //            1,
-        //            &[&skybox_material.user_descriptor_set],
-        //        );
-        //        render_context.render_pass_command.bind_index_buffer(
-        //            &skybox_mesh.primitives[0].index_buffer,
-        //            0,
-        //            IndexType::Uint32,
-        //        );
-        //        render_context.render_pass_command.bind_vertex_buffer(
-        //            0,
-        //            &[
-        //                &skybox_mesh.primitives[0].position_component,
-        //                &skybox_mesh.primitives[0].color_component,
-        //                &skybox_mesh.primitives[0].normal_component,
-        //                &skybox_mesh.primitives[0].tangent_component,
-        //                &skybox_mesh.primitives[0].uv_component,
-        //            ],
-        //            &[0, 0, 0, 0, 0],
-        //        );
-        render_context.render_pass_command.push_constant(
-            pipeline,
-            &ObjectDrawInfo {
-                model: Matrix4::new_translation(&camera_location.coords)
-                    * Matrix4::new_scaling(SKYBOX_SCALE),
-                camera_index: 0,
+        let mut user_bindings = skybox_master
+            .texture_inputs
+            .iter()
+            .enumerate()
+            .map(|(i, tex)| {
+                let texture_parameter = &skybox_material.current_inputs[&tex.name];
+                let tex = resource_map.get(texture_parameter);
+
+                // TODO: these can be avoided
+                let view = resource_map.get(&tex.image_view);
+                let sampler = resource_map.get(&tex.sampler);
+                Binding {
+                    ty: gpu::DescriptorBindingType::ImageView {
+                        image_view_handle: view.view.clone(),
+                        sampler_handle: sampler.0.clone(),
+                    },
+                    binding_stage: ShaderStage::ALL_GRAPHICS,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        if skybox_material.parameter_buffer.is_valid() {
+            user_bindings.push(Binding {
+                ty: gpu::DescriptorBindingType::UniformBuffer {
+                    handle: skybox_material.parameter_buffer.clone(),
+                    offset: 0,
+                    range: gpu::WHOLE_SIZE as _,
+                },
+                binding_stage: ShaderStage::ALL_GRAPHICS,
+            });
+        }
+
+        render_context.render_pass_command.set_vertex_buffers(&[
+            VertexBindingInfo {
+                handle: skybox_mesh.primitives[0].position_component.clone(),
+                location: 0,
+                offset: 0,
+                stride: std::mem::size_of::<Vector3<f32>>() as _,
+                format: ImageFormat::RgbFloat32,
+                input_rate: InputRate::PerVertex,
             },
-            0,
-        );
-        render_context.render_pass_command.draw_indexed(
-            skybox_mesh.primitives[0].index_count,
-            1,
-            0,
-            0,
-            0,
-        );
-        skybox_label.end();
+            VertexBindingInfo {
+                handle: skybox_mesh.primitives[0].color_component.clone(),
+                location: 1,
+                offset: 0,
+                stride: std::mem::size_of::<Vector3<f32>>() as _,
+                format: ImageFormat::RgbFloat32,
+                input_rate: InputRate::PerVertex,
+            },
+            VertexBindingInfo {
+                handle: skybox_mesh.primitives[0].normal_component.clone(),
+                location: 2,
+                offset: 0,
+                stride: std::mem::size_of::<Vector3<f32>>() as _,
+                format: ImageFormat::RgbFloat32,
+                input_rate: InputRate::PerVertex,
+            },
+            VertexBindingInfo {
+                handle: skybox_mesh.primitives[0].tangent_component.clone(),
+                location: 3,
+                offset: 0,
+                stride: std::mem::size_of::<Vector3<f32>>() as _,
+                format: ImageFormat::RgbFloat32,
+                input_rate: InputRate::PerVertex,
+            },
+            VertexBindingInfo {
+                handle: skybox_mesh.primitives[0].uv_component.clone(),
+                location: 4,
+                offset: 0,
+                stride: std::mem::size_of::<Vector2<f32>>() as _,
+                format: ImageFormat::RgFloat32,
+                input_rate: InputRate::PerVertex,
+            },
+        ]);
+        render_context
+            .render_pass_command
+            .bind_resources(0, &user_bindings);
         render_context
             .render_pass_command
             .set_enable_depth_test(true);
         render_context
             .render_pass_command
             .set_cull_mode(gpu::CullMode::Back);
+        render_context.render_pass_command.push_constants(
+            0,
+            0,
+            bytemuck::cast_slice(&[ObjectDrawInfo {
+                model: Matrix4::new_translation(&camera_location.coords)
+                    * Matrix4::new_scaling(SKYBOX_SCALE),
+                camera_index: 0,
+            }]),
+            ShaderStage::ALL_GRAPHICS,
+        );
+
+        render_context
+            .render_pass_command
+            .draw_indexed_handle(1, 0, 0, 0, 0);
+        skybox_label.end();
     }
 
     pub fn set_irradiance_texture(
@@ -909,27 +1051,27 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 color_write_mask: ColorComponentFlags::RGBA,
             })
             .commit();
-        let fxaa_pass = self
-            .render_graph
-            .begin_render_pass("Fxaa", backbuffer.size)?
-            .shader_reads(&[tonemap_output])
-            .writes_attachments(&[fxaa_output])
-            .with_blend_state(BlendState {
-                blend_enable: false,
-                src_color_blend_factor: BlendMode::One,
-                dst_color_blend_factor: BlendMode::Zero,
-                color_blend_op: BlendOp::Add,
-                src_alpha_blend_factor: BlendMode::One,
-                dst_alpha_blend_factor: BlendMode::Zero,
-                alpha_blend_op: BlendOp::Add,
-                color_write_mask: ColorComponentFlags::RGBA,
-            })
-            .commit();
+        //        let fxaa_pass = self
+        //            .render_graph
+        //            .begin_render_pass("Fxaa", backbuffer.size)?
+        //            .shader_reads(&[tonemap_output])
+        //            .writes_attachments(&[fxaa_output])
+        //            .with_blend_state(BlendState {
+        //                blend_enable: false,
+        //                src_color_blend_factor: BlendMode::One,
+        //                dst_color_blend_factor: BlendMode::Zero,
+        //                color_blend_op: BlendOp::Add,
+        //                src_alpha_blend_factor: BlendMode::One,
+        //                dst_alpha_blend_factor: BlendMode::Zero,
+        //                alpha_blend_op: BlendOp::Add,
+        //                color_write_mask: ColorComponentFlags::RGBA,
+        //            })
+        //            .commit();
 
         let present_render_pass = self
             .render_graph
             .begin_render_pass("Present", backbuffer.size)?
-            .shader_reads(&[fxaa_output])
+            .shader_reads(&[tonemap_output])
             .writes_attachments(&[swapchain_image])
             .with_blend_state(BlendState {
                 blend_enable: false,
@@ -944,161 +1086,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .commit();
 
         self.render_graph.compile()?;
-
-        self.render_graph.define_pipeline_for_renderpass(
-            &crate::app_state().gpu,
-            &combine_pass,
-            "CombinePipeline",
-            &RenderGraphPipelineDescription {
-                vertex_inputs: &[],
-                stage: RenderStage::Graphics {
-                    vertex: ModuleInfo {
-                        module: self.screen_quad.clone(),
-                        entry_point: "main",
-                    },
-                    fragment: ModuleInfo {
-                        module: self.gbuffer_combine.clone(),
-                        entry_point: "main",
-                    },
-                },
-                fragment_state: FragmentState {
-                    input_topology: gpu::PrimitiveTopology::TriangleStrip,
-                    primitive_restart: false,
-                    polygon_mode: gpu::PolygonMode::Fill,
-                    cull_mode: gpu::CullMode::None,
-                    front_face: gpu::FrontFace::ClockWise,
-                    depth_stencil_state: DepthStencilState {
-                        depth_test_enable: false,
-                        depth_write_enable: false,
-                        depth_compare_op: CompareOp::Always,
-                        stencil_test_enable: false,
-                        front: StencilOpState::default(),
-                        back: StencilOpState::default(),
-                        min_depth_bounds: 0.0,
-                        max_depth_bounds: 1.0,
-                    },
-                    logic_op: None,
-                    push_constant_ranges: &[],
-                },
-            },
-        )?;
-
-        self.render_graph.define_pipeline_for_renderpass(
-            &crate::app_state().gpu,
-            &tonemap_pass,
-            "TonemapPipeline",
-            &RenderGraphPipelineDescription {
-                vertex_inputs: &[],
-                stage: RenderStage::Graphics {
-                    vertex: ModuleInfo {
-                        module: self.screen_quad.clone(),
-                        entry_point: "main",
-                    },
-                    fragment: ModuleInfo {
-                        module: self.tonemap_fs.clone(),
-                        entry_point: "main",
-                    },
-                },
-                fragment_state: FragmentState {
-                    input_topology: gpu::PrimitiveTopology::TriangleStrip,
-                    primitive_restart: false,
-                    polygon_mode: gpu::PolygonMode::Fill,
-                    cull_mode: gpu::CullMode::None,
-                    front_face: gpu::FrontFace::ClockWise,
-                    depth_stencil_state: DepthStencilState {
-                        depth_test_enable: false,
-                        depth_write_enable: false,
-                        depth_compare_op: CompareOp::Always,
-                        stencil_test_enable: false,
-                        front: StencilOpState::default(),
-                        back: StencilOpState::default(),
-                        min_depth_bounds: 0.0,
-                        max_depth_bounds: 1.0,
-                    },
-                    logic_op: None,
-                    push_constant_ranges: &[],
-                },
-            },
-        )?;
-
-        self.render_graph.define_pipeline_for_renderpass(
-            &crate::app_state().gpu,
-            &fxaa_pass,
-            "FxaaPipeline",
-            &RenderGraphPipelineDescription {
-                vertex_inputs: &[],
-                stage: RenderStage::Graphics {
-                    vertex: ModuleInfo {
-                        module: self.fxaa_vs.clone(),
-                        entry_point: "main",
-                    },
-                    fragment: ModuleInfo {
-                        module: self.fxaa_fs.clone(),
-                        entry_point: "main",
-                    },
-                },
-                fragment_state: FragmentState {
-                    input_topology: gpu::PrimitiveTopology::TriangleList,
-                    primitive_restart: false,
-                    polygon_mode: gpu::PolygonMode::Fill,
-                    cull_mode: gpu::CullMode::None,
-                    front_face: gpu::FrontFace::ClockWise,
-                    depth_stencil_state: DepthStencilState {
-                        depth_test_enable: false,
-                        depth_write_enable: false,
-                        depth_compare_op: CompareOp::Always,
-                        stencil_test_enable: false,
-                        front: StencilOpState::default(),
-                        back: StencilOpState::default(),
-                        min_depth_bounds: 0.0,
-                        max_depth_bounds: 1.0,
-                    },
-                    logic_op: None,
-                    push_constant_ranges: &[PushConstantRange {
-                        stage_flags: ShaderStage::ALL,
-                        offset: 0,
-                        size: std::mem::size_of::<FxaaShaderParams>() as _,
-                    }],
-                },
-            },
-        )?;
-        self.render_graph.define_pipeline_for_renderpass(
-            &app_state().gpu,
-            &present_render_pass,
-            "Present",
-            &RenderGraphPipelineDescription {
-                vertex_inputs: &[],
-                stage: RenderStage::Graphics {
-                    vertex: ModuleInfo {
-                        module: self.screen_quad.clone(),
-                        entry_point: "main",
-                    },
-                    fragment: ModuleInfo {
-                        module: self.texture_copy.clone(),
-                        entry_point: "main",
-                    },
-                },
-                fragment_state: FragmentState {
-                    input_topology: gpu::PrimitiveTopology::TriangleStrip,
-                    primitive_restart: false,
-                    polygon_mode: gpu::PolygonMode::Fill,
-                    cull_mode: gpu::CullMode::None,
-                    front_face: gpu::FrontFace::ClockWise,
-                    depth_stencil_state: DepthStencilState {
-                        depth_test_enable: false,
-                        depth_write_enable: false,
-                        depth_compare_op: CompareOp::Always,
-                        stencil_test_enable: false,
-                        front: StencilOpState::default(),
-                        back: StencilOpState::default(),
-                        min_depth_bounds: 0.0,
-                        max_depth_bounds: 1.0,
-                    },
-                    logic_op: None,
-                    push_constant_ranges: &[],
-                },
-            },
-        )?;
 
         //#endregion
 
@@ -1127,6 +1114,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 &draw_hashmap,
                 0,
                 ctx,
+                &current_buffers.camera_buffer,
+                &current_buffers.light_buffer,
             );
         });
         context.register_callback(&shadow_atlas_rendering_pass, |_: &VkGpu, ctx| {
@@ -1153,51 +1142,78 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     &draw_hashmap,
                     i as _,
                     ctx,
+                    &current_buffers.camera_buffer,
+                    &current_buffers.light_buffer,
                 );
             }
         });
         context.register_callback(&gbuffer_pass, |_: &VkGpu, ctx| {
-            if let Some(material) = skybox_material {
-                let cube_mesh = resource_map.get(&self.cube_mesh);
-                let skybox_master = resource_map.get(&material.owner);
-                Self::draw_skybox(&pov.location, ctx, cube_mesh, material, skybox_master);
-            }
+            //            if let Some(material) = skybox_material {
+            //                let cube_mesh = resource_map.get(&self.cube_mesh);
+            //                let skybox_master = resource_map.get(&material.owner);
+            //                Self::draw_skybox(
+            //                    &pov.location,
+            //                    ctx,
+            //                    cube_mesh,
+            //                    material,
+            //                    skybox_master,
+            //                    resource_map,
+            //                );
+            //            }
             Self::main_render_loop(
                 resource_map,
                 PipelineTarget::ColorAndDepth,
                 &draw_hashmap,
                 0,
                 ctx,
+                &current_buffers.camera_buffer,
+                &current_buffers.light_buffer,
             );
         });
 
         context.register_callback(&combine_pass, |_: &VkGpu, ctx| {
-            ctx.render_pass_command.draw(4, 1, 0, 0);
+            ctx.render_pass_command.bind_resources(0, &ctx.bindings);
+            ctx.render_pass_command
+                .set_vertex_shader(self.screen_quad.clone());
+            ctx.render_pass_command
+                .set_fragment_shader(self.gbuffer_combine.clone());
+            ctx.render_pass_command.draw_handle(4, 1, 0, 0);
         });
         context.register_callback(&tonemap_pass, |_: &VkGpu, ctx| {
-            ctx.render_pass_command.draw(4, 1, 0, 0);
+            ctx.render_pass_command.bind_resources(0, &ctx.bindings);
+            ctx.render_pass_command
+                .set_vertex_shader(self.screen_quad.clone());
+            ctx.render_pass_command
+                .set_fragment_shader(self.tonemap_fs.clone());
+            ctx.render_pass_command.draw_handle(4, 1, 0, 0);
         });
-        context.register_callback(&fxaa_pass, |_: &VkGpu, ctx| {
-            let rcp_frame = vector![backbuffer.size.width as f32, backbuffer.size.height as f32];
-            let rcp_frame = vector![1.0 / rcp_frame.x, 1.0 / rcp_frame.y];
-
-            let params = FxaaShaderParams {
-                rcp_frame,
-                fxaa_quality_subpix: self.fxaa_settings.fxaa_quality_subpix,
-                fxaa_quality_edge_threshold: self.fxaa_settings.fxaa_quality_edge_threshold,
-                fxaa_quality_edge_threshold_min: self.fxaa_settings.fxaa_quality_edge_threshold_min,
-                iterations: self.fxaa_settings.iterations,
-            };
-
-            ctx.render_pass_command.push_constant(
-                ctx.pipeline.expect("No FXAA pipeline"),
-                &params,
-                0,
-            );
-            ctx.render_pass_command.draw(3, 1, 0, 0);
-        });
+        //        context.register_callback(&fxaa_pass, |_: &VkGpu, ctx| {
+        //            let rcp_frame = vector![backbuffer.size.width as f32, backbuffer.size.height as f32];
+        //            let rcp_frame = vector![1.0 / rcp_frame.x, 1.0 / rcp_frame.y];
+        //
+        //            let params = FxaaShaderParams {
+        //                rcp_frame,
+        //                fxaa_quality_subpix: self.fxaa_settings.fxaa_quality_subpix,
+        //                fxaa_quality_edge_threshold: self.fxaa_settings.fxaa_quality_edge_threshold,
+        //                fxaa_quality_edge_threshold_min: self.fxaa_settings.fxaa_quality_edge_threshold_min,
+        //                iterations: self.fxaa_settings.iterations,
+        //            };
+        //
+        //            ctx.render_pass_command.push_constants(
+        //                0,
+        //                0,
+        //                bytemuck::cast_slice(&[params]),
+        //                ShaderStage::ALL_GRAPHICS,
+        //            );
+        //            ctx.render_pass_command.draw(3, 1, 0, 0);
+        //        });
         context.register_callback(&present_render_pass, |_: &VkGpu, ctx| {
-            ctx.render_pass_command.draw(4, 1, 0, 0);
+            ctx.render_pass_command.bind_resources(0, &ctx.bindings);
+            ctx.render_pass_command
+                .set_vertex_shader(self.screen_quad.clone());
+            ctx.render_pass_command
+                .set_fragment_shader(self.texture_copy.clone());
+            ctx.render_pass_command.draw_handle(4, 1, 0, 0);
         });
 
         let irradiance_map_texture = match &self.irradiance_map {

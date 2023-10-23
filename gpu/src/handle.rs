@@ -14,6 +14,9 @@ pub trait Handle: std::fmt::Debug {
     fn new(id: u64, context: Arc<dyn Context>) -> Self;
     fn null() -> Self;
     fn is_null(&self) -> bool;
+    fn is_valid(&self) -> bool {
+        !self.is_null()
+    }
     fn id(&self) -> u64;
     fn handle_type() -> HandleType;
 }

@@ -1,7 +1,8 @@
 use gpu::{
-    ComponentMapping, Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle,
-    ImageSubresourceRange, ImageUsageFlags, ImageViewHandle, ImageViewType, MemoryDomain,
-    SamplerAddressMode, SamplerCreateInfo, SamplerHandle, VkGpu, VkImage, VkImageView, VkSampler,
+    AccessFlags, ComponentMapping, Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat,
+    ImageHandle, ImageSubresourceRange, ImageUsageFlags, ImageViewHandle, ImageViewType,
+    MemoryDomain, PipelineStageFlags, SamplerAddressMode, SamplerCreateInfo, SamplerHandle, VkGpu,
+    VkImage, VkImageView, VkSampler,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 
@@ -64,6 +65,26 @@ impl Texture {
             MemoryDomain::DeviceLocal,
         )?;
 
+        gpu.transition_image_layout(
+            &image,
+            gpu::TransitionInfo {
+                layout: gpu::ImageLayout::Undefined,
+                access_mask: AccessFlags::empty(),
+                stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+            },
+            gpu::TransitionInfo {
+                layout: gpu::ImageLayout::ShaderReadOnly,
+                access_mask: AccessFlags::SHADER_READ,
+                stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
+            },
+            ImageSubresourceRange {
+                aspect_mask: ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: layers,
+            },
+        )?;
         let rgba_view = gpu.make_image_view(&gpu::ImageViewCreateInfo {
             image: image.clone(),
             view_type,

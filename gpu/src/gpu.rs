@@ -13,6 +13,7 @@ use anyhow::{bail, Result};
 use ash::extensions::khr::DynamicRendering;
 use ash::vk::{
     DescriptorType, PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR,
+    PipelineRenderingCreateInfoKHR,
 };
 use ash::{
     extensions::ext::DebugUtils,
@@ -40,8 +41,8 @@ use crate::gpu_resource_manager::{
     utils::associate_to_handle, AllocatedResourceMap, HasAssociatedHandle,
 };
 use crate::{
-    get_allocation_callbacks, BufferCreateInfo, BufferHandle, BufferImageCopyInfo,
-    CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo,
+    get_allocation_callbacks, BeginRenderPassInfoOwned, BufferCreateInfo, BufferHandle,
+    BufferImageCopyInfo, CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo,
     ComputePipelineDescription, Context, DescriptorSetInfo2, DescriptorSetState, Extent2D,
     FramebufferCreateInfo, GPUFence, Gpu, GpuConfiguration, GpuResourceMap,
     GraphicsPipelineDescription, Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat,
@@ -99,6 +100,7 @@ impl PipelineCache {
         &self,
         pipeline_state: &PipelineState,
         layout: vk::PipelineLayout,
+        color_formats: &[vk::Format],
         resource_map: &GpuResourceMap,
     ) -> vk::Pipeline {
         let mut pipelines = self.pipelines.borrow_mut();
@@ -109,7 +111,7 @@ impl PipelineCache {
             return pipelines[&pipeline_hash];
         }
 
-        let pipeline = self.create_pipeline(pipeline_state, layout, resource_map);
+        let pipeline = self.create_pipeline(pipeline_state, layout, color_formats, resource_map);
         pipelines.insert(pipeline_hash, pipeline);
         pipeline
     }
@@ -125,8 +127,10 @@ impl PipelineCache {
         &self,
         pipeline_state: &PipelineState,
         layout: vk::PipelineLayout,
+        color_formats: &[vk::Format],
         resource_map: &GpuResourceMap,
     ) -> vk::Pipeline {
+        assert!(pipeline_state.vertex_shader.is_valid());
         let mut stages = vec![];
         let main_name = std::ffi::CString::new("main").unwrap();
         let vertex_shader = resource_map.resolve::<VkShaderModule>(&pipeline_state.vertex_shader);
@@ -196,9 +200,23 @@ impl PipelineCache {
             p_scissors: std::ptr::null(),
         };
         let dynamic_state = pipeline_state.dynamic_state();
+
+        let rendering_ext_info = PipelineRenderingCreateInfoKHR {
+            s_type: StructureType::PIPELINE_RENDERING_CREATE_INFO_KHR,
+            p_next: std::ptr::null(),
+            view_mask: 0,
+            color_attachment_count: color_formats.len() as _,
+            p_color_attachment_formats: color_formats.as_ptr(),
+            depth_attachment_format: if pipeline_state.enable_depth_test {
+                ImageFormat::Depth.to_vk()
+            } else {
+                vk::Format::UNDEFINED
+            },
+            stencil_attachment_format: vk::Format::UNDEFINED,
+        };
         let create_info = vk::GraphicsPipelineCreateInfo {
             s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
-            p_next: std::ptr::null(),
+            p_next: addr_of!(rendering_ext_info) as *const _,
             flags: vk::PipelineCreateFlags::empty(),
             stage_count: stages.len() as _,
             p_stages: stages.as_ptr() as *const _,
@@ -525,7 +543,24 @@ impl DescriptorSetCache {
             .iter()
             .enumerate()
             .for_each(|(i, b)| match &b.ty {
-                crate::DescriptorBindingType::BufferRange {
+                crate::DescriptorBindingType::StorageBuffer {
+                    handle,
+                    offset,
+                    range,
+                } => buffer_descriptors.push((
+                    i,
+                    DescriptorBufferInfo {
+                        buffer: resource_map.resolve::<VkBuffer>(&handle).inner,
+                        offset: *offset,
+                        range: if *range as vk::DeviceSize == crate::WHOLE_SIZE {
+                            vk::WHOLE_SIZE
+                        } else {
+                            *range as _
+                        },
+                    },
+                    vk::DescriptorType::STORAGE_BUFFER,
+                )),
+                crate::DescriptorBindingType::UniformBuffer {
                     handle,
                     offset,
                     range,
@@ -1577,11 +1612,22 @@ impl VkGpu {
     pub(crate) fn get_pipeline(
         &self,
         pipeline_state: &PipelineState,
+        render_pass_info: &BeginRenderPassInfoOwned,
         layout: vk::PipelineLayout,
     ) -> vk::Pipeline {
+        let formats = render_pass_info
+            .color_attachments
+            .iter()
+            .map(|a| {
+                self.resolve_resource::<VkImageView>(&a.image_view)
+                    .format
+                    .to_vk()
+            })
+            .collect::<Vec<_>>();
         self.state.pipeline_cache.get_pipeline(
             &pipeline_state,
             layout,
+            &formats,
             &self.allocated_resources().borrow(),
         )
     }
@@ -2434,7 +2480,7 @@ impl Gpu for VkGpu {
                 stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
             },
             ImageSubresourceRange {
-                aspect_mask: crate::ImageAspectFlags::COLOR,
+                aspect_mask: info.format.aspect_mask(),
                 base_mip_level: 0,
                 level_count: 1,
                 base_array_layer: 0,
