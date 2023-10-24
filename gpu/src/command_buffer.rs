@@ -1,4 +1,3 @@
-use core::panic;
 use std::{ffi::CString, ops::Deref};
 
 use ash::vk::{
@@ -61,10 +60,17 @@ pub(crate) struct PipelineState {
     pub(crate) scissor_area: Option<Rect2D>,
     pub(crate) front_face: FrontFace,
     pub(crate) cull_mode: CullMode,
+    // If vulkan complains about a missing shader frament shader, check that these two bastards are
+    // enabled
     pub(crate) enable_depth_test: bool,
+    pub(crate) depth_write_enabled: bool,
+
+    pub(crate) depth_compare_op: CompareOp,
     pub(crate) render_area: Rect2D,
     pub(crate) vertex_inputs: Vec<VertexBindingInfo>,
     pub(crate) color_blend_states: Vec<PipelineColorBlendAttachmentState>,
+    pub(crate) primitive_topology: PrimitiveTopology,
+    pub(crate) color_output_enabled: bool,
 }
 
 impl PipelineState {
@@ -91,10 +97,14 @@ impl PipelineState {
             front_face: FrontFace::default(),
             cull_mode: CullMode::default(),
             render_area: info.render_area,
-            enable_depth_test: true,
+            enable_depth_test: false,
+            depth_write_enabled: false,
+            depth_compare_op: CompareOp::Never,
+            primitive_topology: PrimitiveTopology::TriangleList,
 
             vertex_inputs: vec![],
             color_blend_states,
+            color_output_enabled: true,
         }
     }
 
@@ -103,7 +113,7 @@ impl PipelineState {
             s_type: StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
             p_next: std::ptr::null(),
             flags: PipelineInputAssemblyStateCreateFlags::empty(),
-            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+            topology: self.primitive_topology.to_vk(),
             primitive_restart_enable: vk::FALSE,
         }
     }
@@ -174,8 +184,8 @@ impl PipelineState {
             p_next: std::ptr::null(),
             flags: vk::PipelineDepthStencilStateCreateFlags::empty(),
             depth_test_enable: self.enable_depth_test.to_vk(),
-            depth_write_enable: true.to_vk(),
-            depth_compare_op: CompareOp::Always.to_vk(),
+            depth_write_enable: self.depth_write_enabled.to_vk(),
+            depth_compare_op: self.depth_compare_op.to_vk(),
             depth_bounds_test_enable: false.to_vk(),
             stencil_test_enable: false.to_vk(),
             front: StencilOpState::default().to_vk(),
@@ -189,8 +199,6 @@ impl PipelineState {
         const DYNAMIC_STATES: &'static [vk::DynamicState] = &[
             vk::DynamicState::VIEWPORT,
             vk::DynamicState::SCISSOR,
-            vk::DynamicState::FRONT_FACE,
-            vk::DynamicState::CULL_MODE,
             vk::DynamicState::DEPTH_BIAS,
             vk::DynamicState::DEPTH_BIAS_ENABLE,
             vk::DynamicState::DEPTH_TEST_ENABLE,
@@ -265,11 +273,7 @@ impl DescriptorSetInfo2 {
             let descriptor_type = match binding.ty {
                 crate::DescriptorBindingType::UniformBuffer { .. } => BindingType::Uniform,
                 crate::DescriptorBindingType::StorageBuffer { .. } => BindingType::Storage,
-                crate::DescriptorBindingType::ImageView { .. } => BindingType::CombinedImageSampler, //                    super::DescriptorType::StorageBuffer(_) => DescriptorType::STORAGE_BUFFER,
-                                                                                                     //                    super::DescriptorType::Sampler(_) => DescriptorType::SAMPLER,
-                                                                                                     //                    super::DescriptorType::CombinedImageSampler(_) => {
-                                                                                                     //                        DescriptorType::COMBINED_IMAGE_SAMPLER
-                                                                                                     //                    }
+                crate::DescriptorBindingType::ImageView { .. } => BindingType::CombinedImageSampler,
             };
             let binding = BindingElement {
                 binding_type: descriptor_type,
@@ -791,6 +795,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         }
     }
 
+    pub fn set_primitive_topology(&mut self, new_topology: PrimitiveTopology) {
+        self.pipeline_state.primitive_topology = new_topology;
+    }
+
     pub fn set_vertex_shader(&mut self, vertex_shader: ShaderModuleHandle) {
         self.pipeline_state.vertex_shader = vertex_shader;
     }
@@ -801,6 +809,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
 
     pub fn set_vertex_buffers(&mut self, bindings: &[VertexBindingInfo]) {
         self.pipeline_state.vertex_inputs = bindings.to_vec();
+    }
+
+    pub fn set_color_output_enabled(&mut self, color_output_enabled: bool) {
+        self.pipeline_state.color_output_enabled = color_output_enabled;
     }
 
     pub fn draw_indexed(
@@ -869,6 +881,14 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         self.pipeline_state.enable_depth_test = enable_depth_test;
     }
 
+    pub fn set_depth_write_enabled(&mut self, depth_write_enabled: bool) {
+        self.pipeline_state.depth_write_enabled = depth_write_enabled;
+    }
+
+    pub fn set_depth_compare_op(&mut self, depth_compare_op: CompareOp) {
+        self.pipeline_state.depth_compare_op = depth_compare_op;
+    }
+
     fn prepare_draw(&self) {
         let device = self.command_buffer.gpu.vk_logical_device();
 
@@ -908,14 +928,6 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             );
             device.cmd_set_viewport(self.command_buffer.inner(), 0, &[viewport.to_vk()]);
             device.cmd_set_scissor(self.command_buffer.inner(), 0, &[scissor.to_vk()]);
-            device.cmd_set_front_face(
-                self.command_buffer.inner(),
-                self.pipeline_state.front_face.to_vk(),
-            );
-            device.cmd_set_cull_mode(
-                self.command_buffer.inner(),
-                self.pipeline_state.cull_mode.to_vk(),
-            );
             device.cmd_set_depth_test_enable(
                 self.command_buffer.inner(),
                 self.pipeline_state.enable_depth_test,
@@ -965,10 +977,11 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         first_index: u32,
         vertex_offset: i32,
         first_instance: u32,
-    ) -> anyhow::Result<()> {
+    ) {
         self.has_draw_command = true;
         self.command_buffer.has_recorded_anything = true;
-        let layout = self.find_matching_pipeline_layout();
+
+        let layout = self.find_matching_pipeline_layout(&self.descriptor_state);
         let pipeline = self.find_matching_pipeline(layout);
         let device = self.gpu.vk_logical_device();
         {
@@ -1009,7 +1022,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         }
 
         if self.descriptor_state.sets.len() > 0 {
-            let descriptors = self.find_matching_descriptor_sets();
+            let descriptors = self.find_matching_descriptor_sets(&self.descriptor_state);
             unsafe {
                 device.cmd_bind_descriptor_sets(
                     self.inner(),
@@ -1036,8 +1049,6 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 first_instance,
             );
         }
-
-        Ok(())
     }
 
     pub fn draw_handle(
@@ -1046,9 +1057,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         instances: u32,
         first_vertex: u32,
         first_instance: u32,
-    ) -> anyhow::Result<()> {
+    ) {
         self.has_draw_command = true;
-        let layout = self.find_matching_pipeline_layout();
+
+        let layout = self.find_matching_pipeline_layout(&self.descriptor_state);
         let pipeline = self.find_matching_pipeline(layout);
         let device = self.gpu.vk_logical_device();
         {
@@ -1090,7 +1102,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         }
 
         if self.descriptor_state.sets.len() > 0 {
-            let descriptors = self.find_matching_descriptor_sets();
+            let descriptors = self.find_matching_descriptor_sets(&self.descriptor_state);
             unsafe {
                 device.cmd_bind_descriptor_sets(
                     self.inner(),
@@ -1116,8 +1128,6 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 first_instance,
             );
         }
-
-        Ok(())
     }
 
     fn find_matching_pipeline(&mut self, layout: vk::PipelineLayout) -> vk::Pipeline {
@@ -1125,12 +1135,18 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             .get_pipeline(&self.pipeline_state, &self.render_pass_info, layout)
     }
 
-    fn find_matching_pipeline_layout(&self) -> vk::PipelineLayout {
-        self.gpu.get_pipeline_layout(&self.descriptor_state)
+    fn find_matching_pipeline_layout(
+        &self,
+        descriptor_state: &DescriptorSetState,
+    ) -> vk::PipelineLayout {
+        self.gpu.get_pipeline_layout(descriptor_state)
     }
 
-    fn find_matching_descriptor_sets(&self) -> Vec<vk::DescriptorSet> {
-        self.gpu.get_descriptor_sets(&self.descriptor_state)
+    fn find_matching_descriptor_sets(
+        &self,
+        descriptor_state: &DescriptorSetState,
+    ) -> Vec<vk::DescriptorSet> {
+        self.gpu.get_descriptor_sets(descriptor_state)
     }
     pub fn set_index_buffer(
         &self,

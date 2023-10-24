@@ -3,7 +3,7 @@ mod material_instance;
 
 use std::collections::HashMap;
 
-use gpu::{ImageFormat, ShaderModuleHandle, VkShaderModule};
+use gpu::{ImageFormat, ShaderModuleHandle, ShaderStage, VkShaderModule};
 pub use material_instance::*;
 
 pub use master_material::*;
@@ -32,6 +32,7 @@ pub struct MaterialParameterOffsetSize {
 pub struct TextureInput {
     pub name: String,
     pub format: ImageFormat,
+    pub shader_stage: ShaderStage,
 }
 
 pub struct MaterialDescription<'a> {
@@ -39,6 +40,7 @@ pub struct MaterialDescription<'a> {
     pub domain: MaterialDomain,
     pub texture_inputs: &'a [TextureInput],
     pub material_parameters: HashMap<String, MaterialParameterOffsetSize>,
+    pub parameter_shader_visibility: ShaderStage,
     pub fragment_module: ShaderModuleHandle,
     pub vertex_module: ShaderModuleHandle,
 }

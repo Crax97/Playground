@@ -398,12 +398,10 @@ impl DeferredRenderingPipeline {
                         0,
                     );
 
-                    let mut user_bindings = master
-                        .texture_inputs
-                        .iter()
-                        .enumerate()
-                        .map(|(i, tex)| {
-                            let texture_parameter = &material.current_inputs[&tex.name];
+                    let mut user_bindings = vec![];
+                    user_bindings.extend(&mut master.texture_inputs.iter().enumerate().map(
+                        |(i, tex_info)| {
+                            let texture_parameter = &material.current_inputs[&tex_info.name];
                             let tex = resource_map.get(texture_parameter);
 
                             // TODO: these can be avoided
@@ -414,12 +412,11 @@ impl DeferredRenderingPipeline {
                                     image_view_handle: view.view.clone(),
                                     sampler_handle: sampler.0.clone(),
                                 },
-                                binding_stage: ShaderStage::ALL_GRAPHICS,
+                                binding_stage: tex_info.shader_stage,
                                 location: i as _,
                             }
-                        })
-                        .collect::<Vec<_>>();
-
+                        },
+                    ));
                     if material.parameter_buffer.is_valid() {
                         user_bindings.push(Binding {
                             ty: gpu::DescriptorBindingType::UniformBuffer {
@@ -427,7 +424,7 @@ impl DeferredRenderingPipeline {
                                 offset: 0,
                                 range: gpu::WHOLE_SIZE as _,
                             },
-                            binding_stage: ShaderStage::ALL_GRAPHICS,
+                            binding_stage: master.parameter_shader_stages,
                             location: master.texture_inputs.len() as u32,
                         });
                     }
@@ -1123,7 +1120,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         //#region context setup
         context.register_callback(&dbuffer_pass, |_: &VkGpu, ctx| {
             ctx.render_pass_command.set_cull_mode(gpu::CullMode::Back);
+            ctx.render_pass_command
+                .set_depth_compare_op(gpu::CompareOp::LessEqual);
 
+            ctx.render_pass_command.set_color_output_enabled(false);
+            ctx.render_pass_command.set_enable_depth_test(true);
+            ctx.render_pass_command.set_depth_write_enabled(true);
             Self::main_render_loop(
                 resource_map,
                 PipelineTarget::DepthOnly,
@@ -1142,6 +1144,13 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             );
 
             ctx.render_pass_command.set_cull_mode(gpu::CullMode::Front);
+            ctx.render_pass_command
+                .set_depth_compare_op(gpu::CompareOp::LessEqual);
+
+            ctx.render_pass_command.set_color_output_enabled(false);
+            ctx.render_pass_command.set_enable_depth_test(true);
+            ctx.render_pass_command.set_depth_write_enabled(true);
+
             for (i, pov) in per_frame_data.iter().enumerate().skip(1) {
                 ctx.render_pass_command.set_viewport(gpu::Viewport {
                     x: pov.viewport_size_offset.x,
@@ -1164,6 +1173,14 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             }
         });
         context.register_callback(&gbuffer_pass, |_: &VkGpu, ctx| {
+            ctx.render_pass_command
+                .set_front_face(gpu::FrontFace::CounterClockWise);
+            ctx.render_pass_command.set_enable_depth_test(true);
+            ctx.render_pass_command.set_depth_write_enabled(false);
+            ctx.render_pass_command.set_color_output_enabled(true);
+            ctx.render_pass_command.set_cull_mode(gpu::CullMode::Back);
+            ctx.render_pass_command
+                .set_depth_compare_op(gpu::CompareOp::Equal);
             //            if let Some(material) = skybox_material {
             //                let cube_mesh = resource_map.get(&self.cube_mesh);
             //                let skybox_master = resource_map.get(&material.owner);
@@ -1189,6 +1206,13 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         context.register_callback(&combine_pass, |_: &VkGpu, ctx| {
             ctx.render_pass_command.bind_resources(0, &ctx.bindings);
+            ctx.render_pass_command.set_cull_mode(gpu::CullMode::None);
+            ctx.render_pass_command
+                .set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
+            ctx.render_pass_command
+                .set_front_face(gpu::FrontFace::ClockWise);
+            ctx.render_pass_command.set_enable_depth_test(false);
+            ctx.render_pass_command.set_depth_write_enabled(false);
             ctx.render_pass_command
                 .set_vertex_shader(self.screen_quad.clone());
             ctx.render_pass_command
@@ -1197,6 +1221,11 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         });
         context.register_callback(&tonemap_pass, |_: &VkGpu, ctx| {
             ctx.render_pass_command.bind_resources(0, &ctx.bindings);
+            ctx.render_pass_command.set_cull_mode(gpu::CullMode::None);
+            ctx.render_pass_command.set_enable_depth_test(false);
+            ctx.render_pass_command.set_depth_write_enabled(false);
+            ctx.render_pass_command
+                .set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
             ctx.render_pass_command
                 .set_vertex_shader(self.screen_quad.clone());
             ctx.render_pass_command
@@ -1225,6 +1254,13 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         //        });
         context.register_callback(&present_render_pass, |_: &VkGpu, ctx| {
             ctx.render_pass_command.bind_resources(0, &ctx.bindings);
+            ctx.render_pass_command
+                .set_front_face(gpu::FrontFace::ClockWise);
+            ctx.render_pass_command.set_cull_mode(gpu::CullMode::None);
+            ctx.render_pass_command
+                .set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
+            ctx.render_pass_command.set_enable_depth_test(false);
+            ctx.render_pass_command.set_depth_write_enabled(false);
             ctx.render_pass_command
                 .set_vertex_shader(self.screen_quad.clone());
             ctx.render_pass_command
@@ -1401,6 +1437,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 size: std::mem::size_of::<ObjectDrawInfo>() as u32,
             }],
             logic_op: None,
+            parameters_visibility: material_description.parameter_shader_visibility,
         };
 
         MasterMaterial::new(gpu, &master_description)

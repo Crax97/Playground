@@ -11,7 +11,7 @@ use engine::{
     MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo,
     RenderingPipeline, Scene, ScenePrimitive, Texture, TextureInput,
 };
-use gpu::{ImageViewType, PresentMode, VkCommandBuffer};
+use gpu::{ImageViewType, PresentMode, ShaderStage, VkCommandBuffer};
 use imgui::Ui;
 use nalgebra::*;
 use resource_map::ResourceMap;
@@ -142,8 +142,10 @@ impl App for PlanesApp {
                 texture_inputs: &[TextureInput {
                     name: "texSampler".to_owned(),
                     format: gpu::ImageFormat::Rgba8,
+                    shader_stage: ShaderStage::FRAGMENT,
                 }],
                 material_parameters: Default::default(),
+                parameter_shader_visibility: ShaderStage::FRAGMENT,
             },
         )?;
 

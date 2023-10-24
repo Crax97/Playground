@@ -322,7 +322,7 @@ impl App for TriangleApp {
                 bytemuck::cast_slice(mvp.as_slice()),
                 ShaderStage::VERTEX,
             );
-            pass.draw_indexed_handle(3, 1, 0, 0, 0)?;
+            pass.draw_indexed_handle(3, 1, 0, 0, 0);
         }
         Ok(command_buffer)
     }

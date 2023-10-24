@@ -49,7 +49,7 @@ use crate::{
     ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
     ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
     PipelineState, QueueType, Rect2D, RenderPassDescription, SamplerCreateInfo, SamplerHandle,
-    ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo, VkCommandBuffer,
+    ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage, ToVk, TransitionInfo, VkCommandBuffer,
     VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
     VkShaderModule,
 };
@@ -157,11 +157,15 @@ impl PipelineCache {
             });
         }
 
-        let color_attachments = pipeline_state
-            .color_blend_states
-            .iter()
-            .map(|c| c.to_vk())
-            .collect::<Vec<_>>();
+        let color_attachments = if pipeline_state.color_output_enabled {
+            pipeline_state
+                .color_blend_states
+                .iter()
+                .map(|c| c.to_vk())
+                .collect::<Vec<_>>()
+        } else {
+            vec![]
+        };
 
         let (vertex_input_bindings, vertex_attribute_descriptions) =
             pipeline_state.get_vertex_inputs_description();
@@ -187,8 +191,8 @@ impl PipelineCache {
             logic_op_enable: false.to_vk(),
             logic_op: LogicOp::NoOp.to_vk(),
             attachment_count: color_attachments.len() as _,
-            p_attachments: color_attachments.as_ptr() as *const _,
-            blend_constants: [1.0, 1.0, 1.0, 1.0],
+            p_attachments: color_attachments.as_ptr(),
+            blend_constants: [0.0; 4],
         };
         let viewport_state = vk::PipelineViewportStateCreateInfo {
             s_type: StructureType::PIPELINE_VIEWPORT_STATE_CREATE_INFO,
@@ -200,6 +204,12 @@ impl PipelineCache {
             p_scissors: std::ptr::null(),
         };
         let dynamic_state = pipeline_state.dynamic_state();
+
+        let color_formats = if pipeline_state.color_output_enabled {
+            color_formats
+        } else {
+            &[]
+        };
 
         let rendering_ext_info = PipelineRenderingCreateInfoKHR {
             s_type: StructureType::PIPELINE_RENDERING_CREATE_INFO_KHR,
@@ -858,7 +868,7 @@ unsafe extern "system" fn on_message(
     let message = CStr::from_ptr(cb_data.p_message);
     if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::ERROR) {
         log::error!("VULKAN ERROR: {:?}", message);
-        std::process::abort();
+        panic!("Invalid vulkan state");
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::INFO) {
         log::info!("Vulkan - : {:?}", message);
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::WARNING) {
@@ -1569,15 +1579,19 @@ impl VkGpu {
         render_pass_info: &BeginRenderPassInfoOwned,
         layout: vk::PipelineLayout,
     ) -> vk::Pipeline {
-        let formats = render_pass_info
-            .color_attachments
-            .iter()
-            .map(|a| {
-                self.resolve_resource::<VkImageView>(&a.image_view)
-                    .format
-                    .to_vk()
-            })
-            .collect::<Vec<_>>();
+        let formats = if pipeline_state.color_output_enabled {
+            render_pass_info
+                .color_attachments
+                .iter()
+                .map(|a| {
+                    self.resolve_resource::<VkImageView>(&a.image_view)
+                        .format
+                        .to_vk()
+                })
+                .collect::<Vec<_>>()
+        } else {
+            vec![]
+        };
         self.state.pipeline_cache.get_pipeline(
             &pipeline_state,
             layout,

@@ -401,15 +401,8 @@ impl VkGraphicsPipeline {
                 s_type: StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
                 p_next: std::ptr::null(),
                 flags: PipelineInputAssemblyStateCreateFlags::empty(),
-                topology: match pipeline_description.input_topology {
-                    PrimitiveTopology::TriangleList => vk::PrimitiveTopology::TRIANGLE_LIST,
-                    PrimitiveTopology::TriangleStrip => vk::PrimitiveTopology::TRIANGLE_STRIP,
-                },
-                primitive_restart_enable: if pipeline_description.primitive_restart {
-                    vk::TRUE
-                } else {
-                    vk::FALSE
-                },
+                topology: pipeline_description.input_topology.to_vk(),
+                primitive_restart_enable: pipeline_description.primitive_restart.to_vk(),
             };
 
             let tessellation_state: PipelineTessellationStateCreateInfo =

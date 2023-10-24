@@ -3,7 +3,7 @@ use std::{collections::HashMap, hash::Hash, mem::size_of, num::NonZeroU32};
 use gpu::{
     BindingElement, BindingType, CompareOp, CullMode, DepthStencilState, FragmentStageInfo,
     FrontFace, GlobalBinding, GraphicsPipelineDescription, ImageFormat, LogicOp, PolygonMode,
-    PushConstantRange, ShaderModuleHandle, StencilOpState, VertexAttributeDescription,
+    PushConstantRange, ShaderModuleHandle, ShaderStage, StencilOpState, VertexAttributeDescription,
     VertexBindingDescription, VertexStageInfo, VkGpu, VkGraphicsPipeline,
 };
 use nalgebra::{Vector2, Vector3};
@@ -31,6 +31,7 @@ pub struct MasterMaterialDescription<'a> {
     pub global_inputs: &'a [BindingType],
     pub texture_inputs: &'a [TextureInput],
     pub material_parameters: HashMap<String, MaterialParameterOffsetSize>,
+    pub parameters_visibility: ShaderStage,
     pub vertex_info: &'a VertexStageInfo<'a>,
     pub fragment_info: &'a FragmentStageInfo<'a>,
     pub primitive_restart: bool,
@@ -56,6 +57,7 @@ pub struct MasterMaterial {
     pub(crate) texture_inputs: Vec<TextureInput>,
     pub(crate) material_parameters: HashMap<String, MaterialParameterOffsetSize>,
     pub(crate) parameter_block_size: usize,
+    pub(crate) parameter_shader_stages: ShaderStage,
 }
 
 impl Hash for MasterMaterial {
@@ -80,6 +82,7 @@ impl MasterMaterial {
             texture_inputs: description.texture_inputs.to_vec(),
             material_parameters: description.material_parameters.clone(),
             parameter_block_size,
+            parameter_shader_stages: description.parameters_visibility,
         })
     }
 

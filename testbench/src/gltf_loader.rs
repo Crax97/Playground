@@ -10,7 +10,7 @@ use gltf::Document;
 use gpu::{
     ComponentMapping, Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageSubresourceRange,
     ImageUsageFlags, ImageViewCreateInfo, ImageViewType, MemoryDomain, SamplerAddressMode,
-    SamplerCreateInfo, VkGpu,
+    SamplerCreateInfo, ShaderStage, VkGpu,
 };
 use nalgebra::{vector, Matrix4, Point3, Quaternion, UnitQuaternion, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -248,25 +248,31 @@ impl GltfLoader {
                     TextureInput {
                         name: "base_texture".to_owned(),
                         format: gpu::ImageFormat::Rgba8,
+                        shader_stage: ShaderStage::FRAGMENT,
                     },
                     TextureInput {
                         name: "normal_texture".to_owned(),
                         format: gpu::ImageFormat::Rgba8,
+                        shader_stage: ShaderStage::FRAGMENT,
                     },
                     TextureInput {
                         name: "occlusion_texture".to_owned(),
                         format: gpu::ImageFormat::Rgba8,
+                        shader_stage: ShaderStage::FRAGMENT,
                     },
                     TextureInput {
                         name: "emissive_texture".to_owned(),
                         format: gpu::ImageFormat::Rgba8,
+                        shader_stage: ShaderStage::FRAGMENT,
                     },
                     TextureInput {
                         name: "metallic_roughness".to_owned(),
                         format: gpu::ImageFormat::Rgba8,
+                        shader_stage: ShaderStage::FRAGMENT,
                     },
                 ],
                 material_parameters: params,
+                parameter_shader_visibility: ShaderStage::FRAGMENT,
             },
         )?;
 

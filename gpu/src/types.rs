@@ -1306,3 +1306,18 @@ impl ToVk for PipelineColorBlendAttachmentState {
         }
     }
 }
+
+impl ToVk for PrimitiveTopology {
+    type Inner = vk::PrimitiveTopology;
+
+    fn to_vk(&self) -> Self::Inner {
+        match self {
+            PrimitiveTopology::TriangleList => Self::Inner::TRIANGLE_LIST,
+            PrimitiveTopology::TriangleStrip => Self::Inner::TRIANGLE_STRIP,
+            PrimitiveTopology::TriangleFan => Self::Inner::TRIANGLE_FAN,
+            PrimitiveTopology::PointList => Self::Inner::POINT_LIST,
+            PrimitiveTopology::LineList => Self::Inner::LINE_LIST,
+            PrimitiveTopology::LineStrip => Self::Inner::LINE_STRIP,
+        }
+    }
+}

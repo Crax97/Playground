@@ -886,6 +886,10 @@ pub enum PrimitiveTopology {
     #[default]
     TriangleList,
     TriangleStrip,
+    TriangleFan,
+    PointList,
+    LineList,
+    LineStrip,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
