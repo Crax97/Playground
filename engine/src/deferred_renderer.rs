@@ -292,9 +292,9 @@ impl DeferredRenderingPipeline {
             resource_map,
             1,
             1,
-            bytemuck::cast_slice(&[1.0; 6 * 4]),
-            Some("Default Cubemap White"),
-            ImageFormat::RgbaFloat32,
+            bytemuck::cast_slice(&[255u8; 6 * 3]),
+            Some("Default White Irradiance Map"),
+            ImageFormat::Rgb8,
             gpu::ImageViewType::Cube,
         )?;
         let default_irradiance_map = resource_map.add(default_irradiance_map);
@@ -1064,27 +1064,27 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 color_write_mask: ColorComponentFlags::RGBA,
             })
             .commit();
-        //        let fxaa_pass = self
-        //            .render_graph
-        //            .begin_render_pass("Fxaa", backbuffer.size)?
-        //            .shader_reads(&[tonemap_output])
-        //            .writes_attachments(&[fxaa_output])
-        //            .with_blend_state(BlendState {
-        //                blend_enable: false,
-        //                src_color_blend_factor: BlendMode::One,
-        //                dst_color_blend_factor: BlendMode::Zero,
-        //                color_blend_op: BlendOp::Add,
-        //                src_alpha_blend_factor: BlendMode::One,
-        //                dst_alpha_blend_factor: BlendMode::Zero,
-        //                alpha_blend_op: BlendOp::Add,
-        //                color_write_mask: ColorComponentFlags::RGBA,
-        //            })
-        //            .commit();
+        let fxaa_pass = self
+            .render_graph
+            .begin_render_pass("Fxaa", backbuffer.size)?
+            .shader_reads(&[tonemap_output])
+            .writes_attachments(&[fxaa_output])
+            .with_blend_state(BlendState {
+                blend_enable: false,
+                src_color_blend_factor: BlendMode::One,
+                dst_color_blend_factor: BlendMode::Zero,
+                color_blend_op: BlendOp::Add,
+                src_alpha_blend_factor: BlendMode::One,
+                dst_alpha_blend_factor: BlendMode::Zero,
+                alpha_blend_op: BlendOp::Add,
+                color_write_mask: ColorComponentFlags::RGBA,
+            })
+            .commit();
 
         let present_render_pass = self
             .render_graph
             .begin_render_pass("Present", backbuffer.size)?
-            .shader_reads(&[color_target])
+            .shader_reads(&[fxaa_output])
             .writes_attachments(&[swapchain_image])
             .with_blend_state(BlendState {
                 blend_enable: false,
@@ -1232,26 +1232,35 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 .set_fragment_shader(self.tonemap_fs.clone());
             ctx.render_pass_command.draw_handle(4, 1, 0, 0);
         });
-        //        context.register_callback(&fxaa_pass, |_: &VkGpu, ctx| {
-        //            let rcp_frame = vector![backbuffer.size.width as f32, backbuffer.size.height as f32];
-        //            let rcp_frame = vector![1.0 / rcp_frame.x, 1.0 / rcp_frame.y];
-        //
-        //            let params = FxaaShaderParams {
-        //                rcp_frame,
-        //                fxaa_quality_subpix: self.fxaa_settings.fxaa_quality_subpix,
-        //                fxaa_quality_edge_threshold: self.fxaa_settings.fxaa_quality_edge_threshold,
-        //                fxaa_quality_edge_threshold_min: self.fxaa_settings.fxaa_quality_edge_threshold_min,
-        //                iterations: self.fxaa_settings.iterations,
-        //            };
-        //
-        //            ctx.render_pass_command.push_constants(
-        //                0,
-        //                0,
-        //                bytemuck::cast_slice(&[params]),
-        //                ShaderStage::ALL_GRAPHICS,
-        //            );
-        //            ctx.render_pass_command.draw(3, 1, 0, 0);
-        //        });
+        context.register_callback(&fxaa_pass, |_: &VkGpu, ctx| {
+            ctx.render_pass_command.bind_resources(0, &ctx.bindings);
+            ctx.render_pass_command.set_cull_mode(gpu::CullMode::None);
+            ctx.render_pass_command.set_enable_depth_test(false);
+            ctx.render_pass_command.set_depth_write_enabled(false);
+            ctx.render_pass_command
+                .set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
+            let rcp_frame = vector![backbuffer.size.width as f32, backbuffer.size.height as f32];
+            let rcp_frame = vector![1.0 / rcp_frame.x, 1.0 / rcp_frame.y];
+
+            let params = FxaaShaderParams {
+                rcp_frame,
+                fxaa_quality_subpix: self.fxaa_settings.fxaa_quality_subpix,
+                fxaa_quality_edge_threshold: self.fxaa_settings.fxaa_quality_edge_threshold,
+                fxaa_quality_edge_threshold_min: self.fxaa_settings.fxaa_quality_edge_threshold_min,
+                iterations: self.fxaa_settings.iterations,
+            };
+            ctx.render_pass_command
+                .set_vertex_shader(self.fxaa_vs.clone());
+            ctx.render_pass_command
+                .set_fragment_shader(self.fxaa_fs.clone());
+            ctx.render_pass_command.push_constants(
+                0,
+                0,
+                bytemuck::cast_slice(&[params]),
+                ShaderStage::ALL_GRAPHICS,
+            );
+            ctx.render_pass_command.draw_handle(3, 1, 0, 0);
+        });
         context.register_callback(&present_render_pass, |_: &VkGpu, ctx| {
             ctx.render_pass_command.bind_resources(0, &ctx.bindings);
             ctx.render_pass_command
