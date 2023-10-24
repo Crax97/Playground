@@ -66,24 +66,20 @@ impl<T: HasAssociatedHandle + Clone> AllocatedResourceMap<T> {
             .ref_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
-    pub fn decrement_resource_count(&mut self, id: u64) -> Option<T> {
-        let old_refcount = self
-            .0
+    pub fn decrement_resource_count(&mut self, id: u64) {
+        self.0
             .get_mut(&id)
             .expect("Failed to resolve resource")
             .ref_count
             .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
 
-        if old_refcount == 1 {
-            // Resource lost last reference
-            debug!(
-                "Resource {:?} - {id} lost it's last reference",
-                &T::AssociatedHandle::handle_type()
-            );
-            self.0.remove(&id).map(|v| v.resource)
-        } else {
-            None
-        }
+    pub fn update(&mut self) -> Vec<T> {
+        let (alive, dead) = std::mem::take(&mut self.0)
+            .into_iter()
+            .partition(|(_, v)| v.ref_count.load(Ordering::Relaxed) > 0);
+        self.0 = alive;
+        dead.values().map(|v| v.resource.clone()).collect()
     }
 }
 

@@ -367,14 +367,16 @@ impl DeferredRenderingPipeline {
                                 range: gpu::WHOLE_SIZE as _,
                             },
                             binding_stage: ShaderStage::ALL_GRAPHICS,
+                            location: 0,
                         },
                         Binding {
                             ty: gpu::DescriptorBindingType::UniformBuffer {
                                 handle: light_buffer.clone(),
                                 offset: 0,
-                                range: 100 * size_of::<PerFrameData>(),
+                                range: 100 * size_of::<ObjectDrawInfo>(),
                             },
                             binding_stage: ShaderStage::ALL_GRAPHICS,
+                            location: 1,
                         },
                     ],
                 );
@@ -413,6 +415,7 @@ impl DeferredRenderingPipeline {
                                     sampler_handle: sampler.0.clone(),
                                 },
                                 binding_stage: ShaderStage::ALL_GRAPHICS,
+                                location: i as _,
                             }
                         })
                         .collect::<Vec<_>>();
@@ -425,6 +428,7 @@ impl DeferredRenderingPipeline {
                                 range: gpu::WHOLE_SIZE as _,
                             },
                             binding_stage: ShaderStage::ALL_GRAPHICS,
+                            location: master.texture_inputs.len() as u32,
                         });
                     }
 
@@ -480,7 +484,13 @@ impl DeferredRenderingPipeline {
                         }]),
                         ShaderStage::ALL_GRAPHICS,
                     );
-                    ctx.render_pass_command.draw_indexed_handle(1, 0, 0, 0, 0);
+                    ctx.render_pass_command.draw_indexed_handle(
+                        draw_call.prim.index_count,
+                        1,
+                        0,
+                        0,
+                        0,
+                    );
 
                     primitive_label.end();
                     total_primitives_rendered += 1;
@@ -633,6 +643,7 @@ impl DeferredRenderingPipeline {
                         sampler_handle: sampler.0.clone(),
                     },
                     binding_stage: ShaderStage::ALL_GRAPHICS,
+                    location: i as _,
                 }
             })
             .collect::<Vec<_>>();
@@ -645,6 +656,7 @@ impl DeferredRenderingPipeline {
                     range: gpu::WHOLE_SIZE as _,
                 },
                 binding_stage: ShaderStage::ALL_GRAPHICS,
+                location: skybox_master.texture_inputs.len() as u32,
             });
         }
 
@@ -710,9 +722,13 @@ impl DeferredRenderingPipeline {
             ShaderStage::ALL_GRAPHICS,
         );
 
-        render_context
-            .render_pass_command
-            .draw_indexed_handle(1, 0, 0, 0, 0);
+        render_context.render_pass_command.draw_indexed_handle(
+            skybox_mesh.primitives[0].index_count,
+            1,
+            0,
+            0,
+            0,
+        );
         skybox_label.end();
     }
 
@@ -1071,7 +1087,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let present_render_pass = self
             .render_graph
             .begin_render_pass("Present", backbuffer.size)?
-            .shader_reads(&[tonemap_output])
+            .shader_reads(&[color_target])
             .writes_attachments(&[swapchain_image])
             .with_blend_state(BlendState {
                 blend_enable: false,

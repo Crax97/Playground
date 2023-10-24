@@ -332,6 +332,7 @@ impl<'a> CreateFrom<'a, ImageDescription> for GraphImage {
                     samples: SampleCount::Sample1,
                 },
                 MemoryDomain::DeviceLocal,
+                None,
             )
             .expect("Failed to create image resource");
         Ok(GraphImage::construct(image, *desc))
@@ -2397,6 +2398,7 @@ fn resolve_shader_inputs<'a>(
                         sampler_handle: sampler_allocator.get_unchecked(read).resource().clone(),
                     },
                     binding_stage: ShaderStage::ALL_GRAPHICS,
+                    location: idx as _,
                 });
             }
             AllocationType::Buffer(desc) => {
@@ -2420,6 +2422,7 @@ fn resolve_shader_inputs<'a>(
                         },
                     },
                     binding_stage: ShaderStage::ALL_GRAPHICS,
+                    location: idx as _,
                 });
             }
         }

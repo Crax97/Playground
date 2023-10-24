@@ -302,7 +302,7 @@ impl GltfLoader {
             let gpu_image = gpu.make_image(
                 &image_create_info,
                 MemoryDomain::DeviceLocal,
-                // Some(&gltf_image.pixels),
+                Some(&gltf_image.pixels),
             )?;
 
             let gpu_image_view = gpu.make_image_view(&ImageViewCreateInfo {

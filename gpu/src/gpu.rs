@@ -539,59 +539,56 @@ impl DescriptorSetCache {
     ) {
         let mut buffer_descriptors = vec![];
         let mut image_descriptors = vec![];
-        info.bindings
-            .iter()
-            .enumerate()
-            .for_each(|(i, b)| match &b.ty {
-                crate::DescriptorBindingType::StorageBuffer {
-                    handle,
-                    offset,
-                    range,
-                } => buffer_descriptors.push((
-                    i,
-                    DescriptorBufferInfo {
-                        buffer: resource_map.resolve::<VkBuffer>(&handle).inner,
-                        offset: *offset,
-                        range: if *range as vk::DeviceSize == crate::WHOLE_SIZE {
-                            vk::WHOLE_SIZE
-                        } else {
-                            *range as _
-                        },
+        info.bindings.iter().for_each(|b| match &b.ty {
+            crate::DescriptorBindingType::StorageBuffer {
+                handle,
+                offset,
+                range,
+            } => buffer_descriptors.push((
+                b.location,
+                DescriptorBufferInfo {
+                    buffer: resource_map.resolve::<VkBuffer>(&handle).inner,
+                    offset: *offset,
+                    range: if *range as vk::DeviceSize == crate::WHOLE_SIZE {
+                        vk::WHOLE_SIZE
+                    } else {
+                        *range as _
                     },
-                    vk::DescriptorType::STORAGE_BUFFER,
-                )),
-                crate::DescriptorBindingType::UniformBuffer {
-                    handle,
-                    offset,
-                    range,
-                } => buffer_descriptors.push((
-                    i,
-                    DescriptorBufferInfo {
-                        buffer: resource_map.resolve::<VkBuffer>(&handle).inner,
-                        offset: *offset,
-                        range: if *range as vk::DeviceSize == crate::WHOLE_SIZE {
-                            vk::WHOLE_SIZE
-                        } else {
-                            *range as _
-                        },
+                },
+                vk::DescriptorType::STORAGE_BUFFER,
+            )),
+            crate::DescriptorBindingType::UniformBuffer {
+                handle,
+                offset,
+                range,
+            } => buffer_descriptors.push((
+                b.location,
+                DescriptorBufferInfo {
+                    buffer: resource_map.resolve::<VkBuffer>(&handle).inner,
+                    offset: *offset,
+                    range: if *range as vk::DeviceSize == crate::WHOLE_SIZE {
+                        vk::WHOLE_SIZE
+                    } else {
+                        *range as _
                     },
-                    vk::DescriptorType::UNIFORM_BUFFER,
-                )),
-                crate::DescriptorBindingType::ImageView {
-                    image_view_handle,
-                    sampler_handle,
-                } => image_descriptors.push((
-                    i,
-                    DescriptorImageInfo {
-                        sampler: resource_map.resolve::<VkSampler>(&sampler_handle).inner,
-                        image_view: resource_map
-                            .resolve::<VkImageView>(&image_view_handle)
-                            .inner,
-                        image_layout: ImageLayout::ShaderReadOnly.to_vk(),
-                    },
-                    vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                )),
-            });
+                },
+                vk::DescriptorType::UNIFORM_BUFFER,
+            )),
+            crate::DescriptorBindingType::ImageView {
+                image_view_handle,
+                sampler_handle,
+            } => image_descriptors.push((
+                b.location,
+                DescriptorImageInfo {
+                    sampler: resource_map.resolve::<VkSampler>(&sampler_handle).inner,
+                    image_view: resource_map
+                        .resolve::<VkImageView>(&image_view_handle)
+                        .inner,
+                    image_layout: ImageLayout::ShaderReadOnly.to_vk(),
+                },
+                vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            )),
+        });
 
         let mut write_descriptor_sets = vec![];
 
@@ -648,11 +645,11 @@ impl<T: std::fmt::Debug> DestroyedResource<T> {
 
 #[derive(Default)]
 pub struct DestroyedResources {
-    destroyed_shader_modules: RefCell<Vec<DestroyedResource<vk::ShaderModule>>>,
+    destroyed_shader_modules: RefCell<Vec<DestroyedResource<VkShaderModule>>>,
     destroyed_buffers: RefCell<Vec<DestroyedResource<VkBuffer>>>,
     destroyed_images: RefCell<Vec<DestroyedResource<VkImage>>>,
     destroyed_image_views: RefCell<Vec<DestroyedResource<VkImageView>>>,
-    destroyed_samplers: RefCell<Vec<DestroyedResource<vk::Sampler>>>,
+    destroyed_samplers: RefCell<Vec<DestroyedResource<VkSampler>>>,
 }
 
 /*
@@ -776,74 +773,31 @@ impl Context for GpuThreadSharedState {
 
     fn decrement_resource_refcount(&self, id: u64, resource_type: crate::HandleType) {
         match resource_type {
-            crate::HandleType::Buffer => {
-                if let Some(buffer) = self
-                    .allocated_resources
-                    .borrow()
-                    .get_map_mut::<VkBuffer>()
-                    .decrement_resource_count(id)
-                {
-                    self.destroyed_resources
-                        .destroyed_buffers
-                        .borrow_mut()
-                        .push(DestroyedResource::new(buffer, HandleType::Buffer))
-                }
-            }
-            crate::HandleType::ShaderModule => {
-                if let Some(shader_module) = self
-                    .allocated_resources
-                    .borrow()
-                    .get_map_mut::<VkShaderModule>()
-                    .decrement_resource_count(id)
-                {
-                    self.destroyed_resources
-                        .destroyed_shader_modules
-                        .borrow_mut()
-                        .push(DestroyedResource::new(
-                            shader_module.inner,
-                            HandleType::ShaderModule,
-                        ))
-                }
-            }
-            crate::HandleType::Image => {
-                if let Some(image) = self
-                    .allocated_resources
-                    .borrow()
-                    .get_map_mut::<VkImage>()
-                    .decrement_resource_count(id)
-                {
-                    self.destroyed_resources
-                        .destroyed_images
-                        .borrow_mut()
-                        .push(DestroyedResource::new(image, HandleType::Image))
-                }
-            }
-            crate::HandleType::ImageView => {
-                if let Some(view) = self
-                    .allocated_resources
-                    .borrow()
-                    .get_map_mut::<VkImageView>()
-                    .decrement_resource_count(id)
-                {
-                    self.destroyed_resources
-                        .destroyed_image_views
-                        .borrow_mut()
-                        .push(DestroyedResource::new(view, HandleType::ImageView))
-                }
-            }
-            crate::HandleType::Sampler => {
-                if let Some(sampler) = self
-                    .allocated_resources
-                    .borrow()
-                    .get_map_mut::<VkSampler>()
-                    .decrement_resource_count(id)
-                {
-                    self.destroyed_resources
-                        .destroyed_samplers
-                        .borrow_mut()
-                        .push(DestroyedResource::new(sampler.inner, HandleType::Sampler))
-                }
-            }
+            crate::HandleType::Buffer => self
+                .allocated_resources
+                .borrow()
+                .get_map_mut::<VkBuffer>()
+                .decrement_resource_count(id),
+            crate::HandleType::ShaderModule => self
+                .allocated_resources
+                .borrow()
+                .get_map_mut::<VkShaderModule>()
+                .decrement_resource_count(id),
+            crate::HandleType::Image => self
+                .allocated_resources
+                .borrow()
+                .get_map_mut::<VkImage>()
+                .decrement_resource_count(id),
+            crate::HandleType::ImageView => self
+                .allocated_resources
+                .borrow()
+                .get_map_mut::<VkImageView>()
+                .decrement_resource_count(id),
+            crate::HandleType::Sampler => self
+                .allocated_resources
+                .borrow()
+                .get_map_mut::<VkSampler>()
+                .decrement_resource_count(id),
         }
     }
 }
@@ -1736,7 +1690,7 @@ fn create_staging_buffer(state: &Arc<GpuThreadSharedState>) -> VkResult<BufferHa
         MemoryDomain::HostVisible,
         allocation,
     )?;
-    let handle = BufferHandle::new(buffer.inner.as_raw(), state.clone());
+    let handle = BufferHandle::new(state.clone());
     state
         .allocated_resources
         .borrow_mut()
@@ -1987,8 +1941,7 @@ impl VkGpu {
         &self,
         create_info: &ImageCreateInfo,
         memory_domain: MemoryDomain,
-        data: Option<&[u8]>,
-    ) -> VkResult<VkImage> {
+    ) -> VkResult<(VkImage, ImageFormat)> {
         let mut format = create_info.format;
         if format == ImageFormat::Rgb8 && !self.state.features.supports_rgb_images {
             format = ImageFormat::Rgba8;
@@ -2058,49 +2011,7 @@ impl VkGpu {
             format.into(),
         )?;
 
-        /*
-
-        let write_layered_image = |data: &[u8]| -> VkResult<()> {
-            let texel_size = format.texel_size_bytes();
-            for i in 0..create_info.layers {
-                let layer_size = (create_info.width * create_info.height * texel_size) as usize;
-                let offset = i as usize * layer_size;
-
-                self.write_image_data(
-                    &image,
-                    &data[offset..offset + layer_size],
-                    Offset2D { x: 0, y: 0 },
-                    Extent2D {
-                        width: create_info.width,
-                        height: create_info.height,
-                    },
-                    i,
-                )?;
-            }
-            Ok(())
-        };
-
-        if let Some(data) = data {
-            assert!(data.len() > 0);
-            if create_info.format == ImageFormat::Rgb8 && !self.state.features.supports_rgb_images {
-                let mut rgba_data = vec![];
-                let rgba_size = create_info.width * create_info.height * 4;
-                rgba_data.reserve(rgba_size as _);
-                for chunk in data.chunks(3) {
-                    rgba_data.push(chunk[0]);
-                    rgba_data.push(chunk[1]);
-                    rgba_data.push(chunk[2]);
-                    rgba_data.push(255);
-                }
-
-                write_layered_image(&rgba_data)?;
-            } else {
-                write_layered_image(&data)?;
-            }
-        }
-        */
-
-        Ok(image)
+        Ok((image, format))
     }
 
     pub fn create_image_view(&self, create_info: &ImageViewCreateInfo) -> VkResult<VkImageView> {
@@ -2352,10 +2263,79 @@ impl VkGpu {
             r.destroyed_frame_counter -= 1;
         });
     }
+
+    fn drain_dead_resources<T: HasAssociatedHandle + Clone + std::fmt::Debug>(
+        &self,
+        map: &mut AllocatedResourceMap<T>,
+        destroyed: &mut Vec<DestroyedResource<T>>,
+    ) {
+        let dead = map.update();
+        destroyed.extend(
+            &mut dead
+                .into_iter()
+                .map(|r| DestroyedResource::new(r, T::AssociatedHandle::handle_type())),
+        );
+    }
 }
 
 impl Gpu for VkGpu {
     fn update(&self) {
+        self.drain_dead_resources(
+            &mut self
+                .state
+                .allocated_resources
+                .borrow()
+                .get_map_mut::<VkImageView>(),
+            &mut self
+                .state
+                .destroyed_resources
+                .destroyed_image_views
+                .borrow_mut(),
+        );
+        self.drain_dead_resources(
+            &mut self
+                .state
+                .allocated_resources
+                .borrow()
+                .get_map_mut::<VkBuffer>(),
+            &mut self
+                .state
+                .destroyed_resources
+                .destroyed_buffers
+                .borrow_mut(),
+        );
+        self.drain_dead_resources(
+            &mut self
+                .state
+                .allocated_resources
+                .borrow()
+                .get_map_mut::<VkSampler>(),
+            &mut self
+                .state
+                .destroyed_resources
+                .destroyed_samplers
+                .borrow_mut(),
+        );
+        self.drain_dead_resources(
+            &mut self
+                .state
+                .allocated_resources
+                .borrow()
+                .get_map_mut::<VkShaderModule>(),
+            &mut self
+                .state
+                .destroyed_resources
+                .destroyed_shader_modules
+                .borrow_mut(),
+        );
+        self.drain_dead_resources(
+            &mut self
+                .state
+                .allocated_resources
+                .borrow()
+                .get_map_mut::<VkImage>(),
+            &mut self.state.destroyed_resources.destroyed_images.borrow_mut(),
+        );
         self.update_cycle_for_deleted_resources(
             &mut self
                 .state
@@ -2364,7 +2344,7 @@ impl Gpu for VkGpu {
                 .borrow_mut(),
             |sm| unsafe {
                 self.vk_logical_device()
-                    .destroy_shader_module(*sm, get_allocation_callbacks())
+                    .destroy_shader_module(sm.inner, get_allocation_callbacks())
             },
         );
         self.update_cycle_for_deleted_resources(
@@ -2386,7 +2366,7 @@ impl Gpu for VkGpu {
                 .borrow_mut(),
             |sam| unsafe {
                 self.vk_logical_device()
-                    .destroy_sampler(*sam, get_allocation_callbacks());
+                    .destroy_sampler(sam.inner, get_allocation_callbacks());
             },
         );
         self.update_cycle_for_deleted_resources(
@@ -2427,7 +2407,7 @@ impl Gpu for VkGpu {
         info: &ShaderModuleCreateInfo,
     ) -> anyhow::Result<crate::ShaderModuleHandle> {
         let buffer = self.create_shader_module(info)?;
-        let handle = ShaderModuleHandle::new(buffer.inner.as_raw(), self.state.clone());
+        let handle = ShaderModuleHandle::new(self.state.clone());
         self.allocated_resources()
             .borrow_mut()
             .insert(&handle, buffer);
@@ -2441,7 +2421,7 @@ impl Gpu for VkGpu {
         memory_domain: MemoryDomain,
     ) -> anyhow::Result<crate::BufferHandle> {
         let buffer = self.create_buffer(buffer_info, memory_domain)?;
-        let handle = BufferHandle::new(buffer.inner.as_raw(), self.state.clone());
+        let handle = BufferHandle::new(self.state.clone());
         self.allocated_resources()
             .borrow_mut()
             .insert(&handle, buffer);
@@ -2459,34 +2439,75 @@ impl Gpu for VkGpu {
         &self,
         info: &ImageCreateInfo,
         memory_domain: MemoryDomain,
+        data: Option<&[u8]>,
     ) -> anyhow::Result<ImageHandle> {
-        let image = self.create_image(info, memory_domain, None)?;
-        let handle = ImageHandle::new(image.inner.as_raw(), self.state.clone());
+        let (image, format) = self.create_image(info, memory_domain)?;
+
+        let handle = ImageHandle::new(self.state.clone());
 
         self.allocated_resources()
             .borrow_mut()
             .insert(&handle, image);
 
-        self.transition_image_layout(
-            &handle,
-            TransitionInfo {
-                layout: ImageLayout::Undefined,
-                access_mask: AccessFlags::empty(),
-                stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-            },
-            TransitionInfo {
-                layout: ImageLayout::ShaderReadOnly,
-                access_mask: AccessFlags::empty(),
-                stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
-            },
-            ImageSubresourceRange {
-                aspect_mask: info.format.aspect_mask(),
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 1,
-            },
-        )?;
+        let write_layered_image = |data: &[u8]| -> VkResult<()> {
+            let texel_size = format.texel_size_bytes();
+            for i in 0..info.layers {
+                let layer_size = (info.width * info.height * texel_size) as usize;
+                let offset = i as usize * layer_size;
+
+                self.write_image_data(
+                    &handle,
+                    &data[offset..offset + layer_size],
+                    Offset2D { x: 0, y: 0 },
+                    Extent2D {
+                        width: info.width,
+                        height: info.height,
+                    },
+                    i,
+                )?;
+            }
+            Ok(())
+        };
+
+        if let Some(data) = data {
+            assert!(data.len() > 0);
+            if info.format == ImageFormat::Rgb8 && !self.state.features.supports_rgb_images {
+                let mut rgba_data = vec![];
+                let rgba_size = info.width * info.height * 4;
+                rgba_data.reserve(rgba_size as _);
+                for chunk in data.chunks(3) {
+                    rgba_data.push(chunk[0]);
+                    rgba_data.push(chunk[1]);
+                    rgba_data.push(chunk[2]);
+                    rgba_data.push(255);
+                }
+
+                write_layered_image(&rgba_data)?;
+            } else {
+                write_layered_image(&data)?;
+            }
+        } else {
+            self.transition_image_layout(
+                &handle,
+                TransitionInfo {
+                    layout: ImageLayout::Undefined,
+                    access_mask: AccessFlags::empty(),
+                    stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+                },
+                TransitionInfo {
+                    layout: ImageLayout::ShaderReadOnly,
+                    access_mask: AccessFlags::empty(),
+                    stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
+                },
+                ImageSubresourceRange {
+                    aspect_mask: info.format.aspect_mask(),
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+            )?;
+        }
 
         Ok(handle)
     }
@@ -2661,7 +2682,7 @@ impl Gpu for VkGpu {
                 image.extents,
             )
         }?;
-        let handle = ImageViewHandle::new(view.inner_image_view().as_raw(), self.state.clone());
+        let handle = ImageViewHandle::new(self.state.clone());
         self.allocated_resources()
             .borrow_mut()
             .insert(&handle, view);
@@ -2670,7 +2691,7 @@ impl Gpu for VkGpu {
 
     fn make_sampler(&self, info: &SamplerCreateInfo) -> anyhow::Result<crate::SamplerHandle> {
         let sampler = self.create_sampler(info)?;
-        let handle = SamplerHandle::new(sampler.inner.as_raw(), self.state.clone());
+        let handle = SamplerHandle::new(self.state.clone());
         self.allocated_resources()
             .borrow_mut()
             .insert(&handle, sampler);

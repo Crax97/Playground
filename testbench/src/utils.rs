@@ -30,12 +30,7 @@ pub fn read_file_to_vk_module<P: AsRef<Path>>(
     gpu: &VkGpu,
     path: P,
 ) -> anyhow::Result<ShaderModuleHandle> {
-    info!(
-        "Reading path from {:?}",
-        path.as_ref()
-            .canonicalize()
-            .expect("Failed to canonicalize path")
-    );
+    info!("Reading path from {:?}", path.as_ref());
     let input_file = std::fs::read(path)?;
     let create_info = ShaderModuleCreateInfo { code: &input_file };
     Ok(gpu.make_shader_module(&create_info)?)
@@ -160,7 +155,7 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
             usage: ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST,
         },
         MemoryDomain::DeviceLocal,
-        // Some(&hdr_image.bytes),
+        Some(&hdr_image.bytes),
     )?;
     let hdr_texture_view = gpu.make_image_view(&ImageViewCreateInfo {
         image: hdr_texture,
@@ -215,7 +210,7 @@ fn cubemap_main_loop(
                 | ImageUsageFlags::COLOR_ATTACHMENT,
         },
         MemoryDomain::DeviceLocal,
-        // None,
+        None,
     )?;
     let skybox_pipeline = gpu.create_graphics_pipeline(&GraphicsPipelineDescription {
         global_bindings: &[GlobalBinding {
@@ -452,7 +447,6 @@ fn cubemap_main_loop(
             //            );
             render_pass_command.push_constant(&skybox_pipeline, &[mvp], 0);
             render_pass_command.draw_indexed(mesh.primitives[0].index_count, 1, 0, 0, 0);
-
         }
         command_buffer.submit(&gpu::CommandBufferSubmitInfo {
             wait_semaphores: &[],

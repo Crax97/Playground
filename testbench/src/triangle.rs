@@ -126,6 +126,7 @@ impl App for TriangleApp {
                 usage: ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST,
             },
             MemoryDomain::DeviceLocal,
+            None,
         )?;
 
         let david_image_view = app_state.gpu.make_image_view(&ImageViewCreateInfo {
@@ -311,6 +312,7 @@ impl App for TriangleApp {
                         sampler_handle: self.david_sampler.clone(),
                     },
                     binding_stage: ShaderStage::FRAGMENT,
+                    location: 0,
                 }],
             );
             pass.set_cull_mode(CullMode::None);

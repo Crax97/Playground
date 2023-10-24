@@ -63,6 +63,7 @@ impl Texture {
                 usage: ImageUsageFlags::TRANSFER_DST | ImageUsageFlags::SAMPLED,
             },
             MemoryDomain::DeviceLocal,
+            data,
         )?;
 
         gpu.transition_image_layout(

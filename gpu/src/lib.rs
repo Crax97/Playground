@@ -45,6 +45,7 @@ pub trait Gpu {
         &self,
         info: &ImageCreateInfo,
         memory_domain: MemoryDomain,
+        data: Option<&[u8]>,
     ) -> anyhow::Result<ImageHandle>;
     fn write_image(
         &self,

@@ -1,5 +1,10 @@
 use crate::Context;
-use std::sync::Arc;
+use std::sync::{atomic::AtomicU64, Arc};
+
+fn next_unique_id() -> u64 {
+    static ATOMIC_COUNTER: AtomicU64 = AtomicU64::new(1);
+    ATOMIC_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum HandleType {
@@ -11,7 +16,7 @@ pub enum HandleType {
 }
 
 pub trait Handle: std::fmt::Debug {
-    fn new(id: u64, context: Arc<dyn Context>) -> Self;
+    fn new(context: Arc<dyn Context>) -> Self;
     fn null() -> Self;
     fn is_null(&self) -> bool;
     fn is_valid(&self) -> bool {
@@ -61,10 +66,9 @@ macro_rules! define_handle {
         }
 
         impl Handle for $st_name {
-            fn new(id: u64, context: Arc<dyn Context>) -> Self {
-                assert!(id != 0, "ID 0 is reserved for null handles!");
+            fn new(context: Arc<dyn Context>) -> Self {
                 Self {
-                    id,
+                    id: next_unique_id(),
                     context: Some(context),
                 }
             }

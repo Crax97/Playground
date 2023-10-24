@@ -7,7 +7,7 @@ use gpu::{
 use imgui::{Context, FontConfig, FontSource, Ui};
 use imgui_rs_vulkan_renderer::{DynamicRendering, Options, Renderer};
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
-use log::trace;
+use log::{info, trace};
 use winit::{
     dpi::PhysicalSize,
     event::Event,
@@ -202,6 +202,10 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
     } else {
         env_logger::init();
     }
+    info!(
+        "Running in {:?}",
+        std::env::current_dir().unwrap_or(".".into())
+    );
     let event_loop = winit::event_loop::EventLoop::default();
     let window = winit::window::WindowBuilder::default()
         .with_inner_size(PhysicalSize {

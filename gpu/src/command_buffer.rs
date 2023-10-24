@@ -238,6 +238,7 @@ impl Default for DescriptorBindingType {
 pub struct Binding {
     pub ty: DescriptorBindingType,
     pub binding_stage: ShaderStage,
+    pub location: u32,
 }
 
 #[derive(Default, Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
