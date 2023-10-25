@@ -157,15 +157,11 @@ impl PipelineCache {
             });
         }
 
-        let color_attachments = if pipeline_state.color_output_enabled {
-            pipeline_state
-                .color_blend_states
-                .iter()
-                .map(|c| c.to_vk())
-                .collect::<Vec<_>>()
-        } else {
-            vec![]
-        };
+        let color_attachments = pipeline_state
+            .color_blend_states
+            .iter()
+            .map(|c| c.to_vk())
+            .collect::<Vec<_>>();
 
         let (vertex_input_bindings, vertex_attribute_descriptions) =
             pipeline_state.get_vertex_inputs_description();
@@ -189,10 +185,10 @@ impl PipelineCache {
             p_next: std::ptr::null(),
             flags: vk::PipelineColorBlendStateCreateFlags::empty(),
             logic_op_enable: false.to_vk(),
-            logic_op: LogicOp::NoOp.to_vk(),
+            logic_op: LogicOp::Clear.to_vk(),
             attachment_count: color_attachments.len() as _,
             p_attachments: color_attachments.as_ptr(),
-            blend_constants: [0.0; 4],
+            blend_constants: [1.0; 4],
         };
         let viewport_state = vk::PipelineViewportStateCreateInfo {
             s_type: StructureType::PIPELINE_VIEWPORT_STATE_CREATE_INFO,
@@ -217,11 +213,8 @@ impl PipelineCache {
             view_mask: 0,
             color_attachment_count: color_formats.len() as _,
             p_color_attachment_formats: color_formats.as_ptr(),
-            depth_attachment_format: if pipeline_state.enable_depth_test {
-                ImageFormat::Depth.to_vk()
-            } else {
-                vk::Format::UNDEFINED
-            },
+            depth_attachment_format: ImageFormat::Depth.to_vk(),
+
             stencil_attachment_format: vk::Format::UNDEFINED,
         };
         let create_info = vk::GraphicsPipelineCreateInfo {
@@ -1579,19 +1572,15 @@ impl VkGpu {
         render_pass_info: &BeginRenderPassInfoOwned,
         layout: vk::PipelineLayout,
     ) -> vk::Pipeline {
-        let formats = if pipeline_state.color_output_enabled {
-            render_pass_info
-                .color_attachments
-                .iter()
-                .map(|a| {
-                    self.resolve_resource::<VkImageView>(&a.image_view)
-                        .format
-                        .to_vk()
-                })
-                .collect::<Vec<_>>()
-        } else {
-            vec![]
-        };
+        let formats = render_pass_info
+            .color_attachments
+            .iter()
+            .map(|a| {
+                self.resolve_resource::<VkImageView>(&a.image_view)
+                    .format
+                    .to_vk()
+            })
+            .collect::<Vec<_>>();
         self.state.pipeline_cache.get_pipeline(
             &pipeline_state,
             layout,

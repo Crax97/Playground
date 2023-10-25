@@ -82,10 +82,10 @@ impl PipelineState {
             .map(|_| PipelineColorBlendAttachmentState {
                 blend_enable: true,
                 src_color_blend_factor: BlendMode::One,
-                dst_color_blend_factor: BlendMode::One,
+                dst_color_blend_factor: BlendMode::Zero,
                 color_blend_op: BlendOp::Add,
                 src_alpha_blend_factor: BlendMode::One,
-                dst_alpha_blend_factor: BlendMode::One,
+                dst_alpha_blend_factor: BlendMode::Zero,
                 alpha_blend_op: BlendOp::Add,
                 color_write_mask: ColorComponentFlags::RGBA,
             })

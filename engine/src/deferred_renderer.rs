@@ -594,12 +594,6 @@ impl DeferredRenderingPipeline {
         skybox_master: &MasterMaterial,
         resource_map: &ResourceMap,
     ) {
-        render_context
-            .render_pass_command
-            .set_enable_depth_test(false);
-        render_context
-            .render_pass_command
-            .set_cull_mode(gpu::CullMode::Front);
         const SKYBOX_SCALE: f32 = 1.0;
         let permutation = skybox_master
             .get_permutation(PipelineTarget::ColorAndDepth)
@@ -657,6 +651,11 @@ impl DeferredRenderingPipeline {
             });
         }
 
+        render_context.render_pass_command.set_index_buffer(
+            skybox_mesh.primitives[0].index_buffer.clone(),
+            IndexType::Uint32,
+            0,
+        );
         render_context.render_pass_command.set_vertex_buffers(&[
             VertexBindingInfo {
                 handle: skybox_mesh.primitives[0].position_component.clone(),
@@ -702,12 +701,6 @@ impl DeferredRenderingPipeline {
         render_context
             .render_pass_command
             .bind_resources(1, &user_bindings);
-        render_context
-            .render_pass_command
-            .set_enable_depth_test(true);
-        render_context
-            .render_pass_command
-            .set_cull_mode(gpu::CullMode::Back);
         render_context.render_pass_command.push_constants(
             0,
             0,
@@ -719,6 +712,15 @@ impl DeferredRenderingPipeline {
             ShaderStage::ALL_GRAPHICS,
         );
 
+        render_context
+            .render_pass_command
+            .set_enable_depth_test(false);
+        render_context
+            .render_pass_command
+            .set_depth_write_enabled(false);
+        render_context
+            .render_pass_command
+            .set_cull_mode(gpu::CullMode::None);
         render_context.render_pass_command.draw_indexed_handle(
             skybox_mesh.primitives[0].index_count,
             1,
@@ -1173,14 +1175,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             }
         });
         context.register_callback(&gbuffer_pass, |_: &VkGpu, ctx| {
-            ctx.render_pass_command
-                .set_front_face(gpu::FrontFace::CounterClockWise);
-            ctx.render_pass_command.set_enable_depth_test(true);
-            ctx.render_pass_command.set_depth_write_enabled(false);
-            ctx.render_pass_command.set_color_output_enabled(true);
-            ctx.render_pass_command.set_cull_mode(gpu::CullMode::Back);
-            ctx.render_pass_command
-                .set_depth_compare_op(gpu::CompareOp::Equal);
             if let Some(material) = skybox_material {
                 let cube_mesh = resource_map.get(&self.cube_mesh);
                 let skybox_master = resource_map.get(&material.owner);
@@ -1193,6 +1187,14 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                     resource_map,
                 );
             }
+            ctx.render_pass_command
+                .set_front_face(gpu::FrontFace::CounterClockWise);
+            ctx.render_pass_command.set_enable_depth_test(true);
+            ctx.render_pass_command.set_depth_write_enabled(false);
+            ctx.render_pass_command.set_color_output_enabled(true);
+            ctx.render_pass_command.set_cull_mode(gpu::CullMode::Back);
+            ctx.render_pass_command
+                .set_depth_compare_op(gpu::CompareOp::Equal);
             Self::main_render_loop(
                 resource_map,
                 PipelineTarget::ColorAndDepth,

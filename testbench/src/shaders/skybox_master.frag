@@ -18,9 +18,8 @@ layout(location = 4) out vec4 outPbr;
 layout(location = 0) in FragmentOut fragOut;
 
 void main() {
-    outPosition = vec4(fragOut.position, 1.0);
-    outNormal = vec4(fragOut.normal, 1.0);
-    //outDiffuse = texture(baseColorSampler, fragOut.uv);
+    outPosition = vec4(0.0);
+    outNormal = vec4(0.0);
     outDiffuse = vec4(0.0);
     outEmissive = texture(baseColorSampler, normalize(fragOut.vert_position));
     outPbr = vec4(0.0);
