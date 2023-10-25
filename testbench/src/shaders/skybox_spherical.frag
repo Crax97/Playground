@@ -2,11 +2,6 @@
 
 #include "definitions.glsl"
 
-layout(set = 0, binding = 0) readonly buffer PerFrameDataBlock {
-    uint shadow_count;
-    PointOfView pfd[];
-} per_frame_data;
-
 const vec2 invAtan = vec2(0.1591, 0.3183);
 vec2 sample_spherical_map(vec3 v)
 {

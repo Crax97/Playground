@@ -25,6 +25,7 @@ pub use render_graph::*;
 pub use scene::*;
 pub use texture::*;
 pub use time::*;
+pub use utils::*;
 
 /*
  * Conventions used

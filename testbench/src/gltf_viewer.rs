@@ -11,7 +11,7 @@ use std::num::NonZeroU32;
 use app::{bootstrap, App};
 
 use fps_camera::FpsCamera;
-use gpu::{Extent2D, ImageFormat, PresentMode, VkCommandBuffer};
+use gpu::{Extent2D, ImageFormat, PresentMode, ShaderStage, VkCommandBuffer};
 use imgui::{TreeNodeFlags, Ui};
 use input::InputState;
 use winit::dpi::{PhysicalPosition, Position};
@@ -222,59 +222,61 @@ impl App for GLTFViewer {
         let skybox_fragment =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/skybox_master.spirv")?;
 
-        //        let david_texture = utils::load_hdr_to_cubemap(
-        //            &app_state.gpu,
-        //            Extent2D {
-        //                width: 1024,
-        //                height: 1024,
-        //            },
-        //            cube_mesh.clone(),
-        //            &mut resource_map,
-        //            "images/skybox/hdr/evening_road.hdr",
-        //        )?;
-        //        let irradiance_map = utils::generate_irradiance_map(
-        //            &app_state.gpu,
-        //            &david_texture,
-        //            &mut resource_map,
-        //            &cube_mesh,
-        //        )?;
-        //        let david_texture = resource_map.add(david_texture);
-        //        let irradiance_map = resource_map.add(irradiance_map);
-        //
+        let david_texture = utils::load_hdr_to_cubemap(
+            &app_state.gpu,
+            Extent2D {
+                width: 1024,
+                height: 1024,
+            },
+            cube_mesh.clone(),
+            &mut resource_map,
+            "images/skybox/hdr/evening_road.hdr",
+        )?;
+        let irradiance_map = utils::generate_irradiance_map(
+            &app_state.gpu,
+            &david_texture,
+            &mut resource_map,
+            &cube_mesh,
+        )?;
+        let david_texture = resource_map.add(david_texture);
+        let irradiance_map = resource_map.add(irradiance_map);
+
         let mut scene_renderer =
             DeferredRenderingPipeline::new(&app_state.gpu, &mut resource_map, cube_mesh)?;
-        //
-        //        scene_renderer.set_irradiance_texture(Some(irradiance_map));
-        //
-        //        let skybox_material = scene_renderer.create_material(
-        //            &app_state.gpu,
-        //            engine::MaterialDescription {
-        //                name: "skybox material",
-        //                domain: engine::MaterialDomain::Surface,
-        //                texture_inputs: &[TextureInput {
-        //                    name: "Cubemap".to_owned(),
-        //                    format: ImageFormat::Rgba8,
-        //                }],
-        //                material_parameters: HashMap::new(),
-        //                fragment_module: skybox_fragment,
-        //                vertex_module,
-        //            },
-        //        )?;
-        //        let skybox_master = resource_map.add(skybox_material);
-        //
-        //        let mut skybox_textures = HashMap::new();
-        //        skybox_textures.insert("Cubemap".to_string(), david_texture);
-        //
-        //        let skybox_instance = MaterialInstance::create_instance(
-        //            &app_state.gpu,
-        //            skybox_master,
-        //            &resource_map,
-        //            &engine::MaterialInstanceDescription {
-        //                name: "david skybox",
-        //                texture_inputs: skybox_textures,
-        //            },
-        //        )?;
-        //        let skybox_instance = resource_map.add(skybox_instance);
+
+        scene_renderer.set_irradiance_texture(Some(irradiance_map));
+
+        let skybox_material = scene_renderer.create_material(
+            &app_state.gpu,
+            engine::MaterialDescription {
+                name: "skybox material",
+                domain: engine::MaterialDomain::Surface,
+                texture_inputs: &[TextureInput {
+                    name: "Cubemap".to_owned(),
+                    format: ImageFormat::Rgba8,
+                    shader_stage: ShaderStage::ALL_GRAPHICS,
+                }],
+                material_parameters: HashMap::new(),
+                fragment_module: skybox_fragment,
+                vertex_module,
+                parameter_shader_visibility: ShaderStage::ALL_GRAPHICS,
+            },
+        )?;
+        let skybox_master = resource_map.add(skybox_material);
+
+        let mut skybox_textures = HashMap::new();
+        skybox_textures.insert("Cubemap".to_string(), david_texture);
+
+        let skybox_instance = MaterialInstance::create_instance(
+            &app_state.gpu,
+            skybox_master,
+            &resource_map,
+            &engine::MaterialInstanceDescription {
+                name: "david skybox",
+                texture_inputs: skybox_textures,
+            },
+        )?;
+        let skybox_instance = resource_map.add(skybox_instance);
 
         let mut gltf_loader = GltfLoader::load(
             &args.gltf_file,
@@ -284,9 +286,9 @@ impl App for GLTFViewer {
             GltfLoadOptions {},
         )?;
 
-        //        gltf_loader
-        //            .scene_mut()
-        //            .set_skybox_material(Some(skybox_instance));
+        gltf_loader
+            .scene_mut()
+            .set_skybox_material(Some(skybox_instance));
 
         engine::app_state_mut()
             .swapchain_mut()

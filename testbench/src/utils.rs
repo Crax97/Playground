@@ -16,14 +16,14 @@ pub struct LoadedImage {
 }
 
 use gpu::{
-    AccessFlags, BeginRenderPassInfo, BindingElement, BlendState, ColorAttachment,
+    AccessFlags, BeginRenderPassInfo, Binding, BindingElement, BlendState, ColorAttachment,
     ComponentMapping, DepthStencilState, DescriptorInfo, DescriptorSetInfo, Extent2D,
     FragmentStageInfo, GlobalBinding, Gpu, GraphicsPipelineDescription, ImageAspectFlags,
     ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout, ImageSubresourceRange, ImageUsageFlags,
-    ImageViewCreateInfo, ImageViewHandle, MemoryDomain, Offset2D, PipelineStageFlags,
+    ImageViewCreateInfo, ImageViewHandle, InputRate, MemoryDomain, Offset2D, PipelineStageFlags,
     PushConstantRange, Rect2D, RenderPassAttachment, SamplerCreateInfo, SamplerState,
     ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage, VertexAttributeDescription,
-    VertexBindingDescription, VertexStageInfo, VkGpu, VkShaderModule,
+    VertexBindingDescription, VertexBindingInfo, VertexStageInfo, VkGpu, VkShaderModule,
 };
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
@@ -176,7 +176,7 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
         gpu,
         cube_image_format,
         &hdr_texture_view,
-        &equilateral_fragment,
+        equilateral_fragment,
         size,
         resource_map,
         &cube_mesh,
@@ -189,7 +189,7 @@ fn cubemap_main_loop(
     gpu: &VkGpu,
     cube_image_format: ImageFormat,
     input_texture_view: &ImageViewHandle,
-    fragment_shader_to_apply: &ShaderModuleHandle,
+    fragment_shader_to_apply: ShaderModuleHandle,
     size: Extent2D,
     resource_map: &ResourceMap,
     cube_mesh: &ResourceHandle<Mesh>,
@@ -212,100 +212,6 @@ fn cubemap_main_loop(
         MemoryDomain::DeviceLocal,
         None,
     )?;
-    let skybox_pipeline = gpu.create_graphics_pipeline(&GraphicsPipelineDescription {
-        global_bindings: &[GlobalBinding {
-            set_index: 0,
-            elements: &[BindingElement {
-                binding_type: gpu::BindingType::CombinedImageSampler,
-                index: 0,
-                stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
-            }],
-        }],
-        vertex_inputs: &[
-            VertexBindingDescription {
-                binding: 0,
-                input_rate: gpu::InputRate::PerVertex,
-                stride: size_of::<Vector3<f32>>() as u32,
-                attributes: &[VertexAttributeDescription {
-                    location: 0,
-                    format: ImageFormat::RgbFloat32,
-                    offset: 0,
-                }],
-            },
-            VertexBindingDescription {
-                binding: 1,
-                input_rate: gpu::InputRate::PerVertex,
-                stride: size_of::<Vector3<f32>>() as u32,
-                attributes: &[VertexAttributeDescription {
-                    location: 1,
-                    format: ImageFormat::RgbFloat32,
-                    offset: 0,
-                }],
-            },
-            VertexBindingDescription {
-                binding: 2,
-                input_rate: gpu::InputRate::PerVertex,
-                stride: size_of::<Vector3<f32>>() as u32,
-                attributes: &[VertexAttributeDescription {
-                    location: 2,
-                    format: ImageFormat::RgbFloat32,
-                    offset: 0,
-                }],
-            },
-            VertexBindingDescription {
-                binding: 3,
-                input_rate: gpu::InputRate::PerVertex,
-                stride: size_of::<Vector3<f32>>() as u32,
-                attributes: &[VertexAttributeDescription {
-                    location: 3,
-                    format: ImageFormat::RgbFloat32,
-                    offset: 0,
-                }],
-            },
-            VertexBindingDescription {
-                binding: 4,
-                input_rate: gpu::InputRate::PerVertex,
-                stride: size_of::<Vector2<f32>>() as u32,
-                attributes: &[VertexAttributeDescription {
-                    location: 4,
-                    format: ImageFormat::RgFloat32,
-                    offset: 0,
-                }],
-            },
-        ],
-        vertex_stage: Some(VertexStageInfo {
-            entry_point: "main",
-            module: vertex_module.clone(),
-        }),
-        fragment_stage: Some(FragmentStageInfo {
-            entry_point: "main",
-            module: fragment_shader_to_apply.clone(),
-            color_attachments: &[RenderPassAttachment {
-                format: cube_image_format,
-                samples: gpu::SampleCount::Sample1,
-                load_op: gpu::ColorLoadOp::Clear([0.0; 4]),
-                store_op: gpu::AttachmentStoreOp::Store,
-                stencil_load_op: gpu::StencilLoadOp::DontCare,
-                stencil_store_op: gpu::AttachmentStoreOp::DontCare,
-                initial_layout: gpu::ImageLayout::ColorAttachment,
-                final_layout: gpu::ImageLayout::ShaderReadOnly,
-                blend_state: BlendState::default(),
-            }],
-            depth_stencil_attachments: &[],
-        }),
-        input_topology: gpu::PrimitiveTopology::TriangleList,
-        primitive_restart: false,
-        polygon_mode: gpu::PolygonMode::Fill,
-        cull_mode: gpu::CullMode::None,
-        front_face: gpu::FrontFace::ClockWise,
-        depth_stencil_state: DepthStencilState::default(),
-        logic_op: None,
-        push_constant_ranges: &[PushConstantRange {
-            stage_flags: ShaderStage::ALL,
-            offset: 0,
-            size: std::mem::size_of::<Matrix4<f32>>() as _,
-        }],
-    })?;
     let skybox_sampler = gpu.make_sampler(&SamplerCreateInfo {
         mag_filter: gpu::Filter::Linear,
         min_filter: gpu::Filter::Linear,
@@ -382,17 +288,6 @@ fn cubemap_main_loop(
             layer_count: 6,
         },
     )?;
-    let skybox_descriptor_set = gpu.create_descriptor_set(&DescriptorSetInfo {
-        descriptors: &[DescriptorInfo {
-            binding: 0,
-            element_type: gpu::DescriptorType::CombinedImageSampler(SamplerState {
-                sampler: skybox_sampler.clone(),
-                image_view: input_texture_view.clone(),
-                image_layout: ImageLayout::ShaderReadOnly,
-            }),
-            binding_stage: ShaderStage::VERTEX | ShaderStage::FRAGMENT,
-        }],
-    })?;
     let mesh = resource_map.get(&cube_mesh);
     for (i, view) in views.iter().enumerate() {
         let mvp = povs[i].projection * povs[i].view;
@@ -413,6 +308,8 @@ fn cubemap_main_loop(
                     extent: size,
                 },
             });
+            render_pass_command.set_vertex_shader(vertex_module.clone());
+            render_pass_command.set_fragment_shader(fragment_shader_to_apply.clone());
 
             render_pass_command.set_cull_mode(gpu::CullMode::None);
             render_pass_command.set_viewport(gpu::Viewport {
@@ -423,30 +320,73 @@ fn cubemap_main_loop(
                 min_depth: 0.0,
                 max_depth: 1.0,
             });
-            render_pass_command.bind_pipeline(&skybox_pipeline);
-            render_pass_command.bind_descriptor_sets(
-                &skybox_pipeline,
+
+            render_pass_command.bind_resources(
                 0,
-                &[&skybox_descriptor_set],
+                &[Binding {
+                    ty: gpu::DescriptorBindingType::ImageView {
+                        image_view_handle: input_texture_view.clone(),
+                        sampler_handle: skybox_sampler.clone(),
+                    },
+                    binding_stage: ShaderStage::FRAGMENT,
+                    location: 0,
+                }],
             );
-            //            render_pass_command.bind_index_buffer(
-            //                &mesh.primitives[0].index_buffer,
-            //                0,
-            //                gpu::IndexType::Uint32,
-            //            );
-            //            render_pass_command.bind_vertex_buffer(
-            //                0,
-            //                &[
-            //                    &mesh.primitives[0].position_component,
-            //                    &mesh.primitives[0].color_component,
-            //                    &mesh.primitives[0].normal_component,
-            //                    &mesh.primitives[0].tangent_component,
-            //                    &mesh.primitives[0].uv_component,
-            //                ],
-            //                &[0, 0, 0, 0, 0],
-            //            );
-            render_pass_command.push_constant(&skybox_pipeline, &[mvp], 0);
-            render_pass_command.draw_indexed(mesh.primitives[0].index_count, 1, 0, 0, 0);
+
+            render_pass_command.set_index_buffer(
+                mesh.primitives[0].index_buffer.clone(),
+                gpu::IndexType::Uint32,
+                0,
+            );
+            render_pass_command.set_vertex_buffers(&[
+                VertexBindingInfo {
+                    handle: mesh.primitives[0].position_component.clone(),
+                    location: 0,
+                    offset: 0,
+                    stride: std::mem::size_of::<Vector3<f32>>() as _,
+                    format: ImageFormat::RgbFloat32,
+                    input_rate: InputRate::PerVertex,
+                },
+                VertexBindingInfo {
+                    handle: mesh.primitives[0].color_component.clone(),
+                    location: 1,
+                    offset: 0,
+                    stride: std::mem::size_of::<Vector3<f32>>() as _,
+                    format: ImageFormat::RgbFloat32,
+                    input_rate: InputRate::PerVertex,
+                },
+                VertexBindingInfo {
+                    handle: mesh.primitives[0].normal_component.clone(),
+                    location: 2,
+                    offset: 0,
+                    stride: std::mem::size_of::<Vector3<f32>>() as _,
+                    format: ImageFormat::RgbFloat32,
+                    input_rate: InputRate::PerVertex,
+                },
+                VertexBindingInfo {
+                    handle: mesh.primitives[0].tangent_component.clone(),
+                    location: 3,
+                    offset: 0,
+                    stride: std::mem::size_of::<Vector3<f32>>() as _,
+                    format: ImageFormat::RgbFloat32,
+                    input_rate: InputRate::PerVertex,
+                },
+                VertexBindingInfo {
+                    handle: mesh.primitives[0].uv_component.clone(),
+                    location: 4,
+                    offset: 0,
+                    stride: std::mem::size_of::<Vector2<f32>>() as _,
+                    format: ImageFormat::RgFloat32,
+                    input_rate: InputRate::PerVertex,
+                },
+            ]);
+            render_pass_command.push_constants(
+                0,
+                0,
+                engine::to_u8_slice(&[mvp]),
+                ShaderStage::ALL_GRAPHICS,
+            );
+            render_pass_command.draw_indexed_handle(mesh.primitives[0].index_count, 1, 0, 0, 0);
         }
         command_buffer.submit(&gpu::CommandBufferSubmitInfo {
             wait_semaphores: &[],
@@ -509,7 +449,7 @@ pub fn generate_irradiance_map(
         gpu,
         ImageFormat::RgbaFloat16,
         &input_texture_view.view,
-        &convolve,
+        convolve,
         size,
         resource_map,
         cube_mesh,

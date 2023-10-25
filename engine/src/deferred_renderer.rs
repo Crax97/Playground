@@ -701,7 +701,7 @@ impl DeferredRenderingPipeline {
         ]);
         render_context
             .render_pass_command
-            .bind_resources(0, &user_bindings);
+            .bind_resources(1, &user_bindings);
         render_context
             .render_pass_command
             .set_enable_depth_test(true);
@@ -1181,18 +1181,18 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             ctx.render_pass_command.set_cull_mode(gpu::CullMode::Back);
             ctx.render_pass_command
                 .set_depth_compare_op(gpu::CompareOp::Equal);
-            //            if let Some(material) = skybox_material {
-            //                let cube_mesh = resource_map.get(&self.cube_mesh);
-            //                let skybox_master = resource_map.get(&material.owner);
-            //                Self::draw_skybox(
-            //                    &pov.location,
-            //                    ctx,
-            //                    cube_mesh,
-            //                    material,
-            //                    skybox_master,
-            //                    resource_map,
-            //                );
-            //            }
+            if let Some(material) = skybox_material {
+                let cube_mesh = resource_map.get(&self.cube_mesh);
+                let skybox_master = resource_map.get(&material.owner);
+                Self::draw_skybox(
+                    &pov.location,
+                    ctx,
+                    cube_mesh,
+                    material,
+                    skybox_master,
+                    resource_map,
+                );
+            }
             Self::main_render_loop(
                 resource_map,
                 PipelineTarget::ColorAndDepth,
