@@ -534,76 +534,46 @@ impl ToVk for BufferUsageFlags {
     }
 }
 
-macro_rules! impl_raii_wrapper_hash {
-    ($name:ident) => {
-        impl std::hash::Hash for $name {
-            fn hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
-                self.inner.hash(hasher)
-            }
-        }
-    };
+#[derive(Clone)]
+pub struct GPUSemaphore {
+    pub(super) inner: vk::Semaphore,
+    pub(super) label: Option<String>,
 }
-macro_rules! impl_raii_wrapper_to_vk {
-    ($name:ident, $inner:ty) => {
-        impl ToVk for $name {
-            type Inner = $inner;
-            fn to_vk(&self) -> Self::Inner {
-                self.inner
-            }
-        }
-    };
-}
-
-macro_rules! define_raii_wrapper {
-    ((struct $name:ident { $($mem_name:ident : $mem_ty : ty,)* }, $vk_type:ty, $drop_fn:path) {($arg_name:ident : $arg_typ:ty,) => $create_impl_block:tt}) => {
-        #[derive(Clone)]
-        pub struct $name {
-            pub(super) inner: $vk_type,
-            pub(super) label: Option<String>,
-            $(pub(super) $mem_name : $mem_ty,)*
-        }
-
-        impl std::fmt::Debug for $name {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_fmt(format_args!("{:?}", &self.label))
-            }
-        }
-
-        impl $name {
-
-            pub(super) fn create(device: ash::Device, label: Option<&str>, $arg_name : $arg_typ, $($mem_name : $mem_ty,)*) -> VkResult<Self> {
-
-                let inner = $create_impl_block(&device)?;
-                Ok(Self {
-                    inner,
-                    label: label.map(|s| s.to_owned()),
-                    $($mem_name),*
-                })
-            }
-        }
-
-
-        impl Deref for $name {
-            type Target = $vk_type;
-
-            fn deref(&self) -> &Self::Target {
-                &self.inner
-            }
-        }
-
-        impl_raii_wrapper_hash!($name);
-        impl_raii_wrapper_to_vk!($name, $vk_type);
-
-    };
-}
-
-define_raii_wrapper!((struct GPUSemaphore {}, vk::Semaphore, ash::Device::destroy_semaphore) {
-    (create_info: &SemaphoreCreateInfo,) => {
-        |device: &ash::Device| { unsafe {
-            device.create_semaphore(create_info, get_allocation_callbacks())
-        }}
+impl std::fmt::Debug for GPUSemaphore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{:?}", &self.label))
     }
-});
+}
+impl GPUSemaphore {
+    pub(super) fn create(
+        device: ash::Device,
+        label: Option<&str>,
+        create_info: &SemaphoreCreateInfo,
+    ) -> VkResult<Self> {
+        let inner = {
+            |device: &ash::Device| unsafe {
+                device.create_semaphore(create_info, get_allocation_callbacks())
+            }
+        }(&device)?;
+        Ok(Self {
+            inner,
+            label: label.map(|s| s.to_owned()),
+        })
+    }
+}
+impl Deref for GPUSemaphore {
+    type Target = vk::Semaphore;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl ToVk for GPUSemaphore {
+    type Inner = vk::Semaphore;
+    fn to_vk(&self) -> Self::Inner {
+        self.inner
+    }
+}
 
 impl ToVk for FenceCreateFlags {
     type Inner = vk::FenceCreateFlags;
@@ -622,18 +592,51 @@ pub struct FenceCreateInfo {
     pub flags: FenceCreateFlags,
 }
 
-define_raii_wrapper!((struct GPUFence {}, vk::Fence, ash::Device::destroy_fence) {
-    (create_info: &FenceCreateInfo,) => {
-        |device: &ash::Device| {
-        let vk_fence_create_info = VkFenceCreateInfo {
-            s_type: StructureType::FENCE_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: create_info.flags.to_vk()
-
-        };
-        unsafe { device.create_fence(&vk_fence_create_info, get_allocation_callbacks()) }}
+#[derive(Clone)]
+pub struct GPUFence {
+    pub(super) inner: vk::Fence,
+    pub(super) label: Option<String>,
+}
+impl std::fmt::Debug for GPUFence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{:?}", &self.label))
     }
-});
+}
+impl GPUFence {
+    pub(super) fn create(
+        device: ash::Device,
+        label: Option<&str>,
+        create_info: &FenceCreateInfo,
+    ) -> VkResult<Self> {
+        let inner = {
+            |device: &ash::Device| {
+                let vk_fence_create_info = VkFenceCreateInfo {
+                    s_type: StructureType::FENCE_CREATE_INFO,
+                    p_next: std::ptr::null(),
+                    flags: create_info.flags.to_vk(),
+                };
+                unsafe { device.create_fence(&vk_fence_create_info, get_allocation_callbacks()) }
+            }
+        }(&device)?;
+        Ok(Self {
+            inner,
+            label: label.map(|s| s.to_owned()),
+        })
+    }
+}
+impl Deref for GPUFence {
+    type Target = vk::Fence;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl ToVk for GPUFence {
+    type Inner = vk::Fence;
+    fn to_vk(&self) -> Self::Inner {
+        self.inner
+    }
+}
 
 impl GPUFence {
     pub fn new(gpu: &VkGpu, create_info: &FenceCreateInfo) -> VkResult<Self> {
@@ -774,8 +777,12 @@ impl VkBuffer {
     }
 }
 
-impl_raii_wrapper_hash!(VkBuffer);
-impl_raii_wrapper_to_vk!(VkBuffer, vk::Buffer);
+impl ToVk for VkBuffer {
+    type Inner = vk::Buffer;
+    fn to_vk(&self) -> Self::Inner {
+        self.inner
+    }
+}
 
 #[derive(Clone)]
 pub struct VkImage {
@@ -838,22 +845,57 @@ impl Deref for VkImage {
         &self.inner
     }
 }
-impl_raii_wrapper_hash!(VkImage);
-impl_raii_wrapper_to_vk!(VkImage, vk::Image);
 
-define_raii_wrapper!((struct VkImageView{
-    format: ImageFormat,
-    owner_image: ImageHandle,
-    extents: Extent2D,
-}, vk::ImageView, ash::Device::destroy_image_view) {
-    (create_info: &vk::ImageViewCreateInfo,) => {
-        |device: &ash::Device| {
-            unsafe {
+#[derive(Clone)]
+pub struct VkImageView {
+    pub(super) inner: vk::ImageView,
+    pub(super) label: Option<String>,
+    pub(super) format: ImageFormat,
+    pub(super) owner_image: ImageHandle,
+    pub(super) extents: Extent2D,
+}
+
+impl std::fmt::Debug for VkImageView {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{:?}", &self.label))
+    }
+}
+impl VkImageView {
+    pub(super) fn create(
+        device: ash::Device,
+        label: Option<&str>,
+        create_info: &vk::ImageViewCreateInfo,
+        format: ImageFormat,
+        owner_image: ImageHandle,
+        extents: Extent2D,
+    ) -> VkResult<Self> {
+        let inner = {
+            |device: &ash::Device| unsafe {
                 device.create_image_view(create_info, get_allocation_callbacks())
             }
-        }
+        }(&device)?;
+        Ok(Self {
+            inner,
+            label: label.map(|s| s.to_owned()),
+            format,
+            owner_image,
+            extents,
+        })
     }
-});
+}
+impl Deref for VkImageView {
+    type Target = vk::ImageView;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl ToVk for VkImageView {
+    type Inner = vk::ImageView;
+    fn to_vk(&self) -> Self::Inner {
+        self.inner
+    }
+}
 
 impl VkImageView {
     pub fn inner_image_view(&self) -> vk::ImageView {
@@ -872,16 +914,86 @@ impl VkImageView {
     }
 }
 
-define_raii_wrapper!((struct VkSampler {}, vk::Sampler, ash::Device::destroy_sampler) {
-    (create_info: &SamplerCreateInfo,) => {
-        |device: &ash::Device| { unsafe { device.create_sampler(&create_info.to_vk(), get_allocation_callbacks()) }}
+#[derive(Clone)]
+pub struct VkSampler {
+    pub(super) inner: vk::Sampler,
+    pub(super) label: Option<String>,
+}
+impl std::fmt::Debug for VkSampler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{:?}", &self.label))
     }
-});
-define_raii_wrapper!((struct VkShaderModule {}, vk::ShaderModule, ash::Device::destroy_shader_module) {
-    (create_info: &ShaderModuleCreateInfo,) => {
-        |device: &ash::Device| { unsafe { device.create_shader_module(create_info, get_allocation_callbacks()) }}
+}
+impl VkSampler {
+    pub(super) fn create(
+        device: ash::Device,
+        label: Option<&str>,
+        create_info: &SamplerCreateInfo,
+    ) -> VkResult<Self> {
+        let inner = {
+            |device: &ash::Device| unsafe {
+                device.create_sampler(&create_info.to_vk(), get_allocation_callbacks())
+            }
+        }(&device)?;
+        Ok(Self {
+            inner,
+            label: label.map(|s| s.to_owned()),
+        })
     }
-});
+}
+impl Deref for VkSampler {
+    type Target = vk::Sampler;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl ToVk for VkSampler {
+    type Inner = vk::Sampler;
+    fn to_vk(&self) -> Self::Inner {
+        self.inner
+    }
+}
+#[derive(Clone)]
+pub struct VkShaderModule {
+    pub(super) inner: vk::ShaderModule,
+    pub(super) label: Option<String>,
+}
+impl std::fmt::Debug for VkShaderModule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{:?}", &self.label))
+    }
+}
+impl VkShaderModule {
+    pub(super) fn create(
+        device: ash::Device,
+        label: Option<&str>,
+        create_info: &ShaderModuleCreateInfo,
+    ) -> VkResult<Self> {
+        let inner = {
+            |device: &ash::Device| unsafe {
+                device.create_shader_module(create_info, get_allocation_callbacks())
+            }
+        }(&device)?;
+        Ok(Self {
+            inner,
+            label: label.map(|s| s.to_owned()),
+        })
+    }
+}
+impl Deref for VkShaderModule {
+    type Target = vk::ShaderModule;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl ToVk for VkShaderModule {
+    type Inner = vk::ShaderModule;
+    fn to_vk(&self) -> Self::Inner {
+        self.inner
+    }
+}
 
 impl ToVk for Offset2D {
     type Inner = vk::Offset2D;
