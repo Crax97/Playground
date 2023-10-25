@@ -1,3 +1,4 @@
+use std::ops::DerefMut;
 use std::{ffi::CString, ops::Deref};
 
 use ash::vk::{
@@ -20,6 +21,7 @@ pub struct VkCommandBuffer<'g> {
     has_recorded_anything: bool,
     has_been_submitted: bool,
     target_queue: vk::Queue,
+    descriptor_state: DescriptorSetState,
 }
 
 #[derive(Clone)]
@@ -39,11 +41,23 @@ where
     viewport_area: Option<Viewport>,
     depth_bias_setup: Option<(f32, f32, f32)>,
 
-    pipeline_state: PipelineState,
+    pipeline_state: GraphicsPipelineState,
     descriptor_state: DescriptorSetState,
     render_pass_info: BeginRenderPassInfoOwned,
 
     push_constant_data: Vec<Vec<u8>>,
+}
+
+#[derive(Hash)]
+pub(crate) struct ComputePipelineState {
+    pub(crate) shader: ShaderModuleHandle,
+}
+impl ComputePipelineState {
+    fn new() -> ComputePipelineState {
+        Self {
+            shader: ShaderModuleHandle::null(),
+        }
+    }
 }
 
 pub struct VkComputePassCommand<'c, 'g>
@@ -51,10 +65,11 @@ where
     'g: 'c,
 {
     command_buffer: &'c mut VkCommandBuffer<'g>,
+    pipeline_state: ComputePipelineState,
 }
 
 #[derive(Hash)]
-pub(crate) struct PipelineState {
+pub(crate) struct GraphicsPipelineState {
     pub(crate) fragment_shader: ShaderModuleHandle,
     pub(crate) vertex_shader: ShaderModuleHandle,
     pub(crate) scissor_area: Option<Rect2D>,
@@ -73,7 +88,7 @@ pub(crate) struct PipelineState {
     pub(crate) color_output_enabled: bool,
 }
 
-impl PipelineState {
+impl GraphicsPipelineState {
     fn new(info: &BeginRenderPassInfo) -> Self {
         // TODO: put this into pipeline state
         let color_blend_states = info
@@ -370,6 +385,7 @@ impl<'g> VkCommandBuffer<'g> {
             has_recorded_anything: false,
             has_been_submitted: false,
             target_queue: target_queue.get_vk_queue(gpu),
+            descriptor_state: DescriptorSetState::default(),
         })
     }
     pub fn begin_render_pass<'p>(
@@ -381,6 +397,15 @@ impl<'g> VkCommandBuffer<'g> {
 
     pub fn begin_compute_pass<'p>(&'p mut self) -> VkComputePassCommand<'p, 'g> {
         VkComputePassCommand::<'p, 'g>::new(self)
+    }
+    pub fn bind_resources(&mut self, set: u32, bindings: &[Binding]) {
+        if self.descriptor_state.sets.len() <= (set as _) {
+            self.descriptor_state
+                .sets
+                .resize(set as usize + 1, DescriptorSetInfo2::default());
+        }
+
+        self.descriptor_state.sets[set as usize].bindings = bindings.to_vec();
     }
 
     pub fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo) {
@@ -567,6 +592,20 @@ impl<'g> VkCommandBuffer<'g> {
 
             Ok(())
         }
+    }
+
+    fn find_matching_pipeline_layout(
+        &self,
+        descriptor_state: &DescriptorSetState,
+    ) -> vk::PipelineLayout {
+        self.gpu.get_pipeline_layout(descriptor_state)
+    }
+
+    fn find_matching_descriptor_sets(
+        &self,
+        descriptor_state: &DescriptorSetState,
+    ) -> Vec<vk::DescriptorSet> {
+        self.gpu.get_descriptor_sets(descriptor_state)
     }
 }
 
@@ -771,7 +810,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             has_draw_command: false,
             viewport_area: None,
             depth_bias_setup: None,
-            pipeline_state: PipelineState::new(info),
+            pipeline_state: GraphicsPipelineState::new(info),
             descriptor_state: DescriptorSetState::default(),
             push_constant_data: vec![],
             render_pass_info: BeginRenderPassInfoOwned {
@@ -982,7 +1021,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         self.command_buffer.has_recorded_anything = true;
 
         let layout = self.find_matching_pipeline_layout(&self.descriptor_state);
-        let pipeline = self.find_matching_pipeline(layout);
+        let pipeline = self.find_matching_graphics_pipeline(layout);
         let device = self.gpu.vk_logical_device();
         {
             unsafe {
@@ -1061,7 +1100,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         self.has_draw_command = true;
 
         let layout = self.find_matching_pipeline_layout(&self.descriptor_state);
-        let pipeline = self.find_matching_pipeline(layout);
+        let pipeline = self.find_matching_graphics_pipeline(layout);
         let device = self.gpu.vk_logical_device();
         {
             unsafe {
@@ -1130,24 +1169,11 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         }
     }
 
-    fn find_matching_pipeline(&mut self, layout: vk::PipelineLayout) -> vk::Pipeline {
+    fn find_matching_graphics_pipeline(&mut self, layout: vk::PipelineLayout) -> vk::Pipeline {
         self.gpu
-            .get_pipeline(&self.pipeline_state, &self.render_pass_info, layout)
+            .get_graphics_pipeline(&self.pipeline_state, &self.render_pass_info, layout)
     }
 
-    fn find_matching_pipeline_layout(
-        &self,
-        descriptor_state: &DescriptorSetState,
-    ) -> vk::PipelineLayout {
-        self.gpu.get_pipeline_layout(descriptor_state)
-    }
-
-    fn find_matching_descriptor_sets(
-        &self,
-        descriptor_state: &DescriptorSetState,
-    ) -> Vec<vk::DescriptorSet> {
-        self.gpu.get_descriptor_sets(descriptor_state)
-    }
     pub fn set_index_buffer(
         &self,
         index_buffer: BufferHandle,
@@ -1194,16 +1220,6 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             size: std::mem::size_of_val(data) as _,
         }
     }
-
-    pub fn bind_resources(&mut self, set: u32, bindings: &[Binding]) {
-        if self.descriptor_state.sets.len() <= (set as _) {
-            self.descriptor_state
-                .sets
-                .resize(set as usize + 1, DescriptorSetInfo2::default());
-        }
-
-        self.descriptor_state.sets[set as usize].bindings = bindings.to_vec();
-    }
 }
 
 impl<'c, 'g> AsRef<VkCommandBuffer<'g>> for VkRenderPassCommand<'c, 'g> {
@@ -1234,23 +1250,34 @@ impl<'c, 'g> Drop for VkRenderPassCommand<'c, 'g> {
 
 impl<'c, 'g> VkComputePassCommand<'c, 'g> {
     fn new(command_buffer: &'c mut VkCommandBuffer<'g>) -> Self {
-        Self { command_buffer }
-    }
-
-    pub fn bind_pipeline(&mut self, pipeline: &VkComputePipeline) {
-        let device = self.command_buffer.gpu.vk_logical_device();
-        unsafe {
-            device.cmd_bind_pipeline(
-                self.command_buffer.inner_command_buffer,
-                PipelineBindPoint::COMPUTE,
-                pipeline.pipeline,
-            )
+        Self {
+            command_buffer,
+            pipeline_state: ComputePipelineState::new(),
         }
     }
 
+    pub fn set_compute_shader(&mut self, compute_shader: ShaderModuleHandle) {
+        self.pipeline_state.shader = compute_shader;
+    }
+
     pub fn dispatch(&mut self, group_size_x: u32, group_size_y: u32, group_size_z: u32) {
+        assert!(self.pipeline_state.shader.is_valid());
+        let pipeline_layout = self.find_matching_pipeline_layout(&self.descriptor_state);
+        let pipeline = self.find_matching_compute_pipeline(pipeline_layout);
+        let device = self.command_buffer.gpu.vk_logical_device();
         unsafe {
-            self.command_buffer.gpu.vk_logical_device().cmd_dispatch(
+            device.cmd_bind_pipeline(self.inner(), PipelineBindPoint::COMPUTE, pipeline);
+
+            let sets = self.find_matching_descriptor_sets(&self.descriptor_state);
+            device.cmd_bind_descriptor_sets(
+                self.inner(),
+                PipelineBindPoint::COMPUTE,
+                pipeline_layout,
+                0,
+                &sets,
+                &[],
+            );
+            device.cmd_dispatch(
                 self.command_buffer.inner_command_buffer,
                 group_size_x,
                 group_size_y,
@@ -1258,6 +1285,10 @@ impl<'c, 'g> VkComputePassCommand<'c, 'g> {
             );
         }
         self.command_buffer.has_recorded_anything = true;
+    }
+
+    fn find_matching_compute_pipeline(&mut self, layout: vk::PipelineLayout) -> vk::Pipeline {
+        self.gpu.get_compute_pipeline(&self.pipeline_state, layout)
     }
 }
 
@@ -1272,5 +1303,16 @@ impl<'c, 'g> Deref for VkComputePassCommand<'c, 'g> {
 
     fn deref(&self) -> &Self::Target {
         self.command_buffer
+    }
+}
+
+impl<'c, 'g> DerefMut for VkRenderPassCommand<'c, 'g> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.command_buffer
+    }
+}
+impl<'c, 'g> DerefMut for VkComputePassCommand<'c, 'g> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.command_buffer
     }
 }

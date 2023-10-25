@@ -43,15 +43,15 @@ use crate::gpu_resource_manager::{
 use crate::{
     get_allocation_callbacks, BeginRenderPassInfoOwned, BufferCreateInfo, BufferHandle,
     BufferImageCopyInfo, CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo,
-    ComputePipelineDescription, Context, DescriptorSetInfo2, DescriptorSetState, Extent2D,
-    FramebufferCreateInfo, GPUFence, Gpu, GpuConfiguration, GpuResourceMap,
-    GraphicsPipelineDescription, Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat,
-    ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
-    ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
-    PipelineState, QueueType, Rect2D, RenderPassDescription, SamplerCreateInfo, SamplerHandle,
-    ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo, VkCommandBuffer,
-    VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
-    VkShaderModule,
+    ComputePipelineDescription, ComputePipelineState, Context, DescriptorSetInfo2,
+    DescriptorSetState, Extent2D, FramebufferCreateInfo, GPUFence, Gpu, GpuConfiguration,
+    GpuResourceMap, GraphicsPipelineDescription, GraphicsPipelineState, Handle as GpuHandle,
+    HandleType, ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier,
+    ImageSubresourceRange, ImageViewCreateInfo, ImageViewHandle, LogicOp, Offset2D, Offset3D,
+    PipelineBarrierInfo, PipelineStageFlags, QueueType, Rect2D, RenderPassDescription,
+    SamplerCreateInfo, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle, ToVk,
+    TransitionInfo, VkCommandBuffer, VkCommandPool, VkComputePipeline, VkFramebuffer,
+    VkGraphicsPipeline, VkImageView, VkRenderPass, VkShaderModule,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -96,9 +96,9 @@ pub(crate) struct PipelineCache {
 }
 
 impl PipelineCache {
-    pub(crate) fn get_pipeline(
+    pub(crate) fn get_graphics_pipeline(
         &self,
-        pipeline_state: &PipelineState,
+        pipeline_state: &GraphicsPipelineState,
         layout: vk::PipelineLayout,
         color_formats: &[vk::Format],
         resource_map: &GpuResourceMap,
@@ -111,7 +111,27 @@ impl PipelineCache {
             return pipelines[&pipeline_hash];
         }
 
-        let pipeline = self.create_pipeline(pipeline_state, layout, color_formats, resource_map);
+        let pipeline =
+            self.create_graphics_pipeline(pipeline_state, layout, color_formats, resource_map);
+        pipelines.insert(pipeline_hash, pipeline);
+        pipeline
+    }
+
+    pub(crate) fn get_compute_pipeline(
+        &self,
+        pipeline_state: &ComputePipelineState,
+        layout: vk::PipelineLayout,
+        resource_map: &GpuResourceMap,
+    ) -> vk::Pipeline {
+        let mut pipelines = self.pipelines.borrow_mut();
+        let mut hasher = DefaultHasher::new();
+        pipeline_state.hash(&mut hasher);
+        let pipeline_hash = hasher.finish();
+        if pipelines.contains_key(&pipeline_hash) {
+            return pipelines[&pipeline_hash];
+        }
+
+        let pipeline = self.create_compute_pipeline(pipeline_state, layout, resource_map);
         pipelines.insert(pipeline_hash, pipeline);
         pipeline
     }
@@ -123,9 +143,9 @@ impl PipelineCache {
         }
     }
 
-    fn create_pipeline(
+    fn create_graphics_pipeline(
         &self,
-        pipeline_state: &PipelineState,
+        pipeline_state: &GraphicsPipelineState,
         layout: vk::PipelineLayout,
         color_formats: &[vk::Format],
         resource_map: &GpuResourceMap,
@@ -241,6 +261,42 @@ impl PipelineCache {
         let pipeline = unsafe {
             self.device
                 .create_graphics_pipelines(vk::PipelineCache::null(), &[create_info], None)
+        }
+        .expect("Failed to create pipelines");
+        pipeline[0]
+    }
+
+    fn create_compute_pipeline(
+        &self,
+        pipeline_state: &ComputePipelineState,
+        layout: vk::PipelineLayout,
+        resource_map: &GpuResourceMap,
+    ) -> vk::Pipeline {
+        let main_name = std::ffi::CString::new("main").unwrap();
+        let stage = vk::PipelineShaderStageCreateInfo {
+            s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineShaderStageCreateFlags::empty(),
+            stage: vk::ShaderStageFlags::COMPUTE,
+            module: resource_map
+                .resolve::<VkShaderModule>(&pipeline_state.shader)
+                .inner,
+            p_name: main_name.as_ptr(),
+            p_specialization_info: std::ptr::null(),
+        };
+        let create_info = vk::ComputePipelineCreateInfo {
+            s_type: StructureType::COMPUTE_PIPELINE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineCreateFlags::empty(),
+            stage,
+            layout,
+            base_pipeline_handle: vk::Pipeline::null(),
+            base_pipeline_index: 0,
+        };
+
+        let pipeline = unsafe {
+            self.device
+                .create_compute_pipelines(vk::PipelineCache::null(), &[create_info], None)
         }
         .expect("Failed to create pipelines");
         pipeline[0]
@@ -1566,9 +1622,9 @@ impl VkGpu {
         &self.state.allocated_resources
     }
 
-    pub(crate) fn get_pipeline(
+    pub(crate) fn get_graphics_pipeline(
         &self,
-        pipeline_state: &PipelineState,
+        pipeline_state: &GraphicsPipelineState,
         render_pass_info: &BeginRenderPassInfoOwned,
         layout: vk::PipelineLayout,
     ) -> vk::Pipeline {
@@ -1581,10 +1637,22 @@ impl VkGpu {
                     .to_vk()
             })
             .collect::<Vec<_>>();
-        self.state.pipeline_cache.get_pipeline(
+        self.state.pipeline_cache.get_graphics_pipeline(
             &pipeline_state,
             layout,
             &formats,
+            &self.allocated_resources().borrow(),
+        )
+    }
+
+    pub(crate) fn get_compute_pipeline(
+        &self,
+        pipeline_state: &crate::ComputePipelineState,
+        layout: vk::PipelineLayout,
+    ) -> vk::Pipeline {
+        self.state.pipeline_cache.get_compute_pipeline(
+            pipeline_state,
+            layout,
             &self.allocated_resources().borrow(),
         )
     }

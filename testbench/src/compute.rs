@@ -1,7 +1,7 @@
 use engine_macros::*;
 use gpu::DescriptorType::{StorageBuffer, UniformBuffer};
 use gpu::{
-    BindingElement, BindingType, BufferCreateInfo, BufferRange, BufferUsageFlags,
+    Binding, BindingElement, BindingType, BufferCreateInfo, BufferRange, BufferUsageFlags,
     CommandBufferSubmitInfo, ComputePipelineDescription, DescriptorInfo, DescriptorSetInfo,
     GPUFence, GlobalBinding, Gpu, GpuConfiguration, MemoryDomain, PipelineStageFlags, QueueType,
     ShaderModuleCreateInfo, ShaderStage, VkGpu,
@@ -26,6 +26,15 @@ void main() {
 );
 
 fn main() -> anyhow::Result<()> {
+    if cfg!(debug_assertions) {
+        // Enable all logging in debug configuration
+        env_logger::builder()
+            .filter(None, log::LevelFilter::Trace)
+            .init();
+    } else {
+        env_logger::init();
+    }
+
     let gpu = VkGpu::new(GpuConfiguration {
         app_name: "compute sample",
         pipeline_cache_path: None,
@@ -33,7 +42,7 @@ fn main() -> anyhow::Result<()> {
         window: None,
     })?;
 
-    let module = gpu.make_shader_module(&ShaderModuleCreateInfo {
+    let compute_module = gpu.make_shader_module(&ShaderModuleCreateInfo {
         code: bytemuck::cast_slice(COMPUTE_SUM),
     })?;
 
@@ -43,27 +52,6 @@ fn main() -> anyhow::Result<()> {
             flags: gpu::FenceCreateFlags::empty(),
         },
     )?;
-
-    let command_pipeline = gpu.create_compute_pipeline(&ComputePipelineDescription {
-        module,
-        entry_point: "main",
-        bindings: &[GlobalBinding {
-            set_index: 0,
-            elements: &[
-                BindingElement {
-                    binding_type: BindingType::Uniform,
-                    index: 0,
-                    stage: ShaderStage::COMPUTE,
-                },
-                BindingElement {
-                    binding_type: BindingType::Storage,
-                    index: 1,
-                    stage: ShaderStage::COMPUTE,
-                },
-            ],
-        }],
-        push_constant_ranges: &[],
-    })?;
 
     let output_buffer = gpu.make_buffer(
         &BufferCreateInfo {
@@ -83,36 +71,36 @@ fn main() -> anyhow::Result<()> {
         },
         MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
     )?;
-    gpu.write_buffer(&input_buffer, 0, bytemuck::cast_slice(&inputs));
-
-    let descriptor_set = gpu.create_descriptor_set(&DescriptorSetInfo {
-        descriptors: &[
-            DescriptorInfo {
-                binding: 0,
-                element_type: UniformBuffer(BufferRange {
-                    handle: input_buffer.clone(),
-                    offset: 0,
-                    size: gpu::WHOLE_SIZE,
-                }),
-                binding_stage: ShaderStage::COMPUTE,
-            },
-            DescriptorInfo {
-                binding: 1,
-                element_type: StorageBuffer(BufferRange {
-                    handle: output_buffer.clone(),
-                    offset: 0,
-                    size: gpu::WHOLE_SIZE,
-                }),
-                binding_stage: ShaderStage::COMPUTE,
-            },
-        ],
-    })?;
+    gpu.write_buffer(&input_buffer, 0, bytemuck::cast_slice(&inputs))?;
 
     let mut command_buffer = gpu.create_command_buffer(QueueType::Graphics)?;
     {
         let mut compute_pass = command_buffer.begin_compute_pass();
-        compute_pass.bind_pipeline(&command_pipeline);
-        compute_pass.bind_descriptor_sets(&command_pipeline, 0, &[&descriptor_set]);
+        compute_pass.set_compute_shader(compute_module);
+        compute_pass.bind_resources(
+            0,
+            &[
+                Binding {
+                    location: 0,
+                    ty: gpu::DescriptorBindingType::UniformBuffer {
+                        handle: input_buffer.clone(),
+                        offset: 0,
+                        range: gpu::WHOLE_SIZE as _,
+                    },
+                    binding_stage: ShaderStage::COMPUTE,
+                },
+                Binding {
+                    location: 1,
+                    ty: gpu::DescriptorBindingType::StorageBuffer {
+                        handle: output_buffer.clone(),
+                        offset: 0,
+                        range: gpu::WHOLE_SIZE as _,
+                    },
+                    binding_stage: ShaderStage::COMPUTE,
+                },
+            ],
+        );
+
         compute_pass.dispatch(1, 1, 1);
     }
 
