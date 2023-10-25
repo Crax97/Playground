@@ -32,7 +32,7 @@ use ash::{
     *,
 };
 
-use log::{debug, error, trace, warn};
+use log::{debug, error, info, trace, warn};
 use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 
@@ -259,6 +259,7 @@ impl PipelineCache {
                 .create_graphics_pipelines(vk::PipelineCache::null(), &[create_info], None)
         }
         .expect("Failed to create pipelines");
+        info!("Created a new graphics pipeline");
         pipeline[0]
     }
 
@@ -295,6 +296,7 @@ impl PipelineCache {
                 .create_compute_pipelines(vk::PipelineCache::null(), &[create_info], None)
         }
         .expect("Failed to create pipelines");
+        info!("Created a new compute pipeline");
         pipeline[0]
     }
 }
@@ -333,6 +335,7 @@ impl DescriptorSetLayoutCache {
         info: &DescriptorSetInfo2,
     ) -> vk::DescriptorSetLayout {
         let descriptor_set_bindings = info.descriptor_set_layout().vk_set_layout_bindings();
+        info!("Created a new descriptor set layout");
         unsafe {
             self.device
                 .create_descriptor_set_layout(
@@ -482,7 +485,7 @@ impl DescriptorSetCache {
         layout: vk::DescriptorSetLayout,
     ) -> DescriptorSetAllocation {
         let descriptor_set = self.allocate_descriptor_set(info, layout);
-
+        info!("Created a new descriptor set");
         descriptor_set
     }
 
