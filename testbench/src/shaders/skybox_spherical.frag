@@ -13,7 +13,6 @@ vec2 sample_spherical_map(vec3 v)
 
 layout(set = 0, binding = 0) uniform sampler2D baseColorSampler;
 
-
 layout(location = 0) out vec4 outEmissive;
 
 layout(location = 0) in FragmentOut fragOut;

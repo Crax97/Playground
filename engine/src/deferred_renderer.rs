@@ -479,7 +479,7 @@ impl DeferredRenderingPipeline {
                         }]),
                         ShaderStage::ALL_GRAPHICS,
                     );
-                    ctx.render_pass_command.draw_indexed_handle(
+                    ctx.render_pass_command.draw_indexed(
                         draw_call.prim.index_count,
                         1,
                         0,
@@ -719,7 +719,7 @@ impl DeferredRenderingPipeline {
         render_context
             .render_pass_command
             .set_cull_mode(gpu::CullMode::None);
-        render_context.render_pass_command.draw_indexed_handle(
+        render_context.render_pass_command.draw_indexed(
             skybox_mesh.primitives[0].index_count,
             1,
             0,
@@ -1217,7 +1217,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 .set_vertex_shader(self.screen_quad.clone());
             ctx.render_pass_command
                 .set_fragment_shader(self.gbuffer_combine.clone());
-            ctx.render_pass_command.draw_handle(4, 1, 0, 0);
+            ctx.render_pass_command.draw(4, 1, 0, 0);
         });
         context.register_callback(&tonemap_pass, |_: &VkGpu, ctx| {
             ctx.render_pass_command.bind_resources(0, &ctx.bindings);
@@ -1230,7 +1230,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 .set_vertex_shader(self.screen_quad.clone());
             ctx.render_pass_command
                 .set_fragment_shader(self.tonemap_fs.clone());
-            ctx.render_pass_command.draw_handle(4, 1, 0, 0);
+            ctx.render_pass_command.draw(4, 1, 0, 0);
         });
         context.register_callback(&fxaa_pass, |_: &VkGpu, ctx| {
             ctx.render_pass_command.bind_resources(0, &ctx.bindings);
@@ -1259,7 +1259,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 bytemuck::cast_slice(&[params]),
                 ShaderStage::ALL_GRAPHICS,
             );
-            ctx.render_pass_command.draw_handle(3, 1, 0, 0);
+            ctx.render_pass_command.draw(3, 1, 0, 0);
         });
         context.register_callback(&present_render_pass, |_: &VkGpu, ctx| {
             ctx.render_pass_command.bind_resources(0, &ctx.bindings);
@@ -1274,7 +1274,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 .set_vertex_shader(self.screen_quad.clone());
             ctx.render_pass_command
                 .set_fragment_shader(self.texture_copy.clone());
-            ctx.render_pass_command.draw_handle(4, 1, 0, 0);
+            ctx.render_pass_command.draw(4, 1, 0, 0);
         });
 
         let irradiance_map_texture = match &self.irradiance_map {
@@ -1301,7 +1301,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
     fn create_material(
         &mut self,
-        gpu: &VkGpu,
+        _gpu: &VkGpu,
         material_description: MaterialDescription,
     ) -> anyhow::Result<MasterMaterial> {
         let color_attachments = &[
@@ -1449,6 +1449,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             parameters_visibility: material_description.parameter_shader_visibility,
         };
 
-        MasterMaterial::new(gpu, &master_description)
+        MasterMaterial::new(&master_description)
     }
 }

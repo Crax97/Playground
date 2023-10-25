@@ -4,7 +4,6 @@ mod descriptor_set;
 mod gpu;
 mod gpu_resource_manager;
 mod handle;
-mod pipeline;
 mod swapchain;
 mod types;
 
@@ -14,7 +13,6 @@ pub use bitflags::bitflags;
 pub use command_buffer::*;
 pub use gpu_resource_manager::*;
 pub use handle::*;
-pub use pipeline::*;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 pub use swapchain::VkSwapchain;
@@ -156,14 +154,6 @@ pub struct BufferImageCopyInfo {
     pub mip_level: u32,
     pub base_layer: u32,
     pub num_layers: u32,
-}
-
-#[derive(Clone, Copy)]
-pub struct FramebufferCreateInfo<'a> {
-    pub render_pass: &'a VkRenderPass,
-    pub attachments: &'a [ImageViewHandle],
-    pub width: u32,
-    pub height: u32,
 }
 
 pub struct ShaderModuleCreateInfo<'a> {

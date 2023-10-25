@@ -9,7 +9,7 @@ use engine::Backbuffer;
 use engine_macros::glsl;
 use gpu::{
     AccessFlags, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorAttachment,
-    CullMode, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle, ImageMemoryBarrier,
+    CullMode, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageMemoryBarrier,
     ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, IndexType, InputRate, MemoryDomain,
     PipelineStageFlags, PresentMode, SamplerCreateInfo, SamplerHandle, ShaderModuleHandle,
     ShaderStage, VertexBindingInfo, VkCommandBuffer,
@@ -320,7 +320,7 @@ impl App for TriangleApp {
                 bytemuck::cast_slice(mvp.as_slice()),
                 ShaderStage::VERTEX,
             );
-            pass.draw_indexed_handle(3, 1, 0, 0, 0);
+            pass.draw_indexed(3, 1, 0, 0, 0);
         }
         Ok(command_buffer)
     }

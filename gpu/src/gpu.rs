@@ -23,12 +23,11 @@ use ash::{
         DebugUtilsMessageTypeFlagsEXT, DebugUtilsMessengerCreateFlagsEXT,
         DebugUtilsMessengerCreateInfoEXT, DebugUtilsObjectNameInfoEXT, DescriptorBufferInfo,
         DescriptorImageInfo, DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags,
-        DeviceQueueCreateInfo, Extent3D, FormatFeatureFlags, FramebufferCreateFlags, Handle,
-        ImageCreateFlags, ImageTiling, ImageType, ImageViewCreateFlags, InstanceCreateFlags,
-        InstanceCreateInfo, MemoryHeap, MemoryHeapFlags, PhysicalDevice, PhysicalDeviceFeatures,
-        PhysicalDeviceProperties, PhysicalDeviceType, PipelineCacheCreateFlags,
-        PipelineCacheCreateInfo, Queue, QueueFlags, ShaderModuleCreateFlags, SharingMode,
-        StructureType, WriteDescriptorSet, API_VERSION_1_3,
+        DeviceQueueCreateInfo, Extent3D, FormatFeatureFlags, Handle, ImageCreateFlags, ImageTiling,
+        ImageType, ImageViewCreateFlags, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap,
+        MemoryHeapFlags, PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties,
+        PhysicalDeviceType, PipelineCacheCreateFlags, PipelineCacheCreateInfo, Queue, QueueFlags,
+        ShaderModuleCreateFlags, SharingMode, StructureType, WriteDescriptorSet, API_VERSION_1_3,
     },
     *,
 };
@@ -43,15 +42,13 @@ use crate::gpu_resource_manager::{
 use crate::{
     get_allocation_callbacks, BeginRenderPassInfoOwned, BufferCreateInfo, BufferHandle,
     BufferImageCopyInfo, CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo,
-    ComputePipelineDescription, ComputePipelineState, Context, DescriptorSetInfo2,
-    DescriptorSetState, Extent2D, FramebufferCreateInfo, GPUFence, Gpu, GpuConfiguration,
-    GpuResourceMap, GraphicsPipelineDescription, GraphicsPipelineState, Handle as GpuHandle,
-    HandleType, ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier,
+    ComputePipelineState, Context, DescriptorSetInfo2, DescriptorSetState, Extent2D, GPUFence, Gpu,
+    GpuConfiguration, GpuResourceMap, GraphicsPipelineState, Handle as GpuHandle, HandleType,
+    ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier,
     ImageSubresourceRange, ImageViewCreateInfo, ImageViewHandle, LogicOp, Offset2D, Offset3D,
-    PipelineBarrierInfo, PipelineStageFlags, QueueType, Rect2D, RenderPassDescription,
-    SamplerCreateInfo, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle, ToVk,
-    TransitionInfo, VkCommandBuffer, VkCommandPool, VkComputePipeline, VkFramebuffer,
-    VkGraphicsPipeline, VkImageView, VkRenderPass, VkShaderModule,
+    PipelineBarrierInfo, PipelineStageFlags, QueueType, Rect2D, SamplerCreateInfo, SamplerHandle,
+    ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo, VkCommandBuffer,
+    VkCommandPool, VkImageView, VkShaderModule,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -59,8 +56,7 @@ use super::descriptor_set::PooledDescriptorSetAllocator;
 use super::{
     allocator::{GpuAllocator, PasstroughAllocator},
     descriptor_set::DescriptorSetAllocator,
-    AccessFlags, AllocationRequirements, DescriptorSetInfo, MemoryDomain, VkBuffer,
-    VkDescriptorSet, VkImage, VkSampler,
+    AccessFlags, AllocationRequirements, MemoryDomain, VkBuffer, VkImage, VkSampler,
 };
 
 const KHRONOS_VALIDATION_LAYER: &str = "VK_LAYER_KHRONOS_validation";
@@ -1443,97 +1439,6 @@ impl VkGpu {
         trace!("{}", s);
     }
 
-    fn initialize_descriptor_set(
-        &self,
-        descriptor_set: &vk::DescriptorSet,
-        info: &DescriptorSetInfo,
-    ) -> VkResult<()> {
-        let mut buffer_descriptors = vec![];
-        let mut image_descriptors = vec![];
-        info.descriptors.iter().for_each(|i| match &i.element_type {
-            super::DescriptorType::UniformBuffer(buf) => buffer_descriptors.push((
-                i.binding,
-                DescriptorBufferInfo {
-                    buffer: self.resolve_resource::<VkBuffer>(&buf.handle).inner,
-                    offset: buf.offset,
-                    range: if buf.size == crate::WHOLE_SIZE {
-                        vk::WHOLE_SIZE
-                    } else {
-                        buf.size
-                    },
-                },
-                vk::DescriptorType::UNIFORM_BUFFER,
-            )),
-            super::DescriptorType::StorageBuffer(buf) => buffer_descriptors.push((
-                i.binding,
-                DescriptorBufferInfo {
-                    buffer: self.resolve_resource::<VkBuffer>(&buf.handle).inner,
-                    offset: buf.offset,
-                    range: if buf.size == crate::WHOLE_SIZE {
-                        vk::WHOLE_SIZE
-                    } else {
-                        buf.size
-                    },
-                },
-                vk::DescriptorType::STORAGE_BUFFER,
-            )),
-            super::DescriptorType::Sampler(sam) => image_descriptors.push((
-                i.binding,
-                DescriptorImageInfo {
-                    sampler: self.resolve_resource::<VkSampler>(&sam.sampler).inner,
-                    image_view: self.resolve_resource::<VkImageView>(&sam.image_view).inner,
-                    image_layout: sam.image_layout.to_vk(),
-                },
-                vk::DescriptorType::SAMPLER,
-            )),
-            super::DescriptorType::CombinedImageSampler(sam) => image_descriptors.push((
-                i.binding,
-                DescriptorImageInfo {
-                    sampler: self.resolve_resource::<VkSampler>(&sam.sampler).inner,
-                    image_view: self.resolve_resource::<VkImageView>(&sam.image_view).inner,
-                    image_layout: sam.image_layout.to_vk(),
-                },
-                vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            )),
-        });
-
-        let mut write_descriptor_sets = vec![];
-
-        for (bind, desc, ty) in &buffer_descriptors {
-            write_descriptor_sets.push(WriteDescriptorSet {
-                s_type: StructureType::WRITE_DESCRIPTOR_SET,
-                p_next: null(),
-                dst_set: *descriptor_set,
-                dst_binding: *bind,
-                dst_array_element: 0,
-                descriptor_count: 1,
-                descriptor_type: *ty,
-                p_image_info: std::ptr::null(),
-                p_buffer_info: addr_of!(*desc),
-                p_texel_buffer_view: std::ptr::null(),
-            });
-        }
-        for (bind, desc, ty) in &image_descriptors {
-            write_descriptor_sets.push(WriteDescriptorSet {
-                s_type: StructureType::WRITE_DESCRIPTOR_SET,
-                p_next: null(),
-                dst_set: *descriptor_set,
-                dst_binding: *bind,
-                dst_array_element: 0,
-                descriptor_count: 1,
-                descriptor_type: *ty,
-                p_image_info: addr_of!(*desc),
-                p_buffer_info: std::ptr::null(),
-                p_texel_buffer_view: std::ptr::null(),
-            });
-        }
-        unsafe {
-            self.vk_logical_device()
-                .update_descriptor_sets(&write_descriptor_sets, &[]);
-        }
-        Ok(())
-    }
-
     pub fn wait_device_idle(&self) -> VkResult<()> {
         unsafe { self.vk_logical_device().device_wait_idle() }
     }
@@ -2117,33 +2022,6 @@ impl VkGpu {
         VkSampler::create(self.vk_logical_device(), None, create_info)
     }
 
-    pub fn create_framebuffer(
-        &self,
-        create_info: &FramebufferCreateInfo,
-    ) -> VkResult<VkFramebuffer> {
-        let attachments: Vec<_> = create_info
-            .attachments
-            .iter()
-            .map(|a| self.resolve_resource::<VkImageView>(&a).inner)
-            .collect();
-        let create_info = vk::FramebufferCreateInfo {
-            s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: FramebufferCreateFlags::empty(),
-            render_pass: create_info.render_pass.inner,
-
-            attachment_count: attachments.len() as _,
-            p_attachments: attachments.as_ptr(),
-            width: create_info.width,
-            height: create_info.height,
-
-            // We only support one single framebuffer
-            layers: 1,
-        };
-
-        VkFramebuffer::create(self.vk_logical_device(), None, &create_info)
-    }
-
     pub fn copy_buffer(
         &self,
         source_buffer: &VkBuffer,
@@ -2215,16 +2093,6 @@ impl VkGpu {
         Ok(())
     }
 
-    pub fn create_descriptor_set(&self, info: &DescriptorSetInfo) -> VkResult<VkDescriptorSet> {
-        let allocated_descriptor_set = self
-            .state
-            .descriptor_set_allocator
-            .borrow_mut()
-            .allocate(info)?;
-        self.initialize_descriptor_set(&allocated_descriptor_set.descriptor_set, info)?;
-        VkDescriptorSet::create(allocated_descriptor_set)
-    }
-
     pub fn wait_for_fences(
         &self,
         fences: &[&GPUFence],
@@ -2241,27 +2109,6 @@ impl VkGpu {
     pub fn reset_fences(&self, fences: &[&GPUFence]) -> VkResult<()> {
         let fences: Vec<_> = fences.iter().map(|f| f.inner).collect();
         unsafe { self.vk_logical_device().reset_fences(&fences) }
-    }
-
-    pub fn create_render_pass(
-        &self,
-        description: &RenderPassDescription,
-    ) -> VkResult<VkRenderPass> {
-        VkRenderPass::new(self, description)
-    }
-
-    pub fn create_graphics_pipeline(
-        &self,
-        description: &GraphicsPipelineDescription,
-    ) -> VkResult<VkGraphicsPipeline> {
-        VkGraphicsPipeline::new(self, description)
-    }
-
-    pub fn create_compute_pipeline(
-        &self,
-        description: &ComputePipelineDescription,
-    ) -> VkResult<VkComputePipeline> {
-        VkComputePipeline::new(self, description)
     }
 
     pub fn create_command_pool(

@@ -7,19 +7,16 @@ use std::{
 };
 
 use gpu::{
-    AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, Binding, BindingType,
-    BlendMode, BlendOp, BlendState, BufferCreateInfo, BufferHandle, BufferUsageFlags,
-    ColorAttachment, ColorComponentFlags, ColorLoadOp, ComponentMapping, CullMode, DepthAttachment,
-    DepthLoadOp, DepthStencilState, DescriptorInfo, DescriptorSetInfo, Extent2D, Filter,
-    FramebufferCreateInfo, FrontFace, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat,
-    ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageUsageFlags,
-    ImageViewCreateInfo, ImageViewHandle, ImageViewType, LogicOp, MemoryDomain, Offset2D,
-    PipelineBarrierInfo, PipelineBindPoint, PipelineStageFlags, PolygonMode, PrimitiveTopology,
-    PushConstantRange, Rect2D, RenderPassAttachment, RenderPassDescription, SampleCount,
-    SamplerAddressMode, SamplerCreateInfo, SamplerHandle, ShaderModuleHandle, ShaderStage,
-    StencilAttachment, StencilLoadOp, SubpassDependency, SubpassDescription, TransitionInfo,
-    VertexBindingDescription, VkCommandBuffer, VkDescriptorSet, VkFramebuffer, VkGpu, VkImageView,
-    VkRenderPass, VkRenderPassCommand,
+    AccessFlags, BeginRenderPassInfo, Binding, BindingType, BlendState, BufferCreateInfo,
+    BufferHandle, BufferUsageFlags, ColorAttachment, ColorLoadOp, ComponentMapping, CullMode,
+    DepthAttachment, DepthLoadOp, DepthStencilState, Extent2D, Filter, FrontFace, Gpu,
+    ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier,
+    ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, ImageViewType,
+    LogicOp, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags, PolygonMode,
+    PrimitiveTopology, PushConstantRange, Rect2D, SampleCount, SamplerAddressMode,
+    SamplerCreateInfo, SamplerHandle, ShaderModuleHandle, ShaderStage, StencilAttachment,
+    StencilLoadOp, TransitionInfo, VertexBindingDescription, VkCommandBuffer, VkGpu,
+    VkRenderPassCommand,
 };
 
 use indexmap::IndexSet;
@@ -502,16 +499,6 @@ impl<'a> CreateFrom<'a, BufferDescription> for GraphBuffer {
         Ok(GraphBuffer::construct(buffer, *desc))
     }
 }
-struct RenderGraphPassCreateInfo<'a> {
-    graph: &'a RenderGraph,
-    pass_info: &'a RenderPassInfo,
-}
-
-impl<'a> AsRef<RenderPassInfo> for RenderGraphPassCreateInfo<'a> {
-    fn as_ref(&self) -> &RenderPassInfo {
-        self.pass_info
-    }
-}
 
 impl AsRef<ImageDescription> for ImageDescription {
     fn as_ref(&self) -> &ImageDescription {
@@ -519,271 +506,15 @@ impl AsRef<ImageDescription> for ImageDescription {
     }
 }
 
-pub struct GraphPass {
-    inner: VkRenderPass,
-    desc: RenderPassInfo,
-}
-
-impl GraphResource for GraphPass {
-    type Inner = VkRenderPass;
-    type Desc = RenderPassInfo;
-
-    fn construct(inner: Self::Inner, desc: Self::Desc) -> Self
-    where
-        Self: Sized,
-    {
-        Self { inner, desc }
-    }
-
-    fn matches_description(&self, new_desc: &Self::Desc) -> bool {
-        self.desc == *new_desc
-    }
-
-    fn resource(&self) -> &Self::Inner {
-        &self.inner
-    }
-    fn type_str() -> &'static str {
-        "GraphPass"
-    }
-}
-
-impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
-    fn create(gpu: &VkGpu, create_info: &'a RenderGraphPassCreateInfo) -> anyhow::Result<Self> {
-        let mut color_attachments = vec![];
-        let mut depth_attachments = vec![];
-
-        let mut all_attachments: Vec<_> = vec![];
-        let mut index = 0;
-        for write in &create_info.pass_info.attachment_writes {
-            let image_desc = &create_info.graph.allocations[write];
-            let image_desc = match &image_desc.ty {
-                AllocationType::Image(image_desc) => image_desc,
-                AllocationType::Buffer { .. } => {
-                    panic!("A buffer cannot be treated as a render target!")
-                }
-            };
-
-            let resource_usage = create_info.pass_info.resource_usage(write);
-
-            let final_layout = match resource_usage.output {
-                ResourceLayout::Unknown => ImageLayout::General,
-                ResourceLayout::ShaderRead => ImageLayout::ShaderReadOnly,
-                ResourceLayout::AttachmentRead => {
-                    image_desc.format.preferred_attachment_read_layout()
-                }
-                ResourceLayout::Present => ImageLayout::PresentSrc,
-                _ => unreachable!(),
-            };
-            let attachment = RenderPassAttachment {
-                format: image_desc.format,
-                samples: SampleCount::Sample1,
-                load_op: match resource_usage.input {
-                    ResourceLayout::Unknown => ColorLoadOp::DontCare,
-                    _ => ColorLoadOp::Clear([0.0; 4]),
-                },
-                store_op: match resource_usage.output {
-                    ResourceLayout::Unknown => AttachmentStoreOp::DontCare,
-                    _ => AttachmentStoreOp::Store,
-                },
-                stencil_load_op: StencilLoadOp::DontCare,
-                stencil_store_op: AttachmentStoreOp::DontCare,
-                initial_layout: match resource_usage.input {
-                    ResourceLayout::Unknown => ImageLayout::Undefined,
-                    ResourceLayout::ShaderWrite => {
-                        image_desc.format.preferred_shader_write_layout()
-                    }
-                    ResourceLayout::AttachmentWrite => {
-                        image_desc.format.preferred_attachment_write_layout()
-                    }
-                    _ => unreachable!(),
-                },
-
-                final_layout,
-                blend_state: if let Some(state) = create_info.pass_info.blend_state {
-                    state
-                } else {
-                    BlendState {
-                        blend_enable: true,
-                        src_color_blend_factor: BlendMode::One,
-                        dst_color_blend_factor: BlendMode::Zero,
-                        color_blend_op: BlendOp::Add,
-                        src_alpha_blend_factor: BlendMode::One,
-                        dst_alpha_blend_factor: BlendMode::Zero,
-                        alpha_blend_op: BlendOp::Add,
-                        color_write_mask: ColorComponentFlags::RGBA,
-                    }
-                },
-            };
-            all_attachments.push(attachment);
-
-            if image_desc.format.is_color() {
-                color_attachments.push(AttachmentReference {
-                    attachment: index as _,
-                    layout: ImageLayout::ColorAttachment,
-                });
-            } else {
-                depth_attachments.push(AttachmentReference {
-                    attachment: index as _,
-                    layout: ImageLayout::DepthStencilAttachment,
-                });
-            }
-
-            index += 1;
-        }
-        for read in &create_info.pass_info.attachment_reads {
-            let image_desc = &create_info.graph.allocations[read];
-            let image_desc = match &image_desc.ty {
-                AllocationType::Image(image_desc) => image_desc,
-                AllocationType::Buffer { .. } => {
-                    panic!("A buffer cannot be treated as a render target!")
-                }
-            };
-            let resource_usage = create_info.pass_info.resource_usage(read);
-            let attachment = RenderPassAttachment {
-                format: image_desc.format,
-                samples: SampleCount::Sample1,
-                load_op: ColorLoadOp::Load,
-                store_op: AttachmentStoreOp::DontCare,
-                stencil_load_op: StencilLoadOp::DontCare,
-                stencil_store_op: AttachmentStoreOp::DontCare,
-                initial_layout: match resource_usage.input {
-                    ResourceLayout::Unknown => ImageLayout::Undefined,
-                    ResourceLayout::ShaderWrite => {
-                        image_desc.format.preferred_shader_write_layout()
-                    }
-                    ResourceLayout::AttachmentWrite => {
-                        image_desc.format.preferred_attachment_write_layout()
-                    }
-                    _ => unreachable!(),
-                },
-                final_layout: match resource_usage.output {
-                    ResourceLayout::Unknown => ImageLayout::General,
-                    ResourceLayout::ShaderRead => ImageLayout::ShaderReadOnly,
-                    ResourceLayout::AttachmentRead => {
-                        image_desc.format.preferred_attachment_read_layout()
-                    }
-                    ResourceLayout::Present => ImageLayout::PresentSrc,
-                    _ => unreachable!(),
-                },
-                blend_state: if let Some(state) = create_info.pass_info.blend_state {
-                    state
-                } else {
-                    BlendState {
-                        blend_enable: true,
-                        src_color_blend_factor: BlendMode::One,
-                        dst_color_blend_factor: BlendMode::Zero,
-                        color_blend_op: BlendOp::Add,
-                        src_alpha_blend_factor: BlendMode::One,
-                        dst_alpha_blend_factor: BlendMode::Zero,
-                        alpha_blend_op: BlendOp::Add,
-                        color_write_mask: ColorComponentFlags::RGBA,
-                    }
-                },
-            };
-            all_attachments.push(attachment);
-
-            if image_desc.format.is_color() {
-                color_attachments.push(AttachmentReference {
-                    attachment: index as _,
-                    layout: ImageLayout::ColorAttachment,
-                });
-            } else {
-                depth_attachments.push(AttachmentReference {
-                    attachment: index as _,
-                    layout: ImageLayout::DepthStencilAttachment,
-                });
-            }
-            index += 1;
-        }
-
-        let description = RenderPassDescription {
-            attachments: &all_attachments,
-            subpasses: &[SubpassDescription {
-                pipeline_bind_point: PipelineBindPoint::Graphics,
-                input_attachments: &[],
-                color_attachments: &color_attachments,
-                resolve_attachments: &[],
-                depth_stencil_attachment: &depth_attachments,
-                preserve_attachments: &[],
-            }],
-            dependencies: &[SubpassDependency {
-                src_subpass: SubpassDependency::EXTERNAL,
-                dst_subpass: 0,
-                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                src_access_mask: AccessFlags::empty(),
-                dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-            }],
-        };
-        let pass = gpu.create_render_pass(&description)?;
-
-        Ok(GraphPass::construct(pass, create_info.pass_info.clone()))
-    }
-}
-
-pub struct GraphDescriptorSet {
-    inner: VkDescriptorSet,
-    desc: u64,
-}
-
-impl GraphResource for GraphDescriptorSet {
-    type Inner = VkDescriptorSet;
-    type Desc = u64;
-
-    fn construct(inner: Self::Inner, desc: Self::Desc) -> Self
-    where
-        Self: Sized,
-    {
-        Self { inner, desc }
-    }
-
-    fn matches_description(&self, new_desc: &Self::Desc) -> bool {
-        self.desc == *new_desc
-    }
-
-    fn resource(&self) -> &Self::Inner {
-        &self.inner
-    }
-    fn type_str() -> &'static str {
-        "GraphDescriptorSet"
-    }
-}
-
-struct DescriptorSetCreateInfo<'a> {
-    hash: u64,
-    inputs: &'a [DescriptorInfo],
-}
-
-impl<'a> AsRef<u64> for DescriptorSetCreateInfo<'a> {
-    fn as_ref(&self) -> &u64 {
-        &self.hash
-    }
-}
-
-impl<'a> CreateFrom<'a, DescriptorSetCreateInfo<'a>> for GraphDescriptorSet {
-    fn create(gpu: &VkGpu, desc: &'a DescriptorSetCreateInfo) -> anyhow::Result<Self> {
-        let ds = gpu
-            .create_descriptor_set(&DescriptorSetInfo {
-                descriptors: desc.inputs,
-            })
-            .expect("Failed to create descriptor set!");
-        Ok(GraphDescriptorSet::construct(ds, desc.hash))
-    }
-}
-
 type ImageAllocator = ResourceAllocator<GraphImage, ResourceId>;
 type ImageViewAllocator = ResourceAllocator<GraphImageView, ResourceId>;
 type BufferAllocator = ResourceAllocator<GraphBuffer, ResourceId>;
-type RenderPassAllocator = ResourceAllocator<GraphPass, RenderPassHandle>;
 type SampleAllocator = ResourceAllocator<GraphSampler, ResourceId>;
-type DescriptorSetAllocator = ResourceAllocator<GraphDescriptorSet, u64>;
 pub struct DefaultResourceAllocator {
     images: ImageAllocator,
     image_views: ImageViewAllocator,
     buffers: BufferAllocator,
     samplers: SampleAllocator,
-    descriptors: DescriptorSetAllocator,
-    render_passes: RenderPassAllocator,
 }
 
 impl Default for DefaultResourceAllocator {
@@ -798,9 +529,7 @@ impl DefaultResourceAllocator {
             images: ResourceAllocator::new(2),
             image_views: ResourceAllocator::new(2),
             buffers: ResourceAllocator::new(2),
-            render_passes: RenderPassAllocator::new(0),
             samplers: ResourceAllocator::new(0),
-            descriptors: ResourceAllocator::new(3),
         }
     }
 }
@@ -810,9 +539,6 @@ impl DefaultResourceAllocator {
         self.image_views.remove_unused_resources(current_iteration);
         self.images.remove_unused_resources(current_iteration);
         self.samplers.remove_unused_resources(current_iteration);
-        self.descriptors.remove_unused_resources(current_iteration);
-        self.render_passes
-            .remove_unused_resources(current_iteration);
     }
 }
 pub struct GraphRunContext<'a, 'e> {
@@ -1140,16 +866,6 @@ impl RenderPassInfo {
         resources
             .into_iter()
             .any(|r| self.uses_as_write_attachment(r))
-    }
-
-    fn resource_usage(&self, resource: &ResourceId) -> ResourceUsage {
-        *self
-            .resource_usages
-            .get(resource)
-            .unwrap_or(&ResourceUsage {
-                input: ResourceLayout::Unknown,
-                output: ResourceLayout::Unknown,
-            })
     }
 }
 
@@ -2024,7 +1740,6 @@ impl RenderGraphRunner for GpuRunner {
                     &resource_allocator.image_views,
                     &resource_allocator.buffers,
                     &mut resource_allocator.samplers,
-                    &mut resource_allocator.descriptors,
                 );
 
                 let cb = ctx.callbacks.callbacks.get_mut(rp);
@@ -2033,7 +1748,7 @@ impl RenderGraphRunner for GpuRunner {
                     [0.3, 0.0, 0.0, 1.0],
                 );
 
-                let mut render_pass_command =
+                let render_pass_command =
                     ctx.command_buffer.begin_render_pass(&BeginRenderPassInfo {
                         color_attachments: &color_views,
                         depth_attachment: depth_view,
@@ -2292,7 +2007,6 @@ fn resolve_shader_inputs<'a>(
     image_view_allocator: &'a ImageViewAllocator,
     buffer_allocator: &'a BufferAllocator,
     sampler_allocator: &'a mut SampleAllocator,
-    descriptor_view_allocator: &'a mut DescriptorSetAllocator,
 ) -> Vec<Binding> {
     if info.shader_reads.is_empty() {
         return vec![];

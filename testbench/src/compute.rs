@@ -1,10 +1,8 @@
 use engine_macros::*;
-use gpu::DescriptorType::{StorageBuffer, UniformBuffer};
 use gpu::{
-    Binding, BindingElement, BindingType, BufferCreateInfo, BufferRange, BufferUsageFlags,
-    CommandBufferSubmitInfo, ComputePipelineDescription, DescriptorInfo, DescriptorSetInfo,
-    GPUFence, GlobalBinding, Gpu, GpuConfiguration, MemoryDomain, PipelineStageFlags, QueueType,
-    ShaderModuleCreateInfo, ShaderStage, VkGpu,
+    Binding, BufferCreateInfo, BufferUsageFlags, CommandBufferSubmitInfo, GPUFence, Gpu,
+    GpuConfiguration, MemoryDomain, PipelineStageFlags, QueueType, ShaderModuleCreateInfo,
+    ShaderStage, VkGpu,
 };
 use std::mem::{size_of, size_of_val};
 

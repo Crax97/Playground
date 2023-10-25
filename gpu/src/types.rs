@@ -1,4 +1,4 @@
-use std::{cell::RefCell, ops::Deref, sync::Arc};
+use std::ops::Deref;
 
 use super::gpu::*;
 use crate::{
@@ -16,10 +16,7 @@ use ash::{
     },
 };
 
-use super::{
-    descriptor_set::{DescriptorSetAllocation, DescriptorSetAllocator},
-    MemoryAllocation, MemoryDomain,
-};
+use super::{MemoryAllocation, MemoryDomain};
 
 pub fn get_allocation_callbacks() -> Option<&'static AllocationCallbacks> {
     None
@@ -875,36 +872,6 @@ impl VkImageView {
     }
 }
 
-pub struct VkDescriptorSet {
-    pub(super) inner: vk::DescriptorSet,
-    pub(super) allocation: DescriptorSetAllocation,
-}
-
-impl PartialEq for VkDescriptorSet {
-    fn eq(&self, other: &Self) -> bool {
-        self.inner == other.inner
-    }
-}
-
-impl Eq for VkDescriptorSet {}
-
-impl VkDescriptorSet {
-    pub fn create(allocation: DescriptorSetAllocation) -> VkResult<Self> {
-        Ok(Self {
-            inner: allocation.descriptor_set,
-            allocation,
-        })
-    }
-}
-impl Deref for VkDescriptorSet {
-    type Target = vk::DescriptorSet;
-    fn deref(&self) -> &Self::Target {
-        &self.allocation.descriptor_set
-    }
-}
-impl_raii_wrapper_hash!(VkDescriptorSet);
-impl_raii_wrapper_to_vk!(VkDescriptorSet, vk::DescriptorSet);
-
 define_raii_wrapper!((struct VkSampler {}, vk::Sampler, ash::Device::destroy_sampler) {
     (create_info: &SamplerCreateInfo,) => {
         |device: &ash::Device| { unsafe { device.create_sampler(&create_info.to_vk(), get_allocation_callbacks()) }}
@@ -915,15 +882,6 @@ define_raii_wrapper!((struct VkShaderModule {}, vk::ShaderModule, ash::Device::d
         |device: &ash::Device| { unsafe { device.create_shader_module(create_info, get_allocation_callbacks()) }}
     }
 });
-
-define_raii_wrapper!((struct VkFramebuffer {}, vk::Framebuffer, ash::Device::destroy_framebuffer) {
-    (create_info: &vk::FramebufferCreateInfo,) => {
-        |device: &ash::Device| {
-            unsafe {
-                device.create_framebuffer(create_info, get_allocation_callbacks()) }}
-            }
-        }
-);
 
 impl ToVk for Offset2D {
     type Inner = vk::Offset2D;

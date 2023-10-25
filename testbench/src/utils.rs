@@ -5,7 +5,7 @@ use image::DynamicImage;
 use log::{debug, info};
 use nalgebra::{point, vector, Vector2, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
-use std::{path::Path};
+use std::path::Path;
 
 use half::f16;
 
@@ -16,11 +16,11 @@ pub struct LoadedImage {
 }
 
 use gpu::{
-    AccessFlags, BeginRenderPassInfo, Binding, ColorAttachment,
-    ComponentMapping, Extent2D, Gpu, ImageAspectFlags,
-    ImageCreateInfo, ImageFormat, ImageHandle, ImageSubresourceRange, ImageUsageFlags,
-    ImageViewCreateInfo, ImageViewHandle, InputRate, MemoryDomain, Offset2D, PipelineStageFlags, Rect2D, SamplerCreateInfo,
-    ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage, VertexBindingInfo, VkGpu,
+    AccessFlags, BeginRenderPassInfo, Binding, ColorAttachment, ComponentMapping, Extent2D, Gpu,
+    ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle, ImageSubresourceRange,
+    ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, InputRate, MemoryDomain, Offset2D,
+    PipelineStageFlags, Rect2D, SamplerCreateInfo, ShaderModuleCreateInfo, ShaderModuleHandle,
+    ShaderStage, VertexBindingInfo, VkGpu,
 };
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
@@ -383,7 +383,7 @@ fn cubemap_main_loop(
                 engine::to_u8_slice(&[mvp]),
                 ShaderStage::ALL_GRAPHICS,
             );
-            render_pass_command.draw_indexed_handle(mesh.primitives[0].index_count, 1, 0, 0, 0);
+            render_pass_command.draw_indexed(mesh.primitives[0].index_count, 1, 0, 0, 0);
         }
         command_buffer.submit(&gpu::CommandBufferSubmitInfo {
             wait_semaphores: &[],

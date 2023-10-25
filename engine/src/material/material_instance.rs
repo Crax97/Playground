@@ -1,8 +1,4 @@
-use gpu::{
-    BufferCreateInfo, BufferHandle, BufferRange, BufferUsageFlags, DescriptorInfo,
-    DescriptorSetInfo, DescriptorType, Gpu, Handle, ImageLayout, MemoryDomain, VkDescriptorSet,
-    VkGpu,
-};
+use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, Handle, MemoryDomain, VkGpu};
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 use std::collections::HashMap;
 
@@ -68,48 +64,5 @@ impl MaterialInstance {
         );
         gpu.write_buffer(&self.parameter_buffer, 0, to_u8_slice(&[block]))?;
         Ok(())
-    }
-
-    fn create_user_descriptor_set(
-        gpu: &VkGpu,
-        resource_map: &ResourceMap,
-        master: &MasterMaterial,
-        description: &MaterialInstanceDescription<'_>,
-        param_buffer: &BufferHandle,
-    ) -> anyhow::Result<VkDescriptorSet> {
-        let mut descriptors: Vec<_> = master
-            .texture_inputs
-            .iter()
-            .enumerate()
-            .map(|(i, tex)| {
-                let tex = resource_map.get(&description.texture_inputs[&tex.name]);
-                DescriptorInfo {
-                    binding: i as _,
-                    element_type: DescriptorType::CombinedImageSampler(gpu::SamplerState {
-                        sampler: resource_map.get(&tex.sampler).0.clone(),
-                        image_view: resource_map.get(&tex.image_view).view.clone(),
-                        image_layout: ImageLayout::ShaderReadOnly,
-                    }),
-                    binding_stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
-                }
-            })
-            .collect();
-
-        if !param_buffer.is_null() {
-            descriptors.push(DescriptorInfo {
-                binding: descriptors.len() as _,
-                binding_stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
-                element_type: DescriptorType::UniformBuffer(BufferRange {
-                    handle: param_buffer.clone(),
-                    offset: 0,
-                    size: gpu::WHOLE_SIZE,
-                }),
-            });
-        }
-
-        let descriptor = gpu.create_descriptor_set(&DescriptorSetInfo {
-            descriptors: &descriptors,
-        })?;
-        Ok(descriptor)
     }
 }

@@ -1,11 +1,9 @@
 use std::{collections::HashMap, hash::Hash, mem::size_of, num::NonZeroU32};
 
 use gpu::{
-    BindingElement, BindingType, CullMode, FragmentStageInfo, FrontFace, ImageFormat, LogicOp,
-    PolygonMode, PushConstantRange, ShaderModuleHandle, ShaderStage, VertexAttributeDescription,
-    VertexBindingDescription, VertexStageInfo, VkGpu,
+    BindingElement, BindingType, CullMode, FragmentStageInfo, FrontFace, LogicOp, PolygonMode,
+    PushConstantRange, ShaderModuleHandle, ShaderStage, VertexStageInfo,
 };
-use nalgebra::{Vector2, Vector3};
 use resource_map::Resource;
 
 use crate::{MaterialDomain, MaterialParameterOffsetSize, PipelineTarget, TextureInput};
@@ -72,8 +70,8 @@ impl Resource for MasterMaterial {
 }
 
 impl MasterMaterial {
-    pub fn new(gpu: &VkGpu, description: &MasterMaterialDescription) -> anyhow::Result<Self> {
-        let shader_permutations = Self::create_shader_permutations(gpu, description)?;
+    pub fn new(description: &MasterMaterialDescription) -> anyhow::Result<Self> {
+        let shader_permutations = Self::create_shader_permutations(description)?;
         let parameter_block_size = size_of::<f32>() * 4 * description.material_parameters.len();
         Ok(MasterMaterial {
             name: description.name.to_owned(),
@@ -86,19 +84,8 @@ impl MasterMaterial {
     }
 
     fn create_shader_permutations(
-        gpu: &VkGpu,
         description: &MasterMaterialDescription<'_>,
     ) -> anyhow::Result<HashMap<PipelineTarget, ShaderPermutation>> {
-        let global_elements: Vec<_> = description
-            .global_inputs
-            .iter()
-            .enumerate()
-            .map(|(i, d)| BindingElement {
-                binding_type: *d,
-                index: i as _,
-                stage: gpu::ShaderStage::VERTEX | gpu::ShaderStage::FRAGMENT,
-            })
-            .collect();
         let mut user_elements: Vec<_> = description
             .texture_inputs
             .iter()
@@ -118,79 +105,8 @@ impl MasterMaterial {
         }
 
         match description.domain {
-            MaterialDomain::Surface => {
-                Self::create_surface_permutations(gpu, description, global_elements, user_elements)
-            }
-            MaterialDomain::PostProcess => Self::create_post_process_permutations(
-                gpu,
-                description,
-                global_elements,
-                user_elements,
-            ),
-        }
-    }
-
-    fn get_inputs_for_material_domain(
-        domain: &MaterialDomain,
-    ) -> &'static [gpu::VertexBindingDescription<'static>] {
-        static SURFACE_INPUTS: &[VertexBindingDescription] = &[
-            VertexBindingDescription {
-                binding: 0,
-                input_rate: gpu::InputRate::PerVertex,
-                stride: size_of::<Vector3<f32>>() as u32,
-                attributes: &[VertexAttributeDescription {
-                    location: 0,
-                    format: ImageFormat::RgbFloat32,
-                    offset: 0,
-                }],
-            },
-            VertexBindingDescription {
-                binding: 1,
-                input_rate: gpu::InputRate::PerVertex,
-                stride: size_of::<Vector3<f32>>() as u32,
-                attributes: &[VertexAttributeDescription {
-                    location: 1,
-                    format: ImageFormat::RgbFloat32,
-                    offset: 0,
-                }],
-            },
-            VertexBindingDescription {
-                binding: 2,
-                input_rate: gpu::InputRate::PerVertex,
-                stride: size_of::<Vector3<f32>>() as u32,
-                attributes: &[VertexAttributeDescription {
-                    location: 2,
-                    format: ImageFormat::RgbFloat32,
-                    offset: 0,
-                }],
-            },
-            VertexBindingDescription {
-                binding: 3,
-                input_rate: gpu::InputRate::PerVertex,
-                stride: size_of::<Vector3<f32>>() as u32,
-                attributes: &[VertexAttributeDescription {
-                    location: 3,
-                    format: ImageFormat::RgbFloat32,
-                    offset: 0,
-                }],
-            },
-            VertexBindingDescription {
-                binding: 4,
-                input_rate: gpu::InputRate::PerVertex,
-                stride: size_of::<Vector2<f32>>() as u32,
-                attributes: &[VertexAttributeDescription {
-                    location: 4,
-                    format: ImageFormat::RgFloat32,
-                    offset: 0,
-                }],
-            },
-        ];
-        static PP_INPUTS: &[VertexBindingDescription] = &[
-            // No inputs: the vertex shaders outputs vertices directly
-        ];
-        match domain {
-            MaterialDomain::Surface => SURFACE_INPUTS,
-            MaterialDomain::PostProcess => PP_INPUTS,
+            MaterialDomain::Surface => Self::create_surface_permutations(description),
+            MaterialDomain::PostProcess => Self::create_post_process_permutations(description),
         }
     }
 
@@ -199,10 +115,7 @@ impl MasterMaterial {
     }
 
     fn create_surface_permutations(
-        gpu: &VkGpu,
         description: &MasterMaterialDescription,
-        global_elements: Vec<BindingElement>,
-        user_elements: Vec<BindingElement>,
     ) -> anyhow::Result<HashMap<PipelineTarget, ShaderPermutation>> {
         let mut pipelines = HashMap::new();
 
@@ -224,10 +137,7 @@ impl MasterMaterial {
         Ok(pipelines)
     }
     fn create_post_process_permutations(
-        gpu: &VkGpu,
         description: &MasterMaterialDescription,
-        global_elements: Vec<BindingElement>,
-        user_elements: Vec<BindingElement>,
     ) -> anyhow::Result<HashMap<PipelineTarget, ShaderPermutation>> {
         let mut pipelines = HashMap::new();
         pipelines.insert(

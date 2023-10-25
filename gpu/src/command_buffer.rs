@@ -10,10 +10,9 @@ use ash::vk::{
 use ash::{extensions::ext::DebugUtils, prelude::VkResult, RawPtr};
 use log::warn;
 
-use crate::pipeline::VkPipelineInfo;
 use crate::*;
 
-use super::{QueueType, VkBuffer, VkDescriptorSet, VkGpu, VkGraphicsPipeline};
+use super::{QueueType, VkBuffer, VkGpu};
 
 pub struct VkCommandBuffer<'g> {
     gpu: &'g VkGpu,
@@ -22,6 +21,7 @@ pub struct VkCommandBuffer<'g> {
     has_been_submitted: bool,
     target_queue: vk::Queue,
     descriptor_state: DescriptorSetState,
+    push_constant_data: Vec<Vec<u8>>,
 }
 
 #[derive(Clone)]
@@ -42,10 +42,7 @@ where
     depth_bias_setup: Option<(f32, f32, f32)>,
 
     pipeline_state: GraphicsPipelineState,
-    descriptor_state: DescriptorSetState,
     render_pass_info: BeginRenderPassInfoOwned,
-
-    push_constant_data: Vec<Vec<u8>>,
 }
 
 #[derive(Hash)]
@@ -324,29 +321,6 @@ impl DescriptorSetLayoutDescription {
         descriptor_set_bindings
     }
 }
-mod inner {
-    use ash::vk::ShaderStageFlags;
-
-    pub(super) fn push_constant<T: Copy + Sized>(
-        command_buffer: &crate::VkCommandBuffer,
-        pipeline: &crate::VkGraphicsPipeline,
-        data: &T,
-        offset: u32,
-    ) {
-        let device = command_buffer.gpu.vk_logical_device();
-        unsafe {
-            let ptr: *const u8 = data as *const T as *const u8;
-            let slice = std::slice::from_raw_parts(ptr, std::mem::size_of::<T>());
-            device.cmd_push_constants(
-                command_buffer.inner_command_buffer,
-                pipeline.pipeline_layout,
-                ShaderStageFlags::ALL,
-                offset,
-                slice,
-            );
-        }
-    }
-}
 
 impl<'g> VkCommandBuffer<'g> {
     pub(crate) fn new(
@@ -386,6 +360,7 @@ impl<'g> VkCommandBuffer<'g> {
             has_been_submitted: false,
             target_queue: target_queue.get_vk_queue(gpu),
             descriptor_state: DescriptorSetState::default(),
+            push_constant_data: vec![],
         })
     }
     pub fn begin_render_pass<'p>(
@@ -398,6 +373,31 @@ impl<'g> VkCommandBuffer<'g> {
     pub fn begin_compute_pass<'p>(&'p mut self) -> VkComputePassCommand<'p, 'g> {
         VkComputePassCommand::<'p, 'g>::new(self)
     }
+
+    pub fn push_constants(
+        &mut self,
+        index: u32,
+        offset: u32,
+        data: &[u8],
+        shader_stage: ShaderStage,
+    ) {
+        // Ensure enough push constant range descriptions are allocated
+        if self.descriptor_state.push_constant_range.len() <= (index as _) {
+            self.descriptor_state
+                .push_constant_range
+                .resize(index as usize + 1, PushConstantRange::default());
+            self.push_constant_data.resize(index as usize + 1, vec![]);
+        }
+
+        self.push_constant_data[index as usize] = data.to_vec();
+
+        self.descriptor_state.push_constant_range[index as usize] = PushConstantRange {
+            stage_flags: shader_stage,
+            offset,
+            size: std::mem::size_of_val(data) as _,
+        }
+    }
+
     pub fn bind_resources(&mut self, set: u32, bindings: &[Binding]) {
         if self.descriptor_state.sets.len() <= (set as _) {
             self.descriptor_state
@@ -464,28 +464,6 @@ impl<'g> VkCommandBuffer<'g> {
                 &image_memory_barriers,
             )
         };
-    }
-
-    pub fn bind_descriptor_sets<T: VkPipelineInfo>(
-        &self,
-        pipeline: &T,
-        first_index: u32,
-        descriptor_sets: &[&VkDescriptorSet],
-    ) {
-        let descriptor_sets: Vec<_> = descriptor_sets
-            .iter()
-            .map(|d| d.allocation.descriptor_set)
-            .collect();
-        unsafe {
-            self.gpu.vk_logical_device().cmd_bind_descriptor_sets(
-                self.inner_command_buffer,
-                T::bind_point().to_vk(),
-                pipeline.vk_pipeline_layout(),
-                first_index,
-                &descriptor_sets,
-                &[],
-            );
-        }
     }
 
     pub fn submit(mut self, submit_info: &CommandBufferSubmitInfo) -> VkResult<()> {
@@ -811,26 +789,12 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             viewport_area: None,
             depth_bias_setup: None,
             pipeline_state: GraphicsPipelineState::new(info),
-            descriptor_state: DescriptorSetState::default(),
-            push_constant_data: vec![],
             render_pass_info: BeginRenderPassInfoOwned {
                 color_attachments: info.color_attachments.to_vec(),
                 depth_attachment: info.depth_attachment.clone(),
                 stencil_attachment: info.stencil_attachment.clone(),
                 render_area: info.render_area,
             },
-        }
-    }
-
-    #[deprecated(note = "Use the new, higher-level, api")]
-    pub fn bind_pipeline(&mut self, material: &VkGraphicsPipeline) {
-        let device = self.command_buffer.gpu.vk_logical_device();
-        unsafe {
-            device.cmd_bind_pipeline(
-                self.command_buffer.inner_command_buffer,
-                PipelineBindPoint::GRAPHICS,
-                material.pipeline,
-            )
         }
     }
 
@@ -852,52 +816,6 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
 
     pub fn set_color_output_enabled(&mut self, color_output_enabled: bool) {
         self.pipeline_state.color_output_enabled = color_output_enabled;
-    }
-
-    pub fn draw_indexed(
-        &mut self,
-        index_count: u32,
-        instance_count: u32,
-        first_index: u32,
-        vertex_offset: i32,
-        first_instance: u32,
-    ) {
-        self.prepare_draw();
-
-        self.has_draw_command = true;
-        self.command_buffer.has_recorded_anything = true;
-        let device = self.command_buffer.gpu.vk_logical_device();
-        unsafe {
-            device.cmd_draw_indexed(
-                self.command_buffer.inner(),
-                index_count,
-                instance_count,
-                first_index,
-                vertex_offset,
-                first_instance,
-            );
-        }
-    }
-    pub fn draw(
-        &mut self,
-        vertex_count: u32,
-        instance_count: u32,
-        first_vertex: u32,
-        first_instance: u32,
-    ) {
-        self.prepare_draw();
-        self.has_draw_command = true;
-        self.command_buffer.has_recorded_anything = true;
-        let device = self.command_buffer.gpu.vk_logical_device();
-        unsafe {
-            device.cmd_draw(
-                self.command_buffer.inner(),
-                vertex_count,
-                instance_count,
-                first_vertex,
-                first_instance,
-            );
-        }
     }
 
     pub fn set_viewport(&mut self, viewport: Viewport) {
@@ -928,9 +846,67 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         self.pipeline_state.depth_compare_op = depth_compare_op;
     }
 
-    fn prepare_draw(&self) {
-        let device = self.command_buffer.gpu.vk_logical_device();
+    fn prepare_draw(&mut self) {
+        self.has_draw_command = true;
+        self.command_buffer.has_recorded_anything = true;
 
+        let layout = self.find_matching_pipeline_layout(&self.descriptor_state);
+        let pipeline = self.find_matching_graphics_pipeline(layout);
+        let device = self.gpu.vk_logical_device();
+        {
+            unsafe {
+                for (idx, constant_range) in
+                    self.descriptor_state.push_constant_range.iter().enumerate()
+                {
+                    device.cmd_push_constants(
+                        self.inner(),
+                        layout,
+                        constant_range.stage_flags.to_vk(),
+                        constant_range.offset,
+                        &self.push_constant_data[idx],
+                    );
+                }
+                if self.pipeline_state.vertex_inputs.len() > 0 {
+                    let buffers = self
+                        .pipeline_state
+                        .vertex_inputs
+                        .iter()
+                        .map(|b| {
+                            self.gpu
+                                .allocated_resources()
+                                .borrow()
+                                .resolve::<VkBuffer>(&b.handle)
+                                .inner
+                        })
+                        .collect::<Vec<_>>();
+                    let offsets = self
+                        .pipeline_state
+                        .vertex_inputs
+                        .iter()
+                        .map(|_| 0)
+                        .collect::<Vec<_>>();
+                    device.cmd_bind_vertex_buffers(self.inner(), 0, &buffers, &offsets);
+                }
+            }
+        }
+
+        if self.descriptor_state.sets.len() > 0 {
+            let descriptors = self.find_matching_descriptor_sets(&self.descriptor_state);
+            unsafe {
+                device.cmd_bind_descriptor_sets(
+                    self.inner(),
+                    PipelineBindPoint::GRAPHICS,
+                    layout,
+                    0,
+                    &descriptors,
+                    &[],
+                );
+            }
+        }
+
+        unsafe {
+            device.cmd_bind_pipeline(self.inner(), PipelineBindPoint::GRAPHICS, pipeline);
+        }
         // Negate height because of Khronos brain farts
         let height = self.pipeline_state.render_area.extent.height as f32;
         let viewport = match self.viewport_area {
@@ -1000,16 +976,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         }
     }
 
-    pub fn push_constant<T: Copy + Sized>(
-        &self,
-        pipeline: &VkGraphicsPipeline,
-        data: &T,
-        offset: u32,
-    ) {
-        inner::push_constant(self, pipeline, data, offset)
-    }
-
-    pub fn draw_indexed_handle(
+    pub fn draw_indexed(
         &mut self,
         num_indices: u32,
         instances: u32,
@@ -1017,69 +984,9 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         vertex_offset: i32,
         first_instance: u32,
     ) {
-        self.has_draw_command = true;
-        self.command_buffer.has_recorded_anything = true;
-
-        let layout = self.find_matching_pipeline_layout(&self.descriptor_state);
-        let pipeline = self.find_matching_graphics_pipeline(layout);
-        let device = self.gpu.vk_logical_device();
-        {
-            unsafe {
-                for (idx, constant_range) in
-                    self.descriptor_state.push_constant_range.iter().enumerate()
-                {
-                    device.cmd_push_constants(
-                        self.inner(),
-                        layout,
-                        constant_range.stage_flags.to_vk(),
-                        constant_range.offset,
-                        &self.push_constant_data[idx],
-                    );
-                }
-                if self.pipeline_state.vertex_inputs.len() > 0 {
-                    let buffers = self
-                        .pipeline_state
-                        .vertex_inputs
-                        .iter()
-                        .map(|b| {
-                            self.gpu
-                                .allocated_resources()
-                                .borrow()
-                                .resolve::<VkBuffer>(&b.handle)
-                                .inner
-                        })
-                        .collect::<Vec<_>>();
-                    let offsets = self
-                        .pipeline_state
-                        .vertex_inputs
-                        .iter()
-                        .map(|_| 0)
-                        .collect::<Vec<_>>();
-                    device.cmd_bind_vertex_buffers(self.inner(), 0, &buffers, &offsets);
-                }
-            }
-        }
-
-        if self.descriptor_state.sets.len() > 0 {
-            let descriptors = self.find_matching_descriptor_sets(&self.descriptor_state);
-            unsafe {
-                device.cmd_bind_descriptor_sets(
-                    self.inner(),
-                    PipelineBindPoint::GRAPHICS,
-                    layout,
-                    0,
-                    &descriptors,
-                    &[],
-                );
-            }
-        }
-
-        unsafe {
-            device.cmd_bind_pipeline(self.inner(), PipelineBindPoint::GRAPHICS, pipeline);
-        }
         self.prepare_draw();
         unsafe {
-            device.cmd_draw_indexed(
+            self.gpu.vk_logical_device().cmd_draw_indexed(
                 self.inner(),
                 num_indices,
                 instances,
@@ -1090,76 +997,16 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         }
     }
 
-    pub fn draw_handle(
+    pub fn draw(
         &mut self,
         num_vertices: u32,
         instances: u32,
         first_vertex: u32,
         first_instance: u32,
     ) {
-        self.has_draw_command = true;
-
-        let layout = self.find_matching_pipeline_layout(&self.descriptor_state);
-        let pipeline = self.find_matching_graphics_pipeline(layout);
-        let device = self.gpu.vk_logical_device();
-        {
-            unsafe {
-                for (idx, constant_range) in
-                    self.descriptor_state.push_constant_range.iter().enumerate()
-                {
-                    device.cmd_push_constants(
-                        self.inner(),
-                        layout,
-                        constant_range.stage_flags.to_vk(),
-                        constant_range.offset,
-                        &self.push_constant_data[idx],
-                    );
-                }
-                if self.pipeline_state.vertex_inputs.len() > 0 {
-                    let buffers = self
-                        .pipeline_state
-                        .vertex_inputs
-                        .iter()
-                        .map(|b| {
-                            self.gpu
-                                .allocated_resources()
-                                .borrow()
-                                .resolve::<VkBuffer>(&b.handle)
-                                .inner
-                        })
-                        .collect::<Vec<_>>();
-                    let offsets = self
-                        .pipeline_state
-                        .vertex_inputs
-                        .iter()
-                        .map(|_| 0)
-                        .collect::<Vec<_>>();
-
-                    device.cmd_bind_vertex_buffers(self.inner(), 0, &buffers, &offsets);
-                }
-            }
-        }
-
-        if self.descriptor_state.sets.len() > 0 {
-            let descriptors = self.find_matching_descriptor_sets(&self.descriptor_state);
-            unsafe {
-                device.cmd_bind_descriptor_sets(
-                    self.inner(),
-                    PipelineBindPoint::GRAPHICS,
-                    layout,
-                    0,
-                    &descriptors,
-                    &[],
-                );
-            }
-        }
-
-        unsafe {
-            device.cmd_bind_pipeline(self.inner(), PipelineBindPoint::GRAPHICS, pipeline);
-        }
         self.prepare_draw();
         unsafe {
-            device.cmd_draw(
+            self.gpu.vk_logical_device().cmd_draw(
                 self.inner(),
                 num_vertices,
                 instances,
@@ -1194,30 +1041,6 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 offset as _,
                 index_type.to_vk(),
             );
-        }
-    }
-
-    pub fn push_constants(
-        &mut self,
-        index: u32,
-        offset: u32,
-        data: &[u8],
-        shader_stage: ShaderStage,
-    ) {
-        // Ensure enough push constant range descriptions are allocated
-        if self.descriptor_state.push_constant_range.len() <= (index as _) {
-            self.descriptor_state
-                .push_constant_range
-                .resize(index as usize + 1, PushConstantRange::default());
-            self.push_constant_data.resize(index as usize + 1, vec![]);
-        }
-
-        self.push_constant_data[index as usize] = data.to_vec();
-
-        self.descriptor_state.push_constant_range[index as usize] = PushConstantRange {
-            stage_flags: shader_stage,
-            offset,
-            size: std::mem::size_of_val(data) as _,
         }
     }
 }

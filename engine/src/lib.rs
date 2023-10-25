@@ -1,7 +1,6 @@
 mod app_state;
 mod camera;
 pub mod deferred_renderer;
-mod gpu_pipeline;
 mod material;
 mod mesh;
 mod render_graph;
@@ -18,7 +17,6 @@ use once_cell::unsync::OnceCell;
 pub use app_state::*;
 pub use camera::*;
 pub use deferred_renderer::*;
-pub use gpu_pipeline::*;
 pub use material::*;
 pub use mesh::*;
 pub use render_graph::*;
