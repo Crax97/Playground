@@ -1,6 +1,6 @@
 use std::{cell::RefCell, ops::Deref, sync::Arc};
 
-use super::{allocator::GpuAllocator, gpu::*};
+use super::{gpu::*};
 use crate::{
     Extent2D, Filter, IndexType, Offset2D, PipelineBindPoint, Rect2D, SamplerAddressMode,
     SamplerCreateInfo, StencilOp, StencilOpState, *,
@@ -814,7 +814,7 @@ impl VkImage {
     }
 
     pub(super) fn wrap(
-        device: ash::Device,
+        _device: ash::Device,
         label: Option<&str>,
         inner: vk::Image,
         extents: Extent2D,

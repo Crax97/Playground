@@ -1,5 +1,5 @@
 use std::cell::Cell;
-use std::{mem::MaybeUninit, num::NonZeroU32, ptr::addr_of, sync::Arc};
+use std::{num::NonZeroU32, ptr::addr_of, sync::Arc};
 
 use ash::vk::Handle;
 use ash::{

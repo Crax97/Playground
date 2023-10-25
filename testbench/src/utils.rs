@@ -3,9 +3,9 @@ use anyhow::bail;
 use engine::{Mesh, MeshPrimitiveCreateInfo, Texture};
 use image::DynamicImage;
 use log::{debug, info};
-use nalgebra::{point, vector, Matrix4, Vector2, Vector3};
+use nalgebra::{point, vector, Vector2, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
-use std::{mem::size_of, path::Path};
+use std::{path::Path};
 
 use half::f16;
 
@@ -16,14 +16,11 @@ pub struct LoadedImage {
 }
 
 use gpu::{
-    AccessFlags, BeginRenderPassInfo, Binding, BindingElement, BlendState, ColorAttachment,
-    ComponentMapping, DepthStencilState, DescriptorInfo, DescriptorSetInfo, Extent2D,
-    FragmentStageInfo, GlobalBinding, Gpu, GraphicsPipelineDescription, ImageAspectFlags,
-    ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout, ImageSubresourceRange, ImageUsageFlags,
-    ImageViewCreateInfo, ImageViewHandle, InputRate, MemoryDomain, Offset2D, PipelineStageFlags,
-    PushConstantRange, Rect2D, RenderPassAttachment, SamplerCreateInfo, SamplerState,
-    ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage, VertexAttributeDescription,
-    VertexBindingDescription, VertexBindingInfo, VertexStageInfo, VkGpu, VkShaderModule,
+    AccessFlags, BeginRenderPassInfo, Binding, ColorAttachment,
+    ComponentMapping, Extent2D, Gpu, ImageAspectFlags,
+    ImageCreateInfo, ImageFormat, ImageHandle, ImageSubresourceRange, ImageUsageFlags,
+    ImageViewCreateInfo, ImageViewHandle, InputRate, MemoryDomain, Offset2D, PipelineStageFlags, Rect2D, SamplerCreateInfo,
+    ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage, VertexBindingInfo, VkGpu,
 };
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(

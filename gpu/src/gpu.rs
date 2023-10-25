@@ -12,7 +12,7 @@ use std::{
 use anyhow::{bail, Result};
 use ash::extensions::khr::DynamicRendering;
 use ash::vk::{
-    DescriptorType, PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR,
+    PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR,
     PipelineRenderingCreateInfoKHR,
 };
 use ash::{
@@ -49,7 +49,7 @@ use crate::{
     ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
     ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
     PipelineState, QueueType, Rect2D, RenderPassDescription, SamplerCreateInfo, SamplerHandle,
-    ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage, ToVk, TransitionInfo, VkCommandBuffer,
+    ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo, VkCommandBuffer,
     VkCommandPool, VkComputePipeline, VkFramebuffer, VkGraphicsPipeline, VkImageView, VkRenderPass,
     VkShaderModule,
 };
