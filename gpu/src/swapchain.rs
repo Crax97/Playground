@@ -211,12 +211,10 @@ impl VkSwapchain {
                     .unwrap();
                 self.current_swapchain_index.replace(next_image);
                 let image_idx = self.current_swapchain_index.get() as usize;
-                return Ok(unsafe {
-                    (
-                        self.current_swapchain_images[image_idx].clone(),
-                        image_view.clone(),
-                    )
-                });
+                return Ok((
+                    self.current_swapchain_images[image_idx].clone(),
+                    image_view.clone(),
+                ));
             } else {
                 self.recreate_swapchain()?;
             }

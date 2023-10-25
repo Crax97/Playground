@@ -1,6 +1,6 @@
 use nalgebra::{Vector2, Vector3};
 
-use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain, VkBuffer, VkGpu};
+use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain, VkGpu};
 use resource_map::Resource;
 
 use crate::utils::to_u8_slice;

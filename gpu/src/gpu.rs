@@ -1687,7 +1687,6 @@ fn create_staging_buffer(state: &Arc<GpuThreadSharedState>) -> VkResult<BufferHa
     }?;
 
     let buffer = VkBuffer::create(
-        state.logical_device.clone(),
         Some("Staging buffer"),
         buffer,
         MemoryDomain::HostVisible,
@@ -1756,13 +1755,7 @@ impl VkGpu {
 
         self.set_object_debug_name(create_info.label, buffer)?;
 
-        VkBuffer::create(
-            self.vk_logical_device(),
-            create_info.label,
-            buffer,
-            memory_domain,
-            allocation,
-        )
+        VkBuffer::create(create_info.label, buffer, memory_domain, allocation)
     }
 
     fn set_object_debug_name<T: Handle>(
@@ -2161,10 +2154,7 @@ impl VkGpu {
             .borrow_mut()
             .allocate(info)?;
         self.initialize_descriptor_set(&allocated_descriptor_set.descriptor_set, info)?;
-        VkDescriptorSet::create(
-            allocated_descriptor_set,
-            self.state.descriptor_set_allocator.clone(),
-        )
+        VkDescriptorSet::create(allocated_descriptor_set)
     }
 
     pub fn wait_for_fences(

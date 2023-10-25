@@ -1,6 +1,6 @@
 use std::{cell::RefCell, ops::Deref, sync::Arc};
 
-use super::{gpu::*};
+use super::gpu::*;
 use crate::{
     Extent2D, Filter, IndexType, Offset2D, PipelineBindPoint, Rect2D, SamplerAddressMode,
     SamplerCreateInfo, StencilOp, StencilOpState, *,
@@ -695,7 +695,6 @@ impl VkCommandPool {
 
 #[derive(Clone)]
 pub struct VkBuffer {
-    device: ash::Device,
     pub(super) label: Option<String>,
     pub(super) inner: vk::Buffer,
     pub(super) memory_domain: MemoryDomain,
@@ -710,14 +709,12 @@ impl std::fmt::Debug for VkBuffer {
 
 impl VkBuffer {
     pub(super) fn create(
-        device: ash::Device,
         label: Option<&str>,
         buffer: Buffer,
         memory_domain: MemoryDomain,
         allocation: MemoryAllocation,
     ) -> VkResult<Self> {
         Ok(Self {
-            device,
             label: label.map(|s| s.to_owned()),
             inner: buffer,
             memory_domain,
@@ -881,7 +878,6 @@ impl VkImageView {
 pub struct VkDescriptorSet {
     pub(super) inner: vk::DescriptorSet,
     pub(super) allocation: DescriptorSetAllocation,
-    pub(super) allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
 }
 
 impl PartialEq for VkDescriptorSet {
@@ -893,14 +889,10 @@ impl PartialEq for VkDescriptorSet {
 impl Eq for VkDescriptorSet {}
 
 impl VkDescriptorSet {
-    pub fn create(
-        allocation: DescriptorSetAllocation,
-        allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
-    ) -> VkResult<Self> {
+    pub fn create(allocation: DescriptorSetAllocation) -> VkResult<Self> {
         Ok(Self {
             inner: allocation.descriptor_set,
             allocation,
-            allocator,
         })
     }
 }

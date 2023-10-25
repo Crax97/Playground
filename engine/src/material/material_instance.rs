@@ -1,8 +1,7 @@
-use bytemuck::{Pod, Zeroable};
 use gpu::{
     BufferCreateInfo, BufferHandle, BufferRange, BufferUsageFlags, DescriptorInfo,
-    DescriptorSetInfo, DescriptorType, Gpu, Handle, ImageLayout, MemoryDomain, VkBuffer,
-    VkDescriptorSet, VkGpu,
+    DescriptorSetInfo, DescriptorType, Gpu, Handle, ImageLayout, MemoryDomain, VkDescriptorSet,
+    VkGpu,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 use std::collections::HashMap;

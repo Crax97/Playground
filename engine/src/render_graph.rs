@@ -7,21 +7,19 @@ use std::{
 };
 
 use gpu::{
-    AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, Binding,
-    BindingElement, BindingType, BlendMode, BlendOp, BlendState, BufferCreateInfo, BufferHandle,
-    BufferRange, BufferUsageFlags, ColorAttachment, ColorComponentFlags, ColorLoadOp,
-    ComponentMapping, CullMode, DepthAttachment, DepthLoadOp, DepthStencilAttachment,
-    DepthStencilState, DescriptorInfo, DescriptorSetInfo, Extent2D, Filter, FragmentStageInfo,
-    FramebufferCreateInfo, FrontFace, GlobalBinding, Gpu, GraphicsPipelineDescription,
-    ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier,
-    ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, ImageViewType,
-    LogicOp, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineBindPoint, PipelineStageFlags,
-    PolygonMode, PrimitiveTopology, PushConstantRange, Rect2D, RenderPassAttachment,
-    RenderPassDescription, SampleCount, SamplerAddressMode, SamplerCreateInfo, SamplerHandle,
-    ShaderModuleHandle, ShaderStage, StencilAttachment, StencilLoadOp, SubpassDependency,
-    SubpassDescription, TransitionInfo, VertexBindingDescription, VertexStageInfo, VkBuffer,
-    VkCommandBuffer, VkDescriptorSet, VkFramebuffer, VkGpu, VkGraphicsPipeline, VkImage,
-    VkImageView, VkRenderPass, VkRenderPassCommand, VkSampler, VkShaderModule,
+    AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, Binding, BindingType,
+    BlendMode, BlendOp, BlendState, BufferCreateInfo, BufferHandle, BufferUsageFlags,
+    ColorAttachment, ColorComponentFlags, ColorLoadOp, ComponentMapping, CullMode, DepthAttachment,
+    DepthLoadOp, DepthStencilState, DescriptorInfo, DescriptorSetInfo, Extent2D, Filter,
+    FramebufferCreateInfo, FrontFace, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat,
+    ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageUsageFlags,
+    ImageViewCreateInfo, ImageViewHandle, ImageViewType, LogicOp, MemoryDomain, Offset2D,
+    PipelineBarrierInfo, PipelineBindPoint, PipelineStageFlags, PolygonMode, PrimitiveTopology,
+    PushConstantRange, Rect2D, RenderPassAttachment, RenderPassDescription, SampleCount,
+    SamplerAddressMode, SamplerCreateInfo, SamplerHandle, ShaderModuleHandle, ShaderStage,
+    StencilAttachment, StencilLoadOp, SubpassDependency, SubpassDescription, TransitionInfo,
+    VertexBindingDescription, VkCommandBuffer, VkDescriptorSet, VkFramebuffer, VkGpu, VkImageView,
+    VkRenderPass, VkRenderPassCommand,
 };
 
 use indexmap::IndexSet;
@@ -723,62 +721,6 @@ impl<'a> CreateFrom<'a, RenderGraphPassCreateInfo<'_>> for GraphPass {
     }
 }
 
-pub struct GraphFramebuffer {
-    inner: VkFramebuffer,
-    desc: FramebufferHandle,
-}
-
-impl GraphResource for GraphFramebuffer {
-    type Inner = VkFramebuffer;
-    type Desc = FramebufferHandle;
-
-    fn construct(inner: Self::Inner, desc: Self::Desc) -> Self
-    where
-        Self: Sized,
-    {
-        Self { inner, desc }
-    }
-
-    fn matches_description(&self, new_desc: &Self::Desc) -> bool {
-        self.desc == *new_desc
-    }
-
-    fn resource(&self) -> &Self::Inner {
-        &self.inner
-    }
-    fn type_str() -> &'static str {
-        "GraphFramebuffer"
-    }
-}
-
-struct RenderGraphFramebufferCreateInfo<'a> {
-    render_pass: &'a VkRenderPass,
-    render_targets: &'a [&'a VkImageView],
-    extents: Extent2D,
-    framebuffer_hash: FramebufferHandle,
-}
-
-impl<'a> AsRef<FramebufferHandle> for RenderGraphFramebufferCreateInfo<'a> {
-    fn as_ref(&self) -> &FramebufferHandle {
-        &self.framebuffer_hash
-    }
-}
-
-impl<'a> CreateFrom<'a, RenderGraphFramebufferCreateInfo<'a>> for GraphFramebuffer {
-    fn create(gpu: &VkGpu, desc: &'a RenderGraphFramebufferCreateInfo) -> anyhow::Result<Self> {
-        let fb = gpu
-            .create_framebuffer(&FramebufferCreateInfo {
-                render_pass: desc.render_pass,
-                attachments: todo!(),
-                width: desc.extents.width,
-                height: desc.extents.height,
-            })
-            .expect("Failed to create framebuffer");
-
-        Ok(GraphFramebuffer::construct(fb, desc.framebuffer_hash))
-    }
-}
-
 pub struct GraphDescriptorSet {
     inner: VkDescriptorSet,
     desc: u64,
@@ -834,14 +776,12 @@ type ImageViewAllocator = ResourceAllocator<GraphImageView, ResourceId>;
 type BufferAllocator = ResourceAllocator<GraphBuffer, ResourceId>;
 type RenderPassAllocator = ResourceAllocator<GraphPass, RenderPassHandle>;
 type SampleAllocator = ResourceAllocator<GraphSampler, ResourceId>;
-type FramebufferAllocator = ResourceAllocator<GraphFramebuffer, FramebufferHandle>;
 type DescriptorSetAllocator = ResourceAllocator<GraphDescriptorSet, u64>;
 pub struct DefaultResourceAllocator {
     images: ImageAllocator,
     image_views: ImageViewAllocator,
     buffers: BufferAllocator,
     samplers: SampleAllocator,
-    framebuffers: FramebufferAllocator,
     descriptors: DescriptorSetAllocator,
     render_passes: RenderPassAllocator,
 }
@@ -858,7 +798,6 @@ impl DefaultResourceAllocator {
             images: ResourceAllocator::new(2),
             image_views: ResourceAllocator::new(2),
             buffers: ResourceAllocator::new(2),
-            framebuffers: ResourceAllocator::new(5),
             render_passes: RenderPassAllocator::new(0),
             samplers: ResourceAllocator::new(0),
             descriptors: ResourceAllocator::new(3),
@@ -868,7 +807,6 @@ impl DefaultResourceAllocator {
 
 impl DefaultResourceAllocator {
     fn update(&mut self, current_iteration: u64) {
-        self.framebuffers.remove_unused_resources(current_iteration);
         self.image_views.remove_unused_resources(current_iteration);
         self.images.remove_unused_resources(current_iteration);
         self.samplers.remove_unused_resources(current_iteration);
@@ -1137,8 +1075,6 @@ pub struct RenderGraph {
     hasher: DefaultHasher,
     cached_graph_hash: u64,
     cached_graph: CompiledRenderGraph,
-
-    render_pass_pipelines: HashMap<RenderPassHandle, VkGraphicsPipeline>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -1395,8 +1331,6 @@ impl RenderGraph {
             hasher: DefaultHasher::default(),
             cached_graph_hash: 0,
             cached_graph: CompiledRenderGraph::default(),
-
-            render_pass_pipelines: Default::default(),
         }
     }
 
@@ -1651,13 +1585,6 @@ impl RenderGraph {
             .get(resource)
             .cloned()
             .ok_or(CompileError::ResourceNotFound(*resource))
-    }
-
-    pub(crate) fn get_pipeline(
-        &self,
-        pipeline_handle: &RenderPassHandle,
-    ) -> Option<&VkGraphicsPipeline> {
-        self.render_pass_pipelines.get(pipeline_handle)
     }
 
     fn mark_resource_usages(&mut self, compiled: &CompiledRenderGraph) {

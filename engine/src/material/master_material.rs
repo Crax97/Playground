@@ -1,10 +1,9 @@
 use std::{collections::HashMap, hash::Hash, mem::size_of, num::NonZeroU32};
 
 use gpu::{
-    BindingElement, BindingType, CompareOp, CullMode, DepthStencilState, FragmentStageInfo,
-    FrontFace, GlobalBinding, GraphicsPipelineDescription, ImageFormat, LogicOp, PolygonMode,
-    PushConstantRange, ShaderModuleHandle, ShaderStage, StencilOpState, VertexAttributeDescription,
-    VertexBindingDescription, VertexStageInfo, VkGpu, VkGraphicsPipeline,
+    BindingElement, BindingType, CullMode, FragmentStageInfo, FrontFace, ImageFormat, LogicOp,
+    PolygonMode, PushConstantRange, ShaderModuleHandle, ShaderStage, VertexAttributeDescription,
+    VertexBindingDescription, VertexStageInfo, VkGpu,
 };
 use nalgebra::{Vector2, Vector3};
 use resource_map::Resource;

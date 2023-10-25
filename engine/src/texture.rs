@@ -2,7 +2,6 @@ use gpu::{
     AccessFlags, ComponentMapping, Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat,
     ImageHandle, ImageSubresourceRange, ImageUsageFlags, ImageViewHandle, ImageViewType,
     MemoryDomain, PipelineStageFlags, SamplerAddressMode, SamplerCreateInfo, SamplerHandle, VkGpu,
-    VkImage, VkImageView, VkSampler,
 };
 use resource_map::{Resource, ResourceHandle, ResourceMap};
 

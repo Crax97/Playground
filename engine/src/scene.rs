@@ -1,9 +1,6 @@
 use std::num::NonZeroU32;
 
-use gpu::{
-    Extent2D, ImageFormat, ImageHandle, ImageViewHandle, VkCommandBuffer, VkGpu, VkImage,
-    VkImageView,
-};
+use gpu::{Extent2D, ImageFormat, ImageHandle, ImageViewHandle, VkCommandBuffer, VkGpu};
 use nalgebra::{vector, Matrix4, Point3, Vector2, Vector3};
 use resource_map::{ResourceHandle, ResourceMap};
 

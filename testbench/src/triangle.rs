@@ -9,10 +9,10 @@ use engine::Backbuffer;
 use engine_macros::glsl;
 use gpu::{
     AccessFlags, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorAttachment,
-    CullMode, Gpu, Handle, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle,
-    ImageMemoryBarrier, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, IndexType,
-    InputRate, MemoryDomain, PipelineStageFlags, PresentMode, SamplerCreateInfo, SamplerHandle,
-    ShaderModuleHandle, ShaderStage, VertexBindingInfo, VkCommandBuffer,
+    CullMode, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle, ImageMemoryBarrier,
+    ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, IndexType, InputRate, MemoryDomain,
+    PipelineStageFlags, PresentMode, SamplerCreateInfo, SamplerHandle, ShaderModuleHandle,
+    ShaderStage, VertexBindingInfo, VkCommandBuffer,
 };
 use imgui::Ui;
 use nalgebra::*;
@@ -71,7 +71,6 @@ pub struct TriangleApp {
     uv_buffer: BufferHandle,
     index_buffer: BufferHandle,
 
-    david_image: ImageHandle,
     david_image_view: ImageViewHandle,
 
     david_sampler: SamplerHandle,
@@ -216,7 +215,6 @@ impl App for TriangleApp {
             triangle_buffer,
             index_buffer,
 
-            david_image,
             david_image_view,
             david_sampler,
 
