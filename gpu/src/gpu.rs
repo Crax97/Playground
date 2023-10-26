@@ -1602,6 +1602,25 @@ impl VkGpu {
     ) -> T {
         self.state.allocated_resources.borrow().resolve(source)
     }
+
+    pub fn read_buffer(&self, output_buffer: &BufferHandle, offset: u64, size: usize) -> Vec<u8> {
+        let buffer = self.resolve_resource::<VkBuffer>(output_buffer);
+        assert!(size > 0, "Cannot read 0 bytes on a buffer");
+        assert!(offset < buffer.allocation.size);
+        assert!(size as u64 + offset <= buffer.allocation.size);
+
+        let address = unsafe {
+            buffer
+                .allocation
+                .persistent_ptr
+                .expect("Tried to read from a buffer without a persistent ptr!")
+                .as_ptr()
+                .add(offset as _)
+        } as *mut u8;
+        let slice = unsafe { std::slice::from_raw_parts_mut(address, size) };
+
+        slice.to_vec()
+    }
 }
 
 fn find_supported_features(

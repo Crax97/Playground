@@ -112,10 +112,12 @@ fn main() -> anyhow::Result<()> {
     gpu.wait_for_fences(&[&wait_fence], true, 10000000)
         .expect("Fence not triggered!");
 
-    //gpu.wait_device_idle()?;
+    gpu.wait_queue_idle(QueueType::Graphics)?;
 
-    //let output = output_buffer.read::<u32>(0);
-    //let inputs = input_buffer.read::<[u32; 2]>(0);
-    //println!("Output is: {output}, inputs are {inputs:?}");
+    let output: u32 =
+        bytemuck::cast_slice(&gpu.read_buffer(&output_buffer, 0, std::mem::size_of::<u32>()))[0];
+    let buffer_data = gpu.read_buffer(&input_buffer, 0, std::mem::size_of::<[u32; 2]>());
+    let inputs: &[u32] = &bytemuck::cast_slice(&buffer_data);
+    println!("Output is: {output}, inputs are {inputs:?}");
     Ok(())
 }
