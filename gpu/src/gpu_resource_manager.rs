@@ -252,8 +252,18 @@ impl<T: Sized> LifetimedCache<T> {
     }
 }
 
-impl<T: Sized + Clone> LifetimedCache<T> {
+impl<T: Sized + Copy> LifetimedCache<T> {
     pub fn get<D: std::hash::Hash, C: FnOnce() -> T>(
+        &self,
+        description: &D,
+        creation_func: C,
+    ) -> T {
+        *self.get_ref(description, creation_func)
+    }
+}
+
+impl<T: Sized + Clone> LifetimedCache<T> {
+    pub fn get_clone<D: std::hash::Hash, C: FnOnce() -> T>(
         &self,
         description: &D,
         creation_func: C,
