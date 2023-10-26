@@ -115,8 +115,8 @@ fn main() -> anyhow::Result<()> {
     gpu.wait_queue_idle(QueueType::Graphics)?;
 
     let output: u32 =
-        bytemuck::cast_slice(&gpu.read_buffer(&output_buffer, 0, std::mem::size_of::<u32>()))[0];
-    let buffer_data = gpu.read_buffer(&input_buffer, 0, std::mem::size_of::<[u32; 2]>());
+        bytemuck::cast_slice(&gpu.read_buffer(&output_buffer, 0, std::mem::size_of::<u32>())?)[0];
+    let buffer_data = gpu.read_buffer(&input_buffer, 0, std::mem::size_of::<[u32; 2]>())?;
     let inputs: &[u32] = &bytemuck::cast_slice(&buffer_data);
     println!("Output is: {output}, inputs are {inputs:?}");
     Ok(())

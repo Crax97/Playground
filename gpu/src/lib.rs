@@ -38,6 +38,12 @@ pub trait Gpu {
         memory_domain: MemoryDomain,
     ) -> anyhow::Result<BufferHandle>;
     fn write_buffer(&self, buffer: &BufferHandle, offset: u64, data: &[u8]) -> anyhow::Result<()>;
+    fn read_buffer(
+        &self,
+        buffer: &BufferHandle,
+        offset: u64,
+        size: usize,
+    ) -> anyhow::Result<Vec<u8>>;
 
     fn make_image(
         &self,
