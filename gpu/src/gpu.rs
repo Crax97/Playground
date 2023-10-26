@@ -1,8 +1,6 @@
-use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::{
     cell::RefCell,
     ffi::{c_void, CStr, CString},
-    hash::{Hash, Hasher},
     ptr::addr_of_mut,
     ptr::{addr_of, null},
     sync::Arc,
@@ -1074,9 +1072,9 @@ impl VkGpu {
         };
         let pipeline = unsafe {
             self.vk_logical_device().create_graphics_pipelines(
-                vk::PipelineCache::null(),
+                self.state.vk_pipeline_cache,
                 &[create_info],
-                None,
+                get_allocation_callbacks(),
             )
         }
         .expect("Failed to create pipelines");
@@ -1102,6 +1100,7 @@ impl VkGpu {
             self.create_graphics_pipeline(pipeline_state, layout, &formats)
         })
     }
+
     fn create_compute_pipeline(
         &self,
         pipeline_state: &ComputePipelineState,
@@ -1131,9 +1130,9 @@ impl VkGpu {
 
         let pipeline = unsafe {
             self.vk_logical_device().create_compute_pipelines(
-                vk::PipelineCache::null(),
+                self.state.vk_pipeline_cache,
                 &[create_info],
-                None,
+                get_allocation_callbacks(),
             )
         }
         .expect("Failed to create pipelines");
@@ -1357,6 +1356,8 @@ impl VkGpu {
         info: &DescriptorSetState,
         descriptor_set_layout_cache: &LifetimedCache<vk::DescriptorSetLayout>,
     ) -> vk::PipelineLayout {
+        info!("Creating a new Pipeline Layout");
+
         let mut descriptor_set_layouts = vec![];
         for set in &info.sets {
             let layout =
@@ -2048,6 +2049,35 @@ impl VkGpu {
 
 impl Gpu for VkGpu {
     fn update(&self) {
+        let device = self.vk_logical_device();
+        self.state.descriptor_set_cache.update(|set| unsafe {
+            info!("Destroying descriptor set");
+            let mut owner_pool = self
+                .state
+                .descriptor_pool_cache
+                .get_ref_mut_raw(&set.pool_hash);
+            let owner_pool = &mut owner_pool[set.pool_index];
+            device
+                .free_descriptor_sets(owner_pool.pool, &[set.set])
+                .expect("Failed to free descriptor set");
+            owner_pool.allocated_descriptors -= 1;
+        });
+        self.state.descriptor_set_layout_cache.update(|l| unsafe {
+            info!("Destroying descriptor layout");
+            device.destroy_descriptor_set_layout(l, get_allocation_callbacks());
+        });
+        self.state.pipeline_layout_cache.update(|p| unsafe {
+            info!("Destroying pipeline layout");
+            device.destroy_pipeline_layout(p, get_allocation_callbacks());
+        });
+        self.state.graphics_pipeline_cache.update(|p| unsafe {
+            info!("Destroying graphics pipeline");
+            device.destroy_pipeline(p, get_allocation_callbacks());
+        });
+        self.state.compute_pipeline_cache.update(|p| unsafe {
+            info!("Destroying compute pipeline");
+            device.destroy_pipeline(p, get_allocation_callbacks());
+        });
         self.drain_dead_resources(
             &mut self
                 .state

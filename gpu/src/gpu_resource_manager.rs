@@ -193,10 +193,7 @@ impl<T: Sized> LifetimedCache<T> {
         let hash = quick_hash(description);
 
         self.ensure_existing(hash, creation_func);
-
-        Ref::map(self.map.borrow(), |m: &HashMap<u64, Lifetimed<T>>| {
-            &m.get(&hash).unwrap().resource
-        })
+        unsafe { self.get_ref_raw(&hash) }
     }
 
     pub fn get_ref_mut<D: std::hash::Hash, C: FnOnce() -> T>(
@@ -207,10 +204,32 @@ impl<T: Sized> LifetimedCache<T> {
         let hash = quick_hash(description);
 
         self.ensure_existing(hash, creation_func);
+        unsafe { self.get_ref_mut_raw(&hash) }
+    }
 
+    /// # Safety
+    /// The inner map must have a valid item with hash 'hash'
+    /// Otherwise, this function will panic
+    pub unsafe fn get_ref_raw(&self, hash: &u64) -> Ref<T> {
+        Ref::map(self.map.borrow(), |m: &HashMap<u64, Lifetimed<T>>| {
+            &m.get(hash)
+                .expect("LifetimedCache::get_ref_raw(): resource not found")
+                .resource
+        })
+    }
+
+    /// # Safety
+    /// The inner map must have a valid item with hash 'hash'
+    /// Otherwise, this function will panic
+    pub unsafe fn get_ref_mut_raw(&self, hash: &u64) -> RefMut<T> {
         RefMut::map(
             self.map.borrow_mut(),
-            |m: &mut HashMap<u64, Lifetimed<T>>| &mut m.get_mut(&hash).unwrap().resource,
+            |m: &mut HashMap<u64, Lifetimed<T>>| {
+                &mut m
+                    .get_mut(&hash)
+                    .expect("LifetimedCache::get_ref_mut_raw(): resource not found")
+                    .resource
+            },
         )
     }
 
@@ -218,11 +237,13 @@ impl<T: Sized> LifetimedCache<T> {
         if self.resource_lifetime == lifetime_cache_constants::NEVER_DEALLOCATE {
             return;
         }
-        let mut map = self.map.borrow_mut();
-        map.values_mut().for_each(|v| v.current_lifetime -= 1);
+        let (alive, dead) = {
+            let mut map = self.map.borrow_mut();
+            map.values_mut().for_each(|v| v.current_lifetime -= 1);
 
-        let map = std::mem::take(map.deref_mut());
-        let (alive, dead) = map.into_iter().partition(|(_, v)| v.current_lifetime > 0);
+            let map = std::mem::take(map.deref_mut());
+            map.into_iter().partition(|(_, v)| v.current_lifetime > 0)
+        };
 
         self.map.replace(alive);
         for resource in dead {
