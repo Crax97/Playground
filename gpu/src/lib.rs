@@ -13,6 +13,7 @@ pub use bitflags::bitflags;
 pub use command_buffer::*;
 pub use gpu_resource_manager::*;
 pub use handle::*;
+use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 pub use swapchain::VkSwapchain;
@@ -62,6 +63,7 @@ pub trait Gpu {
     fn make_image_view(&self, info: &ImageViewCreateInfo) -> anyhow::Result<ImageViewHandle>;
 
     fn make_sampler(&self, info: &SamplerCreateInfo) -> anyhow::Result<SamplerHandle>;
+    fn get_shader_info(&self, shader_handle: &ShaderModuleHandle) -> ShaderInfo;
 
     fn make_shader_module(
         &self,
@@ -315,6 +317,7 @@ pub enum ComponentSwizzle {
 #[derive(Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum ImageFormat {
     #[default]
+    Undefined,
     Rgba8,
     Bgra8,
     SRgba8,
@@ -346,6 +349,7 @@ impl ImageFormat {
             ImageFormat::RgbFloat16 => 6,
             ImageFormat::RgbaFloat16 => 8,
             ImageFormat::Depth => 3,
+            ImageFormat::Undefined => unreachable!(),
         }
     }
     pub fn is_color(&self) -> bool {
@@ -362,7 +366,7 @@ impl ImageFormat {
             | ImageFormat::RgFloat32
             | ImageFormat::RgbFloat32
             | ImageFormat::RgbaFloat32 => true,
-            ImageFormat::Depth => false,
+            ImageFormat::Depth | ImageFormat::Undefined => false,
         }
     }
 
@@ -422,6 +426,26 @@ impl ImageFormat {
             ImageLayout::DepthStencilAttachment
         } else {
             unreachable!()
+        }
+    }
+}
+
+impl From<spirv_reflect::types::ReflectFormat> for ImageFormat {
+    fn from(value: spirv_reflect::types::ReflectFormat) -> Self {
+        match value {
+            spirv_reflect::types::ReflectFormat::Undefined => Self::Undefined,
+            spirv_reflect::types::ReflectFormat::R32_UINT => todo!(),
+            spirv_reflect::types::ReflectFormat::R32_SINT => todo!(),
+            spirv_reflect::types::ReflectFormat::R32_SFLOAT => Self::RFloat32,
+            spirv_reflect::types::ReflectFormat::R32G32_UINT => todo!(),
+            spirv_reflect::types::ReflectFormat::R32G32_SINT => todo!(),
+            spirv_reflect::types::ReflectFormat::R32G32_SFLOAT => Self::RgFloat32,
+            spirv_reflect::types::ReflectFormat::R32G32B32_UINT => todo!(),
+            spirv_reflect::types::ReflectFormat::R32G32B32_SINT => todo!(),
+            spirv_reflect::types::ReflectFormat::R32G32B32_SFLOAT => Self::RgbFloat32,
+            spirv_reflect::types::ReflectFormat::R32G32B32A32_UINT => todo!(),
+            spirv_reflect::types::ReflectFormat::R32G32B32A32_SINT => todo!(),
+            spirv_reflect::types::ReflectFormat::R32G32B32A32_SFLOAT => Self::RgbaFloat32,
         }
     }
 }
@@ -913,7 +937,7 @@ pub enum BindingType {
     CombinedImageSampler,
 }
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord, Debug)]
 pub struct BindingElement {
     pub binding_type: BindingType,
     pub index: u32,
@@ -1086,4 +1110,92 @@ pub struct Viewport {
     pub height: f32,
     pub min_depth: f32,
     pub max_depth: f32,
+}
+
+#[derive(Default, Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
+pub struct Binding {
+    pub ty: DescriptorBindingType,
+    pub binding_stage: ShaderStage,
+    pub location: u32,
+}
+
+#[derive(Default, Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
+pub struct DescriptorSetInfo2 {
+    pub(crate) bindings: Vec<Binding>,
+}
+
+#[derive(Hash, Clone, Default, Eq, PartialEq, PartialOrd, Ord)]
+pub struct DescriptorSetState {
+    pub(crate) sets: Vec<DescriptorSetInfo2>,
+    pub(crate) push_constant_range: Vec<PushConstantRange>,
+}
+
+#[derive(Hash, Clone, Default, Eq, PartialEq, PartialOrd, Ord, Debug)]
+pub struct DescriptorSetLayoutDescription {
+    pub(crate) elements: Vec<BindingElement>,
+}
+
+impl DescriptorSetInfo2 {
+    pub fn descriptor_set_layout(&self) -> DescriptorSetLayoutDescription {
+        let mut descriptor_set_bindings = DescriptorSetLayoutDescription::default();
+        for (binding_index, binding) in self.bindings.iter().enumerate() {
+            let stage_flags = binding.binding_stage;
+            let descriptor_type = match binding.ty {
+                crate::DescriptorBindingType::UniformBuffer { .. } => BindingType::Uniform,
+                crate::DescriptorBindingType::StorageBuffer { .. } => BindingType::Storage,
+                crate::DescriptorBindingType::ImageView { .. } => BindingType::CombinedImageSampler,
+            };
+            let binding = BindingElement {
+                binding_type: descriptor_type,
+                index: binding_index as _,
+                stage: stage_flags,
+            };
+            descriptor_set_bindings.elements.push(binding);
+        }
+        descriptor_set_bindings
+    }
+}
+
+#[derive(Clone, Hash, Eq, Ord, PartialOrd, PartialEq, Debug)]
+pub struct DescriptorBindingInfo {
+    pub name: String,
+    pub binding: u32,
+    pub ty: BindingType,
+}
+#[derive(Clone, Hash, Eq, Ord, PartialOrd, PartialEq, Debug)]
+pub struct DescriptorSetDescription {
+    pub bindings: Vec<DescriptorBindingInfo>,
+}
+
+#[derive(Clone, Hash, Eq, Ord, PartialOrd, PartialEq, Debug, Default)]
+pub struct ShaderAttribute {
+    pub name: String,
+    pub format: ImageFormat,
+    pub location: u32,
+}
+
+#[derive(Clone, Hash, Eq, Ord, PartialOrd, PartialEq, Debug, Default)]
+pub struct PushConstantBlockDescription {
+    pub name: String,
+    pub size: u32,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Default)]
+pub struct UniformVariableDescription {
+    pub name: String,
+    pub offset: u32,
+    pub size: u32,
+
+    pub inner_members: HashMap<String, UniformVariableDescription>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ShaderInfo {
+    pub entry_point: String,
+    pub shader_type: ShaderStage,
+    pub inputs: Vec<ShaderAttribute>,
+    pub outputs: Vec<ShaderAttribute>,
+    pub descriptor_layouts: Vec<DescriptorSetDescription>,
+    pub push_constant_ranges: Vec<PushConstantBlockDescription>,
+    pub uniform_variables: HashMap<String, UniformVariableDescription>,
 }

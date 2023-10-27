@@ -237,6 +237,7 @@ impl ToVk for ImageFormat {
             ImageFormat::RgbaFloat32 => vk::Format::R32G32B32A32_SFLOAT,
             ImageFormat::Depth => vk::Format::D32_SFLOAT,
             ImageFormat::Bgra8 => vk::Format::B8G8R8A8_UNORM,
+            ImageFormat::Undefined => vk::Format::UNDEFINED,
         }
     }
 }
@@ -958,6 +959,7 @@ impl ToVk for VkSampler {
 pub struct VkShaderModule {
     pub(super) inner: vk::ShaderModule,
     pub(super) label: Option<String>,
+    pub(super) shader_info: ShaderInfo,
 }
 impl std::fmt::Debug for VkShaderModule {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -969,6 +971,7 @@ impl VkShaderModule {
         device: ash::Device,
         label: Option<&str>,
         create_info: &ShaderModuleCreateInfo,
+        shader_info: ShaderInfo,
     ) -> VkResult<Self> {
         let inner = {
             |device: &ash::Device| unsafe {
@@ -978,6 +981,7 @@ impl VkShaderModule {
         Ok(Self {
             inner,
             label: label.map(|s| s.to_owned()),
+            shader_info,
         })
     }
 }

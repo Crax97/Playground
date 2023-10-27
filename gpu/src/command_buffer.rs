@@ -254,50 +254,6 @@ impl Default for DescriptorBindingType {
     }
 }
 
-#[derive(Default, Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
-pub struct Binding {
-    pub ty: DescriptorBindingType,
-    pub binding_stage: ShaderStage,
-    pub location: u32,
-}
-
-#[derive(Default, Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
-pub(crate) struct DescriptorSetInfo2 {
-    pub(crate) bindings: Vec<Binding>,
-}
-
-#[derive(Hash, Clone, Default, Eq, PartialEq, PartialOrd, Ord)]
-pub(crate) struct DescriptorSetState {
-    pub(crate) sets: Vec<DescriptorSetInfo2>,
-    pub(crate) push_constant_range: Vec<PushConstantRange>,
-}
-
-#[derive(Hash, Clone, Default, Eq, PartialEq, PartialOrd, Ord)]
-pub(crate) struct DescriptorSetLayoutDescription {
-    pub(crate) elements: Vec<BindingElement>,
-}
-
-impl DescriptorSetInfo2 {
-    pub(crate) fn descriptor_set_layout(&self) -> DescriptorSetLayoutDescription {
-        let mut descriptor_set_bindings = DescriptorSetLayoutDescription::default();
-        for (binding_index, binding) in self.bindings.iter().enumerate() {
-            let stage_flags = binding.binding_stage;
-            let descriptor_type = match binding.ty {
-                crate::DescriptorBindingType::UniformBuffer { .. } => BindingType::Uniform,
-                crate::DescriptorBindingType::StorageBuffer { .. } => BindingType::Storage,
-                crate::DescriptorBindingType::ImageView { .. } => BindingType::CombinedImageSampler,
-            };
-            let binding = BindingElement {
-                binding_type: descriptor_type,
-                index: binding_index as _,
-                stage: stage_flags,
-            };
-            descriptor_set_bindings.elements.push(binding);
-        }
-        descriptor_set_bindings
-    }
-}
-
 impl DescriptorSetLayoutDescription {
     pub(crate) fn vk_set_layout_bindings(&self) -> Vec<vk::DescriptorSetLayoutBinding> {
         let mut descriptor_set_bindings = vec![];

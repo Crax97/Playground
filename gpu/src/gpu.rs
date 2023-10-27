@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    collections::HashMap,
     ffi::{c_void, CStr, CString},
     ptr::addr_of_mut,
     ptr::{addr_of, null},
@@ -33,20 +34,24 @@ use log::{debug, error, info, trace, warn};
 use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 
-use crate::gpu_resource_manager::{
-    utils::associate_to_handle, AllocatedResourceMap, HasAssociatedHandle, LifetimedCache,
-};
 use crate::{
     get_allocation_callbacks, lifetime_cache_constants, quick_hash, BeginRenderPassInfoOwned,
     BufferCreateInfo, BufferHandle, BufferImageCopyInfo, CommandBufferSubmitInfo,
     CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineState, Context,
-    DescriptorSetInfo2, DescriptorSetState, Extent2D, GPUFence, Gpu, GpuConfiguration,
-    GpuResourceMap, GraphicsPipelineState, Handle as GpuHandle, HandleType, ImageCreateInfo,
-    ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
-    ImageViewCreateInfo, ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo,
-    PipelineStageFlags, QueueType, Rect2D, SamplerCreateInfo, SamplerHandle,
-    ShaderModuleCreateInfo, ShaderModuleHandle, ToVk, TransitionInfo, VkCommandBuffer,
+    DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2, DescriptorSetState,
+    Extent2D, GPUFence, Gpu, GpuConfiguration, GpuResourceMap, GraphicsPipelineState,
+    Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout,
+    ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, ImageViewHandle, LogicOp,
+    Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags, PushConstantBlockDescription,
+    QueueType, Rect2D, SamplerCreateInfo, SamplerHandle, ShaderAttribute, ShaderModuleCreateInfo,
+    ShaderModuleHandle, ToVk, TransitionInfo, UniformVariableDescription, VkCommandBuffer,
     VkCommandPool, VkImageView, VkShaderModule,
+};
+use crate::{
+    gpu_resource_manager::{
+        utils::associate_to_handle, AllocatedResourceMap, HasAssociatedHandle, LifetimedCache,
+    },
+    ShaderInfo,
 };
 
 use super::descriptor_set::PooledDescriptorSetAllocator;
@@ -898,6 +903,9 @@ impl VkGpu {
             "Pointers to shader modules code must be 4 byte aligned"
         );
 
+        let shader_info =
+            Self::reflect_spirv(code).expect("TOOO: change return type to anyhow::Result");
+
         let create_info = vk::ShaderModuleCreateInfo {
             s_type: StructureType::SHADER_MODULE_CREATE_INFO,
             p_next: std::ptr::null(),
@@ -906,7 +914,8 @@ impl VkGpu {
             p_code,
         };
 
-        let shader = VkShaderModule::create(self.vk_logical_device(), None, &create_info)?;
+        let shader =
+            VkShaderModule::create(self.vk_logical_device(), None, &create_info, shader_info)?;
 
         Ok(shader)
     }
@@ -1441,6 +1450,117 @@ impl VkGpu {
     ) -> T {
         self.state.allocated_resources.borrow().resolve(source)
     }
+
+    fn reflect_spirv(code: &[u32]) -> anyhow::Result<ShaderInfo> {
+        let spirv_module = spirv_reflect::ShaderModule::load_u32_data(code);
+        let spirv_module = match spirv_module {
+            Ok(m) => m,
+            Err(e) => anyhow::bail!(e.to_string()),
+        };
+
+        let mut info = ShaderInfo::default();
+
+        info.entry_point = spirv_module.get_entry_point_name();
+
+        for input in spirv_module
+            .enumerate_input_variables(None)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+        {
+            let shader_input = ShaderAttribute {
+                name: input.name,
+                format: input.format.into(),
+                location: input.location,
+            };
+            info.inputs.push(shader_input);
+        }
+
+        for output in spirv_module
+            .enumerate_output_variables(None)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+        {
+            let shader_output = ShaderAttribute {
+                name: output.name,
+                format: output.format.into(),
+                location: output.location,
+            };
+            info.outputs.push(shader_output);
+        }
+
+        for set in spirv_module
+            .enumerate_descriptor_sets(None)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+        {
+            let mut set_description = DescriptorSetDescription { bindings: vec![] };
+
+            for binding in &set.bindings {
+                let members = parse_members(&binding.block.members);
+                info.uniform_variables.extend(members.into_iter());
+                let binding = DescriptorBindingInfo {
+                    name: binding.name.clone(),
+                    binding: binding.binding,
+                    ty: match binding.descriptor_type {
+                        spirv_reflect::types::ReflectDescriptorType::Undefined => unreachable!(),
+                        spirv_reflect::types::ReflectDescriptorType::Sampler => {
+                            crate::BindingType::Sampler
+                        }
+                        spirv_reflect::types::ReflectDescriptorType::CombinedImageSampler => {
+                            crate::BindingType::CombinedImageSampler
+                        }
+                        spirv_reflect::types::ReflectDescriptorType::SampledImage => todo!(),
+                        spirv_reflect::types::ReflectDescriptorType::StorageImage => todo!(),
+                        spirv_reflect::types::ReflectDescriptorType::UniformTexelBuffer => todo!(),
+                        spirv_reflect::types::ReflectDescriptorType::StorageTexelBuffer => todo!(),
+                        spirv_reflect::types::ReflectDescriptorType::UniformBuffer => {
+                            crate::BindingType::Uniform
+                        }
+                        spirv_reflect::types::ReflectDescriptorType::StorageBuffer => {
+                            crate::BindingType::Storage
+                        }
+                        spirv_reflect::types::ReflectDescriptorType::UniformBufferDynamic => {
+                            todo!()
+                        }
+                        spirv_reflect::types::ReflectDescriptorType::StorageBufferDynamic => {
+                            todo!()
+                        }
+                        spirv_reflect::types::ReflectDescriptorType::InputAttachment => todo!(),
+                        spirv_reflect::types::ReflectDescriptorType::AccelerationStructureNV => {
+                            todo!()
+                        }
+                    },
+                };
+
+                set_description.bindings.push(binding);
+            }
+            info.descriptor_layouts.push(set_description);
+        }
+        for push_constant in spirv_module
+            .enumerate_push_constant_blocks(None)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+        {
+            let push_constant_description = PushConstantBlockDescription {
+                name: push_constant.name,
+                size: push_constant.size,
+            };
+            info.push_constant_ranges.push(push_constant_description);
+        }
+
+        Ok(info)
+    }
+}
+fn parse_members(
+    members: &[spirv_reflect::types::variable::ReflectBlockVariable],
+) -> HashMap<String, UniformVariableDescription> {
+    let mut map = HashMap::new();
+    for member in members {
+        let uniform_description = UniformVariableDescription {
+            name: member.name.clone(),
+            offset: member.offset,
+            size: member.size,
+            inner_members: parse_members(&member.members),
+        };
+        map.insert(member.name.clone(), uniform_description);
+    }
+    map
 }
 
 fn find_supported_features(
@@ -2500,5 +2620,11 @@ impl Gpu for VkGpu {
             .insert(&handle, sampler);
 
         Ok(handle)
+    }
+
+    fn get_shader_info(&self, shader_handle: &ShaderModuleHandle) -> ShaderInfo {
+        self.resolve_resource::<VkShaderModule>(shader_handle)
+            .shader_info
+            .clone()
     }
 }
