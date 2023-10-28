@@ -238,6 +238,14 @@ impl ToVk for ImageFormat {
             ImageFormat::Depth => vk::Format::D32_SFLOAT,
             ImageFormat::Bgra8 => vk::Format::B8G8R8A8_UNORM,
             ImageFormat::Undefined => vk::Format::UNDEFINED,
+            ImageFormat::RUint32 => vk::Format::R32_UINT,
+            ImageFormat::RSint32 => vk::Format::R32_SINT,
+            ImageFormat::RgUint32 => vk::Format::R32G32_UINT,
+            ImageFormat::RgSint32 => vk::Format::R32G32_SINT,
+            ImageFormat::RgbUint32 => vk::Format::R32G32B32_UINT,
+            ImageFormat::RgbSint32 => vk::Format::R32G32B32_SINT,
+            ImageFormat::RgbaUint32 => vk::Format::R32G32B32A32_UINT,
+            ImageFormat::RgbaSint32 => vk::Format::R32G32B32A32_SINT,
         }
     }
 }
@@ -289,7 +297,7 @@ impl ToVk for ImageLayout {
             ImageLayout::Undefined => Self::Inner::UNDEFINED,
             ImageLayout::General => Self::Inner::GENERAL,
             ImageLayout::ColorAttachment => Self::Inner::COLOR_ATTACHMENT_OPTIMAL,
-            ImageLayout::DepthStencilAttachment => Self::Inner::DEPTH_ATTACHMENT_OPTIMAL,
+            ImageLayout::DepthStencilAttachment => Self::Inner::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             ImageLayout::DepthStencilReadOnly => Self::Inner::DEPTH_STENCIL_READ_ONLY_OPTIMAL,
             ImageLayout::ShaderReadOnly => Self::Inner::SHADER_READ_ONLY_OPTIMAL,
             ImageLayout::TransferSrc => Self::Inner::TRANSFER_SRC_OPTIMAL,

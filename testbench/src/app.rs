@@ -1,11 +1,12 @@
 use engine::{AppState, Backbuffer};
 use gpu::{
-    AccessFlags, BeginRenderPassInfo, ColorAttachment, CommandBufferSubmitInfo, ImageAspectFlags,
-    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, Offset2D, PipelineBarrierInfo,
-    PipelineStageFlags, Rect2D, VkCommandBuffer,
+    AccessFlags, BeginRenderPassInfo, CommandBufferSubmitInfo, FramebufferColorAttachment,
+    ImageAspectFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, Offset2D,
+    PipelineBarrierInfo, PipelineStageFlags, Rect2D, RenderPassAttachment, VkCommandBuffer,
+    VkSwapchain,
 };
 use imgui::{Context, FontConfig, FontSource, Ui};
-use imgui_rs_vulkan_renderer::{DynamicRendering, Options, Renderer};
+use imgui_rs_vulkan_renderer::{Options, Renderer};
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use log::{info, trace};
 use winit::{
@@ -16,8 +17,8 @@ use winit::{
 
 pub struct ImguiData {
     imgui: Context,
-    renderer: Renderer,
     platform: WinitPlatform,
+    renderer: Renderer,
 }
 
 pub trait App {
@@ -108,16 +109,14 @@ fn update_loop(
         .update_delta_time(std::time::Duration::from_secs_f32(
             app_state_mut.time.delta_frame(),
         ));
-
     let window_name = app.window_name(app_state_mut);
+    let ui = imgui_data.imgui.new_frame();
 
     app_state_mut.window().set_title(&window_name);
-
-    let ui = imgui_data.imgui.frame();
-    app.update(app_state_mut, ui)?;
     imgui_data
         .platform
         .prepare_render(ui, &engine::app_state().window());
+    app.update(app_state_mut, ui)?;
 
     let swapchain_format = app_state_mut.swapchain().present_format();
     let swapchain_extents = app_state_mut.swapchain().extents();
@@ -132,6 +131,7 @@ fn update_loop(
     let mut command_buffer = app.draw(&backbuffer)?;
 
     draw_imgui(imgui_data, &backbuffer, &mut command_buffer)?;
+
     let frame = app_state_mut.swapchain_mut().get_current_swapchain_frame();
     command_buffer.submit(&CommandBufferSubmitInfo {
         wait_semaphores: &[&frame.image_available_semaphore],
@@ -148,14 +148,15 @@ fn draw_imgui(
     backbuffer: &Backbuffer,
     command_buffer: &mut VkCommandBuffer<'_>,
 ) -> Result<(), anyhow::Error> {
-    let data = imgui_data.imgui.render();
     {
-        let color = vec![ColorAttachment {
+        let color = vec![FramebufferColorAttachment {
             image_view: backbuffer.image_view.clone(),
             load_op: gpu::ColorLoadOp::Load,
             store_op: gpu::AttachmentStoreOp::Store,
             initial_layout: ImageLayout::ColorAttachment,
+            final_layout: ImageLayout::PresentSrc,
         }];
+        let imgui_label = command_buffer.begin_debug_region("ImGui", [0.0, 0.0, 1.0, 1.0]);
         let render_imgui = command_buffer.begin_render_pass(&BeginRenderPassInfo {
             color_attachments: &color,
             depth_attachment: None,
@@ -164,32 +165,15 @@ fn draw_imgui(
                 offset: Offset2D { x: 0, y: 0 },
                 extent: backbuffer.size,
             },
+            label: Some("ImGUI render pass"),
         });
+
         let cmd_buf = render_imgui.inner();
+        let data = imgui_data.imgui.render();
+
         imgui_data.renderer.cmd_draw(cmd_buf, data)?;
+        imgui_label.end();
     }
-    command_buffer.pipeline_barrier(&PipelineBarrierInfo {
-        src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-        dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-        memory_barriers: &[],
-        buffer_memory_barriers: &[],
-        image_memory_barriers: &[ImageMemoryBarrier {
-            src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-            dst_access_mask: AccessFlags::COLOR_ATTACHMENT_READ,
-            old_layout: ImageLayout::ColorAttachment,
-            new_layout: ImageLayout::PresentSrc,
-            src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-            dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-            image: backbuffer.image.clone(),
-            subresource_range: ImageSubresourceRange {
-                aspect_mask: ImageAspectFlags::COLOR,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 1,
-            },
-        }],
-    });
     Ok(())
 }
 
@@ -241,27 +225,42 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
         &engine::app_state().window(),
         HiDpiMode::Rounded,
     );
+    let render_pass = engine::app_state().gpu.get_render_pass(
+        &gpu::RenderPassAttachments {
+            color_attachments: vec![RenderPassAttachment {
+                format: engine::app_state().swapchain().present_format().into(),
+                samples: gpu::SampleCount::Sample1,
+                load_op: gpu::ColorLoadOp::DontCare,
+                store_op: gpu::AttachmentStoreOp::Store,
+                stencil_load_op: gpu::StencilLoadOp::DontCare,
+                stencil_store_op: gpu::AttachmentStoreOp::DontCare,
+                initial_layout: ImageLayout::ColorAttachment,
+                final_layout: ImageLayout::PresentSrc,
+                blend_state: gpu::BlendState::default(),
+            }],
+            depth_attachment: None,
+            stencil_attachment: None,
+        },
+        Some("ImGUI render pass"),
+    );
     let renderer = Renderer::with_default_allocator(
         &engine::app_state().gpu.instance(),
         engine::app_state().gpu.vk_physical_device(),
         engine::app_state().gpu.vk_logical_device(),
         engine::app_state().gpu.graphics_queue(),
         engine::app_state().gpu.graphics_command_pool().inner,
-        DynamicRendering {
-            color_attachment_format: engine::app_state().swapchain().present_format(),
-            depth_attachment_format: None,
-        },
+        render_pass,
         &mut imgui,
         Some(Options {
-            in_flight_frames: 2,
-            ..Default::default()
+            in_flight_frames: VkSwapchain::MAX_FRAMES_IN_FLIGHT,
+            enable_depth_test: false,
+            enable_depth_write: false,
         }),
     )?;
-
     let imgui_data = ImguiData {
         imgui,
-        renderer,
         platform,
+        renderer,
     };
     let imgui_data = Box::new(imgui_data);
     let mut imgui_data = Box::leak(imgui_data);

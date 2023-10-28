@@ -65,6 +65,8 @@ fn main() -> anyhow::Result<()> {
         code: bytemuck::cast_slice(SHADER_SOURCE_VS),
     })?;
 
+    println!("Dumping infos about shader");
+
     let shader_info = gpu.get_shader_info(&shader_module);
 
     for var in &shader_info.inputs {

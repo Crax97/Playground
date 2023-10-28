@@ -8,11 +8,11 @@ use app::{bootstrap, App};
 use engine::Backbuffer;
 use engine_macros::glsl;
 use gpu::{
-    AccessFlags, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorAttachment,
-    CullMode, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageMemoryBarrier,
-    ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, IndexType, InputRate, MemoryDomain,
-    PipelineStageFlags, PresentMode, SamplerCreateInfo, SamplerHandle, ShaderModuleHandle,
-    ShaderStage, VertexBindingInfo, VkCommandBuffer,
+    AccessFlags, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags, CullMode,
+    FramebufferColorAttachment, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat,
+    ImageMemoryBarrier, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, IndexType,
+    InputRate, MemoryDomain, PipelineStageFlags, PresentMode, SamplerCreateInfo, SamplerHandle,
+    ShaderModuleHandle, ShaderStage, VertexBindingInfo, VkCommandBuffer,
 };
 use imgui::Ui;
 use nalgebra::*;
@@ -225,35 +225,13 @@ impl App for TriangleApp {
     fn draw(&mut self, backbuffer: &Backbuffer) -> anyhow::Result<VkCommandBuffer> {
         let gpu = &engine::app_state().gpu;
         let mut command_buffer = gpu.create_command_buffer(gpu::QueueType::Graphics)?;
-
-        command_buffer.pipeline_barrier(&gpu::PipelineBarrierInfo {
-            src_stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-            dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            memory_barriers: &[],
-            buffer_memory_barriers: &[],
-            image_memory_barriers: &[ImageMemoryBarrier {
-                src_access_mask: AccessFlags::empty(),
-                dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                old_layout: gpu::ImageLayout::Undefined,
-                new_layout: gpu::ImageLayout::ColorAttachment,
-                src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-                dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-                image: backbuffer.image.clone(),
-                subresource_range: gpu::ImageSubresourceRange {
-                    aspect_mask: ImageAspectFlags::COLOR,
-                    base_mip_level: 0,
-                    level_count: 1,
-                    base_array_layer: 0,
-                    layer_count: 1,
-                },
-            }],
-        });
         {
-            let color_attachments = vec![ColorAttachment {
+            let color_attachments = vec![FramebufferColorAttachment {
                 image_view: backbuffer.image_view.clone(),
                 load_op: gpu::ColorLoadOp::Clear([0.3, 0.0, 0.3, 1.0]),
                 store_op: gpu::AttachmentStoreOp::Store,
-                initial_layout: gpu::ImageLayout::ColorAttachment,
+                initial_layout: gpu::ImageLayout::Undefined,
+                final_layout: gpu::ImageLayout::ColorAttachment,
             }];
 
             let mut pass = command_buffer.begin_render_pass(&gpu::BeginRenderPassInfo {
@@ -264,6 +242,7 @@ impl App for TriangleApp {
                     offset: gpu::Offset2D::default(),
                     extent: backbuffer.size,
                 },
+                label: Some("Triangle rendering"),
             });
 
             let projection = Matrix4::<f32>::new_perspective(

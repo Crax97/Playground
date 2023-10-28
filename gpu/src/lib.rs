@@ -142,7 +142,7 @@ pub struct BufferCreateInfo<'a> {
     pub usage: BufferUsageFlags,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct TransitionInfo {
     pub layout: ImageLayout,
     pub access_mask: AccessFlags,
@@ -318,18 +318,26 @@ pub enum ComponentSwizzle {
 pub enum ImageFormat {
     #[default]
     Undefined,
+    RFloat16,
+    RFloat32,
+    RUint32,
+    RSint32,
+    RgFloat16,
+    RgFloat32,
+    RgUint32,
+    RgSint32,
+    RgbFloat16,
+    RgbFloat32,
+    RgbUint32,
+    RgbSint32,
+    RgbaFloat16,
+    RgbaFloat32,
+    RgbaUint32,
+    RgbaSint32,
     Rgba8,
     Bgra8,
     SRgba8,
     Rgb8,
-    RFloat32,
-    RgFloat32,
-    RgbFloat32,
-    RgbaFloat32,
-    RFloat16,
-    RgFloat16,
-    RgbFloat16,
-    RgbaFloat16,
     Depth,
 }
 
@@ -350,23 +358,20 @@ impl ImageFormat {
             ImageFormat::RgbaFloat16 => 8,
             ImageFormat::Depth => 3,
             ImageFormat::Undefined => unreachable!(),
+            ImageFormat::RUint32 => 4,
+            ImageFormat::RSint32 => 4,
+            ImageFormat::RgUint32 => 8,
+            ImageFormat::RgSint32 => 8,
+            ImageFormat::RgbUint32 => 12,
+            ImageFormat::RgbSint32 => 12,
+            ImageFormat::RgbaUint32 => 16,
+            ImageFormat::RgbaSint32 => 16,
         }
     }
     pub fn is_color(&self) -> bool {
         match self {
-            ImageFormat::RFloat16
-            | ImageFormat::RgFloat16
-            | ImageFormat::RgbFloat16
-            | ImageFormat::RgbaFloat16
-            | ImageFormat::Rgba8
-            | ImageFormat::Bgra8
-            | ImageFormat::SRgba8
-            | ImageFormat::Rgb8
-            | ImageFormat::RFloat32
-            | ImageFormat::RgFloat32
-            | ImageFormat::RgbFloat32
-            | ImageFormat::RgbaFloat32 => true,
             ImageFormat::Depth | ImageFormat::Undefined => false,
+            _ => true,
         }
     }
 
@@ -432,20 +437,21 @@ impl ImageFormat {
 
 impl From<spirv_reflect::types::ReflectFormat> for ImageFormat {
     fn from(value: spirv_reflect::types::ReflectFormat) -> Self {
+        use ImageFormat::*;
         match value {
-            spirv_reflect::types::ReflectFormat::Undefined => Self::Undefined,
-            spirv_reflect::types::ReflectFormat::R32_UINT => todo!(),
-            spirv_reflect::types::ReflectFormat::R32_SINT => todo!(),
-            spirv_reflect::types::ReflectFormat::R32_SFLOAT => Self::RFloat32,
-            spirv_reflect::types::ReflectFormat::R32G32_UINT => todo!(),
-            spirv_reflect::types::ReflectFormat::R32G32_SINT => todo!(),
-            spirv_reflect::types::ReflectFormat::R32G32_SFLOAT => Self::RgFloat32,
-            spirv_reflect::types::ReflectFormat::R32G32B32_UINT => todo!(),
-            spirv_reflect::types::ReflectFormat::R32G32B32_SINT => todo!(),
-            spirv_reflect::types::ReflectFormat::R32G32B32_SFLOAT => Self::RgbFloat32,
-            spirv_reflect::types::ReflectFormat::R32G32B32A32_UINT => todo!(),
-            spirv_reflect::types::ReflectFormat::R32G32B32A32_SINT => todo!(),
-            spirv_reflect::types::ReflectFormat::R32G32B32A32_SFLOAT => Self::RgbaFloat32,
+            spirv_reflect::types::ReflectFormat::Undefined => Undefined,
+            spirv_reflect::types::ReflectFormat::R32_UINT => RUint32,
+            spirv_reflect::types::ReflectFormat::R32_SINT => RSint32,
+            spirv_reflect::types::ReflectFormat::R32_SFLOAT => RFloat32,
+            spirv_reflect::types::ReflectFormat::R32G32_UINT => RgUint32,
+            spirv_reflect::types::ReflectFormat::R32G32_SINT => RgSint32,
+            spirv_reflect::types::ReflectFormat::R32G32_SFLOAT => RgFloat32,
+            spirv_reflect::types::ReflectFormat::R32G32B32_UINT => RgbUint32,
+            spirv_reflect::types::ReflectFormat::R32G32B32_SINT => RgbSint32,
+            spirv_reflect::types::ReflectFormat::R32G32B32_SFLOAT => RgbFloat32,
+            spirv_reflect::types::ReflectFormat::R32G32B32A32_UINT => RgbaUint32,
+            spirv_reflect::types::ReflectFormat::R32G32B32A32_SINT => RgbaSint32,
+            spirv_reflect::types::ReflectFormat::R32G32B32A32_SFLOAT => RgbaFloat32,
         }
     }
 }
@@ -651,7 +657,7 @@ pub struct SamplerCreateInfo {
     pub border_color: [f32; 4],
 }
 
-#[derive(Default, Clone, Debug, Copy, PartialEq, PartialOrd)]
+#[derive(Default, Clone, Debug, Copy, PartialEq, PartialOrd, Hash)]
 pub enum PipelineBindPoint {
     #[default]
     Graphics,
@@ -744,9 +750,8 @@ pub enum PresentMode {
     Mailbox,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Hash)]
 pub struct SubpassDescription<'a> {
-    pub pipeline_bind_point: PipelineBindPoint,
     pub input_attachments: &'a [AttachmentReference],
     pub color_attachments: &'a [AttachmentReference],
     pub resolve_attachments: &'a [AttachmentReference],
@@ -754,7 +759,7 @@ pub struct SubpassDescription<'a> {
     pub preserve_attachments: &'a [u32],
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Hash)]
 pub struct SubpassDependency {
     pub src_subpass: u32,
     pub dst_subpass: u32,
@@ -878,7 +883,7 @@ impl Default for BlendState {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Hash)]
 pub struct RenderPassAttachment {
     pub format: ImageFormat,
     pub samples: SampleCount,
@@ -1048,6 +1053,12 @@ pub enum ColorLoadOp {
     Clear([f32; 4]),
 }
 
+impl Hash for ColorLoadOp {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub enum DepthLoadOp {
     #[default]
@@ -1055,6 +1066,13 @@ pub enum DepthLoadOp {
     Load,
     Clear(f32),
 }
+
+impl Hash for DepthLoadOp {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub enum StencilLoadOp {
     #[default]
@@ -1063,43 +1081,60 @@ pub enum StencilLoadOp {
     Clear(u8),
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+impl Hash for StencilLoadOp {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AttachmentStoreOp {
     #[default]
     DontCare,
     Store,
 }
 
-#[derive(Clone)]
-pub struct ColorAttachment {
+#[derive(Clone, Hash)]
+pub struct FramebufferColorAttachment {
     pub image_view: ImageViewHandle,
     pub load_op: ColorLoadOp,
     pub store_op: AttachmentStoreOp,
     pub initial_layout: ImageLayout,
+    pub final_layout: ImageLayout,
 }
 
-#[derive(Clone)]
-pub struct DepthAttachment {
+#[derive(Clone, Hash)]
+pub struct FramebufferDepthAttachment {
     pub image_view: ImageViewHandle,
     pub load_op: DepthLoadOp,
     pub store_op: AttachmentStoreOp,
     pub initial_layout: ImageLayout,
+    pub final_layout: ImageLayout,
 }
 
-#[derive(Clone)]
-pub struct StencilAttachment {
+#[derive(Clone, Hash)]
+pub struct FramebufferStencilAttachment {
     pub image_view: ImageViewHandle,
     pub load_op: StencilLoadOp,
     pub store_op: AttachmentStoreOp,
     pub initial_layout: ImageLayout,
+    pub final_layout: ImageLayout,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Hash)]
 pub struct BeginRenderPassInfo<'a> {
-    pub color_attachments: &'a [ColorAttachment],
-    pub depth_attachment: Option<DepthAttachment>,
-    pub stencil_attachment: Option<StencilAttachment>,
+    pub label: Option<&'a str>,
+    pub color_attachments: &'a [FramebufferColorAttachment],
+    pub depth_attachment: Option<FramebufferDepthAttachment>,
+    pub stencil_attachment: Option<FramebufferStencilAttachment>,
     pub render_area: Rect2D,
+}
+
+#[derive(Clone, Hash, Default)]
+pub struct RenderPassAttachments {
+    pub color_attachments: Vec<RenderPassAttachment>,
+    pub depth_attachment: Option<RenderPassAttachment>,
+    pub stencil_attachment: Option<RenderPassAttachment>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]

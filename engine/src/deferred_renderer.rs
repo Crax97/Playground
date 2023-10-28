@@ -479,13 +479,8 @@ impl DeferredRenderingPipeline {
                         }]),
                         ShaderStage::ALL_GRAPHICS,
                     );
-                    ctx.render_pass_command.draw_indexed(
-                        draw_call.prim.index_count,
-                        1,
-                        0,
-                        0,
-                        0,
-                    );
+                    ctx.render_pass_command
+                        .draw_indexed(draw_call.prim.index_count, 1, 0, 0, 0);
 
                     primitive_label.end();
                     total_primitives_rendered += 1;
@@ -906,7 +901,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 info: Image2DInfo {
                     height: backbuffer.size.height,
                     width: backbuffer.size.width,
-                    present: false,
+                    present: true,
                 },
             },
 
@@ -1084,7 +1079,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let present_render_pass = self
             .render_graph
             .begin_render_pass("Present", backbuffer.size)?
-            .shader_reads(&[fxaa_output])
+            .shader_reads(&[color_target])
             .writes_attachments(&[swapchain_image])
             .with_blend_state(BlendState {
                 blend_enable: false,
@@ -1309,7 +1304,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             RenderPassAttachment {
                 format: ImageFormat::RgbaFloat32,
                 samples: SampleCount::Sample1,
-                load_op: ColorLoadOp::Load,
+                load_op: ColorLoadOp::Clear([0.0; 4]),
                 store_op: AttachmentStoreOp::Store,
                 stencil_load_op: StencilLoadOp::DontCare,
                 stencil_store_op: AttachmentStoreOp::Store,

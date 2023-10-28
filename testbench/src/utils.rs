@@ -16,11 +16,11 @@ pub struct LoadedImage {
 }
 
 use gpu::{
-    AccessFlags, BeginRenderPassInfo, Binding, ColorAttachment, ComponentMapping, Extent2D, Gpu,
-    ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle, ImageSubresourceRange,
-    ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, InputRate, MemoryDomain, Offset2D,
-    PipelineStageFlags, Rect2D, SamplerCreateInfo, ShaderModuleCreateInfo, ShaderModuleHandle,
-    ShaderStage, VertexBindingInfo, VkGpu,
+    AccessFlags, BeginRenderPassInfo, Binding, ComponentMapping, Extent2D,
+    FramebufferColorAttachment, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle,
+    ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, InputRate,
+    MemoryDomain, Offset2D, PipelineStageFlags, Rect2D, SamplerCreateInfo, ShaderModuleCreateInfo,
+    ShaderModuleHandle, ShaderStage, VertexBindingInfo, VkGpu,
 };
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
@@ -275,7 +275,7 @@ fn cubemap_main_loop(
         gpu::TransitionInfo {
             layout: gpu::ImageLayout::ColorAttachment,
             access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-            stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
         },
         ImageSubresourceRange {
             aspect_mask: ImageAspectFlags::COLOR,
@@ -288,11 +288,12 @@ fn cubemap_main_loop(
     let mesh = resource_map.get(&cube_mesh);
     for (i, view) in views.iter().enumerate() {
         let mvp = povs[i].projection * povs[i].view;
-        let views = vec![ColorAttachment {
+        let views = vec![FramebufferColorAttachment {
             image_view: view.clone(),
-            load_op: gpu::ColorLoadOp::Clear([0.0; 4]),
+            load_op: gpu::ColorLoadOp::DontCare,
             store_op: gpu::AttachmentStoreOp::Store,
-            initial_layout: gpu::ImageLayout::ColorAttachment,
+            initial_layout: gpu::ImageLayout::Undefined,
+            final_layout: gpu::ImageLayout::ShaderReadOnly,
         }];
         let mut command_buffer = gpu.create_command_buffer(gpu::QueueType::Graphics)?;
         {
@@ -304,6 +305,7 @@ fn cubemap_main_loop(
                     offset: Offset2D::default(),
                     extent: size,
                 },
+                label: Some("Cubemap main loop"),
             });
             render_pass_command.set_vertex_shader(vertex_module.clone());
             render_pass_command.set_fragment_shader(fragment_shader_to_apply.clone());
@@ -394,26 +396,6 @@ fn cubemap_main_loop(
         gpu.wait_device_idle()?;
     }
     gpu.wait_device_idle()?;
-    gpu.transition_image_layout(
-        &backing_image,
-        gpu::TransitionInfo {
-            layout: gpu::ImageLayout::ColorAttachment,
-            access_mask: AccessFlags::empty(),
-            stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-        },
-        gpu::TransitionInfo {
-            layout: gpu::ImageLayout::ShaderReadOnly,
-            access_mask: AccessFlags::SHADER_READ,
-            stage_mask: PipelineStageFlags::ALL_GRAPHICS,
-        },
-        ImageSubresourceRange {
-            aspect_mask: ImageAspectFlags::COLOR,
-            base_mip_level: 0,
-            level_count: 1,
-            base_array_layer: 0,
-            layer_count: 6,
-        },
-    )?;
     let view = gpu.make_image_view(&gpu::ImageViewCreateInfo {
         image: backing_image.clone(),
         view_type: gpu::ImageViewType::Cube,

@@ -35,17 +35,18 @@ use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 
 use crate::{
-    get_allocation_callbacks, lifetime_cache_constants, quick_hash, BeginRenderPassInfoOwned,
-    BufferCreateInfo, BufferHandle, BufferImageCopyInfo, CommandBufferSubmitInfo,
-    CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineState, Context,
-    DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2, DescriptorSetState,
-    Extent2D, GPUFence, Gpu, GpuConfiguration, GpuResourceMap, GraphicsPipelineState,
-    Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout,
-    ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, ImageViewHandle, LogicOp,
-    Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags, PushConstantBlockDescription,
-    QueueType, Rect2D, SamplerCreateInfo, SamplerHandle, ShaderAttribute, ShaderModuleCreateInfo,
-    ShaderModuleHandle, ToVk, TransitionInfo, UniformVariableDescription, VkCommandBuffer,
-    VkCommandPool, VkImageView, VkShaderModule,
+    get_allocation_callbacks, lifetime_cache_constants, quick_hash, AttachmentStoreOp,
+    BeginRenderPassInfo, BufferCreateInfo, BufferHandle, BufferImageCopyInfo,
+    CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineState,
+    Context, DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2,
+    DescriptorSetState, Extent2D, GPUFence, Gpu, GpuConfiguration, GpuResourceMap,
+    GraphicsPipelineState, Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat,
+    ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
+    ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
+    PushConstantBlockDescription, QueueType, Rect2D, RenderPassAttachments, SampleCount,
+    SamplerCreateInfo, SamplerHandle, ShaderAttribute, ShaderModuleCreateInfo, ShaderModuleHandle,
+    ToVk, TransitionInfo, UniformVariableDescription, VkCommandBuffer, VkCommandPool, VkImageView,
+    VkShaderModule,
 };
 use crate::{
     gpu_resource_manager::{
@@ -160,6 +161,8 @@ pub struct GpuThreadSharedState {
     pub(crate) descriptor_set_layout_cache: LifetimedCache<vk::DescriptorSetLayout>,
     pub(crate) pipeline_layout_cache: LifetimedCache<vk::PipelineLayout>,
     pub(crate) descriptor_set_cache: LifetimedCache<DescriptorSetAllocation>,
+    pub(crate) render_pass_cache: LifetimedCache<vk::RenderPass>,
+    pub(crate) framebuffer_cache: LifetimedCache<vk::Framebuffer>,
     features: SupportedFeatures,
     messenger: Option<vk::DebugUtilsMessengerEXT>,
     pub dynamic_rendering: DynamicRendering,
@@ -345,7 +348,7 @@ unsafe extern "system" fn on_message(
     let message = CStr::from_ptr(cb_data.p_message);
     if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::ERROR) {
         log::error!("VULKAN ERROR: {:?}", message);
-        panic!("Invalid vulkan state");
+        //panic!("Invalid vulkan state");
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::INFO) {
         log::info!("Vulkan - : {:?}", message);
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::WARNING) {
@@ -499,6 +502,8 @@ impl VkGpu {
             descriptor_set_layout_cache: LifetimedCache::new(8),
             descriptor_pool_cache: LifetimedCache::new(lifetime_cache_constants::NEVER_DEALLOCATE),
             descriptor_set_cache: LifetimedCache::new(8),
+            render_pass_cache: LifetimedCache::new(lifetime_cache_constants::NEVER_DEALLOCATE),
+            framebuffer_cache: LifetimedCache::new(lifetime_cache_constants::NEVER_DEALLOCATE),
             dynamic_rendering,
             allocated_resources: RefCell::new(GpuResourceMap::new()),
             destroyed_resources: DestroyedResources::default(),
@@ -968,10 +973,11 @@ impl VkGpu {
     fn create_graphics_pipeline(
         &self,
         pipeline_state: &GraphicsPipelineState,
+        render_pass: vk::RenderPass,
         layout: vk::PipelineLayout,
-        color_formats: &[vk::Format],
     ) -> vk::Pipeline {
         assert!(pipeline_state.vertex_shader.is_valid());
+        assert!(render_pass != vk::RenderPass::null());
         let mut stages = vec![];
         let main_name = std::ffi::CString::new("main").unwrap();
         let vertex_shader = self.resolve_resource::<VkShaderModule>(&pipeline_state.vertex_shader);
@@ -1022,7 +1028,7 @@ impl VkGpu {
         let multisample_state = pipeline_state.multisample_state();
         let depth_stencil_state = pipeline_state.depth_stencil_state();
         let color_blend_state = vk::PipelineColorBlendStateCreateInfo {
-            s_type: StructureType::PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+            s_type: StructureType::PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
             p_next: std::ptr::null(),
             flags: vk::PipelineColorBlendStateCreateFlags::empty(),
             logic_op_enable: false.to_vk(),
@@ -1042,25 +1048,9 @@ impl VkGpu {
         };
         let dynamic_state = pipeline_state.dynamic_state();
 
-        let color_formats = if pipeline_state.color_output_enabled {
-            color_formats
-        } else {
-            &[]
-        };
-
-        let rendering_ext_info = PipelineRenderingCreateInfoKHR {
-            s_type: StructureType::PIPELINE_RENDERING_CREATE_INFO_KHR,
-            p_next: std::ptr::null(),
-            view_mask: 0,
-            color_attachment_count: color_formats.len() as _,
-            p_color_attachment_formats: color_formats.as_ptr(),
-            depth_attachment_format: ImageFormat::Depth.to_vk(),
-
-            stencil_attachment_format: vk::Format::UNDEFINED,
-        };
         let create_info = vk::GraphicsPipelineCreateInfo {
             s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
-            p_next: addr_of!(rendering_ext_info) as *const _,
+            p_next: std::ptr::null(),
             flags: vk::PipelineCreateFlags::empty(),
             stage_count: stages.len() as _,
             p_stages: stages.as_ptr() as *const _,
@@ -1074,7 +1064,7 @@ impl VkGpu {
             p_color_blend_state: addr_of!(color_blend_state),
             p_dynamic_state: addr_of!(dynamic_state),
             layout,
-            render_pass: vk::RenderPass::null(),
+            render_pass,
             subpass: 0,
             base_pipeline_handle: vk::Pipeline::null(),
             base_pipeline_index: 0,
@@ -1093,20 +1083,11 @@ impl VkGpu {
     pub(crate) fn get_graphics_pipeline(
         &self,
         pipeline_state: &GraphicsPipelineState,
-        render_pass_info: &BeginRenderPassInfoOwned,
         layout: vk::PipelineLayout,
+        render_pass: vk::RenderPass,
     ) -> vk::Pipeline {
-        let formats = render_pass_info
-            .color_attachments
-            .iter()
-            .map(|a| {
-                self.resolve_resource::<VkImageView>(&a.image_view)
-                    .format
-                    .to_vk()
-            })
-            .collect::<Vec<_>>();
         self.state.graphics_pipeline_cache.get(&pipeline_state, || {
-            self.create_graphics_pipeline(pipeline_state, layout, &formats)
+            self.create_graphics_pipeline(pipeline_state, render_pass, layout)
         })
     }
 
@@ -1545,6 +1526,180 @@ impl VkGpu {
         }
 
         Ok(info)
+    }
+
+    pub fn get_render_pass(
+        &self,
+        render_pass_info: &RenderPassAttachments,
+        debug_label: Option<&str>,
+    ) -> vk::RenderPass {
+        self.state.render_pass_cache.get(render_pass_info, || {
+            let render_pass = self.create_render_pass(render_pass_info);
+
+            if let (Some(debug_utils), Some(label)) = (&self.state.debug_utilities, debug_label) {
+                let object_c_name = CString::new(label).unwrap();
+
+                unsafe {
+                    debug_utils
+                        .set_debug_utils_object_name(
+                            self.vk_logical_device().handle(),
+                            &vk::DebugUtilsObjectNameInfoEXT {
+                                s_type: StructureType::DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+                                p_next: std::ptr::null(),
+                                object_type: vk::ObjectType::RENDER_PASS,
+                                object_handle: render_pass.as_raw(),
+                                p_object_name: object_c_name.as_ptr(),
+                            },
+                        )
+                        .unwrap();
+                }
+            }
+
+            render_pass
+        })
+    }
+
+    fn create_render_pass(&self, render_pass_info: &RenderPassAttachments) -> vk::RenderPass {
+        let mut attachments = render_pass_info
+            .color_attachments
+            .iter()
+            .map(|att| vk::AttachmentDescription {
+                flags: vk::AttachmentDescriptionFlags::empty(),
+                format: att.format.to_vk(),
+                samples: SampleCount::Sample1.to_vk(),
+                load_op: att.load_op.to_vk(),
+                store_op: att.store_op.to_vk(),
+                stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+                stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+                initial_layout: att.initial_layout.to_vk(),
+                final_layout: att.final_layout.to_vk(),
+            })
+            .collect::<Vec<_>>();
+
+        let subpass_color_attachments = attachments
+            .iter()
+            .enumerate()
+            .map(|(i, _)| vk::AttachmentReference {
+                attachment: i as _,
+                layout: ImageLayout::ColorAttachment.to_vk(),
+            })
+            .collect::<Vec<_>>();
+
+        if let Some(att) = &render_pass_info.depth_attachment {
+            assert!(att.format == ImageFormat::Depth);
+            attachments.push(vk::AttachmentDescription {
+                flags: vk::AttachmentDescriptionFlags::empty(),
+                format: att.format.to_vk(),
+                samples: SampleCount::Sample1.to_vk(),
+                load_op: att.load_op.to_vk(),
+                store_op: att.store_op.to_vk(),
+                stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+                stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+                initial_layout: att.initial_layout.to_vk(),
+                final_layout: att.final_layout.to_vk(),
+            });
+        }
+
+        let depth_attachment = if let Some(att) = &render_pass_info.depth_attachment {
+            vk::AttachmentReference {
+                attachment: attachments.len() as u32 - 1,
+                layout: if att.store_op == AttachmentStoreOp::Store {
+                    ImageLayout::DepthStencilAttachment
+                } else {
+                    ImageLayout::DepthStencilReadOnly
+                }
+                .to_vk(),
+            }
+        } else {
+            vk::AttachmentReference::default()
+        };
+        let subpass = vk::SubpassDescription {
+            flags: vk::SubpassDescriptionFlags::empty(),
+            pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,
+            input_attachment_count: 0,
+            p_input_attachments: std::ptr::null(),
+            color_attachment_count: subpass_color_attachments.len() as _,
+            p_color_attachments: subpass_color_attachments.as_ptr(),
+            p_resolve_attachments: std::ptr::null(),
+            p_depth_stencil_attachment: if render_pass_info.depth_attachment.is_some() {
+                addr_of!(depth_attachment)
+            } else {
+                std::ptr::null()
+            },
+            preserve_attachment_count: 0,
+            p_preserve_attachments: std::ptr::null(),
+        };
+
+        let subpass_dependency = vk::SubpassDependency {
+            src_subpass: vk::SUBPASS_EXTERNAL,
+            dst_subpass: 0,
+            src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            src_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            dst_stage_mask: vk::PipelineStageFlags::FRAGMENT_SHADER,
+            dst_access_mask: vk::AccessFlags::SHADER_READ,
+            dependency_flags: vk::DependencyFlags::empty(),
+        };
+
+        let create_info = vk::RenderPassCreateInfo {
+            s_type: StructureType::RENDER_PASS_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::RenderPassCreateFlags::empty(),
+            attachment_count: attachments.len() as _,
+            p_attachments: attachments.as_ptr() as *const _,
+            subpass_count: 1,
+            p_subpasses: addr_of!(subpass),
+            dependency_count: 1,
+            p_dependencies: addr_of!(subpass_dependency),
+        };
+        unsafe {
+            self.vk_logical_device()
+                .create_render_pass(&create_info, get_allocation_callbacks())
+                .expect("Failed to create render pass")
+        }
+    }
+
+    pub(crate) fn get_framebuffer(
+        &self,
+        render_pass_info: &BeginRenderPassInfo,
+        render_pass: vk::RenderPass,
+    ) -> vk::Framebuffer {
+        self.state.framebuffer_cache.get(render_pass_info, || {
+            self.create_framebuffer(render_pass_info, render_pass)
+        })
+    }
+
+    fn create_framebuffer(
+        &self,
+        render_pass_info: &BeginRenderPassInfo,
+        render_pass: vk::RenderPass,
+    ) -> vk::Framebuffer {
+        let mut attachments = render_pass_info
+            .color_attachments
+            .iter()
+            .map(|att| self.resolve_resource::<VkImageView>(&att.image_view).inner)
+            .collect::<Vec<_>>();
+        if let Some(ref depth) = render_pass_info.depth_attachment {
+            attachments.push(
+                self.resolve_resource::<VkImageView>(&depth.image_view)
+                    .inner,
+            );
+        }
+        let create_info = vk::FramebufferCreateInfo {
+            s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::FramebufferCreateFlags::empty(),
+            render_pass,
+            attachment_count: attachments.len() as _,
+            p_attachments: attachments.as_ptr(),
+            width: render_pass_info.render_area.extent.width,
+            height: render_pass_info.render_area.extent.height,
+            layers: 1,
+        };
+        unsafe {
+            self.vk_logical_device()
+                .create_framebuffer(&create_info, get_allocation_callbacks())
+                .expect("Failed to create framebuffer")
+        }
     }
 }
 fn parse_members(
