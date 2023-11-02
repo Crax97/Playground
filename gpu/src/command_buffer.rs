@@ -317,7 +317,7 @@ impl<'g> VkCommandBuffer<'g> {
     }
     pub fn begin_render_pass<'p>(
         &'p mut self,
-        info: &BeginRenderPassInfo<'p>,
+        info: &BeginRenderPassInfo,
     ) -> VkRenderPassCommand<'p, 'g> {
         VkRenderPassCommand::<'p, 'g>::new(self, info)
     }
@@ -637,7 +637,7 @@ impl<'g> Drop for VkCommandBuffer<'g> {
 impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
     fn new(
         command_buffer: &'c mut VkCommandBuffer<'g>,
-        render_pass_info: &BeginRenderPassInfo<'c>,
+        render_pass_info: &BeginRenderPassInfo,
     ) -> Self {
         let render_pass = command_buffer.gpu.get_render_pass(
             &Self::get_attachments(&command_buffer.gpu, render_pass_info),
@@ -1012,6 +1012,8 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                     },
                 });
 
+        attachments.subpasses = render_pass_info.subpasses.to_vec();
+        attachments.dependencies = render_pass_info.dependencies.to_vec();
         attachments
     }
 }

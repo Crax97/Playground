@@ -7,16 +7,17 @@ use std::{
 };
 
 use gpu::{
-    AccessFlags, BeginRenderPassInfo, Binding, BindingType, BlendState, BufferCreateInfo,
-    BufferHandle, BufferUsageFlags, ColorLoadOp, ComponentMapping, CullMode, DepthLoadOp,
-    DepthStencilState, Extent2D, Filter, FramebufferColorAttachment, FramebufferDepthAttachment,
-    FramebufferStencilAttachment, FrontFace, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat,
-    ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageUsageFlags,
-    ImageViewCreateInfo, ImageViewHandle, ImageViewType, LogicOp, MemoryDomain, Offset2D,
-    PipelineBarrierInfo, PipelineStageFlags, PolygonMode, PrimitiveTopology, PushConstantRange,
-    Rect2D, SampleCount, SamplerAddressMode, SamplerCreateInfo, SamplerHandle, ShaderModuleHandle,
-    ShaderStage, StencilLoadOp, TransitionInfo, VertexBindingDescription, VkCommandBuffer, VkGpu,
-    VkRenderPassCommand,
+    AccessFlags, AttachmentReference, BeginRenderPassInfo, Binding, BindingType, BlendState,
+    BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorLoadOp, ComponentMapping, CullMode,
+    DepthLoadOp, DepthStencilState, Extent2D, Filter, FramebufferColorAttachment,
+    FramebufferDepthAttachment, FramebufferStencilAttachment, FrontFace, Gpu, ImageAspectFlags,
+    ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier,
+    ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, ImageViewType,
+    LogicOp, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags, PolygonMode,
+    PrimitiveTopology, PushConstantRange, Rect2D, SampleCount, SamplerAddressMode,
+    SamplerCreateInfo, SamplerHandle, ShaderModuleHandle, ShaderStage, StencilLoadOp,
+    SubpassDependency, SubpassDescription, TransitionInfo, VertexBindingDescription,
+    VkCommandBuffer, VkGpu, VkRenderPassCommand,
 };
 
 use indexmap::IndexSet;
@@ -1446,6 +1447,24 @@ impl RenderGraphRunner for GpuRunner {
                     [0.3, 0.0, 0.0, 1.0],
                 );
 
+                let color_attachment_references = color_views
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| AttachmentReference {
+                        attachment: i as _,
+                        layout: ImageLayout::ColorAttachment,
+                    })
+                    .collect::<Vec<_>>();
+
+                let depth_attachment = if let Some(_) = depth_view {
+                    Some(AttachmentReference {
+                        attachment: color_attachment_references.len() as _,
+                        layout: ImageLayout::DepthStencilAttachment,
+                    })
+                } else {
+                    None
+                };
+
                 let render_pass_command =
                     ctx.command_buffer.begin_render_pass(&BeginRenderPassInfo {
                         color_attachments: &color_views,
@@ -1456,6 +1475,21 @@ impl RenderGraphRunner for GpuRunner {
                             extent: info.extents,
                         },
                         label: Some(rp.label),
+                        subpasses: &[SubpassDescription {
+                            input_attachments: vec![],
+                            color_attachments: color_attachment_references,
+                            resolve_attachments: vec![],
+                            depth_stencil_attachment: depth_attachment,
+                            preserve_attachments: vec![],
+                        }],
+                        dependencies: &[SubpassDependency {
+                            src_subpass: SubpassDependency::EXTERNAL,
+                            dst_subpass: 0,
+                            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                            dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                            src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                            dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                        }],
                     });
 
                 let mut context = RenderPassContext {

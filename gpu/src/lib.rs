@@ -750,13 +750,13 @@ pub enum PresentMode {
     Mailbox,
 }
 
-#[derive(Debug, Clone, Copy, Default, Hash)]
-pub struct SubpassDescription<'a> {
-    pub input_attachments: &'a [AttachmentReference],
-    pub color_attachments: &'a [AttachmentReference],
-    pub resolve_attachments: &'a [AttachmentReference],
-    pub depth_stencil_attachment: &'a [AttachmentReference],
-    pub preserve_attachments: &'a [u32],
+#[derive(Debug, Clone, Default, Hash)]
+pub struct SubpassDescription {
+    pub input_attachments: Vec<AttachmentReference>,
+    pub color_attachments: Vec<AttachmentReference>,
+    pub resolve_attachments: Vec<AttachmentReference>,
+    pub depth_stencil_attachment: Option<AttachmentReference>,
+    pub preserve_attachments: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Copy, Hash)]
@@ -776,7 +776,7 @@ impl SubpassDependency {
 #[derive(Debug, Clone, Copy, Default, Hash)]
 pub struct RenderPassDescription<'a> {
     pub attachments: &'a [RenderPassAttachment],
-    pub subpasses: &'a [SubpassDescription<'a>],
+    pub subpasses: &'a [SubpassDescription],
     pub dependencies: &'a [SubpassDependency],
 }
 
@@ -1128,6 +1128,8 @@ pub struct BeginRenderPassInfo<'a> {
     pub depth_attachment: Option<FramebufferDepthAttachment>,
     pub stencil_attachment: Option<FramebufferStencilAttachment>,
     pub render_area: Rect2D,
+    pub subpasses: &'a [SubpassDescription],
+    pub dependencies: &'a [SubpassDependency],
 }
 
 #[derive(Clone, Hash, Default)]
@@ -1135,6 +1137,9 @@ pub struct RenderPassAttachments {
     pub color_attachments: Vec<RenderPassAttachment>,
     pub depth_attachment: Option<RenderPassAttachment>,
     pub stencil_attachment: Option<RenderPassAttachment>,
+
+    pub subpasses: Vec<SubpassDescription>,
+    pub dependencies: Vec<SubpassDependency>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]

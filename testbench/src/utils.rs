@@ -16,11 +16,12 @@ pub struct LoadedImage {
 }
 
 use gpu::{
-    AccessFlags, BeginRenderPassInfo, Binding, ComponentMapping, Extent2D,
+    AccessFlags, AttachmentReference, BeginRenderPassInfo, Binding, ComponentMapping, Extent2D,
     FramebufferColorAttachment, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle,
     ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, InputRate,
     MemoryDomain, Offset2D, PipelineStageFlags, Rect2D, SamplerCreateInfo, ShaderModuleCreateInfo,
-    ShaderModuleHandle, ShaderStage, VertexBindingInfo, VkGpu,
+    ShaderModuleHandle, ShaderStage, SubpassDependency, SubpassDescription, VertexBindingInfo,
+    VkGpu,
 };
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
@@ -275,7 +276,7 @@ fn cubemap_main_loop(
         gpu::TransitionInfo {
             layout: gpu::ImageLayout::ColorAttachment,
             access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-            stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
+            stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
         },
         ImageSubresourceRange {
             aspect_mask: ImageAspectFlags::COLOR,
@@ -306,6 +307,24 @@ fn cubemap_main_loop(
                     extent: size,
                 },
                 label: Some("Cubemap main loop"),
+                subpasses: &[SubpassDescription {
+                    input_attachments: vec![],
+                    color_attachments: vec![AttachmentReference {
+                        attachment: 0,
+                        layout: gpu::ImageLayout::ColorAttachment,
+                    }],
+                    resolve_attachments: vec![],
+                    depth_stencil_attachment: None,
+                    preserve_attachments: vec![],
+                }],
+                dependencies: &[SubpassDependency {
+                    src_subpass: SubpassDependency::EXTERNAL,
+                    dst_subpass: 0,
+                    src_stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+                    dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    src_access_mask: AccessFlags::empty(),
+                    dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                }],
             });
             render_pass_command.set_vertex_shader(vertex_module.clone());
             render_pass_command.set_fragment_shader(fragment_shader_to_apply.clone());

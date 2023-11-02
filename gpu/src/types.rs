@@ -1395,3 +1395,27 @@ impl ToVk for PrimitiveTopology {
         }
     }
 }
+
+impl ToVk for SubpassDependency {
+    type Inner = vk::SubpassDependency;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            src_subpass: if self.src_subpass == SubpassDependency::EXTERNAL {
+                vk::SUBPASS_EXTERNAL
+            } else {
+                self.src_subpass
+            },
+            dst_subpass: if self.dst_subpass == SubpassDependency::EXTERNAL {
+                vk::SUBPASS_EXTERNAL
+            } else {
+                self.dst_subpass
+            },
+            src_stage_mask: self.src_stage_mask.to_vk(),
+            dst_stage_mask: self.dst_stage_mask.to_vk(),
+            src_access_mask: self.src_access_mask.to_vk(),
+            dst_access_mask: self.dst_access_mask.to_vk(),
+            dependency_flags: vk::DependencyFlags::BY_REGION,
+        }
+    }
+}

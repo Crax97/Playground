@@ -8,11 +8,12 @@ use app::{bootstrap, App};
 use engine::Backbuffer;
 use engine_macros::glsl;
 use gpu::{
-    AccessFlags, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags, CullMode,
-    FramebufferColorAttachment, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat,
-    ImageMemoryBarrier, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, IndexType,
-    InputRate, MemoryDomain, PipelineStageFlags, PresentMode, SamplerCreateInfo, SamplerHandle,
-    ShaderModuleHandle, ShaderStage, VertexBindingInfo, VkCommandBuffer,
+    AccessFlags, AttachmentReference, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags,
+    CullMode, FramebufferColorAttachment, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat,
+    ImageLayout, ImageMemoryBarrier, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle,
+    IndexType, InputRate, MemoryDomain, PipelineStageFlags, PresentMode, SamplerCreateInfo,
+    SamplerHandle, ShaderModuleHandle, ShaderStage, SubpassDescription, VertexBindingInfo,
+    VkCommandBuffer,
 };
 use imgui::Ui;
 use nalgebra::*;
@@ -243,6 +244,17 @@ impl App for TriangleApp {
                     extent: backbuffer.size,
                 },
                 label: Some("Triangle rendering"),
+                subpasses: &[SubpassDescription {
+                    input_attachments: vec![],
+                    color_attachments: vec![AttachmentReference {
+                        attachment: 0,
+                        layout: ImageLayout::ColorAttachment,
+                    }],
+                    resolve_attachments: vec![],
+                    depth_stencil_attachment: None,
+                    preserve_attachments: vec![],
+                }],
+                dependencies: &[],
             });
 
             let projection = Matrix4::<f32>::new_perspective(

@@ -8,7 +8,6 @@ use std::{
 };
 
 use anyhow::{bail, Result};
-use ash::extensions::khr::DynamicRendering;
 use ash::vk::{
     PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR,
     PipelineRenderingCreateInfoKHR,
@@ -28,6 +27,10 @@ use ash::{
         SharingMode, StructureType, WriteDescriptorSet, API_VERSION_1_3,
     },
     *,
+};
+use ash::{
+    extensions::khr::DynamicRendering,
+    vk::{PipelineBindPoint, SubpassDescriptionFlags},
 };
 
 use log::{debug, error, info, trace, warn};
@@ -348,7 +351,7 @@ unsafe extern "system" fn on_message(
     let message = CStr::from_ptr(cb_data.p_message);
     if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::ERROR) {
         log::error!("VULKAN ERROR: {:?}", message);
-        //panic!("Invalid vulkan state");
+        panic!("Invalid vulkan state: {:?}", message);
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::INFO) {
         log::info!("Vulkan - : {:?}", message);
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::WARNING) {
@@ -1576,15 +1579,6 @@ impl VkGpu {
             })
             .collect::<Vec<_>>();
 
-        let subpass_color_attachments = attachments
-            .iter()
-            .enumerate()
-            .map(|(i, _)| vk::AttachmentReference {
-                attachment: i as _,
-                layout: ImageLayout::ColorAttachment.to_vk(),
-            })
-            .collect::<Vec<_>>();
-
         if let Some(att) = &render_pass_info.depth_attachment {
             assert!(att.format == ImageFormat::Depth);
             attachments.push(vk::AttachmentDescription {
@@ -1598,47 +1592,79 @@ impl VkGpu {
                 initial_layout: att.initial_layout.to_vk(),
                 final_layout: att.final_layout.to_vk(),
             });
-        }
+        };
+        let mut all_inputs: Vec<vk::AttachmentReference> = vec![];
+        all_inputs.reserve(5);
+        let mut all_colors: Vec<vk::AttachmentReference> = vec![];
+        all_colors.reserve(5);
+        let mut all_resolve: Vec<vk::AttachmentReference> = vec![];
+        all_resolve.reserve(5);
+        let mut all_depths: Vec<vk::AttachmentReference> = vec![];
+        all_depths.reserve(5);
 
-        let depth_attachment = if let Some(att) = &render_pass_info.depth_attachment {
-            vk::AttachmentReference {
-                attachment: attachments.len() as u32 - 1,
-                layout: if att.store_op == AttachmentStoreOp::Store {
-                    ImageLayout::DepthStencilAttachment
-                } else {
-                    ImageLayout::DepthStencilReadOnly
+        let subpasses = render_pass_info
+            .subpasses
+            .iter()
+            .map(|s| unsafe {
+                assert!(
+                    s.resolve_attachments.len() == 0
+                        || s.resolve_attachments.len() == s.color_attachments.len()
+                );
+                let p_input_attachments = all_inputs.as_ptr().add(all_inputs.len());
+                let p_color_attachments = all_colors.as_ptr().add(all_colors.len());
+                let p_resolve_attachments = all_resolve.as_ptr().add(all_resolve.len());
+                let p_depth_stencil_attachment = all_depths.as_ptr().add(all_depths.len());
+                all_inputs.extend(
+                    s.input_attachments
+                        .iter()
+                        .map(|i| i.to_vk())
+                        .collect::<Vec<_>>(),
+                );
+                all_colors.extend(
+                    s.color_attachments
+                        .iter()
+                        .map(|i| i.to_vk())
+                        .collect::<Vec<_>>(),
+                );
+                all_resolve.extend(
+                    s.resolve_attachments
+                        .iter()
+                        .map(|i| i.to_vk())
+                        .collect::<Vec<_>>(),
+                );
+
+                all_depths.push(match s.depth_stencil_attachment {
+                    Some(d) => d.to_vk(),
+                    None => vk::AttachmentReference {
+                        attachment: vk::ATTACHMENT_UNUSED,
+                        layout: vk::ImageLayout::UNDEFINED,
+                    },
+                });
+                vk::SubpassDescription {
+                    flags: SubpassDescriptionFlags::empty(),
+                    pipeline_bind_point: PipelineBindPoint::GRAPHICS,
+                    input_attachment_count: s.input_attachments.len() as _,
+                    p_input_attachments,
+                    color_attachment_count: s.color_attachments.len() as _,
+                    p_color_attachments,
+                    p_resolve_attachments: if s.resolve_attachments.len() > 0 {
+                        p_resolve_attachments
+                    } else {
+                        std::ptr::null()
+                    },
+                    p_depth_stencil_attachment,
+                    preserve_attachment_count: s.preserve_attachments.len() as _,
+                    p_preserve_attachments: s.preserve_attachments.as_ptr(),
                 }
-                .to_vk(),
-            }
-        } else {
-            vk::AttachmentReference::default()
-        };
-        let subpass = vk::SubpassDescription {
-            flags: vk::SubpassDescriptionFlags::empty(),
-            pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,
-            input_attachment_count: 0,
-            p_input_attachments: std::ptr::null(),
-            color_attachment_count: subpass_color_attachments.len() as _,
-            p_color_attachments: subpass_color_attachments.as_ptr(),
-            p_resolve_attachments: std::ptr::null(),
-            p_depth_stencil_attachment: if render_pass_info.depth_attachment.is_some() {
-                addr_of!(depth_attachment)
-            } else {
-                std::ptr::null()
-            },
-            preserve_attachment_count: 0,
-            p_preserve_attachments: std::ptr::null(),
-        };
+            })
+            .collect::<Vec<_>>();
+        let dependencies = render_pass_info
+            .dependencies
+            .iter()
+            .map(|d| d.to_vk())
+            .collect::<Vec<_>>();
 
-        let subpass_dependency = vk::SubpassDependency {
-            src_subpass: vk::SUBPASS_EXTERNAL,
-            dst_subpass: 0,
-            src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            src_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-            dst_stage_mask: vk::PipelineStageFlags::FRAGMENT_SHADER,
-            dst_access_mask: vk::AccessFlags::SHADER_READ,
-            dependency_flags: vk::DependencyFlags::empty(),
-        };
+        assert!(subpasses.len() > 0);
 
         let create_info = vk::RenderPassCreateInfo {
             s_type: StructureType::RENDER_PASS_CREATE_INFO,
@@ -1646,11 +1672,12 @@ impl VkGpu {
             flags: vk::RenderPassCreateFlags::empty(),
             attachment_count: attachments.len() as _,
             p_attachments: attachments.as_ptr() as *const _,
-            subpass_count: 1,
-            p_subpasses: addr_of!(subpass),
-            dependency_count: 1,
-            p_dependencies: addr_of!(subpass_dependency),
+            subpass_count: subpasses.len() as _,
+            p_subpasses: subpasses.as_ptr(),
+            dependency_count: dependencies.len() as _,
+            p_dependencies: dependencies.as_ptr(),
         };
+
         unsafe {
             self.vk_logical_device()
                 .create_render_pass(&create_info, get_allocation_callbacks())

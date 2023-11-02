@@ -1,9 +1,9 @@
 use engine::{AppState, Backbuffer};
 use gpu::{
-    AccessFlags, BeginRenderPassInfo, CommandBufferSubmitInfo, FramebufferColorAttachment,
-    ImageAspectFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, Offset2D,
-    PipelineBarrierInfo, PipelineStageFlags, Rect2D, RenderPassAttachment, VkCommandBuffer,
-    VkSwapchain,
+    AccessFlags, AttachmentReference, BeginRenderPassInfo, CommandBufferSubmitInfo,
+    FramebufferColorAttachment, ImageAspectFlags, ImageLayout, ImageMemoryBarrier,
+    ImageSubresourceRange, Offset2D, PipelineBarrierInfo, PipelineStageFlags, Rect2D,
+    RenderPassAttachment, SubpassDependency, SubpassDescription, VkCommandBuffer, VkSwapchain,
 };
 use imgui::{Context, FontConfig, FontSource, Ui};
 use imgui_rs_vulkan_renderer::{Options, Renderer};
@@ -166,6 +166,26 @@ fn draw_imgui(
                 extent: backbuffer.size,
             },
             label: Some("ImGUI render pass"),
+            subpasses: &[SubpassDescription {
+                input_attachments: vec![],
+                color_attachments: vec![AttachmentReference {
+                    attachment: 0,
+                    layout: ImageLayout::ColorAttachment,
+                }],
+                resolve_attachments: vec![],
+                depth_stencil_attachment: None,
+                preserve_attachments: vec![],
+            }],
+            // Before writing to the swapchain
+            // wait for the previous render pass to have finished writing it's color attachments
+            dependencies: &[SubpassDependency {
+                src_subpass: SubpassDependency::EXTERNAL,
+                dst_subpass: 0,
+                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+            }],
         });
 
         let cmd_buf = render_imgui.inner();
@@ -240,6 +260,24 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
             }],
             depth_attachment: None,
             stencil_attachment: None,
+            subpasses: vec![SubpassDescription {
+                input_attachments: vec![],
+                color_attachments: vec![AttachmentReference {
+                    attachment: 0,
+                    layout: ImageLayout::ColorAttachment,
+                }],
+                resolve_attachments: vec![],
+                depth_stencil_attachment: None,
+                preserve_attachments: vec![],
+            }],
+            dependencies: vec![SubpassDependency {
+                src_subpass: SubpassDependency::EXTERNAL,
+                dst_subpass: 0,
+                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+            }],
         },
         Some("ImGUI render pass"),
     );
