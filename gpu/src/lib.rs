@@ -773,7 +773,7 @@ impl SubpassDependency {
     pub const EXTERNAL: u32 = u32::MAX;
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Hash)]
 pub struct RenderPassDescription<'a> {
     pub attachments: &'a [RenderPassAttachment],
     pub subpasses: &'a [SubpassDescription<'a>],
