@@ -36,6 +36,7 @@ where
 
     pipeline_state: GraphicsPipelineState,
     pub render_pass: vk::RenderPass,
+    subpasses: Vec<SubpassDescription>,
 }
 
 #[derive(Hash)]
@@ -76,6 +77,8 @@ pub(crate) struct GraphicsPipelineState {
     pub(crate) color_blend_states: Vec<PipelineColorBlendAttachmentState>,
     pub(crate) primitive_topology: PrimitiveTopology,
     pub(crate) color_output_enabled: bool,
+
+    pub(crate) current_subpass: u32,
 }
 
 impl GraphicsPipelineState {
@@ -110,6 +113,7 @@ impl GraphicsPipelineState {
             vertex_inputs: vec![],
             color_blend_states,
             color_output_enabled: true,
+            current_subpass: 0,
         }
     }
 
@@ -699,6 +703,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             depth_bias_setup: None,
             pipeline_state: GraphicsPipelineState::new(render_pass_info),
             render_pass,
+            subpasses: render_pass_info.subpasses.to_vec(),
         }
     }
 
@@ -748,6 +753,15 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
 
     pub fn set_depth_compare_op(&mut self, depth_compare_op: CompareOp) {
         self.pipeline_state.depth_compare_op = depth_compare_op;
+    }
+
+    pub fn advance_to_next_subpass(&mut self) {
+        self.pipeline_state.current_subpass += 1;
+        unsafe {
+            self.gpu
+                .vk_logical_device()
+                .cmd_next_subpass(self.inner(), vk::SubpassContents::default());
+        }
     }
 
     fn prepare_draw(&mut self) {
@@ -925,8 +939,12 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         layout: vk::PipelineLayout,
         render_pass: vk::RenderPass,
     ) -> vk::Pipeline {
-        self.gpu
-            .get_graphics_pipeline(&self.pipeline_state, layout, render_pass)
+        self.gpu.get_graphics_pipeline(
+            &self.pipeline_state,
+            layout,
+            render_pass,
+            &self.subpasses[self.pipeline_state.current_subpass as usize],
+        )
     }
 
     pub fn set_index_buffer(

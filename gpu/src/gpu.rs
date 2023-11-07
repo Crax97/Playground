@@ -48,8 +48,8 @@ use crate::{
     ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
     PushConstantBlockDescription, QueueType, Rect2D, RenderPassAttachments, SampleCount,
     SamplerCreateInfo, SamplerHandle, ShaderAttribute, ShaderModuleCreateInfo, ShaderModuleHandle,
-    ToVk, TransitionInfo, UniformVariableDescription, VkCommandBuffer, VkCommandPool, VkImageView,
-    VkShaderModule,
+    SubpassDescription, ToVk, TransitionInfo, UniformVariableDescription, VkCommandBuffer,
+    VkCommandPool, VkImageView, VkShaderModule,
 };
 use crate::{
     gpu_resource_manager::{
@@ -351,7 +351,7 @@ unsafe extern "system" fn on_message(
     let message = CStr::from_ptr(cb_data.p_message);
     if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::ERROR) {
         log::error!("VULKAN ERROR: {:?}", message);
-        panic!("Invalid vulkan state: {:?}", message);
+        panic!("Invalid vulkan state: check log above");
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::INFO) {
         log::info!("Vulkan - : {:?}", message);
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::WARNING) {
@@ -977,6 +977,7 @@ impl VkGpu {
         &self,
         pipeline_state: &GraphicsPipelineState,
         render_pass: vk::RenderPass,
+        subpass_description: &SubpassDescription,
         layout: vk::PipelineLayout,
     ) -> vk::Pipeline {
         assert!(pipeline_state.vertex_shader.is_valid());
@@ -1007,11 +1008,11 @@ impl VkGpu {
             });
         }
 
-        let color_attachments = pipeline_state
-            .color_blend_states
-            .iter()
-            .map(|c| c.to_vk())
-            .collect::<Vec<_>>();
+        let mut color_attachments = vec![];
+        for subpass in &subpass_description.color_attachments {
+            color_attachments
+                .push(pipeline_state.color_blend_states[subpass.attachment as usize].to_vk());
+        }
 
         let (vertex_input_bindings, vertex_attribute_descriptions) =
             pipeline_state.get_vertex_inputs_description();
@@ -1068,7 +1069,7 @@ impl VkGpu {
             p_dynamic_state: addr_of!(dynamic_state),
             layout,
             render_pass,
-            subpass: 0,
+            subpass: pipeline_state.current_subpass as _,
             base_pipeline_handle: vk::Pipeline::null(),
             base_pipeline_index: 0,
         };
@@ -1088,9 +1089,10 @@ impl VkGpu {
         pipeline_state: &GraphicsPipelineState,
         layout: vk::PipelineLayout,
         render_pass: vk::RenderPass,
+        subpass_description: &SubpassDescription,
     ) -> vk::Pipeline {
         self.state.graphics_pipeline_cache.get(&pipeline_state, || {
-            self.create_graphics_pipeline(pipeline_state, render_pass, layout)
+            self.create_graphics_pipeline(pipeline_state, render_pass, subpass_description, layout)
         })
     }
 
@@ -1601,6 +1603,43 @@ impl VkGpu {
         all_resolve.reserve(5);
         let mut all_depths: Vec<vk::AttachmentReference> = vec![];
         all_depths.reserve(5);
+        let mut all_preserve: Vec<u32> = vec![];
+
+        for s in render_pass_info.subpasses.iter() {
+            all_inputs.extend(
+                s.input_attachments
+                    .iter()
+                    .map(|i| i.to_vk())
+                    .collect::<Vec<_>>(),
+            );
+            all_colors.extend(
+                s.color_attachments
+                    .iter()
+                    .map(|i| i.to_vk())
+                    .collect::<Vec<_>>(),
+            );
+            all_resolve.extend(
+                s.resolve_attachments
+                    .iter()
+                    .map(|i| i.to_vk())
+                    .collect::<Vec<_>>(),
+            );
+
+            all_depths.push(match s.depth_stencil_attachment {
+                Some(d) => d.to_vk(),
+                None => vk::AttachmentReference {
+                    attachment: vk::ATTACHMENT_UNUSED,
+                    layout: vk::ImageLayout::UNDEFINED,
+                },
+            });
+            all_preserve.extend(s.preserve_attachments.clone());
+        }
+
+        let mut cur_input = 0;
+        let mut cur_color = 0;
+        let mut cur_resolve = 0;
+        let mut cur_depth = 0;
+        let mut cur_preserve = 0;
 
         let subpasses = render_pass_info
             .subpasses
@@ -1610,36 +1649,20 @@ impl VkGpu {
                     s.resolve_attachments.len() == 0
                         || s.resolve_attachments.len() == s.color_attachments.len()
                 );
-                let p_input_attachments = all_inputs.as_ptr().add(all_inputs.len());
-                let p_color_attachments = all_colors.as_ptr().add(all_colors.len());
-                let p_resolve_attachments = all_resolve.as_ptr().add(all_resolve.len());
-                let p_depth_stencil_attachment = all_depths.as_ptr().add(all_depths.len());
-                all_inputs.extend(
-                    s.input_attachments
-                        .iter()
-                        .map(|i| i.to_vk())
-                        .collect::<Vec<_>>(),
-                );
-                all_colors.extend(
-                    s.color_attachments
-                        .iter()
-                        .map(|i| i.to_vk())
-                        .collect::<Vec<_>>(),
-                );
-                all_resolve.extend(
-                    s.resolve_attachments
-                        .iter()
-                        .map(|i| i.to_vk())
-                        .collect::<Vec<_>>(),
-                );
-
-                all_depths.push(match s.depth_stencil_attachment {
-                    Some(d) => d.to_vk(),
-                    None => vk::AttachmentReference {
-                        attachment: vk::ATTACHMENT_UNUSED,
-                        layout: vk::ImageLayout::UNDEFINED,
-                    },
-                });
+                let p_input_attachments = all_inputs.as_ptr().add(cur_input);
+                let p_color_attachments = all_colors.as_ptr().add(cur_color);
+                let p_resolve_attachments = all_resolve.as_ptr().add(cur_resolve);
+                let p_depth_stencil_attachment = all_depths.as_ptr().add(cur_depth);
+                let p_preserve_attachments = all_preserve.as_ptr().add(cur_preserve);
+                cur_input += s.input_attachments.len();
+                cur_color += s.color_attachments.len();
+                cur_resolve += s.resolve_attachments.len();
+                cur_depth += if s.depth_stencil_attachment.is_some() {
+                    1
+                } else {
+                    0
+                };
+                cur_preserve += s.preserve_attachments.len();
                 vk::SubpassDescription {
                     flags: SubpassDescriptionFlags::empty(),
                     pipeline_bind_point: PipelineBindPoint::GRAPHICS,
@@ -1654,7 +1677,7 @@ impl VkGpu {
                     },
                     p_depth_stencil_attachment,
                     preserve_attachment_count: s.preserve_attachments.len() as _,
-                    p_preserve_attachments: s.preserve_attachments.as_ptr(),
+                    p_preserve_attachments,
                 }
             })
             .collect::<Vec<_>>();
