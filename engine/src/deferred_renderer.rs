@@ -108,7 +108,7 @@ impl ImageAllocator {
                 let image = gpu
                     .make_image(
                         &gpu::ImageCreateInfo {
-                            label: Some(&format!("Backing image - {}", label)),
+                            label: Some(label),
                             width: desc.width,
                             height: desc.height,
                             depth: 1,
@@ -451,146 +451,33 @@ impl DeferredRenderingPipeline {
         draw_hashmap: &HashMap<&MasterMaterial, Vec<DrawCall>>,
         render_pass: &mut VkRenderPassCommand,
         camera_index: u32,
-        camera_buffer: &BufferHandle,
-        light_buffer: &BufferHandle,
+        frame_buffers: &FrameBuffers,
     ) {
         let mut total_primitives_rendered = 0;
         for (master, material_draw_calls) in draw_hashmap.iter() {
             {
-                let permutation = master
-                    .get_permutation(pipeline_target)
-                    .expect("failed to fetch permutation {pipeline_target:?}");
-                render_pass.set_vertex_shader(permutation.vertex_shader.clone());
-                if let Some(fragment_shader) = &permutation.fragment_shader {
-                    render_pass.set_fragment_shader(fragment_shader.clone());
-                }
-                render_pass.bind_resources(
-                    0,
-                    &[
-                        Binding {
-                            ty: gpu::DescriptorBindingType::StorageBuffer {
-                                handle: camera_buffer.clone(),
-                                offset: 0,
-                                range: gpu::WHOLE_SIZE as _,
-                            },
-                            binding_stage: ShaderStage::ALL_GRAPHICS,
-                            location: 0,
-                        },
-                        Binding {
-                            ty: gpu::DescriptorBindingType::UniformBuffer {
-                                handle: light_buffer.clone(),
-                                offset: 0,
-                                range: 100 * size_of::<ObjectDrawInfo>(),
-                            },
-                            binding_stage: ShaderStage::ALL_GRAPHICS,
-                            location: 1,
-                        },
-                    ],
-                );
+                bind_master_material(master, pipeline_target, render_pass, frame_buffers);
 
                 for (idx, draw_call) in material_draw_calls.iter().enumerate() {
                     let material = &draw_call.material;
                     let material = resource_map.get(material);
-                    let primitive_label = render_pass.begin_debug_region(
+                    let draw_label = render_pass.begin_debug_region(
                         &format!(
                             "{} - {}, total primitives rendered {total_primitives_rendered}",
                             material.name, idx
                         ),
                         [0.0, 0.3, 0.4, 1.0],
                     );
-
-                    render_pass.set_index_buffer(
-                        draw_call.prim.index_buffer.clone(),
-                        IndexType::Uint32,
-                        0,
+                    draw_mesh_primitive(
+                        render_pass,
+                        material,
+                        master,
+                        &draw_call.prim,
+                        draw_call.transform,
+                        resource_map,
+                        camera_index,
                     );
-
-                    let mut user_bindings = vec![];
-                    user_bindings.extend(&mut master.texture_inputs.iter().enumerate().map(
-                        |(i, tex_info)| {
-                            let texture_parameter = &material.current_inputs[&tex_info.name];
-                            let tex = resource_map.get(texture_parameter);
-
-                            // TODO: these can be avoided
-                            let view = resource_map.get(&tex.image_view);
-                            let sampler = resource_map.get(&tex.sampler);
-                            Binding {
-                                ty: gpu::DescriptorBindingType::ImageView {
-                                    image_view_handle: view.view.clone(),
-                                    sampler_handle: sampler.0.clone(),
-                                },
-                                binding_stage: tex_info.shader_stage,
-                                location: i as _,
-                            }
-                        },
-                    ));
-                    if material.parameter_buffer.is_valid() {
-                        user_bindings.push(Binding {
-                            ty: gpu::DescriptorBindingType::UniformBuffer {
-                                handle: material.parameter_buffer.clone(),
-                                offset: 0,
-                                range: gpu::WHOLE_SIZE as _,
-                            },
-                            binding_stage: master.parameter_shader_stages,
-                            location: master.texture_inputs.len() as u32,
-                        });
-                    }
-
-                    render_pass.set_vertex_buffers(&[
-                        VertexBindingInfo {
-                            handle: draw_call.prim.position_component.clone(),
-                            location: 0,
-                            offset: 0,
-                            stride: std::mem::size_of::<Vector3<f32>>() as _,
-                            format: ImageFormat::RgbFloat32,
-                            input_rate: InputRate::PerVertex,
-                        },
-                        VertexBindingInfo {
-                            handle: draw_call.prim.color_component.clone(),
-                            location: 1,
-                            offset: 0,
-                            stride: std::mem::size_of::<Vector3<f32>>() as _,
-                            format: ImageFormat::RgbFloat32,
-                            input_rate: InputRate::PerVertex,
-                        },
-                        VertexBindingInfo {
-                            handle: draw_call.prim.normal_component.clone(),
-                            location: 2,
-                            offset: 0,
-                            stride: std::mem::size_of::<Vector3<f32>>() as _,
-                            format: ImageFormat::RgbFloat32,
-                            input_rate: InputRate::PerVertex,
-                        },
-                        VertexBindingInfo {
-                            handle: draw_call.prim.tangent_component.clone(),
-                            location: 3,
-                            offset: 0,
-                            stride: std::mem::size_of::<Vector3<f32>>() as _,
-                            format: ImageFormat::RgbFloat32,
-                            input_rate: InputRate::PerVertex,
-                        },
-                        VertexBindingInfo {
-                            handle: draw_call.prim.uv_component.clone(),
-                            location: 4,
-                            offset: 0,
-                            stride: std::mem::size_of::<Vector2<f32>>() as _,
-                            format: ImageFormat::RgFloat32,
-                            input_rate: InputRate::PerVertex,
-                        },
-                    ]);
-                    render_pass.bind_resources(1, &user_bindings);
-                    render_pass.push_constants(
-                        0,
-                        0,
-                        bytemuck::cast_slice(&[ObjectDrawInfo {
-                            model: draw_call.transform,
-                            camera_index,
-                        }]),
-                        ShaderStage::ALL_GRAPHICS,
-                    );
-                    render_pass.draw_indexed(draw_call.prim.index_count, 1, 0, 0, 0);
-
-                    primitive_label.end();
+                    draw_label.end();
                     total_primitives_rendered += 1;
                 }
                 render_pass.insert_debug_label(
@@ -696,30 +583,89 @@ impl DeferredRenderingPipeline {
         resource_map: &ResourceMap,
     ) {
         const SKYBOX_SCALE: f32 = 1.0;
-        let permutation = skybox_master
-            .get_permutation(PipelineTarget::ColorAndDepth)
-            .expect("failed to fetch pipeline {pipeline_target:?}");
-        render_pass.set_vertex_shader(permutation.vertex_shader.clone());
-        render_pass.set_fragment_shader(
-            permutation
-                .fragment_shader
-                .clone()
-                .expect("No fragment shader in skybox material"),
+        let skybox_transform =
+            Matrix4::new_translation(&camera_location.coords) * Matrix4::new_scaling(SKYBOX_SCALE);
+        render_pass.set_enable_depth_test(false);
+        render_pass.set_depth_write_enabled(false);
+        render_pass.set_color_output_enabled(true);
+        render_pass.set_cull_mode(gpu::CullMode::None);
+        render_pass.set_depth_compare_op(gpu::CompareOp::Always);
+        draw_mesh_primitive(
+            render_pass,
+            skybox_material,
+            skybox_master,
+            &skybox_mesh.primitives[0],
+            skybox_transform,
+            resource_map,
+            0,
         );
-        // render_pass.bind_resources(0, render_pass.bindings);
-        let skybox_label = render_pass.begin_debug_region(
-            &format!(
-                "Rendering scene skybox with material {} ",
-                skybox_material.name,
-            ),
-            [0.0, 0.3, 0.4, 1.0],
-        );
-        let mut user_bindings = skybox_master
+    }
+
+    pub fn set_irradiance_texture(
+        &mut self,
+        irradiance_map: Option<ResourceHandle<crate::Texture>>,
+    ) {
+        self.irradiance_map = irradiance_map;
+    }
+}
+
+fn bind_master_material(
+    master: &MasterMaterial,
+    pipeline_target: PipelineTarget,
+    render_pass: &mut VkRenderPassCommand<'_, '_>,
+    frame_buffers: &FrameBuffers,
+) {
+    let permutation = master
+        .get_permutation(pipeline_target)
+        .expect("failed to fetch permutation {pipeline_target:?}");
+    render_pass.set_vertex_shader(permutation.vertex_shader.clone());
+    if let Some(fragment_shader) = &permutation.fragment_shader {
+        render_pass.set_fragment_shader(fragment_shader.clone());
+    }
+    render_pass.bind_resources(
+        0,
+        &[
+            Binding {
+                ty: gpu::DescriptorBindingType::StorageBuffer {
+                    handle: frame_buffers.camera_buffer.clone(),
+                    offset: 0,
+                    range: gpu::WHOLE_SIZE as _,
+                },
+                binding_stage: ShaderStage::ALL_GRAPHICS,
+                location: 0,
+            },
+            Binding {
+                ty: gpu::DescriptorBindingType::UniformBuffer {
+                    handle: frame_buffers.light_buffer.clone(),
+                    offset: 0,
+                    range: 100 * size_of::<ObjectDrawInfo>(),
+                },
+                binding_stage: ShaderStage::ALL_GRAPHICS,
+                location: 1,
+            },
+        ],
+    );
+}
+
+fn draw_mesh_primitive(
+    render_pass: &mut VkRenderPassCommand,
+    material: &MaterialInstance,
+    master: &MasterMaterial,
+    primitive: &MeshPrimitive,
+    model: Matrix4<f32>,
+    resource_map: &ResourceMap,
+    camera_index: u32,
+) {
+    render_pass.set_index_buffer(primitive.index_buffer.clone(), IndexType::Uint32, 0);
+
+    let mut user_bindings = vec![];
+    user_bindings.extend(
+        &mut master
             .texture_inputs
             .iter()
             .enumerate()
-            .map(|(i, tex)| {
-                let texture_parameter = &skybox_material.current_inputs[&tex.name];
+            .map(|(i, tex_info)| {
+                let texture_parameter = &material.current_inputs[&tex_info.name];
                 let tex = resource_map.get(texture_parameter);
 
                 // TODO: these can be avoided
@@ -730,95 +676,76 @@ impl DeferredRenderingPipeline {
                         image_view_handle: view.view.clone(),
                         sampler_handle: sampler.0.clone(),
                     },
-                    binding_stage: ShaderStage::ALL_GRAPHICS,
+                    binding_stage: tex_info.shader_stage,
                     location: i as _,
                 }
-            })
-            .collect::<Vec<_>>();
-        if skybox_material.parameter_buffer.is_valid() {
-            user_bindings.push(Binding {
-                ty: gpu::DescriptorBindingType::UniformBuffer {
-                    handle: skybox_material.parameter_buffer.clone(),
-                    offset: 0,
-                    range: gpu::WHOLE_SIZE as _,
-                },
-                binding_stage: ShaderStage::ALL_GRAPHICS,
-                location: skybox_master.texture_inputs.len() as u32,
-            });
-        }
-
-        render_pass.set_index_buffer(
-            skybox_mesh.primitives[0].index_buffer.clone(),
-            IndexType::Uint32,
-            0,
-        );
-        render_pass.set_vertex_buffers(&[
-            VertexBindingInfo {
-                handle: skybox_mesh.primitives[0].position_component.clone(),
-                location: 0,
+            }),
+    );
+    if material.parameter_buffer.is_valid() {
+        user_bindings.push(Binding {
+            ty: gpu::DescriptorBindingType::UniformBuffer {
+                handle: material.parameter_buffer.clone(),
                 offset: 0,
-                stride: std::mem::size_of::<Vector3<f32>>() as _,
-                format: ImageFormat::RgbFloat32,
-                input_rate: InputRate::PerVertex,
+                range: gpu::WHOLE_SIZE as _,
             },
-            VertexBindingInfo {
-                handle: skybox_mesh.primitives[0].color_component.clone(),
-                location: 1,
-                offset: 0,
-                stride: std::mem::size_of::<Vector3<f32>>() as _,
-                format: ImageFormat::RgbFloat32,
-                input_rate: InputRate::PerVertex,
-            },
-            VertexBindingInfo {
-                handle: skybox_mesh.primitives[0].normal_component.clone(),
-                location: 2,
-                offset: 0,
-                stride: std::mem::size_of::<Vector3<f32>>() as _,
-                format: ImageFormat::RgbFloat32,
-                input_rate: InputRate::PerVertex,
-            },
-            VertexBindingInfo {
-                handle: skybox_mesh.primitives[0].tangent_component.clone(),
-                location: 3,
-                offset: 0,
-                stride: std::mem::size_of::<Vector3<f32>>() as _,
-                format: ImageFormat::RgbFloat32,
-                input_rate: InputRate::PerVertex,
-            },
-            VertexBindingInfo {
-                handle: skybox_mesh.primitives[0].uv_component.clone(),
-                location: 4,
-                offset: 0,
-                stride: std::mem::size_of::<Vector2<f32>>() as _,
-                format: ImageFormat::RgFloat32,
-                input_rate: InputRate::PerVertex,
-            },
-        ]);
-        render_pass.bind_resources(1, &user_bindings);
-        render_pass.push_constants(
-            0,
-            0,
-            bytemuck::cast_slice(&[ObjectDrawInfo {
-                model: Matrix4::new_translation(&camera_location.coords)
-                    * Matrix4::new_scaling(SKYBOX_SCALE),
-                camera_index: 0,
-            }]),
-            ShaderStage::ALL_GRAPHICS,
-        );
-
-        render_pass.set_enable_depth_test(false);
-        render_pass.set_depth_write_enabled(false);
-        render_pass.set_cull_mode(gpu::CullMode::None);
-        render_pass.draw_indexed(skybox_mesh.primitives[0].index_count, 1, 0, 0, 0);
-        skybox_label.end();
+            binding_stage: master.parameter_shader_stages,
+            location: master.texture_inputs.len() as u32,
+        });
     }
 
-    pub fn set_irradiance_texture(
-        &mut self,
-        irradiance_map: Option<ResourceHandle<crate::Texture>>,
-    ) {
-        self.irradiance_map = irradiance_map;
-    }
+    render_pass.set_vertex_buffers(&[
+        VertexBindingInfo {
+            handle: primitive.position_component.clone(),
+            location: 0,
+            offset: 0,
+            stride: std::mem::size_of::<Vector3<f32>>() as _,
+            format: ImageFormat::RgbFloat32,
+            input_rate: InputRate::PerVertex,
+        },
+        VertexBindingInfo {
+            handle: primitive.color_component.clone(),
+            location: 1,
+            offset: 0,
+            stride: std::mem::size_of::<Vector3<f32>>() as _,
+            format: ImageFormat::RgbFloat32,
+            input_rate: InputRate::PerVertex,
+        },
+        VertexBindingInfo {
+            handle: primitive.normal_component.clone(),
+            location: 2,
+            offset: 0,
+            stride: std::mem::size_of::<Vector3<f32>>() as _,
+            format: ImageFormat::RgbFloat32,
+            input_rate: InputRate::PerVertex,
+        },
+        VertexBindingInfo {
+            handle: primitive.tangent_component.clone(),
+            location: 3,
+            offset: 0,
+            stride: std::mem::size_of::<Vector3<f32>>() as _,
+            format: ImageFormat::RgbFloat32,
+            input_rate: InputRate::PerVertex,
+        },
+        VertexBindingInfo {
+            handle: primitive.uv_component.clone(),
+            location: 4,
+            offset: 0,
+            stride: std::mem::size_of::<Vector2<f32>>() as _,
+            format: ImageFormat::RgFloat32,
+            input_rate: InputRate::PerVertex,
+        },
+    ]);
+    render_pass.bind_resources(1, &user_bindings);
+    render_pass.push_constants(
+        0,
+        0,
+        bytemuck::cast_slice(&[ObjectDrawInfo {
+            model,
+            camera_index,
+        }]),
+        ShaderStage::ALL_GRAPHICS,
+    );
+    render_pass.draw_indexed(primitive.index_count, 1, 0, 0, 0);
 }
 
 impl RenderingPipeline for DeferredRenderingPipeline {
@@ -936,8 +863,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let color_desc = RenderImageDescription {
             format: ImageFormat::Rgba8,
             samples: SampleCount::Sample1,
-            width: backbuffer.size.width,
-            height: backbuffer.size.height,
+            width: 1920,
+            height: 1080,
             view_type: ImageViewType::Type2D,
         };
 
@@ -1177,24 +1104,30 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 &draw_hashmap,
                 &mut gbuffer_render_pass,
                 0,
-                &current_buffers.camera_buffer,
-                &current_buffers.light_buffer,
+                &current_buffers,
             );
 
             gbuffer_render_pass.advance_to_next_subpass();
 
-            //        if let Some(material) = skybox_material {
-            //            let cube_mesh = resource_map.get(&self.cube_mesh);
-            //            let skybox_master = resource_map.get(&material.owner);
-            //            Self::draw_skybox(
-            //                &pov.location,
-            //                ctx,
-            //                cube_mesh,
-            //                material,
-            //                skybox_master,
-            //                resource_map,
-            //            );
-            //        }
+            if let Some(material) = skybox_material {
+                let cube_mesh = resource_map.get(&self.cube_mesh);
+                let skybox_master = resource_map.get(&material.owner);
+                bind_master_material(
+                    skybox_master,
+                    PipelineTarget::ColorAndDepth,
+                    &mut gbuffer_render_pass,
+                    &current_buffers,
+                );
+                Self::draw_skybox(
+                    &pov.location,
+                    &mut gbuffer_render_pass,
+                    cube_mesh,
+                    material,
+                    skybox_master,
+                    resource_map,
+                );
+            }
+
             gbuffer_render_pass.set_front_face(gpu::FrontFace::CounterClockWise);
             gbuffer_render_pass.set_enable_depth_test(true);
             gbuffer_render_pass.set_depth_write_enabled(false);
@@ -1207,8 +1140,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 &draw_hashmap,
                 &mut gbuffer_render_pass,
                 0,
-                &current_buffers.camera_buffer,
-                &current_buffers.light_buffer,
+                &current_buffers,
             );
 
             gbuffer_render_pass.advance_to_next_subpass();
