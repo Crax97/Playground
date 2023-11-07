@@ -20,8 +20,7 @@ use gpu::{
     FramebufferColorAttachment, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle,
     ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, InputRate,
     MemoryDomain, Offset2D, PipelineStageFlags, Rect2D, SamplerCreateInfo, ShaderModuleCreateInfo,
-    ShaderModuleHandle, ShaderStage, SubpassDependency, SubpassDescription, VertexBindingInfo,
-    VkGpu,
+    ShaderModuleHandle, ShaderStage, SubpassDescription, VertexBindingInfo, VkGpu,
 };
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
@@ -293,8 +292,8 @@ fn cubemap_main_loop(
             image_view: view.clone(),
             load_op: gpu::ColorLoadOp::DontCare,
             store_op: gpu::AttachmentStoreOp::Store,
-            initial_layout: gpu::ImageLayout::Undefined,
-            final_layout: gpu::ImageLayout::ShaderReadOnly,
+            initial_layout: gpu::ImageLayout::ColorAttachment,
+            final_layout: gpu::ImageLayout::ColorAttachment,
         }];
         let mut command_buffer = gpu.create_command_buffer(gpu::QueueType::Graphics)?;
         {
@@ -317,14 +316,7 @@ fn cubemap_main_loop(
                     depth_stencil_attachment: None,
                     preserve_attachments: vec![],
                 }],
-                dependencies: &[SubpassDependency {
-                    src_subpass: SubpassDependency::EXTERNAL,
-                    dst_subpass: 0,
-                    src_stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-                    dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                    src_access_mask: AccessFlags::empty(),
-                    dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                }],
+                dependencies: &[],
             });
             render_pass_command.set_vertex_shader(vertex_module.clone());
             render_pass_command.set_fragment_shader(fragment_shader_to_apply.clone());
@@ -428,6 +420,27 @@ fn cubemap_main_loop(
             base_mip_level: 0,
         },
     })?;
+    gpu.transition_image_layout(
+        &backing_image,
+        gpu::TransitionInfo {
+            layout: gpu::ImageLayout::ColorAttachment,
+            access_mask: AccessFlags::empty(),
+            stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+        },
+        gpu::TransitionInfo {
+            layout: gpu::ImageLayout::ShaderReadOnly,
+            access_mask: AccessFlags::SHADER_READ,
+            stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
+        },
+        ImageSubresourceRange {
+            aspect_mask: ImageAspectFlags::COLOR,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 6,
+        },
+    )?;
+    gpu.wait_device_idle()?;
     Ok((backing_image, view))
 }
 
