@@ -582,6 +582,10 @@ impl DeferredRenderingPipeline {
         skybox_master: &MasterMaterial,
         resource_map: &ResourceMap,
     ) {
+        let label = render_pass.begin_debug_region(
+            &format!("Skybox - using material {}", skybox_master.name),
+            [0.2, 0.2, 0.0, 1.0],
+        );
         const SKYBOX_SCALE: f32 = 1.0;
         let skybox_transform =
             Matrix4::new_translation(&camera_location.coords) * Matrix4::new_scaling(SKYBOX_SCALE);
@@ -599,6 +603,7 @@ impl DeferredRenderingPipeline {
             resource_map,
             0,
         );
+        label.end();
     }
 
     pub fn set_irradiance_texture(

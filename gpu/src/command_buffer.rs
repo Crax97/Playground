@@ -36,6 +36,7 @@ where
 
     pipeline_state: GraphicsPipelineState,
     pub render_pass: vk::RenderPass,
+    debug_label: ScopedDebugLabel,
     subpasses: Vec<SubpassDescription>,
 }
 
@@ -592,6 +593,11 @@ impl ScopedDebugLabel {
             label.end();
         }
     }
+    fn end_from_render_pass(&mut self) {
+        if let Some(label) = self.inner.take() {
+            label.end();
+        }
+    }
 }
 
 impl Drop for ScopedDebugLabel {
@@ -696,6 +702,11 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 );
         };
 
+        let debug_label = command_buffer.begin_debug_region(
+            render_pass_info.label.unwrap_or("Graphics render pass"),
+            [0.6, 0.6, 0.6, 1.0],
+        );
+
         Self {
             command_buffer,
             has_draw_command: false,
@@ -703,6 +714,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             depth_bias_setup: None,
             pipeline_state: GraphicsPipelineState::new(render_pass_info),
             render_pass,
+            debug_label,
             subpasses: render_pass_info.subpasses.to_vec(),
         }
     }
@@ -1052,6 +1064,7 @@ impl<'c, 'g> Deref for VkRenderPassCommand<'c, 'g> {
 
 impl<'c, 'g> Drop for VkRenderPassCommand<'c, 'g> {
     fn drop(&mut self) {
+        self.debug_label.end_from_render_pass();
         unsafe {
             self.command_buffer
                 .gpu
