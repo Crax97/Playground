@@ -13,12 +13,13 @@ use crate::{
 use gpu::{
     AccessFlags, AttachmentReference, AttachmentStoreOp, Binding, BindingType, BlendMode, BlendOp,
     BlendState, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorComponentFlags, ColorLoadOp,
-    Extent2D, FragmentStageInfo, FramebufferColorAttachment, Gpu, Handle, ImageAspectFlags,
-    ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier, ImageUsageFlags, ImageViewHandle,
-    ImageViewType, IndexType, InputRate, LifetimedCache, MemoryDomain, PipelineStageFlags,
-    PushConstantRange, RenderPassAttachment, SampleCount, SamplerHandle, ShaderModuleCreateInfo,
-    ShaderModuleHandle, ShaderStage, StencilLoadOp, SubpassDependency, SubpassDescription,
-    VertexBindingInfo, VertexStageInfo, VkCommandBuffer, VkGpu, VkRenderPassCommand, VkSwapchain,
+    Extent2D, FragmentStageInfo, FramebufferColorAttachment, FramebufferDepthAttachment, Gpu,
+    Handle, ImageAspectFlags, ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier,
+    ImageUsageFlags, ImageViewHandle, ImageViewType, IndexType, InputRate, LifetimedCache,
+    MemoryDomain, Offset2D, PipelineStageFlags, PushConstantRange, Rect2D, RenderPassAttachment,
+    SampleCount, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
+    StencilLoadOp, SubpassDependency, SubpassDescription, VertexBindingInfo, VertexStageInfo,
+    VkCommandBuffer, VkGpu, VkRenderPassCommand, VkSwapchain,
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 use resource_map::{ResourceHandle, ResourceMap};
@@ -908,41 +909,95 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             .gpu
             .create_command_buffer(gpu::QueueType::Graphics)?;
 
-        //            ctx.render_pass_command.set_depth_bias(
-        //                self.depth_bias_constant,
-        //                self.depth_bias_clamp,
-        //                self.depth_bias_slope,
-        //            );
-        //
-        //            ctx.render_pass_command.set_cull_mode(gpu::CullMode::Front);
-        //            ctx.render_pass_command
-        //                .set_depth_compare_op(gpu::CompareOp::LessEqual);
-        //
-        //            ctx.render_pass_command.set_color_output_enabled(false);
-        //            ctx.render_pass_command.set_enable_depth_test(true);
-        //            ctx.render_pass_command.set_depth_write_enabled(true);
-        //
-        //            for (i, pov) in per_frame_data.iter().enumerate().skip(1) {
-        //                ctx.render_pass_command.set_viewport(gpu::Viewport {
-        //                    x: pov.viewport_size_offset.x,
-        //                    y: pov.viewport_size_offset.y,
-        //                    width: pov.viewport_size_offset.z,
-        //                    height: pov.viewport_size_offset.w,
-        //                    min_depth: 0.0,
-        //                    max_depth: 1.0,
-        //                });
-        //
-        //                Self::main_render_loop(
-        //                    resource_map,
-        //                    PipelineTarget::DepthOnly,
-        //                    &draw_hashmap,
-        //                    i as _,
-        //                    ctx,
-        //                    &current_buffers.camera_buffer,
-        //                    &current_buffers.light_buffer,
-        //                );
-        //            }
+        {
+            let mut shadow_atlas_command =
+                graphics_command_buffer.begin_render_pass(&gpu::BeginRenderPassInfo {
+                    label: Some("Shadow atlas"),
+                    color_attachments: &[],
+                    depth_attachment: Some(FramebufferDepthAttachment {
+                        image_view: shadow_atlas_component.view.clone(),
+                        load_op: gpu::DepthLoadOp::Clear(1.0),
+                        store_op: gpu::AttachmentStoreOp::Store,
+                        initial_layout: ImageLayout::Undefined,
+                        final_layout: ImageLayout::DepthStencilAttachment,
+                    }),
+                    stencil_attachment: None,
+                    render_area: Rect2D {
+                        offset: Offset2D::default(),
+                        extent: Extent2D {
+                            width: SHADOW_ATLAS_WIDTH,
+                            height: SHADOW_ATLAS_HEIGHT,
+                        },
+                    },
+                    subpasses: &[SubpassDescription {
+                        input_attachments: vec![],
+                        color_attachments: vec![],
+                        resolve_attachments: vec![],
+                        depth_stencil_attachment: Some(AttachmentReference {
+                            attachment: 0,
+                            layout: ImageLayout::DepthStencilAttachment,
+                        }),
+                        preserve_attachments: vec![],
+                    }],
+                    dependencies: &[],
+                });
 
+            shadow_atlas_command.set_depth_bias(
+                self.depth_bias_constant,
+                self.depth_bias_clamp,
+                self.depth_bias_slope,
+            );
+
+            shadow_atlas_command.set_cull_mode(gpu::CullMode::Front);
+            shadow_atlas_command.set_depth_compare_op(gpu::CompareOp::LessEqual);
+
+            shadow_atlas_command.set_color_output_enabled(false);
+            shadow_atlas_command.set_enable_depth_test(true);
+            shadow_atlas_command.set_depth_write_enabled(true);
+
+            for (i, pov) in per_frame_data.iter().enumerate().skip(1) {
+                shadow_atlas_command.set_viewport(gpu::Viewport {
+                    x: pov.viewport_size_offset.x,
+                    y: pov.viewport_size_offset.y,
+                    width: pov.viewport_size_offset.z,
+                    height: pov.viewport_size_offset.w,
+                    min_depth: 0.0,
+                    max_depth: 1.0,
+                });
+
+                Self::main_render_loop(
+                    resource_map,
+                    PipelineTarget::DepthOnly,
+                    &draw_hashmap,
+                    &mut shadow_atlas_command,
+                    i as _,
+                    &current_buffers,
+                );
+            }
+        }
+
+        graphics_command_buffer.pipeline_barrier(&gpu::PipelineBarrierInfo {
+            src_stage_mask: PipelineStageFlags::LATE_FRAGMENT_TESTS,
+            dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
+            memory_barriers: &[],
+            buffer_memory_barriers: &[],
+            image_memory_barriers: &[ImageMemoryBarrier {
+                src_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                dst_access_mask: AccessFlags::SHADER_READ,
+                old_layout: ImageLayout::DepthStencilAttachment,
+                new_layout: ImageLayout::ShaderReadOnly,
+                src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+                dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+                image: shadow_atlas_component.image,
+                subresource_range: gpu::ImageSubresourceRange {
+                    aspect_mask: ImageAspectFlags::DEPTH,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+            }],
+        });
         {
             let mut gbuffer_render_pass =
                 graphics_command_buffer.begin_render_pass(&gpu::BeginRenderPassInfo {
