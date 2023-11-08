@@ -941,6 +941,7 @@ pub enum BindingType {
     Storage,
     Sampler,
     CombinedImageSampler,
+    InputAttachment,
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord, Debug)]
@@ -1185,6 +1186,9 @@ impl DescriptorSetInfo2 {
                 crate::DescriptorBindingType::UniformBuffer { .. } => BindingType::Uniform,
                 crate::DescriptorBindingType::StorageBuffer { .. } => BindingType::Storage,
                 crate::DescriptorBindingType::ImageView { .. } => BindingType::CombinedImageSampler,
+                crate::DescriptorBindingType::InputAttachment { .. } => {
+                    BindingType::InputAttachment
+                }
             };
             let binding = BindingElement {
                 binding_type: descriptor_type,

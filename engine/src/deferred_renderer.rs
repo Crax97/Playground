@@ -928,7 +928,7 @@ impl DeferredRenderingPipeline {
                             src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                             dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
                             src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                            dst_access_mask: AccessFlags::SHADER_READ,
+                            dst_access_mask: AccessFlags::INPUT_ATTACHMENT_READ,
                         },
                     ],
                 });
@@ -991,45 +991,40 @@ impl DeferredRenderingPipeline {
                 0,
                 &[
                     Binding {
-                        ty: gpu::DescriptorBindingType::ImageView {
+                        ty: gpu::DescriptorBindingType::InputAttachment {
                             image_view_handle: pos_component.view.clone(),
-                            sampler_handle: self.gbuffer_nearest_sampler.clone(),
                             layout: gpu::ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 0,
                     },
                     Binding {
-                        ty: gpu::DescriptorBindingType::ImageView {
+                        ty: gpu::DescriptorBindingType::InputAttachment {
                             image_view_handle: normal_component.view.clone(),
-                            sampler_handle: self.gbuffer_nearest_sampler.clone(),
                             layout: gpu::ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 1,
                     },
                     Binding {
-                        ty: gpu::DescriptorBindingType::ImageView {
+                        ty: gpu::DescriptorBindingType::InputAttachment {
                             image_view_handle: diffuse_component.view.clone(),
-                            sampler_handle: self.gbuffer_nearest_sampler.clone(),
                             layout: gpu::ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 2,
                     },
                     Binding {
-                        ty: gpu::DescriptorBindingType::ImageView {
+                        ty: gpu::DescriptorBindingType::InputAttachment {
                             image_view_handle: emissive_component.view.clone(),
-                            sampler_handle: self.gbuffer_nearest_sampler.clone(),
                             layout: gpu::ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 3,
                     },
                     Binding {
-                        ty: gpu::DescriptorBindingType::ImageView {
+                        ty: gpu::DescriptorBindingType::InputAttachment {
                             image_view_handle: pbr_component.view.clone(),
-                            sampler_handle: self.gbuffer_nearest_sampler.clone(),
                             layout: gpu::ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,

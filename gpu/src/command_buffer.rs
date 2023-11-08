@@ -246,6 +246,10 @@ pub enum DescriptorBindingType {
         sampler_handle: SamplerHandle,
         layout: ImageLayout,
     },
+    InputAttachment {
+        image_view_handle: ImageViewHandle,
+        layout: ImageLayout,
+    },
 }
 
 impl Default for DescriptorBindingType {
@@ -268,6 +272,7 @@ impl DescriptorSetLayoutDescription {
                 BindingType::Storage => vk::DescriptorType::STORAGE_BUFFER,
                 BindingType::CombinedImageSampler => vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
                 BindingType::Sampler => vk::DescriptorType::SAMPLER,
+                BindingType::InputAttachment => vk::DescriptorType::INPUT_ATTACHMENT,
             };
             let binding = vk::DescriptorSetLayoutBinding {
                 binding: binding_index as _,

@@ -348,7 +348,7 @@ unsafe extern "system" fn on_message(
     let message = CStr::from_ptr(cb_data.p_message);
     if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::ERROR) {
         // log::error!("VULKAN ERROR: {:?}", message);
-        // panic!("Invalid vulkan state: check log above");
+        panic!("Invalid vulkan state: check log above");
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::INFO) {
         log::info!("Vulkan - : {:?}", message);
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::WARNING) {
@@ -1168,6 +1168,7 @@ impl VkGpu {
                 let mut combined_image_samplers = 0;
                 let mut uniform_buffers = 0;
                 let mut storage_buffers = 0;
+                let mut input_attachments = 0;
 
                 for binding in &descriptor_set_bindings.elements {
                     match binding.binding_type {
@@ -1175,6 +1176,7 @@ impl VkGpu {
                         crate::BindingType::Storage => storage_buffers += 1,
                         crate::BindingType::Sampler => samplers += 1,
                         crate::BindingType::CombinedImageSampler => combined_image_samplers += 1,
+                        crate::BindingType::InputAttachment => input_attachments += 1,
                     }
                 }
 
@@ -1201,6 +1203,12 @@ impl VkGpu {
                     pool_sizes.push(vk::DescriptorPoolSize {
                         ty: vk::DescriptorType::STORAGE_BUFFER,
                         descriptor_count: storage_buffers as _,
+                    });
+                }
+                if input_attachments > 0 {
+                    pool_sizes.push(vk::DescriptorPoolSize {
+                        ty: vk::DescriptorType::INPUT_ATTACHMENT,
+                        descriptor_count: input_attachments as _,
                     });
                 }
                 let pool = unsafe {
@@ -1305,6 +1313,20 @@ impl VkGpu {
                     image_layout: layout.to_vk(),
                 },
                 vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            )),
+            crate::DescriptorBindingType::InputAttachment {
+                image_view_handle,
+                layout,
+            } => image_descriptors.push((
+                b.location,
+                DescriptorImageInfo {
+                    sampler: vk::Sampler::null(),
+                    image_view: self
+                        .resolve_resource::<VkImageView>(&image_view_handle)
+                        .inner,
+                    image_layout: layout.to_vk(),
+                },
+                vk::DescriptorType::INPUT_ATTACHMENT,
             )),
         });
 
@@ -1506,7 +1528,9 @@ impl VkGpu {
                         spirv_reflect::types::ReflectDescriptorType::StorageBufferDynamic => {
                             todo!()
                         }
-                        spirv_reflect::types::ReflectDescriptorType::InputAttachment => todo!(),
+                        spirv_reflect::types::ReflectDescriptorType::InputAttachment => {
+                            crate::BindingType::InputAttachment
+                        }
                         spirv_reflect::types::ReflectDescriptorType::AccelerationStructureNV => {
                             todo!()
                         }
@@ -1594,13 +1618,9 @@ impl VkGpu {
             });
         };
         let mut all_inputs: Vec<vk::AttachmentReference> = vec![];
-        all_inputs.reserve(5);
         let mut all_colors: Vec<vk::AttachmentReference> = vec![];
-        all_colors.reserve(5);
         let mut all_resolve: Vec<vk::AttachmentReference> = vec![];
-        all_resolve.reserve(5);
         let mut all_depths: Vec<vk::AttachmentReference> = vec![];
-        all_depths.reserve(5);
         let mut all_preserve: Vec<u32> = vec![];
 
         for s in render_pass_info.subpasses.iter() {
