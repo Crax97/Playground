@@ -819,7 +819,7 @@ impl DeferredRenderingPipeline {
                         load_op: gpu::DepthLoadOp::Clear(1.0),
                         store_op: AttachmentStoreOp::Store,
                         initial_layout: ImageLayout::Undefined,
-                        final_layout: ImageLayout::DepthStencilAttachment,
+                        final_layout: ImageLayout::DepthStencilReadOnly,
                     }),
                     stencil_attachment: None,
                     render_area: gpu::Rect2D {
@@ -905,12 +905,22 @@ impl DeferredRenderingPipeline {
                     ],
                     dependencies: &[
                         SubpassDependency {
+                            src_subpass: SubpassDependency::EXTERNAL,
+                            dst_subpass: 0,
+                            src_stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+                            dst_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+                            src_access_mask: AccessFlags::empty(),
+                            dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                        },
+                        SubpassDependency {
                             src_subpass: 0,
                             dst_subpass: 1,
                             src_stage_mask: PipelineStageFlags::LATE_FRAGMENT_TESTS,
-                            dst_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+                            dst_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                                | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                             src_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                            dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ,
+                            dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
+                                | AccessFlags::COLOR_ATTACHMENT_WRITE,
                         },
                         SubpassDependency {
                             src_subpass: 1,
@@ -984,6 +994,7 @@ impl DeferredRenderingPipeline {
                         ty: gpu::DescriptorBindingType::ImageView {
                             image_view_handle: pos_component.view.clone(),
                             sampler_handle: self.gbuffer_nearest_sampler.clone(),
+                            layout: gpu::ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 0,
@@ -992,6 +1003,7 @@ impl DeferredRenderingPipeline {
                         ty: gpu::DescriptorBindingType::ImageView {
                             image_view_handle: normal_component.view.clone(),
                             sampler_handle: self.gbuffer_nearest_sampler.clone(),
+                            layout: gpu::ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 1,
@@ -1000,6 +1012,7 @@ impl DeferredRenderingPipeline {
                         ty: gpu::DescriptorBindingType::ImageView {
                             image_view_handle: diffuse_component.view.clone(),
                             sampler_handle: self.gbuffer_nearest_sampler.clone(),
+                            layout: gpu::ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 2,
@@ -1008,6 +1021,7 @@ impl DeferredRenderingPipeline {
                         ty: gpu::DescriptorBindingType::ImageView {
                             image_view_handle: emissive_component.view.clone(),
                             sampler_handle: self.gbuffer_nearest_sampler.clone(),
+                            layout: gpu::ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 3,
@@ -1016,6 +1030,7 @@ impl DeferredRenderingPipeline {
                         ty: gpu::DescriptorBindingType::ImageView {
                             image_view_handle: pbr_component.view.clone(),
                             sampler_handle: self.gbuffer_nearest_sampler.clone(),
+                            layout: gpu::ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 4,
@@ -1024,6 +1039,7 @@ impl DeferredRenderingPipeline {
                         ty: gpu::DescriptorBindingType::ImageView {
                             image_view_handle: shadow_atlas_component.view.clone(),
                             sampler_handle: self.shadow_atlas_sampler.clone(),
+                            layout: gpu::ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 5,
@@ -1032,6 +1048,7 @@ impl DeferredRenderingPipeline {
                         ty: gpu::DescriptorBindingType::ImageView {
                             image_view_handle: irradiance_image_view.view.clone(),
                             sampler_handle: self.gbuffer_nearest_sampler.clone(),
+                            layout: gpu::ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 6,
@@ -1131,6 +1148,7 @@ impl DeferredRenderingPipeline {
                 ty: gpu::DescriptorBindingType::ImageView {
                     image_view_handle: color_output.view.clone(),
                     sampler_handle: self.gbuffer_nearest_sampler.clone(),
+                    layout: gpu::ImageLayout::ShaderReadOnly,
                 },
                 binding_stage: ShaderStage::FRAGMENT,
                 location: 0,
@@ -1213,6 +1231,7 @@ fn draw_mesh_primitive(
                     ty: gpu::DescriptorBindingType::ImageView {
                         image_view_handle: view.view.clone(),
                         sampler_handle: sampler.0.clone(),
+                        layout: gpu::ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: tex_info.shader_stage,
                     location: i as _,

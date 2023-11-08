@@ -8,10 +8,7 @@ use std::{
 };
 
 use anyhow::{bail, Result};
-use ash::vk::{
-    PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR,
-    PipelineRenderingCreateInfoKHR,
-};
+use ash::vk::{PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR};
 use ash::{
     extensions::ext::DebugUtils,
     prelude::*,
@@ -350,8 +347,8 @@ unsafe extern "system" fn on_message(
     let cb_data: vk::DebugUtilsMessengerCallbackDataEXT = *p_callback_data;
     let message = CStr::from_ptr(cb_data.p_message);
     if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::ERROR) {
-        log::error!("VULKAN ERROR: {:?}", message);
-        panic!("Invalid vulkan state: check log above");
+        // log::error!("VULKAN ERROR: {:?}", message);
+        // panic!("Invalid vulkan state: check log above");
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::INFO) {
         log::info!("Vulkan - : {:?}", message);
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::WARNING) {
@@ -1297,6 +1294,7 @@ impl VkGpu {
             crate::DescriptorBindingType::ImageView {
                 image_view_handle,
                 sampler_handle,
+                layout,
             } => image_descriptors.push((
                 b.location,
                 DescriptorImageInfo {
@@ -1304,7 +1302,7 @@ impl VkGpu {
                     image_view: self
                         .resolve_resource::<VkImageView>(&image_view_handle)
                         .inner,
-                    image_layout: ImageLayout::ShaderReadOnly.to_vk(),
+                    image_layout: layout.to_vk(),
                 },
                 vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
             )),

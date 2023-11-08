@@ -300,6 +300,7 @@ impl App for TriangleApp {
                     ty: gpu::DescriptorBindingType::ImageView {
                         image_view_handle: self.david_image_view.clone(),
                         sampler_handle: self.david_sampler.clone(),
+                        layout: gpu::ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: ShaderStage::FRAGMENT,
                     location: 0,

@@ -338,6 +338,7 @@ fn cubemap_main_loop(
                     ty: gpu::DescriptorBindingType::ImageView {
                         image_view_handle: input_texture_view.clone(),
                         sampler_handle: skybox_sampler.clone(),
+                        layout: gpu::ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: ShaderStage::FRAGMENT,
                     location: 0,

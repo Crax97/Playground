@@ -244,6 +244,7 @@ pub enum DescriptorBindingType {
     ImageView {
         image_view_handle: ImageViewHandle,
         sampler_handle: SamplerHandle,
+        layout: ImageLayout,
     },
 }
 
