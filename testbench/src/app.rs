@@ -167,6 +167,7 @@ fn draw_imgui(
             },
             label: Some("ImGUI render pass"),
             subpasses: &[SubpassDescription {
+                label: None,
                 input_attachments: vec![],
                 color_attachments: vec![AttachmentReference {
                     attachment: 0,
@@ -261,6 +262,7 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
             depth_attachment: None,
             stencil_attachment: None,
             subpasses: vec![SubpassDescription {
+                label: None,
                 input_attachments: vec![],
                 color_attachments: vec![AttachmentReference {
                     attachment: 0,

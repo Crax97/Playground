@@ -752,6 +752,7 @@ pub enum PresentMode {
 
 #[derive(Debug, Clone, Default, Hash)]
 pub struct SubpassDescription {
+    pub label: Option<String>,
     pub input_attachments: Vec<AttachmentReference>,
     pub color_attachments: Vec<AttachmentReference>,
     pub resolve_attachments: Vec<AttachmentReference>,

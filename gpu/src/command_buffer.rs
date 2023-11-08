@@ -15,6 +15,9 @@ use crate::*;
 
 use super::{QueueType, VkBuffer, VkGpu};
 
+const RENDER_PASSS_LABEL_COLOR: [f32; 4] = [0.6, 0.6, 0.6, 1.0];
+const SUBPASS_LABEL_COLOR: [f32; 4] = [0.373, 0.792, 0.988, 1.0];
+
 pub struct VkCommandBuffer<'g> {
     gpu: &'g VkGpu,
     inner_command_buffer: vk::CommandBuffer,
@@ -36,7 +39,9 @@ where
 
     pipeline_state: GraphicsPipelineState,
     pub render_pass: vk::RenderPass,
-    debug_label: ScopedDebugLabel,
+    render_pass_label: ScopedDebugLabel,
+    subpass_label: Option<ScopedDebugLabel>,
+
     subpasses: Vec<SubpassDescription>,
 }
 
@@ -649,6 +654,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         command_buffer: &'c mut VkCommandBuffer<'g>,
         render_pass_info: &BeginRenderPassInfo,
     ) -> Self {
+        assert!(render_pass_info.subpasses.len() > 0);
         let render_pass = command_buffer.gpu.get_render_pass(
             &Self::get_attachments(&command_buffer.gpu, render_pass_info),
             render_pass_info.label,
@@ -702,10 +708,15 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 );
         };
 
-        let debug_label = command_buffer.begin_debug_region(
+        let render_pass_label = command_buffer.begin_debug_region(
             render_pass_info.label.unwrap_or("Graphics render pass"),
-            [0.6, 0.6, 0.6, 1.0],
+            RENDER_PASSS_LABEL_COLOR,
         );
+
+        let subpass_label = render_pass_info.subpasses[0]
+            .label
+            .as_ref()
+            .map(|l| command_buffer.begin_debug_region(l, SUBPASS_LABEL_COLOR));
 
         Self {
             command_buffer,
@@ -714,7 +725,8 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             depth_bias_setup: None,
             pipeline_state: GraphicsPipelineState::new(render_pass_info),
             render_pass,
-            debug_label,
+            render_pass_label,
+            subpass_label,
             subpasses: render_pass_info.subpasses.to_vec(),
         }
     }
@@ -769,6 +781,11 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
 
     pub fn advance_to_next_subpass(&mut self) {
         self.pipeline_state.current_subpass += 1;
+        self.subpass_label.take();
+        if let Some(ref label) = self.subpasses[self.pipeline_state.current_subpass as usize].label
+        {
+            self.subpass_label = Some(self.begin_debug_region(&label, SUBPASS_LABEL_COLOR));
+        }
         unsafe {
             self.gpu
                 .vk_logical_device()
@@ -1064,7 +1081,8 @@ impl<'c, 'g> Deref for VkRenderPassCommand<'c, 'g> {
 
 impl<'c, 'g> Drop for VkRenderPassCommand<'c, 'g> {
     fn drop(&mut self) {
-        self.debug_label.end_from_render_pass();
+        self.subpass_label.take();
+        self.render_pass_label.end_from_render_pass();
         unsafe {
             self.command_buffer
                 .gpu

@@ -245,6 +245,7 @@ impl App for TriangleApp {
                 },
                 label: Some("Triangle rendering"),
                 subpasses: &[SubpassDescription {
+                    label: Some("Main pass".to_owned()),
                     input_attachments: vec![],
                     color_attachments: vec![AttachmentReference {
                         attachment: 0,

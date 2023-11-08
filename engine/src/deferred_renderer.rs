@@ -644,6 +644,7 @@ impl DeferredRenderingPipeline {
                         },
                     },
                     subpasses: &[SubpassDescription {
+                        label: None,
                         input_attachments: vec![],
                         color_attachments: vec![],
                         resolve_attachments: vec![],
@@ -827,6 +828,7 @@ impl DeferredRenderingPipeline {
                     },
                     subpasses: &[
                         SubpassDescription {
+                            label: Some("Z Pass".to_owned()),
                             input_attachments: vec![],
                             color_attachments: vec![],
                             resolve_attachments: vec![],
@@ -837,6 +839,7 @@ impl DeferredRenderingPipeline {
                             preserve_attachments: vec![],
                         },
                         SubpassDescription {
+                            label: Some("GBuffer output".to_owned()),
                             input_attachments: vec![],
                             color_attachments: vec![
                                 AttachmentReference {
@@ -868,6 +871,7 @@ impl DeferredRenderingPipeline {
                             preserve_attachments: vec![],
                         },
                         SubpassDescription {
+                            label: Some("GBuffer combining".to_owned()),
                             input_attachments: vec![
                                 AttachmentReference {
                                     attachment: 0,
@@ -1109,6 +1113,7 @@ impl DeferredRenderingPipeline {
                     extent: backbuffer.size,
                 },
                 subpasses: &[SubpassDescription {
+                    label: None,
                     input_attachments: vec![],
                     color_attachments: vec![AttachmentReference {
                         attachment: 0,

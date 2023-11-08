@@ -307,6 +307,7 @@ fn cubemap_main_loop(
                 },
                 label: Some("Cubemap main loop"),
                 subpasses: &[SubpassDescription {
+                    label: None,
                     input_attachments: vec![],
                     color_attachments: vec![AttachmentReference {
                         attachment: 0,
