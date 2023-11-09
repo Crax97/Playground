@@ -135,8 +135,8 @@ impl VkSwapchain {
         )?;
 
         let present_extent = Extent2D {
-            width: window.outer_size().width,
-            height: window.outer_size().height,
+            width: window.inner_size().width,
+            height: window.inner_size().height,
         };
 
         let mut frames_in_flight = vec![];

@@ -1,14 +1,13 @@
 use std::ops::DerefMut;
-use std::ptr::addr_of;
+
 use std::{ffi::CString, ops::Deref};
 
 use ash::vk::{
-    self, ClearDepthStencilValue, CommandBufferAllocateInfo, CommandBufferBeginInfo,
+    self, CommandBufferAllocateInfo, CommandBufferBeginInfo,
     CommandBufferLevel, CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags,
-    PipelineBindPoint, PipelineInputAssemblyStateCreateFlags, RenderingAttachmentInfoKHR,
-    RenderingFlags, RenderingInfoKHR, ResolveModeFlags, StructureType, SubmitInfo,
+    PipelineBindPoint, PipelineInputAssemblyStateCreateFlags, StructureType, SubmitInfo,
 };
-use ash::{extensions::ext::DebugUtils, prelude::VkResult, RawPtr};
+use ash::{extensions::ext::DebugUtils, prelude::VkResult};
 use log::warn;
 
 use crate::*;

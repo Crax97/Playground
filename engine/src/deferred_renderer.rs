@@ -908,15 +908,18 @@ impl DeferredRenderingPipeline {
                             src_subpass: SubpassDependency::EXTERNAL,
                             dst_subpass: 0,
                             src_stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-                            dst_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+                            dst_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                                | PipelineStageFlags::LATE_FRAGMENT_TESTS,
                             src_access_mask: AccessFlags::empty(),
                             dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
                         },
                         SubpassDependency {
                             src_subpass: 0,
                             dst_subpass: 1,
-                            src_stage_mask: PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                            src_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                                | PipelineStageFlags::LATE_FRAGMENT_TESTS,
                             dst_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                                | PipelineStageFlags::LATE_FRAGMENT_TESTS
                                 | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                             src_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
                             dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
@@ -927,8 +930,10 @@ impl DeferredRenderingPipeline {
                             dst_subpass: 2,
                             src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                             dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
-                            src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                            dst_access_mask: AccessFlags::INPUT_ATTACHMENT_READ,
+                            src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE
+                                | AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ,
+                            dst_access_mask: AccessFlags::INPUT_ATTACHMENT_READ
+                                | AccessFlags::SHADER_READ,
                         },
                     ],
                 });

@@ -8,10 +8,10 @@ use app::{bootstrap, App};
 use engine::Backbuffer;
 use engine_macros::glsl;
 use gpu::{
-    AccessFlags, AttachmentReference, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags,
+    AttachmentReference, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags,
     CullMode, FramebufferColorAttachment, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat,
-    ImageLayout, ImageMemoryBarrier, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle,
-    IndexType, InputRate, MemoryDomain, PipelineStageFlags, PresentMode, SamplerCreateInfo,
+    ImageLayout, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle,
+    IndexType, InputRate, MemoryDomain, PresentMode, SamplerCreateInfo,
     SamplerHandle, ShaderModuleHandle, ShaderStage, SubpassDescription, VertexBindingInfo,
     VkCommandBuffer,
 };

@@ -1,8 +1,7 @@
 use engine::{AppState, Backbuffer};
 use gpu::{
     AccessFlags, AttachmentReference, BeginRenderPassInfo, CommandBufferSubmitInfo,
-    FramebufferColorAttachment, ImageAspectFlags, ImageLayout, ImageMemoryBarrier,
-    ImageSubresourceRange, Offset2D, PipelineBarrierInfo, PipelineStageFlags, Rect2D,
+    FramebufferColorAttachment, ImageLayout, Offset2D, PipelineStageFlags, Rect2D,
     RenderPassAttachment, SubpassDependency, SubpassDescription, VkCommandBuffer, VkSwapchain,
 };
 use imgui::{Context, FontConfig, FontSource, Ui};

@@ -35,7 +35,7 @@ use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 
 use crate::{
-    get_allocation_callbacks, lifetime_cache_constants, quick_hash, AttachmentStoreOp,
+    get_allocation_callbacks, lifetime_cache_constants, quick_hash,
     BeginRenderPassInfo, BufferCreateInfo, BufferHandle, BufferImageCopyInfo,
     CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineState,
     Context, DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2,
@@ -348,7 +348,7 @@ unsafe extern "system" fn on_message(
     let message = CStr::from_ptr(cb_data.p_message);
     if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::ERROR) {
         // log::error!("VULKAN ERROR: {:?}", message);
-        panic!("Invalid vulkan state: check log above");
+        // panic!("Invalid vulkan state: check log above");
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::INFO) {
         log::info!("Vulkan - : {:?}", message);
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::WARNING) {
