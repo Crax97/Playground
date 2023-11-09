@@ -11,12 +11,13 @@ use crate::{
 };
 
 use gpu::{
-    AccessFlags, AttachmentReference, AttachmentStoreOp, Binding, BindingType, BlendMode, BlendOp,
-    BlendState, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorComponentFlags, ColorLoadOp,
-    Extent2D, FragmentStageInfo, FramebufferColorAttachment, FramebufferDepthAttachment, Gpu,
-    Handle, ImageAspectFlags, ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier,
-    ImageUsageFlags, ImageViewHandle, ImageViewType, IndexType, InputRate, LifetimedCache,
-    MemoryDomain, Offset2D, PipelineStageFlags, PushConstantRange, Rect2D, RenderPassAttachment,
+    AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, Binding, BindingType,
+    BlendMode, BlendOp, BlendState, BufferCreateInfo, BufferHandle, BufferUsageFlags,
+    ColorComponentFlags, ColorLoadOp, Extent2D, FragmentStageInfo, FramebufferColorAttachment,
+    FramebufferDepthAttachment, Gpu, Handle, ImageAspectFlags, ImageFormat, ImageHandle,
+    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageUsageFlags, ImageViewHandle,
+    ImageViewType, IndexType, InputRate, LifetimedCache, MemoryDomain, Offset2D,
+    PipelineBarrierInfo, PipelineStageFlags, PushConstantRange, Rect2D, RenderPassAttachment,
     SampleCount, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
     StencilLoadOp, SubpassDependency, SubpassDescription, VertexBindingInfo, VertexStageInfo,
     VkCommandBuffer, VkGpu, VkRenderPassCommand, VkSwapchain,
@@ -930,8 +931,7 @@ impl DeferredRenderingPipeline {
                             dst_subpass: 2,
                             src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
                             dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
-                            src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE
-                                | AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ,
+                            src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
                             dst_access_mask: AccessFlags::INPUT_ATTACHMENT_READ
                                 | AccessFlags::SHADER_READ,
                         },
@@ -1110,7 +1110,7 @@ impl DeferredRenderingPipeline {
     fn copy_to_backbuffer_pass(
         &self,
         graphics_command_buffer: &mut VkCommandBuffer,
-        color_output: &RenderImage,
+        color_output: RenderImage,
         backbuffer: &Backbuffer,
     ) {
         let mut present_render_pass =
@@ -1146,7 +1146,7 @@ impl DeferredRenderingPipeline {
             0,
             &[Binding {
                 ty: gpu::DescriptorBindingType::ImageView {
-                    image_view_handle: color_output.view.clone(),
+                    image_view_handle: color_output.view,
                     sampler_handle: self.gbuffer_nearest_sampler.clone(),
                     layout: gpu::ImageLayout::ShaderReadOnly,
                 },
@@ -1162,6 +1162,181 @@ impl DeferredRenderingPipeline {
         present_render_pass.set_vertex_shader(self.screen_quad.clone());
         present_render_pass.set_fragment_shader(self.texture_copy.clone());
         present_render_pass.draw(4, 1, 0, 0);
+    }
+
+    fn post_process_pass(
+        &self,
+        graphics_command_buffer: &mut VkCommandBuffer,
+        color_output: RenderImage,
+        color_desc: RenderImageDescription,
+        render_size: Extent2D,
+    ) -> RenderImage {
+        let final_color_output = {
+            let final_color_output = {
+                let post_process_backbuffer_1 = color_output;
+                let post_process_backbuffer_2 =
+                    self.image_allocator
+                        .get(&app_state().gpu, "post_process2", &color_desc);
+
+                let mut current_postprocess = 1;
+                let mut post_process_pass =
+                    graphics_command_buffer.begin_render_pass(&BeginRenderPassInfo {
+                        label: Some("Post Process"),
+                        color_attachments: &[
+                            FramebufferColorAttachment {
+                                image_view: post_process_backbuffer_1.view.clone(),
+                                load_op: ColorLoadOp::Clear([0.0; 4]),
+                                store_op: AttachmentStoreOp::Store,
+                                initial_layout: ImageLayout::ShaderReadOnly,
+                                final_layout: ImageLayout::ColorAttachment,
+                            },
+                            FramebufferColorAttachment {
+                                image_view: post_process_backbuffer_2.view.clone(),
+                                load_op: ColorLoadOp::Clear([0.0; 4]),
+                                store_op: AttachmentStoreOp::Store,
+                                initial_layout: ImageLayout::Undefined,
+                                final_layout: ImageLayout::ColorAttachment,
+                            },
+                        ],
+                        depth_attachment: None,
+                        stencil_attachment: None,
+                        render_area: Rect2D {
+                            offset: Offset2D::default(),
+                            extent: render_size,
+                        },
+                        subpasses: &[
+                            SubpassDescription {
+                                label: Some("Tonemapping".to_owned()),
+                                input_attachments: vec![],
+                                color_attachments: vec![AttachmentReference {
+                                    attachment: 1,
+                                    layout: ImageLayout::ColorAttachment,
+                                }],
+                                resolve_attachments: vec![],
+                                depth_stencil_attachment: None,
+                                preserve_attachments: vec![],
+                            },
+                            SubpassDescription {
+                                label: Some("Fxaa".to_owned()),
+                                input_attachments: vec![AttachmentReference {
+                                    attachment: 1,
+                                    layout: ImageLayout::ShaderReadOnly,
+                                }],
+                                color_attachments: vec![AttachmentReference {
+                                    attachment: 0,
+                                    layout: ImageLayout::ColorAttachment,
+                                }],
+                                resolve_attachments: vec![],
+                                depth_stencil_attachment: None,
+                                preserve_attachments: vec![],
+                            },
+                        ],
+                        dependencies: &[SubpassDependency {
+                            src_subpass: 0,
+                            dst_subpass: 1,
+                            src_stage_mask: PipelineStageFlags::FRAGMENT_SHADER
+                                | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                            dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER
+                                | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                            src_access_mask: AccessFlags::SHADER_READ
+                                | AccessFlags::COLOR_ATTACHMENT_WRITE,
+                            dst_access_mask: AccessFlags::SHADER_READ
+                                | AccessFlags::COLOR_ATTACHMENT_WRITE,
+                        }],
+                    });
+                post_process_pass.set_cull_mode(gpu::CullMode::None);
+                post_process_pass.set_enable_depth_test(false);
+                post_process_pass.set_depth_write_enabled(false);
+                post_process_pass.set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
+
+                // Tonemap
+                post_process_pass.bind_resources(
+                    0,
+                    &[Binding {
+                        ty: gpu::DescriptorBindingType::ImageView {
+                            image_view_handle: post_process_backbuffer_1.view.clone(),
+                            sampler_handle: self.gbuffer_nearest_sampler.clone(),
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        binding_stage: ShaderStage::FRAGMENT,
+                        location: 0,
+                    }],
+                );
+                post_process_pass.set_vertex_shader(self.screen_quad.clone());
+                post_process_pass.set_fragment_shader(self.tonemap_fs.clone());
+                post_process_pass.draw(4, 1, 0, 0);
+                post_process_pass.advance_to_next_subpass();
+                current_postprocess = (current_postprocess + 1) % 2;
+
+                // Fxaa
+                post_process_pass.bind_resources(
+                    0,
+                    &[Binding {
+                        ty: gpu::DescriptorBindingType::ImageView {
+                            image_view_handle: post_process_backbuffer_2.view.clone(),
+                            sampler_handle: self.gbuffer_nearest_sampler.clone(),
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        binding_stage: ShaderStage::FRAGMENT,
+                        location: 0,
+                    }],
+                );
+                let rcp_frame = vector![render_size.width as f32, render_size.height as f32];
+                let rcp_frame = vector![1.0 / rcp_frame.x, 1.0 / rcp_frame.y];
+
+                let params = FxaaShaderParams {
+                    rcp_frame,
+                    fxaa_quality_subpix: self.fxaa_settings.fxaa_quality_subpix,
+                    fxaa_quality_edge_threshold: self.fxaa_settings.fxaa_quality_edge_threshold,
+                    fxaa_quality_edge_threshold_min: self
+                        .fxaa_settings
+                        .fxaa_quality_edge_threshold_min,
+                    iterations: self.fxaa_settings.iterations,
+                };
+                post_process_pass.set_vertex_shader(self.fxaa_vs.clone());
+                post_process_pass.set_fragment_shader(self.fxaa_fs.clone());
+                post_process_pass.push_constants(
+                    0,
+                    0,
+                    bytemuck::cast_slice(&[params]),
+                    ShaderStage::ALL_GRAPHICS,
+                );
+                post_process_pass.draw(3, 1, 0, 0);
+                current_postprocess = (current_postprocess + 1) % 2;
+
+                let final_target = if current_postprocess == 0 {
+                    post_process_backbuffer_1
+                } else {
+                    post_process_backbuffer_2
+                };
+
+                final_target
+            };
+            graphics_command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
+                memory_barriers: &[],
+                buffer_memory_barriers: &[],
+                image_memory_barriers: &[ImageMemoryBarrier {
+                    src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                    dst_access_mask: AccessFlags::SHADER_READ,
+                    old_layout: ImageLayout::ColorAttachment,
+                    new_layout: ImageLayout::ShaderReadOnly,
+                    src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+                    dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+                    image: final_color_output.image.clone(),
+                    subresource_range: ImageSubresourceRange {
+                        aspect_mask: ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    },
+                }],
+            });
+            final_color_output
+        };
+        final_color_output
     }
 }
 
@@ -1411,9 +1586,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             self.image_allocator
                 .get(&app_state().gpu, "shadow_atlas", &shadow_atlas_desc);
 
-        let color_output = self
-            .image_allocator
-            .get(&app_state().gpu, "color_output", &color_desc);
+        let color_output =
+            self.image_allocator
+                .get(&app_state().gpu, "color_output/post_process_1", &color_desc);
 
         let mut graphics_command_buffer = app_state()
             .gpu
@@ -1440,84 +1615,14 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             scene,
         );
 
-        self.copy_to_backbuffer_pass(&mut graphics_command_buffer, &color_output, backbuffer);
+        let final_color_output = self.post_process_pass(
+            &mut graphics_command_buffer,
+            color_output,
+            color_desc,
+            backbuffer.size,
+        );
 
-        //        context.register_callback(&tonemap_pass, |_: &VkGpu, ctx| {
-        //            ctx.render_pass_command.bind_resources(0, &ctx.bindings);
-        //            ctx.render_pass_command.set_cull_mode(gpu::CullMode::None);
-        //            ctx.render_pass_command.set_enable_depth_test(false);
-        //            ctx.render_pass_command.set_depth_write_enabled(false);
-        //            ctx.render_pass_command
-        //                .set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
-        //            ctx.render_pass_command
-        //                .set_vertex_shader(self.screen_quad.clone());
-        //            ctx.render_pass_command
-        //                .set_fragment_shader(self.tonemap_fs.clone());
-        //            ctx.render_pass_command.draw(4, 1, 0, 0);
-        //        });
-        //        context.register_callback(&fxaa_pass, |_: &VkGpu, ctx| {
-        //            ctx.render_pass_command.bind_resources(0, &ctx.bindings);
-        //            ctx.render_pass_command.set_cull_mode(gpu::CullMode::None);
-        //            ctx.render_pass_command.set_enable_depth_test(false);
-        //            ctx.render_pass_command.set_depth_write_enabled(false);
-        //            ctx.render_pass_command
-        //                .set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
-        //            let rcp_frame = vector![backbuffer.size.width as f32, backbuffer.size.height as f32];
-        //            let rcp_frame = vector![1.0 / rcp_frame.x, 1.0 / rcp_frame.y];
-        //
-        //            let params = FxaaShaderParams {
-        //                rcp_frame,
-        //                fxaa_quality_subpix: self.fxaa_settings.fxaa_quality_subpix,
-        //                fxaa_quality_edge_threshold: self.fxaa_settings.fxaa_quality_edge_threshold,
-        //                fxaa_quality_edge_threshold_min: self.fxaa_settings.fxaa_quality_edge_threshold_min,
-        //                iterations: self.fxaa_settings.iterations,
-        //            };
-        //            ctx.render_pass_command
-        //                .set_vertex_shader(self.fxaa_vs.clone());
-        //            ctx.render_pass_command
-        //                .set_fragment_shader(self.fxaa_fs.clone());
-        //            ctx.render_pass_command.push_constants(
-        //                0,
-        //                0,
-        //                bytemuck::cast_slice(&[params]),
-        //                ShaderStage::ALL_GRAPHICS,
-        //            );
-        //            ctx.render_pass_command.draw(3, 1, 0, 0);
-        //        });
-        //        context.register_callback(&present_render_pass, |_: &VkGpu, ctx| {
-        //            ctx.render_pass_command.bind_resources(0, &ctx.bindings);
-        //            ctx.render_pass_command
-        //                .set_front_face(gpu::FrontFace::ClockWise);
-        //            ctx.render_pass_command.set_cull_mode(gpu::CullMode::None);
-        //            ctx.render_pass_command
-        //                .set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
-        //            ctx.render_pass_command.set_enable_depth_test(false);
-        //            ctx.render_pass_command.set_depth_write_enabled(false);
-        //            ctx.render_pass_command
-        //                .set_vertex_shader(self.screen_quad.clone());
-        //            ctx.render_pass_command
-        //                .set_fragment_shader(self.texture_copy.clone());
-        //            ctx.render_pass_command.draw(4, 1, 0, 0);
-        //        });
-        //
-        //        let irradiance_map_texture = match &self.irradiance_map {
-        //            Some(texture) => texture,
-        //            None => &self.default_irradiance_map,
-        //        };
-        //        let irradiance_map_texture = resource_map.get(irradiance_map_texture);
-        //        let image_view = resource_map.get(&irradiance_map_texture.image_view);
-        //        let image = &resource_map.get(&image_view.image).0;
-        //
-        //        context.inject_external_image(&irradiance_map, image.clone(), image_view.view.clone());
-        //        context.inject_external_image(
-        //            &swapchain_image,
-        //            backbuffer.image.clone(),
-        //            backbuffer.image_view.clone(),
-        //        );
-        //        context.injext_external_buffer(&camera_buffer, current_buffers.camera_buffer.clone());
-        //        context.injext_external_buffer(&light_buffer, current_buffers.light_buffer.clone());
-        //        //#endregion
-        //        self.render_graph.run(context, &mut self.runner)?;
+        self.copy_to_backbuffer_pass(&mut graphics_command_buffer, final_color_output, backbuffer);
 
         Ok(graphics_command_buffer)
     }

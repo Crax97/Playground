@@ -35,18 +35,18 @@ use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 
 use crate::{
-    get_allocation_callbacks, lifetime_cache_constants, quick_hash,
-    BeginRenderPassInfo, BufferCreateInfo, BufferHandle, BufferImageCopyInfo,
-    CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineState,
-    Context, DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2,
-    DescriptorSetState, Extent2D, GPUFence, Gpu, GpuConfiguration, GpuResourceMap,
-    GraphicsPipelineState, Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat,
-    ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
-    ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
-    PushConstantBlockDescription, QueueType, Rect2D, RenderPassAttachments, SampleCount,
-    SamplerCreateInfo, SamplerHandle, ShaderAttribute, ShaderModuleCreateInfo, ShaderModuleHandle,
-    SubpassDescription, ToVk, TransitionInfo, UniformVariableDescription, VkCommandBuffer,
-    VkCommandPool, VkImageView, VkShaderModule,
+    get_allocation_callbacks, lifetime_cache_constants, quick_hash, BeginRenderPassInfo,
+    BufferCreateInfo, BufferHandle, BufferImageCopyInfo, CommandBufferSubmitInfo,
+    CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineState, Context,
+    DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2, DescriptorSetState,
+    Extent2D, GPUFence, Gpu, GpuConfiguration, GpuResourceMap, GraphicsPipelineState,
+    Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout,
+    ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, ImageViewHandle, LogicOp,
+    Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags, PushConstantBlockDescription,
+    QueueType, Rect2D, RenderPassAttachments, SampleCount, SamplerCreateInfo, SamplerHandle,
+    ShaderAttribute, ShaderModuleCreateInfo, ShaderModuleHandle, SubpassDescription, ToVk,
+    TransitionInfo, UniformVariableDescription, VkCommandBuffer, VkCommandPool, VkImageView,
+    VkShaderModule,
 };
 use crate::{
     gpu_resource_manager::{
@@ -347,8 +347,8 @@ unsafe extern "system" fn on_message(
     let cb_data: vk::DebugUtilsMessengerCallbackDataEXT = *p_callback_data;
     let message = CStr::from_ptr(cb_data.p_message);
     if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::ERROR) {
-        // log::error!("VULKAN ERROR: {:?}", message);
-        // panic!("Invalid vulkan state: check log above");
+        log::error!("VULKAN ERROR: {:?}", message);
+        panic!("Invalid vulkan state: check log above");
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::INFO) {
         log::info!("Vulkan - : {:?}", message);
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::WARNING) {
