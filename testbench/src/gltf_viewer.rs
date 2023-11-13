@@ -18,7 +18,7 @@ use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::input::key::Key;
 use engine::{
     AppState, Backbuffer, DeferredRenderingPipeline, Light, LightHandle, LightType,
-    MaterialInstance, RenderingPipeline, ShadowSetup, TextureInput,
+    MaterialInstance, RenderingPipeline, ShadowSetup, TextureInput, FXAA_ITERATIONS_CVAR_NAME,
 };
 use nalgebra::*;
 use resource_map::ResourceMap;
@@ -313,7 +313,15 @@ impl App for GLTFViewer {
 
         ui.text("Hiii");
 
-        ui.slider("FXAA iterations", 0, 12, &mut settings.iterations);
+        ui.slider(
+            "FXAA iterations",
+            0,
+            12,
+            app_state
+                .cvar_manager
+                .get_named_ref_mut::<i32>(FXAA_ITERATIONS_CVAR_NAME)
+                .unwrap(),
+        );
         ui.slider("FXAA subpix", 0.0, 1.0, &mut settings.fxaa_quality_subpix);
         ui.slider(
             "FXAA Edge Threshold",

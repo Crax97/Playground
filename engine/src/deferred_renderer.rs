@@ -6,8 +6,8 @@ use crate::{
     app_state, app_state_mut,
     camera::Camera,
     material::{MasterMaterial, MasterMaterialDescription},
-    Backbuffer, Light, LightType, MaterialDescription, MaterialDomain, MaterialInstance, Mesh,
-    MeshPrimitive, PipelineTarget, RenderingPipeline, Scene, Texture,
+    Backbuffer, CvarFlags, Light, LightType, MaterialDescription, MaterialDomain, MaterialInstance,
+    Mesh, MeshPrimitive, PipelineTarget, RenderingPipeline, Scene, Texture,
 };
 
 use gpu::{
@@ -74,6 +74,8 @@ struct FxaaShaderParams {
     fxaa_quality_edge_threshold_min: f32,
     iterations: u32,
 }
+
+pub const FXAA_ITERATIONS_CVAR_NAME: &str = "fxaa.iterations";
 
 unsafe impl Pod for FxaaShaderParams {}
 unsafe impl Zeroable for FxaaShaderParams {}
@@ -176,7 +178,6 @@ pub struct FxaaSettings {
     pub fxaa_quality_subpix: f32,
     pub fxaa_quality_edge_threshold: f32,
     pub fxaa_quality_edge_threshold_min: f32,
-    pub iterations: u32,
 }
 
 unsafe impl Pod for FxaaSettings {}
@@ -188,7 +189,6 @@ impl Default for FxaaSettings {
             fxaa_quality_subpix: 0.75,
             fxaa_quality_edge_threshold: 0.166,
             fxaa_quality_edge_threshold_min: 0.0833,
-            iterations: 12,
         }
     }
 }
@@ -357,6 +357,12 @@ impl DeferredRenderingPipeline {
         let fxaa_fs = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(FXAA_FS),
         })?;
+
+        app_state_mut().cvar_manager.register_cvar(
+            FXAA_ITERATIONS_CVAR_NAME,
+            12,
+            CvarFlags::empty(),
+        );
 
         let screen_quad = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(SCREEN_QUAD),
@@ -1284,6 +1290,10 @@ impl DeferredRenderingPipeline {
                 let rcp_frame = vector![render_size.width as f32, render_size.height as f32];
                 let rcp_frame = vector![1.0 / rcp_frame.x, 1.0 / rcp_frame.y];
 
+                let iterations = app_state_mut()
+                    .cvar_manager
+                    .get_named::<i32>(FXAA_ITERATIONS_CVAR_NAME)
+                    .expect("Fxaa Cvar not found");
                 let params = FxaaShaderParams {
                     rcp_frame,
                     fxaa_quality_subpix: self.fxaa_settings.fxaa_quality_subpix,
@@ -1291,7 +1301,7 @@ impl DeferredRenderingPipeline {
                     fxaa_quality_edge_threshold_min: self
                         .fxaa_settings
                         .fxaa_quality_edge_threshold_min,
-                    iterations: self.fxaa_settings.iterations,
+                    iterations: iterations as _,
                 };
                 post_process_pass.set_vertex_shader(self.fxaa_vs.clone());
                 post_process_pass.set_fragment_shader(self.fxaa_fs.clone());

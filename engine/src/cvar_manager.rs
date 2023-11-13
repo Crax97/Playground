@@ -75,6 +75,22 @@ macro_rules! impl_into_cvar_type {
                 $wrapper(value)
             }
         }
+        impl<'a> From<&'a CvarType> for &'a $base {
+            fn from(value: &CvarType) -> &$base {
+                match value {
+                    $wrapper(n) => n,
+                    _ => panic!("Invalid Cvar type"),
+                }
+            }
+        }
+        impl<'a> From<&'a mut CvarType> for &'a mut $base {
+            fn from(value: &'a mut CvarType) -> &'a mut $base {
+                match value {
+                    $wrapper(n) => n,
+                    _ => panic!("Invalid Cvar type"),
+                }
+            }
+        }
     };
 }
 
@@ -159,6 +175,50 @@ impl CvarManager {
             .expect("CvarId not valid! This is probably a bug with the CvarManager")
             .ty
             .into()
+    }
+
+    pub fn get_named_ref_mut<'a, T>(&'a mut self, name: &str) -> Result<&'a mut T, CvarError>
+    where
+        &'a mut T: From<&'a mut CvarType>,
+    {
+        let id = self
+            .cvar_id_map
+            .get(name)
+            .ok_or(CvarError::CvarNotFound(name.to_owned()))?;
+        self.get_ref_mut(*id)
+    }
+
+    fn get_ref_mut<'a, T>(&'a mut self, id: CvarId) -> Result<&'a mut T, CvarError>
+    where
+        &'a mut T: From<&'a mut CvarType>,
+    {
+        Ok(self
+            .cvars
+            .get_mut(id.0)
+            .map(|cv| From::from(&mut cv.ty))
+            .expect("CvarId not valid! This is probably a bug with the CvarManager"))
+    }
+
+    pub fn get_named_ref<'a, T>(&'a self, name: &str) -> Result<&'a T, CvarError>
+    where
+        &'a T: From<&'a CvarType>,
+    {
+        let id = self
+            .cvar_id_map
+            .get(name)
+            .ok_or(CvarError::CvarNotFound(name.to_owned()))?;
+        self.get_ref(*id)
+    }
+
+    fn get_ref<'a, T>(&'a self, id: CvarId) -> Result<&'a T, CvarError>
+    where
+        &'a T: From<&'a CvarType>,
+    {
+        Ok(self
+            .cvars
+            .get(id.0)
+            .map(|cv| From::from(&cv.ty))
+            .expect("CvarId not valid! This is probably a bug with the CvarManager"))
     }
 
     pub fn cvar_names(&self) -> impl Iterator<Item = &str> {
