@@ -296,6 +296,7 @@ mod tests {
         assert!(input_state.is_key_pressed(Key::W));
         assert!(input_state.is_key_released(Key::A));
 
+        input_state.end_frame();
         input_state.update::<()>(&Event::WindowEvent {
             window_id: unsafe { winit::window::WindowId::dummy() },
             event: WindowEvent::KeyboardInput {
@@ -312,6 +313,7 @@ mod tests {
         assert!(input_state.is_key_just_released(Key::W));
         assert!(input_state.is_key_released(Key::W));
         assert!(input_state.is_key_released(Key::A));
+        input_state.end_frame();
     }
 
     #[test]

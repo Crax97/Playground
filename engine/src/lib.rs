@@ -1,6 +1,8 @@
 mod app_state;
 mod camera;
+mod cvar_manager;
 pub mod deferred_renderer;
+pub mod input;
 mod material;
 mod mesh;
 mod scene;
@@ -15,6 +17,7 @@ use once_cell::unsync::OnceCell;
 
 pub use app_state::*;
 pub use camera::*;
+pub use cvar_manager::*;
 pub use deferred_renderer::*;
 pub use material::*;
 pub use mesh::*;

@@ -557,6 +557,7 @@ name = "engine"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bitflags 2.2.1",
  "bytemuck",
  "engine_macros",
  "env_logger",
@@ -569,6 +570,8 @@ dependencies = [
  "once_cell",
  "raw-window-handle 0.5.2",
  "resource_map",
+ "strum",
+ "strum_macros",
  "thiserror",
  "winit",
 ]

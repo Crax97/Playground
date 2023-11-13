@@ -1,7 +1,7 @@
 use engine::Camera;
 use nalgebra::{vector, Point3, Rotation3, Vector3};
 
-use crate::input::{key::Key, InputState};
+use engine::input::{key::Key, InputState};
 
 pub struct FpsCamera {
     pub location: Point3<f32>,

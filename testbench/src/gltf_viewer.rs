@@ -1,7 +1,6 @@
 mod app;
 mod fps_camera;
 mod gltf_loader;
-mod input;
 mod utils;
 
 use std::collections::HashMap;
@@ -13,11 +12,10 @@ use app::{bootstrap, App};
 use fps_camera::FpsCamera;
 use gpu::{Extent2D, ImageFormat, PresentMode, ShaderStage, VkCommandBuffer};
 use imgui::{TreeNodeFlags, Ui};
-use input::InputState;
 use winit::dpi::{PhysicalPosition, Position};
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
-use crate::input::key::Key;
+use engine::input::key::Key;
 use engine::{
     AppState, Backbuffer, DeferredRenderingPipeline, Light, LightHandle, LightType,
     MaterialInstance, RenderingPipeline, ShadowSetup, TextureInput,
@@ -48,7 +46,6 @@ pub struct GLTFViewer {
     camera: FpsCamera,
     scene_renderer: DeferredRenderingPipeline,
     gltf_loader: GltfLoader,
-    input: InputState,
     camera_light: Option<LightHandle>,
 }
 
@@ -298,19 +295,9 @@ impl App for GLTFViewer {
             resource_map,
             scene_renderer,
             gltf_loader,
-            input: InputState::new(),
             camera: FpsCamera::default(),
             camera_light: None,
         })
-    }
-
-    fn on_event(
-        &mut self,
-        event: &winit::event::Event<()>,
-        _app_state: &AppState,
-    ) -> anyhow::Result<()> {
-        self.input.update(&event);
-        Ok(())
     }
 
     fn input(
@@ -366,29 +353,35 @@ impl App for GLTFViewer {
             return Ok(());
         }
 
-        if self.input.is_key_just_pressed(Key::P) {
+        if app_state.input.is_key_just_pressed(Key::P) {
             self.print_lights();
         }
 
-        if self.input.is_mouse_button_just_pressed(MouseButton::Right) {
+        if app_state
+            .input
+            .is_mouse_button_just_pressed(MouseButton::Right)
+        {
             app_state
                 .window()
                 .set_cursor_grab(winit::window::CursorGrabMode::Confined)?;
             app_state.window().set_cursor_visible(false);
         }
-        if self.input.is_mouse_button_just_released(MouseButton::Right) {
+        if app_state
+            .input
+            .is_mouse_button_just_released(MouseButton::Right)
+        {
             app_state
                 .window()
                 .set_cursor_grab(winit::window::CursorGrabMode::None)?;
             app_state.window().set_cursor_visible(true);
         }
 
-        if self
+        if app_state
             .input
             .is_mouse_button_pressed(winit::event::MouseButton::Right)
         {
             self.camera
-                .update(&self.input, app_state.time.delta_frame());
+                .update(&app_state.input, app_state.time.delta_frame());
             let window_size = app_state.window().inner_size();
 
             app_state
@@ -399,7 +392,7 @@ impl App for GLTFViewer {
                 }))?;
         }
 
-        if self.input.is_mouse_button_pressed(MouseButton::Left) {
+        if app_state.input.is_mouse_button_pressed(MouseButton::Left) {
             if let Some(camera_light) = self.camera_light {
                 self.gltf_loader
                     .scene_mut()
@@ -412,7 +405,6 @@ impl App for GLTFViewer {
             }
         }
 
-        self.input.end_frame();
         Ok(())
     }
 

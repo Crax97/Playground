@@ -1,3 +1,6 @@
+mod console;
+use console::ImguiConsole;
+
 use engine::{AppState, Backbuffer};
 use gpu::{
     AccessFlags, AttachmentReference, BeginRenderPassInfo, CommandBufferSubmitInfo,
@@ -44,12 +47,14 @@ pub fn app_loop<A: App + 'static>(
     app: &mut A,
     event: Event<'_, ()>,
     imgui_data: &mut ImguiData,
+    console: &mut ImguiConsole,
 ) -> anyhow::Result<ControlFlow> {
     let app_state_mut = engine::app_state_mut();
     app.on_event(&event, app_state_mut)?;
     imgui_data
         .platform
         .handle_event(imgui_data.imgui.io_mut(), &app_state_mut.window(), &event);
+    app_state_mut.input.update(&event);
     match event {
         winit::event::Event::NewEvents(_) => {}
         winit::event::Event::WindowEvent { event, .. } => match event {
@@ -70,14 +75,17 @@ pub fn app_loop<A: App + 'static>(
         winit::event::Event::Suspended => {}
         winit::event::Event::Resumed => {}
         winit::event::Event::MainEventsCleared => {
-            app_state_mut.window().request_redraw();
-        }
-        winit::event::Event::RedrawRequested(..) => {
+            if let Some(_) = app_state_mut.new_size.take() {
+                app_state_mut.swapchain_mut().recreate_swapchain()?;
+            }
+            app_state_mut.begin_frame()?;
             let win_size = app_state_mut.window().inner_size();
             if win_size.width > 0 && win_size.height > 0 {
-                update_loop(app, imgui_data, app_state_mut)?;
+                update_loop(app, imgui_data, app_state_mut, console)?;
             }
+            app_state_mut.end_frame()?;
         }
+        winit::event::Event::RedrawRequested(..) => {}
         winit::event::Event::RedrawEventsCleared => {}
         winit::event::Event::LoopDestroyed => {
             app_state_mut.gpu.wait_device_idle().unwrap();
@@ -94,11 +102,10 @@ fn update_loop(
     app: &mut dyn App,
     imgui_data: &mut ImguiData,
     app_state_mut: &mut AppState,
+    console: &mut ImguiConsole,
 ) -> anyhow::Result<()> {
-    if let Some(_) = app_state_mut.new_size.take() {
-        app_state_mut.swapchain_mut().recreate_swapchain()?;
-    }
-    app_state_mut.begin_frame().unwrap();
+    console.update(&app_state_mut.input);
+
     imgui_data
         .platform
         .prepare_frame(imgui_data.imgui.io_mut(), &app_state_mut.window())?;
@@ -115,7 +122,9 @@ fn update_loop(
     imgui_data
         .platform
         .prepare_render(ui, &engine::app_state().window());
+
     app.update(app_state_mut, ui)?;
+    console.imgui_update(ui, &mut app_state_mut.cvar_manager);
 
     let swapchain_format = app_state_mut.swapchain().present_format();
     let swapchain_extents = app_state_mut.swapchain().extents();
@@ -138,7 +147,6 @@ fn update_loop(
         signal_semaphores: &[&frame.render_finished_semaphore],
         fence: Some(&frame.in_flight_fence),
     })?;
-    app_state_mut.end_frame()?;
     Ok(())
 }
 
@@ -198,14 +206,18 @@ fn draw_imgui(
 }
 
 pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
+    let mut console = ImguiConsole::new();
+    console.add_message("Hello! :)");
+
+    let mut env_logger_builder = env_logger::builder();
+
     if cfg!(debug_assertions) {
         // Enable all logging in debug configuration
-        env_logger::builder()
-            .filter(None, log::LevelFilter::Trace)
-            .init();
-    } else {
-        env_logger::init();
+        env_logger_builder.filter(None, log::LevelFilter::Trace);
     }
+
+    env_logger_builder.init();
+
     info!(
         "Running in {:?}",
         std::env::current_dir().unwrap_or(".".into())
@@ -245,6 +257,7 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
         &engine::app_state().window(),
         HiDpiMode::Rounded,
     );
+
     let render_pass = engine::app_state().gpu.get_render_pass(
         &gpu::RenderPassAttachments {
             color_attachments: vec![RenderPassAttachment {
@@ -303,8 +316,8 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
     };
     let imgui_data = Box::new(imgui_data);
     let mut imgui_data = Box::leak(imgui_data);
-    event_loop.run(
-        move |event, _, control_flow| match app_loop(app, event, &mut imgui_data) {
+    event_loop.run(move |event, _, control_flow| {
+        match app_loop(app, event, &mut imgui_data, &mut console) {
             Ok(flow) => {
                 *control_flow = flow;
             }
@@ -313,6 +326,6 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
                 e,
                 e.backtrace()
             ),
-        },
-    )
+        }
+    })
 }
