@@ -9,7 +9,6 @@ pub struct ImguiConsole {
     show: bool,
     messages: Vec<String>,
     pending_input: String,
-    latest_command: Option<String>,
 }
 
 impl ImguiConsole {
@@ -18,16 +17,12 @@ impl ImguiConsole {
             show: false,
             messages: vec![],
             pending_input: String::new(),
-            latest_command: None,
         }
     }
     pub fn update(&mut self, input: &InputState) {
-        if input.is_key_just_pressed(Key::F12) {
+        if input.is_key_just_pressed(Key::F8) {
             self.show = !self.show;
         }
-    }
-    pub fn take_last_command(&mut self) -> Option<String> {
-        self.latest_command.take()
     }
     pub fn add_message<S: AsRef<str>>(&mut self, message: S) {
         if message.as_ref().is_empty() {
@@ -89,7 +84,6 @@ impl ImguiConsole {
                 .build()
             {
                 let input = std::mem::take(&mut self.pending_input);
-                self.latest_command = Some(input.clone());
                 self.add_message(input.clone());
                 self.handle_cvar_command(&input, cvar_manager);
             }
