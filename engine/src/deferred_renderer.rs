@@ -1315,9 +1315,9 @@ impl DeferredRenderingPipeline {
                 current_postprocess = (current_postprocess + 1) % 2;
 
                 let final_target = if current_postprocess == 0 {
-                    post_process_backbuffer_1
-                } else {
                     post_process_backbuffer_2
+                } else {
+                    post_process_backbuffer_1
                 };
 
                 final_target
@@ -1587,8 +1587,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let color_desc = RenderImageDescription {
             format: ImageFormat::Rgba8,
             samples: SampleCount::Sample1,
-            width: 1920,
-            height: 1080,
+            width: backbuffer.size.width,
+            height: backbuffer.size.height,
             view_type: ImageViewType::Type2D,
         };
 

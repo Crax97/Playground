@@ -504,6 +504,7 @@ void main() {
     float fxaaQualityEdgeThreshold = fxaa_input.fxaaQualityEdgeThreshold;
     float fxaaQualityEdgeThresholdMin = fxaa_input.fxaaQualityEdgeThresholdMin;
 
-    vec4 c = FxaaPixelShader(uv, tex, fxaaQualityRcpFrame, fxaaQualitySubpix, fxaaQualityEdgeThreshold, fxaaQualityEdgeThresholdMin);
+    vec2 nuv = vec2(uv.x, 1.0 - uv.y);
+    vec4 c = FxaaPixelShader(nuv, tex, fxaaQualityRcpFrame, fxaaQualitySubpix, fxaaQualityEdgeThreshold, fxaaQualityEdgeThresholdMin);
     color = c;
 }
