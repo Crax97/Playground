@@ -10,6 +10,7 @@ use crate::{
     Mesh, MeshPrimitive, PipelineTarget, RenderingPipeline, Scene, Texture,
 };
 
+use crate::resource_map::{ResourceHandle, ResourceMap};
 use gpu::{
     AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, Binding, BindingType,
     BlendMode, BlendOp, BlendState, BufferCreateInfo, BufferHandle, BufferUsageFlags,
@@ -23,7 +24,6 @@ use gpu::{
     VkCommandBuffer, VkGpu, VkRenderPassCommand, VkSwapchain,
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
-use resource_map::{ResourceHandle, ResourceMap};
 
 const FXAA_FS: &[u32] = glsl!(
     kind = fragment,

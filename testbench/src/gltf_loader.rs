@@ -12,7 +12,7 @@ use gpu::{
     MemoryDomain, SamplerAddressMode, SamplerCreateInfo, SamplerHandle, ShaderStage, VkGpu,
 };
 use nalgebra::{vector, Matrix4, Point3, Quaternion, UnitQuaternion, Vector3, Vector4};
-use resource_map::{ResourceHandle, ResourceMap};
+use engine::resource_map::{ResourceHandle, ResourceMap};
 use std::collections::HashMap;
 use std::mem::size_of;
 use std::num::NonZeroU32;

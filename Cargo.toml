@@ -5,7 +5,6 @@ members = [
     "engine_macros",
     "engine_macros_tests",
     "gpu",
-    "resource_map",
     "testbench"
 ]
 

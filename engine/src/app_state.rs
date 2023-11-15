@@ -1,5 +1,5 @@
 use gpu::{Gpu, VkGpu, VkSwapchain};
-use resource_map::ResourceMap;
+use crate::resource_map::ResourceMap;
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::{

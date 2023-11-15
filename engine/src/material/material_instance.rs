@@ -1,5 +1,5 @@
 use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, Handle, MemoryDomain, VkGpu};
-use resource_map::{Resource, ResourceHandle, ResourceMap};
+use crate::resource_map::{Resource, ResourceHandle, ResourceMap};
 use std::collections::HashMap;
 
 use crate::{texture::Texture, utils::to_u8_slice};

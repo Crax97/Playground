@@ -1,9 +1,9 @@
+use crate::resource_map::Resource;
 use gpu::{
     AccessFlags, ComponentMapping, Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat,
     ImageHandle, ImageSubresourceRange, ImageUsageFlags, ImageViewHandle, ImageViewType,
     MemoryDomain, PipelineStageFlags, SamplerAddressMode, SamplerCreateInfo, SamplerHandle, VkGpu,
 };
-use resource_map::Resource;
 
 pub struct Texture {
     pub image: ImageHandle,

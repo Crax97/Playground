@@ -1,8 +1,11 @@
+use bevy_ecs::system::Resource as BevyResource;
 use crossbeam::channel::{Receiver, Sender};
 use log::{error, info};
-use std::any::type_name;
+use std::any::{type_name, Any, TypeId};
+use std::collections::HashMap;
 use std::fmt::Formatter;
-use std::{cell::RefCell, marker::PhantomData, rc::Rc};
+use std::marker::PhantomData;
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use thunderdome::{Arena, Index};
 
 pub trait Resource: Send + Sync + 'static {
@@ -15,22 +18,30 @@ pub(crate) struct ResourceId {
     pub(crate) id: Index,
 }
 
-pub struct RefCounted<R: Resource> {
-    resource: R,
+pub struct RefCounted {
+    resource: Arc<dyn Any + Send + Sync>,
     ref_count: u32,
 }
 
-impl<R: Resource> RefCounted<R> {
-    fn new(resource: R) -> Self {
+impl RefCounted {
+    fn new(resource: impl Resource) -> Self {
         Self {
-            resource,
+            resource: Arc::new(resource),
             ref_count: 1,
         }
     }
 }
 
+type Resources = Arena<RefCounted>;
+
+#[derive(Default)]
+pub struct LoadedResources {
+    resources: HashMap<TypeId, RwLock<Resources>>,
+}
+
+#[derive(BevyResource)]
 pub struct ResourceMap {
-    map: RefCell<anymap::AnyMap>,
+    loaded_resources: LoadedResources,
     operations_receiver: Receiver<Box<dyn ResourceMapOperation>>,
     operations_sender: Sender<Box<dyn ResourceMapOperation>>,
 }
@@ -39,14 +50,14 @@ impl Default for ResourceMap {
     fn default() -> Self {
         let (operations_sender, operations_receiver) = crossbeam::channel::unbounded();
         Self {
-            map: RefCell::new(anymap::AnyMap::new()),
+            loaded_resources: LoadedResources::default(),
             operations_receiver,
             operations_sender,
         }
     }
 }
 
-trait ResourceMapOperation: Send + Sync + 'static {
+pub(crate) trait ResourceMapOperation: Send + Sync + 'static {
     fn execute(&self, map: &mut ResourceMap);
 }
 
@@ -142,8 +153,10 @@ impl ResourceMap {
     }
 
     pub fn add<R: Resource + 'static>(&mut self, resource: R) -> ResourceHandle<R> {
-        let handle = self.get_arena_mut::<R>();
-        let id = handle.insert(RefCounted::new(resource));
+        let id = {
+            let mut handle = self.get_or_insert_arena_mut::<R>();
+            handle.insert(RefCounted::new(resource))
+        };
         ResourceHandle {
             _marker: PhantomData,
             id: ResourceId { id },
@@ -151,24 +164,29 @@ impl ResourceMap {
         }
     }
 
-    fn get_arena_handle<R: Resource + 'static>(&self) -> Rc<RefCell<Arena<RefCounted<R>>>> {
-        self.map
-            .borrow_mut()
-            .entry::<Rc<RefCell<Arena<RefCounted<R>>>>>()
-            .or_insert_with(|| Rc::new(RefCell::new(Arena::new())))
-            .clone()
+    fn get_arena_handle<R: Resource>(&self) -> RwLockReadGuard<Resources> {
+        self.loaded_resources
+            .resources
+            .get(&TypeId::of::<R>())
+            .unwrap()
+            .read()
+            .unwrap()
     }
-
-    fn get_arena<R: Resource + 'static>(&self) -> &Arena<RefCounted<R>> {
-        let handle = self.get_arena_handle::<R>();
-        let ptr = handle.as_ptr();
-        unsafe { &*ptr }
+    fn get_or_insert_arena_mut<R: Resource>(&mut self) -> RwLockWriteGuard<Resources> {
+        self.loaded_resources
+            .resources
+            .entry(TypeId::of::<R>())
+            .or_insert_with(|| RwLock::new(Arena::new()))
+            .write()
+            .unwrap()
     }
-
-    fn get_arena_mut<R: Resource + 'static>(&mut self) -> &mut Arena<RefCounted<R>> {
-        let handle = self.get_arena_handle::<R>();
-        let ptr = handle.as_ptr();
-        unsafe { &mut *ptr }
+    fn get_arena_handle_mut<R: Resource>(&self) -> RwLockWriteGuard<Resources> {
+        self.loaded_resources
+            .resources
+            .get(&TypeId::of::<R>())
+            .unwrap()
+            .write()
+            .unwrap()
     }
 
     pub fn get<R: Resource + 'static>(&self, id: &ResourceHandle<R>) -> &R {
@@ -179,22 +197,37 @@ impl ResourceMap {
         self.try_get_mut(id).unwrap()
     }
 
-    pub fn try_get<R: Resource + 'static>(&self, id: &ResourceHandle<R>) -> Option<&R> {
-        let arena_handle = self.get_arena();
-        arena_handle.get(id.id.id).map(|r| &r.resource)
+    pub fn try_get<'a, R: Resource + 'static>(&'a self, id: &ResourceHandle<R>) -> Option<&'a R> {
+        let arena_handle = self.get_arena_handle::<R>();
+        let object_arc = arena_handle
+            .get(id.id.id)
+            .map(|r| r.resource.clone())
+            .map(|a| a.downcast::<R>().unwrap());
+        object_arc
+            .map(|a| Arc::as_ptr(&a))
+            .map(|p| unsafe { p.as_ref() }.unwrap())
     }
-
-    pub fn try_get_mut<R: Resource + 'static>(&mut self, id: &ResourceHandle<R>) -> Option<&mut R> {
-        let arena_handle = self.get_arena_mut::<R>();
-        arena_handle.get_mut(id.id.id).map(|r| &mut r.resource)
+    pub fn try_get_mut<'a, R: Resource + 'static>(
+        &'a self,
+        id: &ResourceHandle<R>,
+    ) -> Option<&'a mut R> {
+        let arena_handle = self.get_arena_handle::<R>();
+        let object_arc = arena_handle
+            .get(id.id.id)
+            .map(|r| r.resource.clone())
+            .map(|a| a.downcast::<R>().unwrap());
+        object_arc
+            .map(|a| Arc::as_ptr(&a))
+            .map(|p| p as *mut R)
+            .map(|p| unsafe { p.as_mut() }.unwrap())
     }
 
     pub fn len<R: Resource + 'static>(&self) -> usize {
-        self.get_arena_handle::<R>().borrow().len()
+        self.get_arena_handle_mut::<R>().len()
     }
 
     pub fn is_empty<R: Resource + 'static>(&self) -> bool {
-        self.get_arena_handle::<R>().borrow().is_empty()
+        self.get_arena_handle_mut::<R>().is_empty()
     }
 
     /* Call this on each frame, to correctly destroy unreferenced resources.
@@ -209,14 +242,14 @@ impl ResourceMap {
     }
 
     fn increment_resource_ref_count<R: Resource + 'static>(&mut self, id: ResourceId) {
-        let arena_handle = self.get_arena_mut::<R>();
+        let mut arena_handle = self.get_arena_handle_mut::<R>();
         let resource_mut = arena_handle
             .get_mut(id.id)
             .unwrap_or_else(|| panic!("Failed to fetch resource of type {}", type_name::<R>()));
         resource_mut.ref_count += 1;
     }
     fn decrement_resource_ref_count<R: Resource + 'static>(&mut self, id: ResourceId) {
-        let arena_handle = self.get_arena_mut::<R>();
+        let mut arena_handle = self.get_arena_handle_mut::<R>();
         let ref_count = {
             let resource_mut = arena_handle
                 .get_mut(id.id)
@@ -233,7 +266,11 @@ impl ResourceMap {
 
             info!(
                 "Deleted resource {} of type {}",
-                removed_resource.resource.get_description(),
+                removed_resource
+                    .resource
+                    .downcast_ref::<R>()
+                    .unwrap()
+                    .get_description(),
                 type_name::<R>()
             );
         }
@@ -371,7 +408,7 @@ mod test {
         // Need to update again because B's are released after A's, so they're destroyed on the
         // next update call
         map.update();
-        assert!(map.get_arena::<A>().is_empty());
-        assert!(map.get_arena::<B>().is_empty());
+        assert!(map.get_arena_handle::<A>().is_empty());
+        assert!(map.get_arena_handle::<B>().is_empty());
     }
 }

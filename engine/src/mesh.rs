@@ -1,7 +1,7 @@
 use nalgebra::{Vector2, Vector3};
 
+use crate::resource_map::Resource;
 use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain, VkGpu};
-use resource_map::Resource;
 
 use crate::utils::to_u8_slice;
 
@@ -19,6 +19,7 @@ pub struct MeshCreateInfo<'a> {
     pub primitives: &'a [MeshPrimitiveCreateInfo],
 }
 
+#[derive(Clone)]
 pub struct MeshPrimitive {
     pub index_buffer: BufferHandle,
     pub position_component: BufferHandle,
@@ -30,6 +31,7 @@ pub struct MeshPrimitive {
     pub index_count: u32,
 }
 
+#[derive(Clone)]
 pub struct Mesh {
     pub primitives: Vec<MeshPrimitive>,
 }

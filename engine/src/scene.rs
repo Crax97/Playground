@@ -1,8 +1,8 @@
-use std::num::NonZeroU32;
-
+use crate::resource_map::{ResourceHandle, ResourceMap};
+use bevy_ecs::system::Resource;
 use gpu::{Extent2D, ImageFormat, ImageHandle, ImageViewHandle, VkCommandBuffer, VkGpu};
 use nalgebra::{vector, Matrix4, Point3, Vector2, Vector3};
-use resource_map::{ResourceHandle, ResourceMap};
+use std::num::NonZeroU32;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -172,7 +172,7 @@ impl Light {
 #[derive(Clone, Copy, Eq, Ord, PartialOrd, PartialEq)]
 pub struct LightHandle(pub usize);
 
-#[derive(Default)]
+#[derive(Resource, Default)]
 pub struct Scene {
     pub primitives: Vec<ScenePrimitive>,
     pub lights: Vec<Light>,

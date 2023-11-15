@@ -1,10 +1,10 @@
 use std::{collections::HashMap, hash::Hash, mem::size_of, num::NonZeroU32};
 
+use crate::resource_map::Resource;
 use gpu::{
     BindingElement, BindingType, CullMode, FragmentStageInfo, FrontFace, LogicOp, PolygonMode,
     PushConstantRange, ShaderModuleHandle, ShaderStage, VertexStageInfo,
 };
-use resource_map::Resource;
 
 use crate::{MaterialDomain, MaterialParameterOffsetSize, PipelineTarget, TextureInput};
 

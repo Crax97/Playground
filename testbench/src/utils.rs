@@ -1,10 +1,9 @@
 #![allow(dead_code)]
 use anyhow::bail;
-use engine::{Mesh, MeshPrimitiveCreateInfo, Texture};
+use engine::{Mesh, MeshPrimitiveCreateInfo, ResourceHandle, ResourceMap, Texture};
 use image::DynamicImage;
 use log::{debug, info};
 use nalgebra::{point, vector, Vector2, Vector3};
-use resource_map::{ResourceHandle, ResourceMap};
 use std::path::Path;
 
 use half::f16;
@@ -469,8 +468,8 @@ pub fn generate_irradiance_map(
 
 pub fn load_cube_to_resource_map(
     gpu: &VkGpu,
-    resource_map: &mut resource_map::ResourceMap,
-) -> anyhow::Result<resource_map::ResourceHandle<engine::Mesh>> {
+    resource_map: &mut ResourceMap,
+) -> anyhow::Result<ResourceHandle<engine::Mesh>> {
     let mesh_create_info = engine::MeshCreateInfo {
         label: Some("cube"),
         primitives: &[MeshPrimitiveCreateInfo {

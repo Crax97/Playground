@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = { version = "1.0.*", features = ["backtrace"] }
+anymap = "0.12.*"
 winit = "0.27.5"
 nalgebra = "0.32.2"
 raw-window-handle = "0.5.2"
@@ -21,7 +22,9 @@ strum = { version = "0.25.0", features = ["derive", "strum_macros"] }
 strum_macros = "0.25.1"
 env_logger = "0.10.0"
 bitflags = "2.2.*"
+bevy_ecs = "0.12.*"
+crossbeam = "0.8.*"
+thunderdome = "0.6.*"
 
 gpu = { path = "../gpu" }
-resource_map = { path = "../resource_map" }
 engine_macros = { path = "../engine_macros" }
