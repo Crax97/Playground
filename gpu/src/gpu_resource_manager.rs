@@ -29,7 +29,7 @@ struct RefCounted<T> {
     ref_count: AtomicU32,
 }
 
-pub trait Context {
+pub trait Context: Send + Sync {
     fn increment_resource_refcount(&self, id: u64, resource_type: HandleType);
     fn decrement_resource_refcount(&self, id: u64, resource_type: HandleType);
 }

@@ -430,7 +430,7 @@ impl VkSwapchain {
             })
             .map(|img| {
                 info!("Created new swapchain image with id {}", img.inner.as_raw());
-                let handle = <ImageHandle as crate::Handle>::new(self.state.clone());
+                let handle = <ImageHandle as crate::Handle>::new(self.state.context.clone());
                 self.state
                     .allocated_resources
                     .borrow_mut()
@@ -484,7 +484,7 @@ impl VkSwapchain {
                 image.clone(),
                 self.present_extent,
             )?;
-            let view_handle = <ImageViewHandle as crate::Handle>::new(self.state.clone());
+            let view_handle = <ImageViewHandle as crate::Handle>::new(self.state.context.clone());
             self.state
                 .allocated_resources
                 .borrow_mut()

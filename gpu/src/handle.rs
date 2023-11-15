@@ -15,7 +15,7 @@ pub enum HandleType {
     Sampler,
 }
 
-pub trait Handle: std::fmt::Debug {
+pub trait Handle: std::fmt::Debug + Send + Sync + 'static {
     fn new(context: Arc<dyn Context>) -> Self;
     fn null() -> Self;
     fn is_null(&self) -> bool;

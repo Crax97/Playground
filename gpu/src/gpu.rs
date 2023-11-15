@@ -30,6 +30,7 @@ use ash::{
     vk::{PipelineBindPoint, SubpassDescriptionFlags},
 };
 
+use crossbeam::channel::{Receiver, Sender};
 use log::{debug, error, info, trace, warn};
 use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
@@ -168,6 +169,8 @@ pub struct GpuThreadSharedState {
     pub dynamic_rendering: DynamicRendering,
     pub allocated_resources: RefCell<GpuResourceMap>,
     pub destroyed_resources: DestroyedResources,
+    pub context: Arc<VkGpuContext>,
+    operations_receiver: Receiver<ResourceOperation>,
 }
 
 impl Drop for GpuThreadSharedState {
@@ -230,7 +233,29 @@ impl GpuThreadLocalState {
     }
 }
 
-impl Context for GpuThreadSharedState {
+#[derive(Clone, Copy, Debug)]
+enum ResourceOperation {
+    IncrementRefCount(u64, HandleType),
+    DecrementRefCount(u64, HandleType),
+}
+
+pub struct VkGpuContext {
+    operations_sender: Sender<ResourceOperation>,
+}
+impl Context for VkGpuContext {
+    fn increment_resource_refcount(&self, id: u64, resource_type: HandleType) {
+        self.operations_sender
+            .send(ResourceOperation::IncrementRefCount(id, resource_type))
+            .expect("Failed to send increment")
+    }
+
+    fn decrement_resource_refcount(&self, id: u64, resource_type: HandleType) {
+        self.operations_sender
+            .send(ResourceOperation::DecrementRefCount(id, resource_type))
+            .expect("Failed to send decrement")
+    }
+}
+impl GpuThreadSharedState {
     fn increment_resource_refcount(&self, id: u64, resource_type: crate::HandleType) {
         match resource_type {
             crate::HandleType::Buffer => self
@@ -480,6 +505,8 @@ impl VkGpu {
 
         let dynamic_rendering = Self::create_dynamic_rendering(&instance, &logical_device)?;
 
+        let (operations_sender, operations_receiver) = crossbeam::channel::unbounded();
+
         let state = Arc::new(GpuThreadSharedState {
             entry,
             instance,
@@ -507,6 +534,8 @@ impl VkGpu {
             dynamic_rendering,
             allocated_resources: RefCell::new(GpuResourceMap::new()),
             destroyed_resources: DestroyedResources::default(),
+            context: Arc::new(VkGpuContext { operations_sender }),
+            operations_receiver,
         });
 
         let thread_local_state = GpuThreadLocalState::new(state.clone())?;
@@ -1850,7 +1879,7 @@ fn create_staging_buffer(state: &Arc<GpuThreadSharedState>) -> VkResult<BufferHa
         MemoryDomain::HostVisible,
         allocation,
     )?;
-    let handle = BufferHandle::new(state.clone());
+    let handle = BufferHandle::new(state.context.clone());
     state
         .allocated_resources
         .borrow_mut()
@@ -2373,6 +2402,17 @@ impl VkGpu {
 
 impl Gpu for VkGpu {
     fn update(&self) {
+        for op in self.state.operations_receiver.try_iter() {
+            match op {
+                ResourceOperation::IncrementRefCount(id, resource_type) => {
+                    self.state.increment_resource_refcount(id, resource_type)
+                }
+                ResourceOperation::DecrementRefCount(id, resource_type) => {
+                    self.state.decrement_resource_refcount(id, resource_type)
+                }
+            }
+        }
+
         let device = self.vk_logical_device();
         self.state.descriptor_set_cache.update(|set| unsafe {
             info!("Destroying descriptor set");
@@ -2529,7 +2569,7 @@ impl Gpu for VkGpu {
         info: &ShaderModuleCreateInfo,
     ) -> anyhow::Result<crate::ShaderModuleHandle> {
         let buffer = self.create_shader_module(info)?;
-        let handle = ShaderModuleHandle::new(self.state.clone());
+        let handle = ShaderModuleHandle::new(self.state.context.clone());
         self.allocated_resources()
             .borrow_mut()
             .insert(&handle, buffer);
@@ -2543,7 +2583,7 @@ impl Gpu for VkGpu {
         memory_domain: MemoryDomain,
     ) -> anyhow::Result<crate::BufferHandle> {
         let buffer = self.create_buffer(buffer_info, memory_domain)?;
-        let handle = BufferHandle::new(self.state.clone());
+        let handle = BufferHandle::new(self.state.context.clone());
         self.allocated_resources()
             .borrow_mut()
             .insert(&handle, buffer);
@@ -2589,7 +2629,7 @@ impl Gpu for VkGpu {
     ) -> anyhow::Result<ImageHandle> {
         let (image, format) = self.create_image(info, memory_domain)?;
 
-        let handle = ImageHandle::new(self.state.clone());
+        let handle = ImageHandle::new(self.state.context.clone());
 
         self.allocated_resources()
             .borrow_mut()
@@ -2828,7 +2868,7 @@ impl Gpu for VkGpu {
                 image.extents,
             )
         }?;
-        let handle = ImageViewHandle::new(self.state.clone());
+        let handle = ImageViewHandle::new(self.state.context.clone());
         self.allocated_resources()
             .borrow_mut()
             .insert(&handle, view);
@@ -2837,7 +2877,7 @@ impl Gpu for VkGpu {
 
     fn make_sampler(&self, info: &SamplerCreateInfo) -> anyhow::Result<crate::SamplerHandle> {
         let sampler = self.create_sampler(info)?;
-        let handle = SamplerHandle::new(self.state.clone());
+        let handle = SamplerHandle::new(self.state.context.clone());
         self.allocated_resources()
             .borrow_mut()
             .insert(&handle, sampler);
