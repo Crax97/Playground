@@ -405,7 +405,6 @@ impl DeferredRenderingPipeline {
 
         let default_irradiance_map = Texture::new_with_data(
             gpu,
-            resource_map,
             1,
             1,
             bytemuck::cast_slice(&[255u8; 6 * 3]),
@@ -739,7 +738,6 @@ impl DeferredRenderingPipeline {
             None => &self.default_irradiance_map,
         };
         let irradiance_map_texture = resource_map.get(irradiance_map_texture);
-        let irradiance_image_view = resource_map.get(&irradiance_map_texture.image_view);
         let vector_desc = RenderImageDescription {
             format: ImageFormat::RgbaFloat32,
             samples: SampleCount::Sample1,
@@ -1052,7 +1050,7 @@ impl DeferredRenderingPipeline {
                     },
                     Binding {
                         ty: gpu::DescriptorBindingType::ImageView {
-                            image_view_handle: irradiance_image_view.view.clone(),
+                            image_view_handle: irradiance_map_texture.view.clone(),
                             sampler_handle: self.gbuffer_nearest_sampler.clone(),
                             layout: gpu::ImageLayout::ShaderReadOnly,
                         },
@@ -1409,13 +1407,10 @@ fn draw_mesh_primitive(
                 let texture_parameter = &material.current_inputs[&tex_info.name];
                 let tex = resource_map.get(texture_parameter);
 
-                // TODO: these can be avoided
-                let view = resource_map.get(&tex.image_view);
-                let sampler = resource_map.get(&tex.sampler);
                 Binding {
                     ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: view.view.clone(),
-                        sampler_handle: sampler.0.clone(),
+                        image_view_handle: tex.view.clone(),
+                        sampler_handle: tex.sampler.clone(),
                         layout: gpu::ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: tex_info.shader_stage,

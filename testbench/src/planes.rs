@@ -119,7 +119,6 @@ impl App for PlanesApp {
 
         let texture = Texture::new_with_data(
             &app_state.gpu,
-            &mut resource_map,
             cpu_image.width(),
             cpu_image.height(),
             &cpu_image,

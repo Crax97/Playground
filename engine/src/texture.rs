@@ -3,34 +3,12 @@ use gpu::{
     ImageHandle, ImageSubresourceRange, ImageUsageFlags, ImageViewHandle, ImageViewType,
     MemoryDomain, PipelineStageFlags, SamplerAddressMode, SamplerCreateInfo, SamplerHandle, VkGpu,
 };
-use resource_map::{Resource, ResourceHandle, ResourceMap};
+use resource_map::Resource;
 
-pub struct ImageResource(pub ImageHandle);
-impl Resource for ImageResource {
-    fn get_description(&self) -> &str {
-        "GPU Image"
-    }
-}
-
-pub struct TextureImageView {
-    pub view: ImageViewHandle,
-    pub image: ResourceHandle<ImageResource>,
-}
-impl Resource for TextureImageView {
-    fn get_description(&self) -> &str {
-        "GPU Image View"
-    }
-}
-
-pub struct SamplerResource(pub SamplerHandle);
-impl Resource for SamplerResource {
-    fn get_description(&self) -> &str {
-        "GPU Sampler"
-    }
-}
 pub struct Texture {
-    pub image_view: ResourceHandle<TextureImageView>,
-    pub sampler: ResourceHandle<SamplerResource>,
+    pub image: ImageHandle,
+    pub view: ImageViewHandle,
+    pub sampler: SamplerHandle,
 }
 
 impl Texture {
@@ -114,12 +92,7 @@ impl Texture {
         Ok((image, rgba_view, sampler))
     }
 
-    pub fn wrap(
-        gpu: &VkGpu,
-        image: ImageHandle,
-        view: ImageViewHandle,
-        resource_map: &mut ResourceMap,
-    ) -> anyhow::Result<Self> {
+    pub fn wrap(gpu: &VkGpu, image: ImageHandle, view: ImageViewHandle) -> anyhow::Result<Self> {
         let sampler = gpu.make_sampler(&SamplerCreateInfo {
             mag_filter: Filter::Linear,
             min_filter: Filter::Linear,
@@ -132,18 +105,15 @@ impl Texture {
             max_lod: 0.0,
             border_color: [0.0; 4],
         })?;
-        let image = resource_map.add(ImageResource(image));
-        let image_view = TextureImageView { image, view };
-        let image_view = resource_map.add(image_view);
-        let sampler = resource_map.add(SamplerResource(sampler));
+
         Ok(Self {
-            image_view,
+            image,
+            view,
             sampler,
         })
     }
     pub fn new_empty(
         gpu: &VkGpu,
-        resource_map: &mut ResourceMap,
         width: u32,
         height: u32,
         label: Option<&str>,
@@ -152,18 +122,15 @@ impl Texture {
     ) -> anyhow::Result<Self> {
         let (image, view, sampler) =
             Self::new_impl(gpu, width, height, None, label, format, view_type)?;
-        let image = resource_map.add(ImageResource(image));
-        let image_view = TextureImageView { image, view };
-        let image_view = resource_map.add(image_view);
-        let sampler = resource_map.add(SamplerResource(sampler));
+
         Ok(Self {
-            image_view,
+            image,
+            view,
             sampler,
         })
     }
     pub fn new_with_data(
         gpu: &VkGpu,
-        resource_map: &mut ResourceMap,
         width: u32,
         height: u32,
         data: &[u8],
@@ -174,13 +141,9 @@ impl Texture {
         let (image, view, sampler) =
             Self::new_impl(gpu, width, height, Some(data), label, format, view_type)?;
 
-        let image = resource_map.add(ImageResource(image));
-        let image_view = TextureImageView { image, view };
-        let image_view = resource_map.add(image_view);
-        let sampler = resource_map.add(SamplerResource(sampler));
-
         Ok(Self {
-            image_view,
+            image,
+            view,
             sampler,
         })
     }

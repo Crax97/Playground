@@ -87,7 +87,6 @@ pub fn load_cubemap_from_path<P: AsRef<Path>>(
     path: P,
     extension: &str,
     target_format: ImageFormat,
-    resource_map: &mut resource_map::ResourceMap,
 ) -> anyhow::Result<Texture> {
     let images = ["posx", "negx", "posy", "negy", "posz", "negz"];
 
@@ -119,7 +118,6 @@ pub fn load_cubemap_from_path<P: AsRef<Path>>(
 
     Texture::new_with_data(
         gpu,
-        resource_map,
         width,
         height,
         &accumulated_bytes,
@@ -179,7 +177,7 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
         &cube_mesh,
     )?;
 
-    Texture::wrap(gpu, backing_image, view, resource_map)
+    Texture::wrap(gpu, backing_image, view)
 }
 
 fn cubemap_main_loop(
@@ -456,18 +454,17 @@ pub fn generate_irradiance_map(
         width: 512,
         height: 512,
     };
-    let input_texture_view = resource_map.get(&source_cubemap.image_view);
     let convolve = read_file_to_vk_module(&gpu, "./shaders/skybox_convolve_irradiance.spirv")?;
     let (backing_image, view) = cubemap_main_loop(
         gpu,
         ImageFormat::RgbaFloat16,
-        &input_texture_view.view,
+        &source_cubemap.view,
         convolve,
         size,
         resource_map,
         cube_mesh,
     )?;
-    Texture::wrap(gpu, backing_image, view, resource_map)
+    Texture::wrap(gpu, backing_image, view)
 }
 
 pub fn load_cube_to_resource_map(
