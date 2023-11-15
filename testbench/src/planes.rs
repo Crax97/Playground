@@ -14,7 +14,6 @@ use engine::{
 use gpu::{ImageViewType, PresentMode, ShaderStage, VkCommandBuffer};
 use imgui::Ui;
 use nalgebra::*;
-use resource_map::ResourceMap;
 use winit::{event::ElementState, event_loop::EventLoop};
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -27,7 +26,6 @@ const SPEED: f32 = 0.1;
 const ROTATION_SPEED: f32 = 3.0;
 const MIN_DELTA: f32 = 1.0;
 pub struct PlanesApp {
-    resource_map: ResourceMap,
     camera: Camera,
     forward_movement: f32,
     rotation_movement: f32,
@@ -44,12 +42,11 @@ impl App for PlanesApp {
         "planes".to_owned()
     }
 
-    fn create(app_state: &engine::AppState, _: &EventLoop<()>) -> anyhow::Result<Self>
+    fn create(app_state: &mut engine::AppState, _: &EventLoop<()>) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
-        let mut resource_map = ResourceMap::new();
-
+        let resource_map = &mut app_state.resource_map;
         let camera = Camera {
             location: point![2.0, 2.0, 2.0],
             forward: vector![0.0, -1.0, -1.0].normalize(),
@@ -75,7 +72,7 @@ impl App for PlanesApp {
         let fragment_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/fragment_deferred.spirv")?;
 
-        let cube = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
+        let cube = utils::load_cube_to_resource_map(&app_state.gpu, resource_map)?;
 
         let mesh_data = MeshCreateInfo {
             label: Some("Quad mesh"),
@@ -129,7 +126,7 @@ impl App for PlanesApp {
         let texture = resource_map.add(texture);
 
         let mut scene_renderer =
-            DeferredRenderingPipeline::new(&app_state.gpu, &mut resource_map, cube.clone())?;
+            DeferredRenderingPipeline::new(&app_state.gpu, resource_map, cube.clone())?;
 
         let master = scene_renderer.create_material(
             &app_state.gpu,
@@ -199,7 +196,6 @@ impl App for PlanesApp {
         });
 
         Ok(Self {
-            resource_map,
             camera,
             forward_movement,
             rotation_movement,
@@ -244,9 +240,17 @@ impl App for PlanesApp {
         Ok(())
     }
 
-    fn draw(&mut self, backbuffer: &Backbuffer) -> anyhow::Result<VkCommandBuffer> {
-        self.scene_renderer
-            .render(&self.camera, &self.scene, backbuffer, &self.resource_map)
+    fn draw(
+        &mut self,
+        app_state: &engine::AppState,
+        backbuffer: &Backbuffer,
+    ) -> anyhow::Result<VkCommandBuffer> {
+        self.scene_renderer.render(
+            &self.camera,
+            &self.scene,
+            backbuffer,
+            &app_state.resource_map,
+        )
     }
 
     fn update(&mut self, _app_state: &mut engine::AppState, _ui: &mut Ui) -> anyhow::Result<()> {

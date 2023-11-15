@@ -1,5 +1,6 @@
 mod app_state;
 mod camera;
+pub mod components;
 mod cvar_manager;
 pub mod deferred_renderer;
 pub mod input;

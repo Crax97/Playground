@@ -1,4 +1,5 @@
 use gpu::{Gpu, VkGpu, VkSwapchain};
+use resource_map::ResourceMap;
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::{
@@ -15,6 +16,7 @@ pub struct AppState {
     pub new_size: Option<PhysicalSize<u32>>,
     pub input: InputState,
     pub cvar_manager: CvarManager,
+    pub resource_map: ResourceMap,
 }
 
 impl AppState {
@@ -22,6 +24,8 @@ impl AppState {
         let swapchain = VkSwapchain::new(&gpu, &window).expect("Failed to create swapchain!");
         let mut cvar_manager = CvarManager::new();
         cvar_manager.register_cvar("g_test", 10, CvarFlags::empty());
+
+        let resource_manager = ResourceMap::new();
 
         Self {
             gpu,
@@ -31,6 +35,7 @@ impl AppState {
             new_size: None,
             cvar_manager,
             input: InputState::new(),
+            resource_map: resource_manager,
         }
     }
 
@@ -44,6 +49,7 @@ impl AppState {
         self.swapchain.present()?;
         self.time.end_frame();
         self.input.end_frame();
+        self.resource_map.update();
         Ok(())
     }
 

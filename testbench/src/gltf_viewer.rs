@@ -21,7 +21,6 @@ use engine::{
     MaterialInstance, RenderingPipeline, ShadowSetup, TextureInput, FXAA_ITERATIONS_CVAR_NAME,
 };
 use nalgebra::*;
-use resource_map::ResourceMap;
 use winit::event::MouseButton;
 use winit::event_loop::EventLoop;
 
@@ -42,7 +41,6 @@ struct VertexData {
 }
 
 pub struct GLTFViewer {
-    resource_map: ResourceMap,
     camera: FpsCamera,
     scene_renderer: DeferredRenderingPipeline,
     gltf_loader: GltfLoader,
@@ -204,14 +202,14 @@ impl App for GLTFViewer {
         format!("GLTF Viewer - FPS {}", 1.0 / app_state.time().delta_frame())
     }
 
-    fn create(app_state: &AppState, _event_loop: &EventLoop<()>) -> anyhow::Result<Self>
+    fn create(app_state: &mut AppState, _event_loop: &EventLoop<()>) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
         let args = GltfViewerArgs::parse();
 
-        let mut resource_map = ResourceMap::new();
-        let cube_mesh = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
+        let resource_map = &mut app_state.resource_map;
+        let cube_mesh = utils::load_cube_to_resource_map(&app_state.gpu, resource_map)?;
 
         // TODO: avoid duplicating this module creation
         let vertex_module =
@@ -226,20 +224,20 @@ impl App for GLTFViewer {
                 height: 1024,
             },
             cube_mesh.clone(),
-            &mut resource_map,
+            resource_map,
             "images/skybox/hdr/evening_road.hdr",
         )?;
         let irradiance_map = utils::generate_irradiance_map(
             &app_state.gpu,
             &david_texture,
-            &mut resource_map,
+            resource_map,
             &cube_mesh,
         )?;
         let david_texture = resource_map.add(david_texture);
         let irradiance_map = resource_map.add(irradiance_map);
 
         let mut scene_renderer =
-            DeferredRenderingPipeline::new(&app_state.gpu, &mut resource_map, cube_mesh)?;
+            DeferredRenderingPipeline::new(&app_state.gpu, resource_map, cube_mesh)?;
 
         scene_renderer.set_irradiance_texture(Some(irradiance_map));
 
@@ -279,7 +277,7 @@ impl App for GLTFViewer {
             &args.gltf_file,
             &app_state.gpu,
             &mut scene_renderer,
-            &mut resource_map,
+            resource_map,
             GltfLoadOptions {},
         )?;
 
@@ -292,7 +290,6 @@ impl App for GLTFViewer {
             .select_present_mode(PresentMode::Immediate)?;
 
         Ok(Self {
-            resource_map,
             scene_renderer,
             gltf_loader,
             camera: FpsCamera::default(),
@@ -416,12 +413,16 @@ impl App for GLTFViewer {
         Ok(())
     }
 
-    fn draw(&mut self, backbuffer: &Backbuffer) -> anyhow::Result<VkCommandBuffer> {
+    fn draw(
+        &mut self,
+        app_state: &AppState,
+        backbuffer: &Backbuffer,
+    ) -> anyhow::Result<VkCommandBuffer> {
         let command_buffer = self.scene_renderer.render(
             &self.camera.camera(),
             self.gltf_loader.scene(),
             backbuffer,
-            &self.resource_map,
+            &app_state.resource_map,
         )?;
         Ok(command_buffer)
     }

@@ -8,12 +8,11 @@ use app::{bootstrap, App};
 use engine::Backbuffer;
 use engine_macros::glsl;
 use gpu::{
-    AttachmentReference, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags,
-    CullMode, FramebufferColorAttachment, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat,
-    ImageLayout, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle,
-    IndexType, InputRate, MemoryDomain, PresentMode, SamplerCreateInfo,
-    SamplerHandle, ShaderModuleHandle, ShaderStage, SubpassDescription, VertexBindingInfo,
-    VkCommandBuffer,
+    AttachmentReference, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags, CullMode,
+    FramebufferColorAttachment, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageLayout,
+    ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, IndexType, InputRate, MemoryDomain,
+    PresentMode, SamplerCreateInfo, SamplerHandle, ShaderModuleHandle, ShaderStage,
+    SubpassDescription, VertexBindingInfo, VkCommandBuffer,
 };
 use imgui::Ui;
 use nalgebra::*;
@@ -87,7 +86,7 @@ impl App for TriangleApp {
         "planes".to_owned()
     }
 
-    fn create(app_state: &engine::AppState, _: &EventLoop<()>) -> anyhow::Result<Self>
+    fn create(app_state: &mut engine::AppState, _: &EventLoop<()>) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
@@ -223,7 +222,11 @@ impl App for TriangleApp {
         })
     }
 
-    fn draw(&mut self, backbuffer: &Backbuffer) -> anyhow::Result<VkCommandBuffer> {
+    fn draw(
+        &mut self,
+        _app_state: &engine::AppState,
+        backbuffer: &Backbuffer,
+    ) -> anyhow::Result<VkCommandBuffer> {
         let gpu = &engine::app_state().gpu;
         let mut command_buffer = gpu.create_command_buffer(gpu::QueueType::Graphics)?;
         {

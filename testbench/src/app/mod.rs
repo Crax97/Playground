@@ -26,7 +26,7 @@ pub struct ImguiData {
 pub trait App {
     fn window_name(&self, app_state: &engine::AppState) -> String;
 
-    fn create(app_state: &AppState, event_loop: &EventLoop<()>) -> anyhow::Result<Self>
+    fn create(app_state: &mut AppState, event_loop: &EventLoop<()>) -> anyhow::Result<Self>
     where
         Self: Sized;
 
@@ -40,7 +40,11 @@ pub trait App {
         event: winit::event::DeviceEvent,
     ) -> anyhow::Result<()>;
     fn update(&mut self, app_state: &mut AppState, ui: &mut Ui) -> anyhow::Result<()>;
-    fn draw(&mut self, backbuffer: &Backbuffer) -> anyhow::Result<VkCommandBuffer>;
+    fn draw(
+        &mut self,
+        app_state: &AppState,
+        backbuffer: &Backbuffer,
+    ) -> anyhow::Result<VkCommandBuffer>;
 }
 
 pub fn app_loop<A: App + 'static>(
@@ -136,7 +140,7 @@ fn update_loop(
         image: swapchain_image,
         image_view: swapchain_image_view,
     };
-    let mut command_buffer = app.draw(&backbuffer)?;
+    let mut command_buffer = app.draw(&app_state_mut, &backbuffer)?;
 
     draw_imgui(imgui_data, &backbuffer, &mut command_buffer)?;
 
@@ -237,7 +241,7 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
 
     engine::init("Winit App", window)?;
 
-    let app = Box::new(A::create(engine::app_state(), &event_loop)?);
+    let app = Box::new(A::create(engine::app_state_mut(), &event_loop)?);
     let app = Box::leak(app);
 
     trace!("Created app");
