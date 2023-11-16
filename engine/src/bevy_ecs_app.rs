@@ -2,6 +2,7 @@ use bevy_ecs::{
     schedule::{Schedule, ScheduleLabel},
     world::World,
 };
+use winit::event_loop::EventLoop;
 
 use crate::{
     app::{App, ImguiConsole},
@@ -24,16 +25,24 @@ pub struct BevyEcsApp {
 }
 
 impl BevyEcsApp {
-    fn world(&mut self) -> &mut World {
+    pub fn new() -> anyhow::Result<(Self, EventLoop<()>)> {
+        crate::app::create_app::<Self>()
+    }
+
+    pub fn world(&mut self) -> &mut World {
         &mut self.world
     }
 
-    fn startup_schedule(&mut self) -> &mut Schedule {
+    pub fn startup_schedule(&mut self) -> &mut Schedule {
         &mut self.startup_schedule
     }
 
-    fn update_schedule(&mut self) -> &mut Schedule {
+    pub fn update_schedule(&mut self) -> &mut Schedule {
         &mut self.update_schedule
+    }
+
+    pub fn run(self, event_loop: EventLoop<()>) -> anyhow::Result<()> {
+        crate::app::run(self, event_loop)
     }
 }
 
@@ -131,7 +140,8 @@ impl App for BevyEcsApp {
         app_state: &'a crate::app::app_state::AppState,
         backbuffer: &crate::Backbuffer,
     ) -> anyhow::Result<gpu::VkCommandBuffer> {
-        let scene = self.world.get_resource::<Scene>().unwrap();
+        let empty_scene = Scene::default();
+        let scene = self.world.get_resource::<Scene>().unwrap_or(&empty_scene);
         let resource_map = self.world.get_resource::<ResourceMap>().unwrap();
         let cvar_manager = self.world.get_resource::<CvarManager>().unwrap();
         let pov = if let Some(pov) = self.world.get_resource::<Camera>() {
