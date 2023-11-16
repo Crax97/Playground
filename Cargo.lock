@@ -781,6 +781,9 @@ dependencies = [
  "env_logger",
  "gpu",
  "image",
+ "imgui",
+ "imgui-rs-vulkan-renderer",
+ "imgui-winit-support",
  "indexmap 1.9.3",
  "log",
  "memoffset 0.8.0",
@@ -1821,6 +1824,34 @@ name = "pkg-config"
 version = "0.3.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ac9a59f73473f1b8d852421e59e64809f025994837ef743615c6d0c5b305160"
+
+[[package]]
+name = "platform2dgame"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "clap",
+ "engine",
+ "engine_macros",
+ "env_logger",
+ "gltf",
+ "gpu",
+ "half",
+ "image",
+ "imgui",
+ "imgui-rs-vulkan-renderer",
+ "imgui-winit-support",
+ "log",
+ "memoffset 0.8.0",
+ "nalgebra",
+ "once_cell",
+ "raw-window-handle 0.5.2",
+ "strum",
+ "strum_macros",
+ "thiserror",
+ "winit",
+]
 
 [[package]]
 name = "png"

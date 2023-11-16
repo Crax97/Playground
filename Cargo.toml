@@ -5,7 +5,8 @@ members = [
     "engine_macros",
     "engine_macros_tests",
     "gpu",
-    "testbench"
+    "testbench",
+    "platform2dgame",
 ]
 
 [profile.release]

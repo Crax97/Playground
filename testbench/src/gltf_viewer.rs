@@ -6,8 +6,9 @@ use std::collections::HashMap;
 
 use std::num::NonZeroU32;
 
-use engine::app::{app_state::*, bootstrap, App};
+use engine::app::{app_state::*, bootstrap, App, ImguiConsole};
 
+use engine::input::InputState;
 use fps_camera::FpsCamera;
 use gpu::{Extent2D, ImageFormat, PresentMode, ShaderStage, VkCommandBuffer};
 use imgui::{TreeNodeFlags, Ui};
@@ -16,8 +17,9 @@ use winit::dpi::{PhysicalPosition, Position};
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::input::key::Key;
 use engine::{
-    Backbuffer, DeferredRenderingPipeline, Light, LightHandle, LightType, MaterialInstance,
-    RenderingPipeline, ShadowSetup, TextureInput, FXAA_ITERATIONS_CVAR_NAME,
+    Backbuffer, CvarManager, DeferredRenderingPipeline, Light, LightHandle, LightType,
+    MaterialInstance, RenderingPipeline, ResourceMap, ShadowSetup, TextureInput,
+    FXAA_ITERATIONS_CVAR_NAME,
 };
 use nalgebra::*;
 use winit::event::MouseButton;
@@ -44,6 +46,11 @@ pub struct GLTFViewer {
     scene_renderer: DeferredRenderingPipeline,
     gltf_loader: GltfLoader,
     camera_light: Option<LightHandle>,
+
+    input: InputState,
+    console: ImguiConsole,
+    cvar_manager: CvarManager,
+    resource_map: ResourceMap,
 }
 
 impl GLTFViewer {
@@ -198,17 +205,20 @@ impl GLTFViewer {
 
 impl App for GLTFViewer {
     fn window_name(&self, app_state: &AppState) -> String {
-        format!("GLTF Viewer - FPS {}", 1.0 / app_state.time().delta_frame())
+        format!("GLTF Viewer - FPS {}", 1.0 / app_state.time.delta_frame())
     }
 
     fn create(app_state: &mut AppState, _event_loop: &EventLoop<()>) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
+        let input = InputState::new();
+        let console = ImguiConsole::new();
+        let mut cvar_manager = CvarManager::new();
         let args = GltfViewerArgs::parse();
 
-        let resource_map = &mut app_state.resource_map;
-        let cube_mesh = utils::load_cube_to_resource_map(&app_state.gpu, resource_map)?;
+        let mut resource_map = ResourceMap::new();
+        let cube_mesh = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
 
         // TODO: avoid duplicating this module creation
         let vertex_module =
@@ -223,13 +233,13 @@ impl App for GLTFViewer {
                 height: 1024,
             },
             cube_mesh.clone(),
-            resource_map,
+            &mut resource_map,
             "images/skybox/hdr/evening_road.hdr",
         )?;
         let irradiance_map = utils::generate_irradiance_map(
             &app_state.gpu,
             &david_texture,
-            resource_map,
+            &mut resource_map,
             &cube_mesh,
         )?;
         let david_texture = resource_map.add(david_texture);
@@ -237,9 +247,9 @@ impl App for GLTFViewer {
 
         let mut scene_renderer = DeferredRenderingPipeline::new(
             &app_state.gpu,
-            resource_map,
+            &mut resource_map,
             cube_mesh,
-            &mut app_state.cvar_manager,
+            &mut cvar_manager,
         )?;
 
         scene_renderer.set_irradiance_texture(Some(irradiance_map));
@@ -280,7 +290,7 @@ impl App for GLTFViewer {
             &args.gltf_file,
             &app_state.gpu,
             &mut scene_renderer,
-            resource_map,
+            &mut resource_map,
             GltfLoadOptions {},
         )?;
 
@@ -297,6 +307,10 @@ impl App for GLTFViewer {
             gltf_loader,
             camera: FpsCamera::default(),
             camera_light: None,
+            console,
+            input,
+            cvar_manager,
+            resource_map,
         })
     }
 
@@ -308,7 +322,18 @@ impl App for GLTFViewer {
         Ok(())
     }
 
+    fn on_event(
+        &mut self,
+        event: &winit::event::Event<()>,
+        _app_state: &AppState,
+    ) -> anyhow::Result<()> {
+        self.input.update(event);
+        Ok(())
+    }
+
     fn update(&mut self, app_state: &mut AppState, ui: &mut Ui) -> anyhow::Result<()> {
+        self.console.update(&self.input);
+        self.console.imgui_update(ui, &mut self.cvar_manager);
         let mut settings = self.scene_renderer.fxaa_settings();
 
         ui.text("Hiii");
@@ -317,8 +342,7 @@ impl App for GLTFViewer {
             "FXAA iterations",
             0,
             12,
-            app_state
-                .cvar_manager
+            self.cvar_manager
                 .get_named_ref_mut::<i32>(FXAA_ITERATIONS_CVAR_NAME)
                 .unwrap(),
         );
@@ -361,35 +385,29 @@ impl App for GLTFViewer {
             return Ok(());
         }
 
-        if app_state.input.is_key_just_pressed(Key::P) {
+        if self.input.is_key_just_pressed(Key::P) {
             self.print_lights();
         }
 
-        if app_state
-            .input
-            .is_mouse_button_just_pressed(MouseButton::Right)
-        {
+        if self.input.is_mouse_button_just_pressed(MouseButton::Right) {
             app_state
                 .window()
                 .set_cursor_grab(winit::window::CursorGrabMode::Confined)?;
             app_state.window().set_cursor_visible(false);
         }
-        if app_state
-            .input
-            .is_mouse_button_just_released(MouseButton::Right)
-        {
+        if self.input.is_mouse_button_just_released(MouseButton::Right) {
             app_state
                 .window()
                 .set_cursor_grab(winit::window::CursorGrabMode::None)?;
             app_state.window().set_cursor_visible(true);
         }
 
-        if app_state
+        if self
             .input
             .is_mouse_button_pressed(winit::event::MouseButton::Right)
         {
             self.camera
-                .update(&app_state.input, app_state.time.delta_frame());
+                .update(&self.input, app_state.time.delta_frame());
             let window_size = app_state.window().inner_size();
 
             app_state
@@ -400,7 +418,7 @@ impl App for GLTFViewer {
                 }))?;
         }
 
-        if app_state.input.is_mouse_button_pressed(MouseButton::Left) {
+        if self.input.is_mouse_button_pressed(MouseButton::Left) {
             if let Some(camera_light) = self.camera_light {
                 self.gltf_loader
                     .scene_mut()
@@ -426,10 +444,15 @@ impl App for GLTFViewer {
             &self.camera.camera(),
             self.gltf_loader.scene(),
             backbuffer,
-            &app_state.resource_map,
-            &app_state.cvar_manager,
+            &self.resource_map,
+            &self.cvar_manager,
         )?;
         Ok(command_buffer)
+    }
+
+    fn end_frame(&mut self, _app_state: &AppState) {
+        self.resource_map.update();
+        self.input.end_frame();
     }
 }
 

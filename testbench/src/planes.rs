@@ -6,9 +6,10 @@ use std::io::BufReader;
 use engine::app::{app_state::*, bootstrap, App};
 
 use engine::{
-    Backbuffer, Camera, DeferredRenderingPipeline, MaterialDescription, MaterialDomain,
-    MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo,
-    RenderingPipeline, Scene, ScenePrimitive, Texture, TextureInput,
+    Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, MaterialDescription,
+    MaterialDomain, MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo,
+    MeshPrimitiveCreateInfo, RenderingPipeline, ResourceMap, Scene, ScenePrimitive, Texture,
+    TextureInput,
 };
 use gpu::{ImageViewType, PresentMode, ShaderStage, VkCommandBuffer};
 use imgui::Ui;
@@ -34,6 +35,8 @@ pub struct PlanesApp {
     movement: Vector3<f32>,
     scene_renderer: DeferredRenderingPipeline,
     scene: Scene,
+    resource_map: ResourceMap,
+    cvar_manager: CvarManager,
 }
 
 impl App for PlanesApp {
@@ -45,7 +48,8 @@ impl App for PlanesApp {
     where
         Self: Sized,
     {
-        let resource_map = &mut app_state.resource_map;
+        let mut resource_map = ResourceMap::new();
+        let mut cvar_manager = CvarManager::new();
         let camera = Camera {
             location: point![2.0, 2.0, 2.0],
             forward: vector![0.0, -1.0, -1.0].normalize(),
@@ -71,7 +75,7 @@ impl App for PlanesApp {
         let fragment_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/fragment_deferred.spirv")?;
 
-        let cube = utils::load_cube_to_resource_map(&app_state.gpu, resource_map)?;
+        let cube = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
 
         let mesh_data = MeshCreateInfo {
             label: Some("Quad mesh"),
@@ -126,9 +130,9 @@ impl App for PlanesApp {
 
         let mut scene_renderer = DeferredRenderingPipeline::new(
             &app_state.gpu,
-            resource_map,
+            &mut resource_map,
             cube.clone(),
-            &mut app_state.cvar_manager,
+            &mut cvar_manager,
         )?;
 
         let master = scene_renderer.create_material(
@@ -208,6 +212,8 @@ impl App for PlanesApp {
             movement,
             scene_renderer,
             scene,
+            resource_map,
+            cvar_manager,
         })
     }
 
@@ -253,8 +259,8 @@ impl App for PlanesApp {
             &self.camera,
             &self.scene,
             backbuffer,
-            &app_state.resource_map,
-            &app_state.cvar_manager,
+            &self.resource_map,
+            &self.cvar_manager,
         )
     }
 
