@@ -1,7 +1,8 @@
+pub mod app_state;
 mod console;
 use console::ImguiConsole;
 
-use engine::Backbuffer;
+use crate::Backbuffer;
 use gpu::{
     AccessFlags, AttachmentReference, BeginRenderPassInfo, CommandBufferSubmitInfo,
     FramebufferColorAttachment, ImageLayout, Offset2D, PipelineStageFlags, Rect2D,
@@ -17,7 +18,7 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
 };
 
-use crate::app_state::{app_state, app_state_mut, AppState};
+use app_state::{app_state, app_state_mut, AppState};
 
 pub struct ImguiData {
     imgui: Context,
@@ -241,7 +242,7 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
     let mut platform = WinitPlatform::init(&mut imgui);
     platform.attach_window(imgui.io_mut(), &window, HiDpiMode::Default);
 
-    crate::app_state::init("Winit App", window)?;
+    crate::app::app_state::init("Winit App", window)?;
 
     let app = Box::new(A::create(app_state_mut(), &event_loop)?);
     let app = Box::leak(app);

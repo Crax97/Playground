@@ -1,6 +1,6 @@
 use imgui::{InputTextCallback, InputTextCallbackHandler, InputTextFlags, Ui};
 
-use engine::{
+use crate::{
     input::{key::Key, InputState},
     CvarManager,
 };

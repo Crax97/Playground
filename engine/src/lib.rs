@@ -1,3 +1,4 @@
+pub mod app;
 mod camera;
 pub mod components;
 mod cvar_manager;

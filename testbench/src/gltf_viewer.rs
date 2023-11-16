@@ -1,5 +1,3 @@
-mod app;
-mod app_state;
 mod fps_camera;
 mod gltf_loader;
 mod utils;
@@ -8,9 +6,8 @@ use std::collections::HashMap;
 
 use std::num::NonZeroU32;
 
-use app::{bootstrap, App};
+use engine::app::{app_state::*, bootstrap, App};
 
-use app_state::{app_state_mut, AppState};
 use fps_camera::FpsCamera;
 use gpu::{Extent2D, ImageFormat, PresentMode, ShaderStage, VkCommandBuffer};
 use imgui::{TreeNodeFlags, Ui};

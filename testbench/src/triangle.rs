@@ -1,12 +1,8 @@
-mod app;
-mod app_state;
 mod utils;
 
 use std::io::BufReader;
 
-use app::{bootstrap, App};
-
-use app_state::AppState;
+use engine::app::{app_state::*, bootstrap, App};
 use engine::Backbuffer;
 use engine_macros::glsl;
 use gpu::{

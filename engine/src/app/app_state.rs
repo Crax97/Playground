@@ -1,11 +1,10 @@
 use std::thread::ThreadId;
 
-use engine::resource_map::ResourceMap;
 use gpu::{Gpu, GpuConfiguration, VkGpu, VkSwapchain};
 use once_cell::unsync::OnceCell;
 use winit::{dpi::PhysicalSize, window::Window};
 
-use engine::{input::InputState, CvarFlags, CvarManager, Time};
+use crate::{input::InputState, CvarFlags, CvarManager, ResourceMap, Time};
 
 pub struct AppState {
     pub gpu: VkGpu,

@@ -1,13 +1,10 @@
-mod app;
-mod app_state;
 mod utils;
 
 use std::collections::HashMap;
 use std::io::BufReader;
 
-use app::{bootstrap, App};
+use engine::app::{app_state::*, bootstrap, App};
 
-use app_state::{app_state_mut, AppState};
 use engine::{
     Backbuffer, Camera, DeferredRenderingPipeline, MaterialDescription, MaterialDomain,
     MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo,
