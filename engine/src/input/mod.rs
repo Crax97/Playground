@@ -32,7 +32,7 @@ pub struct InputState {
 }
 
 impl InputState {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             current_cursor_position: Default::default(),
             last_update_cursor_position: Default::default(),

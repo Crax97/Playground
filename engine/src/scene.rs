@@ -1,4 +1,7 @@
-use crate::resource_map::{ResourceHandle, ResourceMap};
+use crate::{
+    resource_map::{ResourceHandle, ResourceMap},
+    CvarManager,
+};
 use bevy_ecs::system::Resource;
 use gpu::{Extent2D, ImageFormat, ImageHandle, ImageViewHandle, VkCommandBuffer, VkGpu};
 use nalgebra::{vector, Matrix4, Point3, Vector2, Vector3};
@@ -276,12 +279,14 @@ pub struct Backbuffer {
 }
 
 pub trait RenderingPipeline {
-    fn render(
-        &mut self,
+    fn render<'a>(
+        &'a mut self,
+        gpu: &'a VkGpu,
         pov: &Camera,
         scene: &Scene,
         backbuffer: &Backbuffer,
         resource_map: &ResourceMap,
+        cvar_manager: &CvarManager,
     ) -> anyhow::Result<VkCommandBuffer>;
 
     fn create_material(

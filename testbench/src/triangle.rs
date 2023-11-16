@@ -1,10 +1,12 @@
 mod app;
+mod app_state;
 mod utils;
 
 use std::io::BufReader;
 
 use app::{bootstrap, App};
 
+use app_state::AppState;
 use engine::Backbuffer;
 use engine_macros::glsl;
 use gpu::{
@@ -82,11 +84,11 @@ pub struct TriangleApp {
 }
 
 impl App for TriangleApp {
-    fn window_name(&self, _app_state: &engine::AppState) -> String {
+    fn window_name(&self, _app_state: &AppState) -> String {
         "planes".to_owned()
     }
 
-    fn create(app_state: &mut engine::AppState, _: &EventLoop<()>) -> anyhow::Result<Self>
+    fn create(app_state: &mut AppState, _: &EventLoop<()>) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
@@ -204,7 +206,7 @@ impl App for TriangleApp {
             .gpu
             .write_buffer(&index_buffer, 0, bytemuck::cast_slice(&indices))?;
 
-        engine::app_state_mut()
+        app_state
             .swapchain_mut()
             .select_present_mode(PresentMode::Mailbox)?;
 
@@ -222,12 +224,12 @@ impl App for TriangleApp {
         })
     }
 
-    fn draw(
-        &mut self,
-        _app_state: &engine::AppState,
+    fn draw<'a>(
+        &'a mut self,
+        app_state: &'a AppState,
         backbuffer: &Backbuffer,
     ) -> anyhow::Result<VkCommandBuffer> {
-        let gpu = &engine::app_state().gpu;
+        let gpu = &app_state.gpu;
         let mut command_buffer = gpu.create_command_buffer(gpu::QueueType::Graphics)?;
         {
             let color_attachments = vec![FramebufferColorAttachment {
@@ -323,13 +325,13 @@ impl App for TriangleApp {
 
     fn input(
         &mut self,
-        _app_state: &engine::AppState,
+        _app_state: &AppState,
         _event: winit::event::DeviceEvent,
     ) -> anyhow::Result<()> {
         Ok(())
     }
 
-    fn update(&mut self, app_state: &mut engine::AppState, _ui: &mut Ui) -> anyhow::Result<()> {
+    fn update(&mut self, app_state: &mut AppState, _ui: &mut Ui) -> anyhow::Result<()> {
         self.y_rotation += app_state.time.delta_frame() * 6.0;
         Ok(())
     }

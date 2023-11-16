@@ -9,7 +9,7 @@ pub struct Time {
 }
 
 impl Time {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         let now = Instant::now();
         Self {
             app_start: now,
@@ -34,7 +34,7 @@ impl Time {
         self.since_app_start = delta;
     }
 
-    pub(crate) fn end_frame(&mut self) {
+    pub fn end_frame(&mut self) {
         self.frame_counter += 1;
     }
 

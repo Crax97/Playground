@@ -1,4 +1,5 @@
 mod app;
+mod app_state;
 mod utils;
 
 use std::collections::HashMap;
@@ -6,6 +7,7 @@ use std::io::BufReader;
 
 use app::{bootstrap, App};
 
+use app_state::{app_state_mut, AppState};
 use engine::{
     Backbuffer, Camera, DeferredRenderingPipeline, MaterialDescription, MaterialDomain,
     MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo,
@@ -38,11 +40,11 @@ pub struct PlanesApp {
 }
 
 impl App for PlanesApp {
-    fn window_name(&self, _app_state: &engine::AppState) -> String {
+    fn window_name(&self, _app_state: &AppState) -> String {
         "planes".to_owned()
     }
 
-    fn create(app_state: &mut engine::AppState, _: &EventLoop<()>) -> anyhow::Result<Self>
+    fn create(app_state: &mut AppState, _: &EventLoop<()>) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
@@ -125,8 +127,12 @@ impl App for PlanesApp {
         )?;
         let texture = resource_map.add(texture);
 
-        let mut scene_renderer =
-            DeferredRenderingPipeline::new(&app_state.gpu, resource_map, cube.clone())?;
+        let mut scene_renderer = DeferredRenderingPipeline::new(
+            &app_state.gpu,
+            resource_map,
+            cube.clone(),
+            &mut app_state.cvar_manager,
+        )?;
 
         let master = scene_renderer.create_material(
             &app_state.gpu,
@@ -159,7 +165,7 @@ impl App for PlanesApp {
         )?;
         let mat_instance = resource_map.add(mat_instance);
 
-        engine::app_state_mut()
+        app_state_mut()
             .swapchain_mut()
             .select_present_mode(PresentMode::Mailbox)?;
 
@@ -210,7 +216,7 @@ impl App for PlanesApp {
 
     fn input(
         &mut self,
-        _app_state: &engine::AppState,
+        _app_state: &AppState,
         event: winit::event::DeviceEvent,
     ) -> anyhow::Result<()> {
         match event {
@@ -240,20 +246,22 @@ impl App for PlanesApp {
         Ok(())
     }
 
-    fn draw(
-        &mut self,
-        app_state: &engine::AppState,
+    fn draw<'a>(
+        &'a mut self,
+        app_state: &'a AppState,
         backbuffer: &Backbuffer,
     ) -> anyhow::Result<VkCommandBuffer> {
         self.scene_renderer.render(
+            &app_state.gpu,
             &self.camera,
             &self.scene,
             backbuffer,
             &app_state.resource_map,
+            &app_state.cvar_manager,
         )
     }
 
-    fn update(&mut self, _app_state: &mut engine::AppState, _ui: &mut Ui) -> anyhow::Result<()> {
+    fn update(&mut self, _app_state: &mut AppState, _ui: &mut Ui) -> anyhow::Result<()> {
         if self.rotation_movement > 0.0 {
             self.rot_z += self.movement.y;
             self.rot_z = self.rot_z.clamp(-180.0, 180.0);

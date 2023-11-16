@@ -1,4 +1,5 @@
 mod app;
+mod app_state;
 mod fps_camera;
 mod gltf_loader;
 mod utils;
@@ -9,6 +10,7 @@ use std::num::NonZeroU32;
 
 use app::{bootstrap, App};
 
+use app_state::{app_state_mut, AppState};
 use fps_camera::FpsCamera;
 use gpu::{Extent2D, ImageFormat, PresentMode, ShaderStage, VkCommandBuffer};
 use imgui::{TreeNodeFlags, Ui};
@@ -17,8 +19,8 @@ use winit::dpi::{PhysicalPosition, Position};
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::input::key::Key;
 use engine::{
-    AppState, Backbuffer, DeferredRenderingPipeline, Light, LightHandle, LightType,
-    MaterialInstance, RenderingPipeline, ShadowSetup, TextureInput, FXAA_ITERATIONS_CVAR_NAME,
+    Backbuffer, DeferredRenderingPipeline, Light, LightHandle, LightType, MaterialInstance,
+    RenderingPipeline, ShadowSetup, TextureInput, FXAA_ITERATIONS_CVAR_NAME,
 };
 use nalgebra::*;
 use winit::event::MouseButton;
@@ -236,8 +238,12 @@ impl App for GLTFViewer {
         let david_texture = resource_map.add(david_texture);
         let irradiance_map = resource_map.add(irradiance_map);
 
-        let mut scene_renderer =
-            DeferredRenderingPipeline::new(&app_state.gpu, resource_map, cube_mesh)?;
+        let mut scene_renderer = DeferredRenderingPipeline::new(
+            &app_state.gpu,
+            resource_map,
+            cube_mesh,
+            &mut app_state.cvar_manager,
+        )?;
 
         scene_renderer.set_irradiance_texture(Some(irradiance_map));
 
@@ -285,7 +291,7 @@ impl App for GLTFViewer {
             .scene_mut()
             .set_skybox_material(Some(skybox_instance));
 
-        engine::app_state_mut()
+        app_state_mut()
             .swapchain_mut()
             .select_present_mode(PresentMode::Immediate)?;
 
@@ -413,16 +419,18 @@ impl App for GLTFViewer {
         Ok(())
     }
 
-    fn draw(
-        &mut self,
-        app_state: &AppState,
+    fn draw<'a>(
+        &'a mut self,
+        app_state: &'a AppState,
         backbuffer: &Backbuffer,
     ) -> anyhow::Result<VkCommandBuffer> {
         let command_buffer = self.scene_renderer.render(
+            &app_state.gpu,
             &self.camera.camera(),
             self.gltf_loader.scene(),
             backbuffer,
             &app_state.resource_map,
+            &app_state.cvar_manager,
         )?;
         Ok(command_buffer)
     }

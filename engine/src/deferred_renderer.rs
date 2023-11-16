@@ -3,11 +3,10 @@ use engine_macros::glsl;
 use std::{collections::HashMap, mem::size_of};
 
 use crate::{
-    app_state, app_state_mut,
     camera::Camera,
     material::{MasterMaterial, MasterMaterialDescription},
-    Backbuffer, CvarFlags, Light, LightType, MaterialDescription, MaterialDomain, MaterialInstance,
-    Mesh, MeshPrimitive, PipelineTarget, RenderingPipeline, Scene, Texture,
+    Backbuffer, CvarFlags, CvarManager, Light, LightType, MaterialDescription, MaterialDomain,
+    MaterialInstance, Mesh, MeshPrimitive, PipelineTarget, RenderingPipeline, Scene, Texture,
 };
 
 use crate::resource_map::{ResourceHandle, ResourceMap};
@@ -316,6 +315,7 @@ impl DeferredRenderingPipeline {
         gpu: &VkGpu,
         resource_map: &mut ResourceMap,
         cube_mesh: ResourceHandle<Mesh>,
+        cvar_manager: &mut CvarManager,
     ) -> anyhow::Result<Self> {
         let mut frame_buffers = vec![];
         for _ in 0..VkSwapchain::MAX_FRAMES_IN_FLIGHT {
@@ -358,11 +358,7 @@ impl DeferredRenderingPipeline {
             code: bytemuck::cast_slice(FXAA_FS),
         })?;
 
-        app_state_mut().cvar_manager.register_cvar(
-            FXAA_ITERATIONS_CVAR_NAME,
-            12,
-            CvarFlags::empty(),
-        );
+        cvar_manager.register_cvar(FXAA_ITERATIONS_CVAR_NAME, 12, CvarFlags::empty());
 
         let screen_quad = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(SCREEN_QUAD),
@@ -752,24 +748,26 @@ impl DeferredRenderingPipeline {
             height: render_size.height,
             view_type: ImageViewType::Type2D,
         };
-        let depth_component = self
-            .image_allocator
-            .get(&app_state().gpu, "depth", &depth_desc);
-        let pos_component = self
-            .image_allocator
-            .get(&app_state().gpu, "position", &vector_desc);
-        let normal_component = self
-            .image_allocator
-            .get(&app_state().gpu, "normal", &vector_desc);
-        let diffuse_component = self
-            .image_allocator
-            .get(&app_state().gpu, "diffuse", &vector_desc);
+        let depth_component =
+            self.image_allocator
+                .get(&graphics_command_buffer.gpu(), "depth", &depth_desc);
+        let pos_component =
+            self.image_allocator
+                .get(&graphics_command_buffer.gpu(), "position", &vector_desc);
+        let normal_component =
+            self.image_allocator
+                .get(&graphics_command_buffer.gpu(), "normal", &vector_desc);
+        let diffuse_component =
+            self.image_allocator
+                .get(&graphics_command_buffer.gpu(), "diffuse", &vector_desc);
         let emissive_component =
             self.image_allocator
-                .get(&app_state().gpu, "emissive", &vector_desc);
-        let pbr_component =
-            self.image_allocator
-                .get(&app_state().gpu, "pbr_component", &vector_desc);
+                .get(&graphics_command_buffer.gpu(), "emissive", &vector_desc);
+        let pbr_component = self.image_allocator.get(
+            &graphics_command_buffer.gpu(),
+            "pbr_component",
+            &vector_desc,
+        );
 
         {
             let mut gbuffer_render_pass =
@@ -1174,13 +1172,16 @@ impl DeferredRenderingPipeline {
         color_output: RenderImage,
         color_desc: RenderImageDescription,
         render_size: Extent2D,
+        cvar_manager: &CvarManager,
     ) -> RenderImage {
         let final_color_output = {
             let final_color_output = {
                 let post_process_backbuffer_1 = color_output;
-                let post_process_backbuffer_2 =
-                    self.image_allocator
-                        .get(&app_state().gpu, "post_process2", &color_desc);
+                let post_process_backbuffer_2 = self.image_allocator.get(
+                    &graphics_command_buffer.gpu(),
+                    "post_process2",
+                    &color_desc,
+                );
 
                 let mut current_postprocess = 1;
                 let mut post_process_pass =
@@ -1288,8 +1289,7 @@ impl DeferredRenderingPipeline {
                 let rcp_frame = vector![render_size.width as f32, render_size.height as f32];
                 let rcp_frame = vector![1.0 / rcp_frame.x, 1.0 / rcp_frame.y];
 
-                let iterations = app_state_mut()
-                    .cvar_manager
+                let iterations = cvar_manager
                     .get_named::<i32>(FXAA_ITERATIONS_CVAR_NAME)
                     .expect("Fxaa Cvar not found");
                 let params = FxaaShaderParams {
@@ -1486,12 +1486,14 @@ fn draw_mesh_primitive(
 }
 
 impl RenderingPipeline for DeferredRenderingPipeline {
-    fn render(
-        &mut self,
+    fn render<'a>(
+        &'a mut self,
+        gpu: &'a VkGpu,
         pov: &Camera,
         scene: &Scene,
         backbuffer: &Backbuffer,
         resource_map: &ResourceMap,
+        cvar_manager: &CvarManager,
     ) -> anyhow::Result<VkCommandBuffer> {
         let projection = pov.projection();
 
@@ -1518,22 +1520,18 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         per_frame_data.extend_from_slice(&self.light_povs);
 
-        super::app_state()
-            .gpu
-            .write_buffer(
-                &current_buffers.camera_buffer,
-                0,
-                bytemuck::cast_slice(&[per_frame_data.len() as u32 - 1]),
-            )
-            .unwrap();
-        super::app_state()
-            .gpu
-            .write_buffer(
-                &current_buffers.camera_buffer,
-                size_of::<u32>() as u64 * 4,
-                bytemuck::cast_slice(&per_frame_data),
-            )
-            .unwrap();
+        gpu.write_buffer(
+            &current_buffers.camera_buffer,
+            0,
+            bytemuck::cast_slice(&[per_frame_data.len() as u32 - 1]),
+        )
+        .unwrap();
+        gpu.write_buffer(
+            &current_buffers.camera_buffer,
+            size_of::<u32>() as u64 * 4,
+            bytemuck::cast_slice(&per_frame_data),
+        )
+        .unwrap();
 
         let ambient = vector![
             self.ambient_color.x,
@@ -1542,32 +1540,24 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             self.ambient_intensity
         ];
 
-        super::app_state()
-            .gpu
-            .write_buffer(
-                &current_buffers.light_buffer,
-                0,
-                bytemuck::cast_slice(&[ambient.x, ambient.y, ambient.z, ambient.w]),
-            )
-            .unwrap();
-        super::app_state()
-            .gpu
-            .write_buffer(
-                &current_buffers.light_buffer,
-                std::mem::size_of::<Vector4<f32>>() as _,
-                bytemuck::cast_slice(&[self.active_lights.len() as u32]),
-            )
-            .unwrap();
-        super::app_state()
-            .gpu
-            .write_buffer(
-                &current_buffers.light_buffer,
-                std::mem::size_of::<Vector4<f32>>() as u64 + size_of::<u32>() as u64 * 4,
-                bytemuck::cast_slice(&self.active_lights),
-            )
-            .unwrap();
-
-        app_state_mut().begin_frame()?;
+        gpu.write_buffer(
+            &current_buffers.light_buffer,
+            0,
+            bytemuck::cast_slice(&[ambient.x, ambient.y, ambient.z, ambient.w]),
+        )
+        .unwrap();
+        gpu.write_buffer(
+            &current_buffers.light_buffer,
+            std::mem::size_of::<Vector4<f32>>() as _,
+            bytemuck::cast_slice(&[self.active_lights.len() as u32]),
+        )
+        .unwrap();
+        gpu.write_buffer(
+            &current_buffers.light_buffer,
+            std::mem::size_of::<Vector4<f32>>() as u64 + size_of::<u32>() as u64 * 4,
+            bytemuck::cast_slice(&self.active_lights),
+        )
+        .unwrap();
 
         let draw_hashmap = Self::generate_draw_calls(resource_map, scene);
 
@@ -1589,15 +1579,13 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let shadow_atlas_component =
             self.image_allocator
-                .get(&app_state().gpu, "shadow_atlas", &shadow_atlas_desc);
+                .get(gpu, "shadow_atlas", &shadow_atlas_desc);
 
         let color_output =
             self.image_allocator
-                .get(&app_state().gpu, "color_output/post_process_1", &color_desc);
+                .get(gpu, "color_output/post_process_1", &color_desc);
 
-        let mut graphics_command_buffer = app_state()
-            .gpu
-            .create_command_buffer(gpu::QueueType::Graphics)?;
+        let mut graphics_command_buffer = gpu.create_command_buffer(gpu::QueueType::Graphics)?;
 
         self.shadow_atlas_pass(
             &mut graphics_command_buffer,
@@ -1625,6 +1613,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             color_output,
             color_desc,
             backbuffer.size,
+            cvar_manager,
         );
 
         self.copy_to_backbuffer_pass(&mut graphics_command_buffer, final_color_output, backbuffer);

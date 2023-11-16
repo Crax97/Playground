@@ -1,7 +1,7 @@
 mod console;
 use console::ImguiConsole;
 
-use engine::{AppState, Backbuffer};
+use engine::Backbuffer;
 use gpu::{
     AccessFlags, AttachmentReference, BeginRenderPassInfo, CommandBufferSubmitInfo,
     FramebufferColorAttachment, ImageLayout, Offset2D, PipelineStageFlags, Rect2D,
@@ -17,6 +17,8 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
 };
 
+use crate::app_state::{app_state, app_state_mut, AppState};
+
 pub struct ImguiData {
     imgui: Context,
     platform: WinitPlatform,
@@ -24,7 +26,7 @@ pub struct ImguiData {
 }
 
 pub trait App {
-    fn window_name(&self, app_state: &engine::AppState) -> String;
+    fn window_name(&self, app_state: &AppState) -> String;
 
     fn create(app_state: &mut AppState, event_loop: &EventLoop<()>) -> anyhow::Result<Self>
     where
@@ -40,9 +42,9 @@ pub trait App {
         event: winit::event::DeviceEvent,
     ) -> anyhow::Result<()>;
     fn update(&mut self, app_state: &mut AppState, ui: &mut Ui) -> anyhow::Result<()>;
-    fn draw(
-        &mut self,
-        app_state: &AppState,
+    fn draw<'a>(
+        &'a mut self,
+        app_state: &'a AppState,
         backbuffer: &Backbuffer,
     ) -> anyhow::Result<VkCommandBuffer>;
 }
@@ -53,7 +55,7 @@ pub fn app_loop<A: App + 'static>(
     imgui_data: &mut ImguiData,
     console: &mut ImguiConsole,
 ) -> anyhow::Result<ControlFlow> {
-    let app_state_mut = engine::app_state_mut();
+    let app_state_mut = app_state_mut();
     app.on_event(&event, app_state_mut)?;
     imgui_data
         .platform
@@ -125,7 +127,7 @@ fn update_loop(
     app_state_mut.window().set_title(&window_name);
     imgui_data
         .platform
-        .prepare_render(ui, &engine::app_state().window());
+        .prepare_render(ui, &app_state().window());
 
     app.update(app_state_mut, ui)?;
     console.imgui_update(ui, &mut app_state_mut.cvar_manager);
@@ -140,7 +142,7 @@ fn update_loop(
         image: swapchain_image,
         image_view: swapchain_image_view,
     };
-    let mut command_buffer = app.draw(&app_state_mut, &backbuffer)?;
+    let mut command_buffer = app.draw(self::app_state_mut(), &backbuffer)?;
 
     draw_imgui(imgui_data, &backbuffer, &mut command_buffer)?;
 
@@ -239,9 +241,9 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
     let mut platform = WinitPlatform::init(&mut imgui);
     platform.attach_window(imgui.io_mut(), &window, HiDpiMode::Default);
 
-    engine::init("Winit App", window)?;
+    crate::app_state::init("Winit App", window)?;
 
-    let app = Box::new(A::create(engine::app_state_mut(), &event_loop)?);
+    let app = Box::new(A::create(app_state_mut(), &event_loop)?);
     let app = Box::leak(app);
 
     trace!("Created app");
@@ -256,16 +258,12 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
             ..FontConfig::default()
         }),
     }]);
-    platform.attach_window(
-        imgui.io_mut(),
-        &engine::app_state().window(),
-        HiDpiMode::Rounded,
-    );
+    platform.attach_window(imgui.io_mut(), &app_state().window(), HiDpiMode::Rounded);
 
-    let render_pass = engine::app_state().gpu.get_render_pass(
+    let render_pass = app_state().gpu.get_render_pass(
         &gpu::RenderPassAttachments {
             color_attachments: vec![RenderPassAttachment {
-                format: engine::app_state().swapchain().present_format().into(),
+                format: app_state().swapchain().present_format().into(),
                 samples: gpu::SampleCount::Sample1,
                 load_op: gpu::ColorLoadOp::DontCare,
                 store_op: gpu::AttachmentStoreOp::Store,
@@ -300,11 +298,11 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
         Some("ImGUI render pass"),
     );
     let renderer = Renderer::with_default_allocator(
-        &engine::app_state().gpu.instance(),
-        engine::app_state().gpu.vk_physical_device(),
-        engine::app_state().gpu.vk_logical_device(),
-        engine::app_state().gpu.graphics_queue(),
-        engine::app_state().gpu.graphics_command_pool().inner,
+        &app_state().gpu.instance(),
+        app_state().gpu.vk_physical_device(),
+        app_state().gpu.vk_logical_device(),
+        app_state().gpu.graphics_queue(),
+        app_state().gpu.graphics_command_pool().inner,
         render_pass,
         &mut imgui,
         Some(Options {
