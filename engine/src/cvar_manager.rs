@@ -1,6 +1,8 @@
 use bitflags::bitflags;
 use std::{collections::HashMap, error::Error, fmt::Display, str::FromStr};
 
+use bevy_ecs::prelude::Resource;
+
 #[derive(Copy, Clone)]
 pub struct CvarId(usize);
 
@@ -28,7 +30,7 @@ pub struct Cvar {
     flags: CvarFlags,
 }
 
-#[derive(Default)]
+#[derive(Default, Resource)]
 pub struct CvarManager {
     cvars: Vec<Cvar>,
     cvar_id_map: HashMap<&'static str, CvarId>,

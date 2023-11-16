@@ -1,4 +1,5 @@
 pub mod app;
+mod bevy_ecs_app;
 mod camera;
 pub mod components;
 mod cvar_manager;

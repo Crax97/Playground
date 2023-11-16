@@ -16,6 +16,7 @@ use winit::{
     dpi::PhysicalSize,
     event::Event,
     event_loop::{ControlFlow, EventLoop},
+    window::Window,
 };
 
 use app_state::{app_state, app_state_mut, AppState};
@@ -42,6 +43,7 @@ pub trait App {
         app_state: &AppState,
         event: winit::event::DeviceEvent,
     ) -> anyhow::Result<()>;
+    fn on_startup(&mut self, _app_state: &mut AppState) {}
     fn update(&mut self, app_state: &mut AppState, ui: &mut Ui) -> anyhow::Result<()>;
     fn draw<'a>(
         &'a mut self,
@@ -209,7 +211,7 @@ fn draw_imgui(
     Ok(())
 }
 
-pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
+pub fn create_app<A: App + 'static>() -> anyhow::Result<(A, EventLoop<()>)> {
     let mut env_logger_builder = env_logger::builder();
 
     if cfg!(debug_assertions) {
@@ -232,12 +234,14 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
         .with_title("Winit App")
         .build(&event_loop)?;
 
+    crate::app::app_state::init("Winit App", window)?;
+    Ok((A::create(app_state_mut(), &event_loop)?, event_loop))
+}
+
+pub fn run<A: App + 'static>(app: A, event_loop: EventLoop<()>) -> anyhow::Result<()> {
     let mut imgui = Context::create();
     let mut platform = WinitPlatform::init(&mut imgui);
-    platform.attach_window(imgui.io_mut(), &window, HiDpiMode::Default);
-
-    crate::app::app_state::init("Winit App", window)?;
-
+    platform.attach_window(imgui.io_mut(), &app_state().window, HiDpiMode::Default);
     let app = Box::new(A::create(app_state_mut(), &event_loop)?);
     let app = Box::leak(app);
 
@@ -325,4 +329,10 @@ pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
             ),
         },
     )
+}
+
+pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
+    let (app, event_loop) = create_app::<A>()?;
+
+    run::<A>(app, event_loop)
 }

@@ -1,3 +1,8 @@
+use gpu::VkGpu;
+use nalgebra::vector;
+
+use crate::{Mesh, MeshPrimitiveCreateInfo, ResourceHandle, ResourceMap};
+
 pub fn to_u8_slice<T>(vals: &[T]) -> &[u8] {
     unsafe { std::slice::from_raw_parts(vals.as_ptr() as *const u8, std::mem::size_of_val(vals)) }
 }
@@ -162,4 +167,118 @@ mod tests {
         assert!(packer.allocate(32, 16).is_ok());
         assert!(packer.allocate(32, 32).is_err());
     }
+}
+
+pub fn load_cube_to_resource_map(
+    gpu: &VkGpu,
+    resource_map: &mut ResourceMap,
+) -> anyhow::Result<ResourceHandle<crate::Mesh>> {
+    let mesh_create_info = crate::MeshCreateInfo {
+        label: Some("cube"),
+        primitives: &[MeshPrimitiveCreateInfo {
+            indices: vec![
+                0, 1, 2, 3, 1, 0, //Bottom
+                6, 5, 4, 4, 5, 7, // Front
+                10, 9, 8, 8, 9, 11, // Left
+                12, 13, 14, 15, 13, 12, // Right
+                16, 17, 18, 19, 17, 16, // Up
+                22, 21, 20, 20, 21, 23, // Down
+            ],
+            positions: vec![
+                // Back
+                vector![-1.0, -1.0, 1.0],
+                vector![1.0, 1.0, 1.0],
+                vector![-1.0, 1.0, 1.0],
+                vector![1.0, -1.0, 1.0],
+                // Front
+                vector![-1.0, -1.0, -1.0],
+                vector![1.0, 1.0, -1.0],
+                vector![-1.0, 1.0, -1.0],
+                vector![1.0, -1.0, -1.0],
+                // Left
+                vector![1.0, -1.0, -1.0],
+                vector![1.0, 1.0, 1.0],
+                vector![1.0, 1.0, -1.0],
+                vector![1.0, -1.0, 1.0],
+                // Right
+                vector![-1.0, -1.0, -1.0],
+                vector![-1.0, 1.0, 1.0],
+                vector![-1.0, 1.0, -1.0],
+                vector![-1.0, -1.0, 1.0],
+                // Up
+                vector![-1.0, 1.0, -1.0],
+                vector![1.0, 1.0, 1.0],
+                vector![1.0, 1.0, -1.0],
+                vector![-1.0, 1.0, 1.0],
+                // Down
+                vector![-1.0, -1.0, -1.0],
+                vector![1.0, -1.0, 1.0],
+                vector![1.0, -1.0, -1.0],
+                vector![-1.0, -1.0, 1.0],
+            ],
+            colors: vec![],
+            normals: vec![
+                // Back
+                vector![0.0, 0.0, 1.0],
+                vector![0.0, 0.0, 1.0],
+                vector![0.0, 0.0, 1.0],
+                vector![0.0, 0.0, 1.0],
+                // Front
+                vector![0.0, 0.0, -1.0],
+                vector![0.0, 0.0, -1.0],
+                vector![0.0, 0.0, -1.0],
+                vector![0.0, 0.0, -1.0],
+                // Left
+                vector![1.0, 0.0, 0.0],
+                vector![1.0, 0.0, 0.0],
+                vector![1.0, 0.0, 0.0],
+                vector![1.0, 0.0, 0.0],
+                // Right
+                vector![-1.0, 0.0, 0.0],
+                vector![-1.0, 0.0, 0.0],
+                vector![-1.0, 0.0, 0.0],
+                vector![-1.0, 0.0, 0.0],
+                // Up
+                vector![0.0, 1.0, 0.0],
+                vector![0.0, 1.0, 0.0],
+                vector![0.0, 1.0, 0.0],
+                vector![0.0, 1.0, 0.0],
+                // Down
+                vector![0.0, -1.0, 0.0],
+                vector![0.0, -1.0, 0.0],
+                vector![0.0, -1.0, 0.0],
+                vector![0.0, -1.0, 0.0],
+            ],
+            tangents: vec![],
+            uvs: vec![
+                vector![0.0, 0.0],
+                vector![1.0, 1.0],
+                vector![0.0, 1.0],
+                vector![1.0, 0.0],
+                vector![0.0, 0.0],
+                vector![1.0, 1.0],
+                vector![0.0, 1.0],
+                vector![1.0, 0.0],
+                vector![0.0, 0.0],
+                vector![1.0, 1.0],
+                vector![0.0, 1.0],
+                vector![1.0, 0.0],
+                vector![0.0, 0.0],
+                vector![1.0, 1.0],
+                vector![0.0, 1.0],
+                vector![1.0, 0.0],
+                vector![0.0, 0.0],
+                vector![1.0, 1.0],
+                vector![0.0, 1.0],
+                vector![1.0, 0.0],
+                vector![0.0, 0.0],
+                vector![1.0, 1.0],
+                vector![0.0, 1.0],
+                vector![1.0, 0.0],
+            ],
+        }],
+    };
+    let cube_mesh = Mesh::new(gpu, &mesh_create_info)?;
+    let cube_mesh_handle = resource_map.add(cube_mesh);
+    Ok(cube_mesh_handle)
 }

@@ -5,6 +5,7 @@ use nalgebra::Vector2;
 
 use std::collections::HashMap;
 
+use bevy_ecs::prelude::Resource;
 use strum::EnumCount;
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -13,7 +14,7 @@ use winit::{
 
 pub use self::key::*;
 
-#[derive(Debug)]
+#[derive(Debug, Resource)]
 pub struct InputState {
     current_cursor_position: PhysicalPosition<f32>,
     last_update_cursor_position: PhysicalPosition<f32>,

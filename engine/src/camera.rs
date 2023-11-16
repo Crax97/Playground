@@ -1,3 +1,4 @@
+use bevy_ecs::system::Resource;
 use nalgebra::{vector, Matrix4, Point3, Vector3};
 
 /*
@@ -13,6 +14,7 @@ projection: nalgebra::Matrix4::new_perspective(
     10.0,
 ),
 */
+#[derive(Resource, Clone, Copy)]
 pub struct Camera {
     pub location: Point3<f32>,
     pub forward: Vector3<f32>,
