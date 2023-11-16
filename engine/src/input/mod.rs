@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 pub mod key;
 
-pub use key::*;
 use nalgebra::Vector2;
 
 use std::collections::HashMap;
@@ -12,7 +11,7 @@ use winit::{
     event::{ElementState, KeyboardInput, ModifiersState, MouseButton, MouseScrollDelta},
 };
 
-use self::key::{Key, ModifierSet};
+pub use self::key::*;
 
 #[derive(Debug)]
 pub struct InputState {
