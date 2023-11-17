@@ -1,3 +1,5 @@
+use bevy_ecs::system::Resource;
+use crossbeam::channel::{Receiver, Sender};
 use imgui::{InputTextCallback, InputTextCallbackHandler, InputTextFlags, Ui};
 
 use crate::{
@@ -5,23 +7,56 @@ use crate::{
     CvarManager,
 };
 
+#[derive(Clone, Debug)]
+pub struct Message {
+    content: String,
+}
+
 pub struct ImguiConsole {
     show: bool,
     messages: Vec<String>,
+    max_messages: usize,
     pending_input: String,
+    message_receiver: Receiver<Message>,
+}
+
+#[derive(Resource)]
+pub struct ConsoleWriter {
+    message_sender: Sender<Message>,
 }
 
 impl ImguiConsole {
     pub fn new() -> Self {
-        Self {
+        Self::new_with_writer().0
+    }
+
+    pub fn new_with_writer() -> (Self, ConsoleWriter) {
+        let (message_sender, message_receiver) = crossbeam::channel::unbounded();
+
+        let writer = ConsoleWriter { message_sender };
+        let console = Self {
             show: false,
             messages: vec![],
             pending_input: String::new(),
-        }
+            message_receiver,
+            max_messages: 15,
+        };
+
+        (console, writer)
     }
+
     pub fn update(&mut self, input: &InputState) {
         if input.is_key_just_pressed(Key::F8) {
             self.show = !self.show;
+        }
+
+        let messages = self.message_receiver.try_iter().collect::<Vec<_>>();
+        for message in messages {
+            self.add_message(message.content)
+        }
+
+        while self.messages.len() > self.max_messages {
+            self.messages.remove(0);
         }
     }
     pub fn add_message<S: AsRef<str>>(&mut self, message: S) {
@@ -108,5 +143,14 @@ impl ImguiConsole {
                 }
             }
         }
+    }
+}
+
+impl ConsoleWriter {
+    pub fn write_message<S: AsRef<str>>(&mut self, message: S) -> anyhow::Result<()> {
+        self.message_sender.send(Message {
+            content: message.as_ref().to_owned(),
+        })?;
+        Ok(())
     }
 }

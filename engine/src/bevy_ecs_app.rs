@@ -1,3 +1,5 @@
+use std::ops::{Deref, DerefMut};
+
 use bevy_ecs::{
     schedule::{Schedule, ScheduleLabel},
     world::World,
@@ -24,9 +26,16 @@ pub struct BevyEcsApp {
     renderer: DeferredRenderingPipeline,
 }
 
+pub struct BevyEcsAppWithLoop {
+    app: BevyEcsApp,
+    evt_loop: EventLoop<()>,
+}
+
 impl BevyEcsApp {
-    pub fn new() -> anyhow::Result<(Self, EventLoop<()>)> {
-        crate::app::create_app::<Self>()
+    pub fn new() -> anyhow::Result<BevyEcsAppWithLoop> {
+        let (app, evt_loop) = crate::app::create_app::<Self>()?;
+
+        Ok(BevyEcsAppWithLoop { app, evt_loop })
     }
 
     pub fn world(&mut self) -> &mut World {
@@ -39,10 +48,6 @@ impl BevyEcsApp {
 
     pub fn update_schedule(&mut self) -> &mut Schedule {
         &mut self.update_schedule
-    }
-
-    pub fn run(self, event_loop: EventLoop<()>) -> anyhow::Result<()> {
-        crate::app::run(self, event_loop)
     }
 }
 
@@ -61,7 +66,7 @@ impl App for BevyEcsApp {
         let mut world = World::new();
         let mut resource_map = ResourceMap::new();
         let mut cvar_manager = CvarManager::new();
-        let imgui_console = ImguiConsole::new();
+        let (imgui_console, console_writer) = ImguiConsole::new_with_writer();
         let input = InputState::new();
         let cube_mesh = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
         let renderer = DeferredRenderingPipeline::new(
@@ -76,6 +81,7 @@ impl App for BevyEcsApp {
         world.insert_resource(resource_map);
         world.insert_resource(cvar_manager);
         world.insert_resource(input);
+        world.insert_resource(console_writer);
 
         Ok(Self {
             world,
@@ -86,15 +92,11 @@ impl App for BevyEcsApp {
         })
     }
 
-    fn on_startup(&mut self, _app_state: &mut crate::app::app_state::AppState) {
-        self.startup_schedule.run(&mut self.world);
-    }
-
-    fn input(
+    fn on_startup(
         &mut self,
-        app_state: &crate::app::app_state::AppState,
-        event: winit::event::DeviceEvent,
+        _app_state: &mut crate::app::app_state::AppState,
     ) -> anyhow::Result<()> {
+        self.startup_schedule.run(&mut self.world);
         Ok(())
     }
 
@@ -157,5 +159,33 @@ impl App for BevyEcsApp {
             resource_map,
             cvar_manager,
         )
+    }
+}
+
+impl BevyEcsAppWithLoop {
+    pub fn run(self) -> anyhow::Result<()> {
+        crate::app::run(self.app, self.evt_loop)
+    }
+
+    pub fn event_loop(&self) -> &EventLoop<()> {
+        &self.evt_loop
+    }
+
+    pub fn event_loop_mut(&mut self) -> &mut EventLoop<()> {
+        &mut self.evt_loop
+    }
+}
+
+impl Deref for BevyEcsAppWithLoop {
+    type Target = BevyEcsApp;
+
+    fn deref(&self) -> &Self::Target {
+        &self.app
+    }
+}
+
+impl DerefMut for BevyEcsAppWithLoop {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.app
     }
 }

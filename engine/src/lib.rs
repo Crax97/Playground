@@ -13,6 +13,7 @@ mod texture;
 mod time;
 mod utils;
 
+pub use bevy_ecs;
 pub use bevy_ecs_app::BevyEcsApp;
 pub use camera::*;
 pub use cvar_manager::*;

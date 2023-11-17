@@ -1,6 +1,6 @@
 pub mod app_state;
 mod console;
-pub use console::ImguiConsole;
+pub use console::*;
 
 use crate::Backbuffer;
 use gpu::{
@@ -16,7 +16,6 @@ use winit::{
     dpi::PhysicalSize,
     event::Event,
     event_loop::{ControlFlow, EventLoop},
-    window::Window,
 };
 
 use app_state::{app_state, app_state_mut, AppState};
@@ -40,10 +39,14 @@ pub trait App {
 
     fn input(
         &mut self,
-        app_state: &AppState,
-        event: winit::event::DeviceEvent,
-    ) -> anyhow::Result<()>;
-    fn on_startup(&mut self, _app_state: &mut AppState) {}
+        _app_state: &AppState,
+        _event: winit::event::DeviceEvent,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn on_startup(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
+        Ok(())
+    }
     fn update(&mut self, app_state: &mut AppState, ui: &mut Ui) -> anyhow::Result<()>;
     fn draw<'a>(
         &'a mut self,
@@ -242,7 +245,7 @@ pub fn run<A: App + 'static>(app: A, event_loop: EventLoop<()>) -> anyhow::Resul
     let mut imgui = Context::create();
     let mut platform = WinitPlatform::init(&mut imgui);
     platform.attach_window(imgui.io_mut(), &app_state().window, HiDpiMode::Default);
-    let app = Box::new(A::create(app_state_mut(), &event_loop)?);
+    let app = Box::new(app);
     let app = Box::leak(app);
 
     trace!("Created app");
@@ -317,6 +320,7 @@ pub fn run<A: App + 'static>(app: A, event_loop: EventLoop<()>) -> anyhow::Resul
     };
     let imgui_data = Box::new(imgui_data);
     let mut imgui_data = Box::leak(imgui_data);
+    app.on_startup(app_state_mut())?;
     event_loop.run(
         move |event, _, control_flow| match app_loop(app, event, &mut imgui_data) {
             Ok(flow) => {
