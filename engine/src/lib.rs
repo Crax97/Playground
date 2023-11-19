@@ -5,6 +5,7 @@ pub mod components;
 mod cvar_manager;
 pub mod deferred_renderer;
 pub mod input;
+pub mod loaders;
 mod material;
 mod mesh;
 pub mod resource_map;

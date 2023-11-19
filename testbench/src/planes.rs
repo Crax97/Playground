@@ -5,6 +5,7 @@ use std::io::BufReader;
 
 use engine::app::{app_state::*, bootstrap, App};
 
+use engine::loaders::FileSystemTextureLoader;
 use engine::{
     Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, MaterialDescription,
     MaterialDomain, MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo,
@@ -49,6 +50,8 @@ impl App for PlanesApp {
         Self: Sized,
     {
         let mut resource_map = ResourceMap::new();
+        resource_map.install_resource_loader(FileSystemTextureLoader);
+
         let mut cvar_manager = CvarManager::new();
         let camera = Camera {
             location: point![2.0, 2.0, 2.0],
@@ -64,12 +67,6 @@ impl App for PlanesApp {
         let dist = 5.0;
 
         let movement: Vector3<f32> = vector![0.0, 0.0, 0.0];
-        let cpu_image = image::load(
-            BufReader::new(std::fs::File::open("images/texture.jpg")?),
-            image::ImageFormat::Jpeg,
-        )?;
-        let cpu_image = cpu_image.into_rgba8();
-
         let vertex_module =
             utils::read_file_to_vk_module(&app_state.gpu, "./shaders/vertex_deferred.spirv")?;
         let fragment_module =
@@ -117,17 +114,7 @@ impl App for PlanesApp {
         let mesh = Mesh::new(&app_state.gpu, &mesh_data)?;
         let mesh = resource_map.add(mesh);
 
-        let texture = Texture::new_with_data(
-            &app_state.gpu,
-            cpu_image.width(),
-            cpu_image.height(),
-            &cpu_image,
-            Some("Quad texture david"),
-            gpu::ImageFormat::Rgba8,
-            ImageViewType::Type2D,
-        )?;
-        let texture = resource_map.add(texture);
-
+        let texture = resource_map.load::<Texture>(&app_state.gpu, "images/texture.jpg")?;
         let mut scene_renderer = DeferredRenderingPipeline::new(
             &app_state.gpu,
             &mut resource_map,
