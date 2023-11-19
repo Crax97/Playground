@@ -5,11 +5,20 @@ use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::marker::PhantomData;
+use std::path::Path;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use thunderdome::{Arena, Index};
 
+pub type ResourcePtr = Arc<dyn Any + Send + Sync + 'static>;
+
 pub trait Resource: Send + Sync + 'static {
     fn get_description(&self) -> &str;
+}
+
+pub trait ResourceLoader: Send + Sync + 'static {
+    type LoadedResource: Resource;
+
+    fn load(&self, path: &Path) -> anyhow::Result<Self::LoadedResource>;
 }
 
 #[repr(transparent)]
@@ -19,8 +28,17 @@ pub(crate) struct ResourceId {
 }
 
 pub struct RefCounted {
-    resource: Arc<dyn Any + Send + Sync>,
+    resource: ResourcePtr,
     ref_count: u32,
+}
+
+#[derive(BevyResource)]
+pub struct ResourceMap {
+    loaded_resources: LoadedResources,
+    operations_receiver: Receiver<Box<dyn ResourceMapOperation>>,
+    operations_sender: Sender<Box<dyn ResourceMapOperation>>,
+
+    resource_loaders: HashMap<TypeId, Box<dyn ErasedResourceLoader>>,
 }
 
 impl RefCounted {
@@ -30,20 +48,35 @@ impl RefCounted {
             ref_count: 1,
         }
     }
+
+    fn wrap(resource: ResourcePtr) -> Self {
+        Self {
+            resource,
+            ref_count: 1,
+        }
+    }
+}
+
+trait ErasedResourceLoader: Send + Sync + 'static {
+    fn load_erased(&self, path: &Path) -> anyhow::Result<ResourcePtr>;
+}
+
+impl<T: ResourceLoader> ErasedResourceLoader for T
+where
+    T: Send + Sync + 'static,
+{
+    fn load_erased(&self, path: &Path) -> anyhow::Result<ResourcePtr> {
+        let inner = self.load(path)?;
+
+        Ok(Arc::new(inner))
+    }
 }
 
 type Resources = Arena<RefCounted>;
 
 #[derive(Default)]
-pub struct LoadedResources {
+struct LoadedResources {
     resources: HashMap<TypeId, RwLock<Resources>>,
-}
-
-#[derive(BevyResource)]
-pub struct ResourceMap {
-    loaded_resources: LoadedResources,
-    operations_receiver: Receiver<Box<dyn ResourceMapOperation>>,
-    operations_sender: Sender<Box<dyn ResourceMapOperation>>,
 }
 
 impl Default for ResourceMap {
@@ -53,6 +86,7 @@ impl Default for ResourceMap {
             loaded_resources: LoadedResources::default(),
             operations_receiver,
             operations_sender,
+            resource_loaders: HashMap::new(),
         }
     }
 }
@@ -161,6 +195,41 @@ impl ResourceMap {
             _marker: PhantomData,
             id: ResourceId { id },
             operation_sender: self.operations_sender.clone(),
+        }
+    }
+
+    pub fn install_resource_loader<L: ResourceLoader>(&mut self, loader: L) {
+        let old = self
+            .resource_loaders
+            .insert(TypeId::of::<L::LoadedResource>(), Box::new(loader));
+
+        match old {
+            Some(old) => {
+                panic!("A resource loader for resource type {:?} has already been installed of type {:?}", TypeId::of::<L::LoadedResource>(), old.type_id())
+            }
+            _ => {}
+        }
+    }
+
+    pub fn load<R: Resource>(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> anyhow::Result<ResourceHandle<R>> {
+        if let Some(loader) = self.resource_loaders.get(&TypeId::of::<R>()) {
+            let loaded_resource = loader.load_erased(path.as_ref())?;
+
+            let id = {
+                let mut handle = self.get_or_insert_arena_mut::<R>();
+                handle.insert(RefCounted::wrap(loaded_resource))
+            };
+
+            Ok(ResourceHandle {
+                _marker: PhantomData,
+                id: ResourceId { id },
+                operation_sender: self.operations_sender.clone(),
+            })
+        } else {
+            todo!()
         }
     }
 
