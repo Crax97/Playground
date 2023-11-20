@@ -4,8 +4,8 @@ use engine::app::app_state::app_state;
 use engine::bevy_ecs::system::{Res, ResMut};
 use engine::components::{SpriteComponent, Transform2D};
 use engine::{
-    bevy_ecs, Camera, CommonResources, MaterialInstance, MaterialInstanceDescription, ResourceMap,
-    SceneRenderingMode, Texture,
+    bevy_ecs, Camera, CommonResources, DeferredRenderingPipeline, MaterialInstance,
+    MaterialInstanceDescription, ResourceMap, Texture,
 };
 use engine::{
     bevy_ecs::{component::Component, system::Commands},
@@ -19,7 +19,9 @@ fn main() -> anyhow::Result<()> {
     let mut app = BevyEcsApp::new()?;
 
     app.renderer()
-        .set_scene_rendering_mode(SceneRenderingMode::Mode2D);
+        .set_combine_shader(DeferredRenderingPipeline::make_2d_combine_shader(
+            &app_state().gpu,
+        )?);
     app.startup_schedule().add_systems(setup_player_system);
 
     app.update_schedule().add_systems(camera_system);

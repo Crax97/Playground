@@ -69,13 +69,6 @@ const SHADOW_ATLAS_TILE_SIZE: u32 = 128;
 const SHADOW_ATLAS_WIDTH: u32 = 7680;
 const SHADOW_ATLAS_HEIGHT: u32 = 4352;
 
-#[derive(Default)]
-pub enum SceneRenderingMode {
-    #[default]
-    Mode3D,
-    Mode2D,
-}
-
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct FxaaShaderParams {
@@ -294,9 +287,7 @@ pub struct DeferredRenderingPipeline {
     image_allocator: ImageAllocator,
     screen_quad: ShaderModuleHandle,
     texture_copy: ShaderModuleHandle,
-    combine_shader_3d: ShaderModuleHandle,
-    combine_shader_2d: ShaderModuleHandle,
-    scene_rendering_mode: SceneRenderingMode,
+    combine_shader: ShaderModuleHandle,
     tonemap_fs: ShaderModuleHandle,
 
     fxaa_settings: FxaaSettings,
@@ -329,6 +320,7 @@ impl DeferredRenderingPipeline {
         gpu: &VkGpu,
         resource_map: &mut ResourceMap,
         cube_mesh: ResourceHandle<Mesh>,
+        combine_shader: ShaderModuleHandle,
         cvar_manager: &mut CvarManager,
     ) -> anyhow::Result<Self> {
         let mut frame_buffers = vec![];
@@ -377,12 +369,6 @@ impl DeferredRenderingPipeline {
         let screen_quad = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(SCREEN_QUAD),
         })?;
-        let combine_shader_3d = gpu.make_shader_module(&ShaderModuleCreateInfo {
-            code: bytemuck::cast_slice(COMBINE_SHADER_3D),
-        })?;
-        let combine_shader_2d = gpu.make_shader_module(&ShaderModuleCreateInfo {
-            code: bytemuck::cast_slice(COMBINE_SHADER_2D),
-        })?;
         let tonemap_fs = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(TONEMAP),
         })?;
@@ -430,9 +416,7 @@ impl DeferredRenderingPipeline {
         Ok(Self {
             image_allocator: ImageAllocator::new(4),
             screen_quad,
-            combine_shader_3d,
-            combine_shader_2d,
-            scene_rendering_mode: SceneRenderingMode::Mode3D,
+            combine_shader,
             texture_copy,
             frame_buffers,
             tonemap_fs,
@@ -457,10 +441,26 @@ impl DeferredRenderingPipeline {
         })
     }
 
-    pub fn set_scene_rendering_mode(&mut self, new_mode: SceneRenderingMode) {
-        self.scene_rendering_mode = new_mode;
+    pub fn make_2d_combine_shader(gpu: &dyn Gpu) -> anyhow::Result<ShaderModuleHandle> {
+        gpu.make_shader_module(&ShaderModuleCreateInfo {
+            code: bytemuck::cast_slice(COMBINE_SHADER_2D),
+        })
     }
 
+    pub fn make_3d_combine_shader(gpu: &dyn Gpu) -> anyhow::Result<ShaderModuleHandle> {
+        gpu.make_shader_module(&ShaderModuleCreateInfo {
+            code: bytemuck::cast_slice(COMBINE_SHADER_3D),
+        })
+    }
+
+    /*
+    The combine shader is the shader in charge of taking the GBuffer output render targets
+    and combining them in the final image.
+    Take a look at main_combine_shader_2d/3d to understand how it works
+    */
+    pub fn set_combine_shader(&mut self, shader_handle: ShaderModuleHandle) {
+        self.combine_shader = shader_handle;
+    }
     pub fn fxaa_settings(&self) -> FxaaSettings {
         self.fxaa_settings
     }
@@ -1099,18 +1099,13 @@ impl DeferredRenderingPipeline {
                 ],
             );
 
-            let combine_shader = match self.scene_rendering_mode {
-                SceneRenderingMode::Mode3D => self.combine_shader_3d.clone(),
-                SceneRenderingMode::Mode2D => self.combine_shader_2d.clone(),
-            };
-
             gbuffer_render_pass.set_cull_mode(gpu::CullMode::None);
             gbuffer_render_pass.set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
             gbuffer_render_pass.set_front_face(gpu::FrontFace::ClockWise);
             gbuffer_render_pass.set_enable_depth_test(false);
             gbuffer_render_pass.set_depth_write_enabled(false);
             gbuffer_render_pass.set_vertex_shader(self.screen_quad.clone());
-            gbuffer_render_pass.set_fragment_shader(combine_shader);
+            gbuffer_render_pass.set_fragment_shader(self.combine_shader.clone());
             gbuffer_render_pass.draw(4, 1, 0, 0);
         }
 

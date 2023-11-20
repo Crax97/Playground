@@ -249,6 +249,7 @@ impl App for GLTFViewer {
             &app_state.gpu,
             &mut resource_map,
             cube_mesh,
+            DeferredRenderingPipeline::make_3d_combine_shader(&app_state.gpu)?,
             &mut cvar_manager,
         )?;
 

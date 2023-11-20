@@ -118,6 +118,7 @@ impl App for PlanesApp {
             &app_state.gpu,
             &mut resource_map,
             cube.clone(),
+            DeferredRenderingPipeline::make_3d_combine_shader(&app_state.gpu)?,
             &mut cvar_manager,
         )?;
 
