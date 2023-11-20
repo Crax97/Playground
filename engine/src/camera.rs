@@ -37,7 +37,7 @@ impl Default for Camera {
     fn default() -> Self {
         Self {
             location: Default::default(),
-            forward: vector![0.0, 1.0, 0.0],
+            forward: vector![0.0, 0.0, 1.0],
             width: 1240.0,
             height: 720.0,
             near: 0.1,

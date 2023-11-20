@@ -5,15 +5,31 @@ use bevy_ecs::{
     system::Resource,
     world::World,
 };
+use engine_macros::glsl;
+use gpu::{Gpu, ShaderModuleCreateInfo, ShaderStage};
 use nalgebra::vector;
 use winit::event_loop::EventLoop;
 
 use crate::{
     app::{App, ImguiConsole},
     input::InputState,
-    resource_map, utils, Camera, CvarManager, DeferredRenderingPipeline, Mesh, MeshCreateInfo,
+    loaders::FileSystemTextureLoader,
+    utils, Camera, CvarManager, DeferredRenderingPipeline, MasterMaterial, Mesh, MeshCreateInfo,
     MeshPrimitiveCreateInfo, RenderingPipeline, ResourceHandle, ResourceMap, Scene, Texture,
+    TextureInput,
 };
+
+const DEFAULT_DEFERRED_FS: &[u32] = glsl!(
+    kind = fragment,
+    path = "src/shaders/default_fragment_deferred.frag",
+    entry_point = "main"
+);
+
+const DEFAULT_DEFERRED_VS: &[u32] = glsl!(
+    kind = vertex,
+    path = "src/shaders/default_vertex_deferred.vert",
+    entry_point = "main"
+);
 
 #[derive(ScheduleLabel, Debug, Hash, Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 struct StartupSchedule;
@@ -45,6 +61,8 @@ pub struct CommonResources {
 
     pub white_texture: ResourceHandle<Texture>,
     pub black_texture: ResourceHandle<Texture>,
+
+    pub default_material: ResourceHandle<MasterMaterial>,
 }
 
 impl BevyEcsApp {
@@ -56,6 +74,10 @@ impl BevyEcsApp {
 
     pub fn world(&mut self) -> &mut World {
         &mut self.world
+    }
+
+    pub fn renderer(&mut self) -> &mut DeferredRenderingPipeline {
+        &mut self.renderer
     }
 
     pub fn startup_schedule(&mut self) -> &mut Schedule {
@@ -78,7 +100,7 @@ impl BevyEcsApp {
             let mesh_data = MeshCreateInfo {
                 label: Some("Quad mesh"),
                 primitives: &[MeshPrimitiveCreateInfo {
-                    indices: vec![0, 1, 2, 2, 3, 0],
+                    indices: vec![2, 1, 0, 0, 3, 2],
                     positions: vec![
                         vector![-0.5, -0.5, 0.0],
                         vector![0.5, -0.5, 0.0],
@@ -138,12 +160,53 @@ impl BevyEcsApp {
         let white_texture = resource_map.add(white_texture);
         let black_texture = resource_map.add(black_texture);
 
+        let vertex_module = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            code: bytemuck::cast_slice(DEFAULT_DEFERRED_VS),
+        })?;
+        let fragment_module = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            code: bytemuck::cast_slice(DEFAULT_DEFERRED_FS),
+        })?;
+
+        let default_material = MasterMaterial::new(&crate::MasterMaterialDescription {
+            name: "Default master deferred",
+            domain: crate::MaterialDomain::Surface,
+            material_parameters: Default::default(),
+            parameters_visibility: ShaderStage::FRAGMENT,
+            vertex_info: &gpu::VertexStageInfo {
+                entry_point: "main",
+                module: vertex_module,
+            },
+            fragment_info: &gpu::FragmentStageInfo {
+                entry_point: "main",
+                module: fragment_module,
+            },
+            primitive_restart: false,
+            polygon_mode: gpu::PolygonMode::Fill,
+            cull_mode: gpu::CullMode::Back,
+            front_face: gpu::FrontFace::CounterClockWise,
+            logic_op: None,
+
+            texture_inputs: &[TextureInput {
+                name: "texSampler".to_owned(),
+                format: gpu::ImageFormat::Rgba8,
+                shader_stage: ShaderStage::FRAGMENT,
+            }],
+        })?;
+
+        let default_material = resource_map.add(default_material);
+
         Ok(CommonResources {
             cube_mesh,
             quad_mesh,
             white_texture,
             black_texture,
+
+            default_material,
         })
+    }
+
+    fn setup_resource_map(resource_map: &mut ResourceMap) {
+        resource_map.install_resource_loader(FileSystemTextureLoader);
     }
 }
 
@@ -161,6 +224,9 @@ impl App for BevyEcsApp {
     {
         let mut world = World::new();
         let mut resource_map = ResourceMap::new();
+
+        Self::setup_resource_map(&mut resource_map);
+
         let mut cvar_manager = CvarManager::new();
         let (imgui_console, console_writer) = ImguiConsole::new_with_writer();
         let input = InputState::new();

@@ -3,7 +3,7 @@ use std::{collections::HashMap, hash::Hash, mem::size_of, num::NonZeroU32};
 use crate::resource_map::Resource;
 use gpu::{
     BindingElement, BindingType, CullMode, FragmentStageInfo, FrontFace, LogicOp, PolygonMode,
-    PushConstantRange, ShaderModuleHandle, ShaderStage, VertexStageInfo,
+    ShaderModuleHandle, ShaderStage, VertexStageInfo,
 };
 
 use crate::{MaterialDomain, MaterialParameterOffsetSize, PipelineTarget, TextureInput};
@@ -25,7 +25,6 @@ pub struct MaterialParameter {
 pub struct MasterMaterialDescription<'a> {
     pub name: &'a str,
     pub domain: MaterialDomain,
-    pub global_inputs: &'a [BindingType],
     pub texture_inputs: &'a [TextureInput],
     pub material_parameters: HashMap<String, MaterialParameterOffsetSize>,
     pub parameters_visibility: ShaderStage,
@@ -36,7 +35,6 @@ pub struct MasterMaterialDescription<'a> {
     pub cull_mode: CullMode,
     pub front_face: FrontFace,
     pub logic_op: Option<LogicOp>,
-    pub push_constant_ranges: &'a [PushConstantRange],
 }
 
 // Different pipeline targets may have different shader permutations

@@ -25,7 +25,7 @@ pub trait ResourceLoader: Send + Sync + 'static {
 #[repr(transparent)]
 #[derive(Clone, Copy, Hash)]
 pub(crate) struct ResourceId {
-    pub(crate) id: Index,
+    pub(crate) id: Option<Index>,
 }
 
 pub struct RefCounted {
@@ -102,7 +102,7 @@ where
 {
     _marker: PhantomData<R>,
     pub(crate) id: ResourceId,
-    pub(crate) operation_sender: Sender<Box<dyn ResourceMapOperation>>,
+    pub(crate) operation_sender: Option<Sender<Box<dyn ResourceMapOperation>>>,
 }
 
 impl<R: Resource + 'static> std::fmt::Debug for ResourceHandle<R> {
@@ -112,14 +112,36 @@ impl<R: Resource + 'static> std::fmt::Debug for ResourceHandle<R> {
 }
 
 impl<R: Resource + 'static> ResourceHandle<R> {
+    pub fn null() -> Self {
+        Self {
+            _marker: PhantomData,
+            id: ResourceId { id: None },
+            operation_sender: None,
+        }
+    }
+
+    pub fn is_null(&self) -> bool {
+        self.id.id.is_none()
+    }
+
+    pub fn is_not_null(&self) -> bool {
+        !self.is_null()
+    }
+
     fn inc_ref_count(&self) {
+        assert!(self.is_not_null());
         self.operation_sender
+            .as_ref()
+            .expect("Handle is null()")
             .send(self.inc_ref_count_operation())
             .unwrap_or_else(|err| error!("Failed to send increment operation: {err}"));
     }
 
     fn dec_ref_count(&self) {
+        assert!(self.is_not_null());
         self.operation_sender
+            .as_ref()
+            .expect("Handle is null()")
             .send(self.dec_ref_count_operation())
             .unwrap_or_else(|err| error!("Failed to send decrement operation: {err}"));
     }
@@ -194,8 +216,8 @@ impl ResourceMap {
         };
         ResourceHandle {
             _marker: PhantomData,
-            id: ResourceId { id },
-            operation_sender: self.operations_sender.clone(),
+            id: ResourceId { id: Some(id) },
+            operation_sender: Some(self.operations_sender.clone()),
         }
     }
 
@@ -227,8 +249,8 @@ impl ResourceMap {
 
             Ok(ResourceHandle {
                 _marker: PhantomData,
-                id: ResourceId { id },
-                operation_sender: self.operations_sender.clone(),
+                id: ResourceId { id: Some(id) },
+                operation_sender: Some(self.operations_sender.clone()),
             })
         } else {
             Err(anyhow::format_err!(
@@ -272,9 +294,10 @@ impl ResourceMap {
     }
 
     pub fn try_get<'a, R: Resource + 'static>(&'a self, id: &ResourceHandle<R>) -> Option<&'a R> {
+        assert!(id.is_not_null(), "Tried to get a null resource");
         let arena_handle = self.get_arena_handle::<R>();
         let object_arc = arena_handle
-            .get(id.id.id)
+            .get(id.id.id.unwrap())
             .map(|r| r.resource.clone())
             .map(|a| a.downcast::<R>().unwrap());
         object_arc
@@ -285,9 +308,10 @@ impl ResourceMap {
         &'a self,
         id: &ResourceHandle<R>,
     ) -> Option<&'a mut R> {
+        assert!(id.is_not_null(), "Tried to get_mut a null resource");
         let arena_handle = self.get_arena_handle::<R>();
         let object_arc = arena_handle
-            .get(id.id.id)
+            .get(id.id.id.unwrap())
             .map(|r| r.resource.clone())
             .map(|a| a.downcast::<R>().unwrap());
         object_arc
@@ -318,7 +342,10 @@ impl ResourceMap {
     fn increment_resource_ref_count<R: Resource + 'static>(&mut self, id: ResourceId) {
         let mut arena_handle = self.get_arena_handle_mut::<R>();
         let resource_mut = arena_handle
-            .get_mut(id.id)
+            .get_mut(
+                id.id
+                    .expect("Tried to increment the refcount of a null() resource"),
+            )
             .unwrap_or_else(|| panic!("Failed to fetch resource of type {}", type_name::<R>()));
         resource_mut.ref_count += 1;
     }
@@ -326,7 +353,10 @@ impl ResourceMap {
         let mut arena_handle = self.get_arena_handle_mut::<R>();
         let ref_count = {
             let resource_mut = arena_handle
-                .get_mut(id.id)
+                .get_mut(
+                    id.id
+                        .expect("Tried to decrement the refcount of null() resource"),
+                )
                 .unwrap_or_else(|| panic!("Failed to fetch resource of type {}", type_name::<R>()));
             resource_mut.ref_count -= 1;
 
@@ -334,7 +364,7 @@ impl ResourceMap {
         };
 
         if ref_count == 0 {
-            let removed_resource = arena_handle.remove(id.id).unwrap_or_else(|| {
+            let removed_resource = arena_handle.remove(id.id.unwrap()).unwrap_or_else(|| {
                 panic!("Failed to remove resource of type {}", type_name::<R>())
             });
 

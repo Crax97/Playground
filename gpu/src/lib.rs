@@ -903,8 +903,6 @@ pub struct DepthStencilAttachment {}
 pub struct FragmentStageInfo<'a> {
     pub entry_point: &'a str,
     pub module: ShaderModuleHandle,
-    pub color_attachments: &'a [RenderPassAttachment],
-    pub depth_stencil_attachments: &'a [DepthStencilAttachment],
 }
 
 #[derive(Clone, Copy, Debug, Default, Hash)]

@@ -5,22 +5,21 @@ use std::{collections::HashMap, mem::size_of};
 use crate::{
     camera::Camera,
     material::{MasterMaterial, MasterMaterialDescription},
-    Backbuffer, CvarFlags, CvarManager, Light, LightType, MaterialDescription, MaterialDomain,
-    MaterialInstance, Mesh, MeshPrimitive, PipelineTarget, RenderingPipeline, Scene, Texture,
+    Backbuffer, CvarFlags, CvarManager, Light, LightType, MaterialDescription, MaterialInstance,
+    Mesh, MeshPrimitive, PipelineTarget, RenderingPipeline, Scene, Texture,
 };
 
 use crate::resource_map::{ResourceHandle, ResourceMap};
 use gpu::{
-    AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, Binding, BindingType,
-    BlendMode, BlendOp, BlendState, BufferCreateInfo, BufferHandle, BufferUsageFlags,
-    ColorComponentFlags, ColorLoadOp, Extent2D, FragmentStageInfo, FramebufferColorAttachment,
-    FramebufferDepthAttachment, Gpu, Handle, ImageAspectFlags, ImageFormat, ImageHandle,
-    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageUsageFlags, ImageViewHandle,
-    ImageViewType, IndexType, InputRate, LifetimedCache, MemoryDomain, Offset2D,
-    PipelineBarrierInfo, PipelineStageFlags, PushConstantRange, Rect2D, RenderPassAttachment,
-    SampleCount, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
-    StencilLoadOp, SubpassDependency, SubpassDescription, VertexBindingInfo, VertexStageInfo,
-    VkCommandBuffer, VkGpu, VkRenderPassCommand, VkSwapchain,
+    AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, Binding,
+    BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorLoadOp, Extent2D, FragmentStageInfo,
+    FramebufferColorAttachment, FramebufferDepthAttachment, Gpu, Handle, ImageAspectFlags,
+    ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
+    ImageUsageFlags, ImageViewHandle, ImageViewType, IndexType, InputRate, LifetimedCache,
+    MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags, Rect2D, SampleCount,
+    SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage, SubpassDependency,
+    SubpassDescription, VertexBindingInfo, VertexStageInfo, VkCommandBuffer, VkGpu,
+    VkRenderPassCommand, VkSwapchain,
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 
@@ -42,9 +41,15 @@ const SCREEN_QUAD: &[u32] = glsl!(
     entry_point = "main"
 );
 
-const GBUFFER_COMBINE: &[u32] = glsl!(
+const COMBINE_SHADER_3D: &[u32] = glsl!(
     kind = fragment,
-    path = "src/shaders/gbuffer_combine.frag",
+    path = "src/shaders/main_combine_shader_3d.frag",
+    entry_point = "main"
+);
+
+const COMBINE_SHADER_2D: &[u32] = glsl!(
+    kind = fragment,
+    path = "src/shaders/main_combine_shader_2d.frag",
     entry_point = "main"
 );
 
@@ -63,6 +68,13 @@ const TEXTURE_COPY: &[u32] = glsl!(
 const SHADOW_ATLAS_TILE_SIZE: u32 = 128;
 const SHADOW_ATLAS_WIDTH: u32 = 7680;
 const SHADOW_ATLAS_HEIGHT: u32 = 4352;
+
+#[derive(Default)]
+pub enum SceneRenderingMode {
+    #[default]
+    Mode3D,
+    Mode2D,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -282,7 +294,9 @@ pub struct DeferredRenderingPipeline {
     image_allocator: ImageAllocator,
     screen_quad: ShaderModuleHandle,
     texture_copy: ShaderModuleHandle,
-    gbuffer_combine: ShaderModuleHandle,
+    combine_shader_3d: ShaderModuleHandle,
+    combine_shader_2d: ShaderModuleHandle,
+    scene_rendering_mode: SceneRenderingMode,
     tonemap_fs: ShaderModuleHandle,
 
     fxaa_settings: FxaaSettings,
@@ -363,8 +377,11 @@ impl DeferredRenderingPipeline {
         let screen_quad = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(SCREEN_QUAD),
         })?;
-        let gbuffer_combine = gpu.make_shader_module(&ShaderModuleCreateInfo {
-            code: bytemuck::cast_slice(GBUFFER_COMBINE),
+        let combine_shader_3d = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            code: bytemuck::cast_slice(COMBINE_SHADER_3D),
+        })?;
+        let combine_shader_2d = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            code: bytemuck::cast_slice(COMBINE_SHADER_2D),
         })?;
         let tonemap_fs = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(TONEMAP),
@@ -413,7 +430,9 @@ impl DeferredRenderingPipeline {
         Ok(Self {
             image_allocator: ImageAllocator::new(4),
             screen_quad,
-            gbuffer_combine,
+            combine_shader_3d,
+            combine_shader_2d,
+            scene_rendering_mode: SceneRenderingMode::Mode3D,
             texture_copy,
             frame_buffers,
             tonemap_fs,
@@ -436,6 +455,10 @@ impl DeferredRenderingPipeline {
             gbuffer_nearest_sampler,
             shadow_atlas_sampler,
         })
+    }
+
+    pub fn set_scene_rendering_mode(&mut self, new_mode: SceneRenderingMode) {
+        self.scene_rendering_mode = new_mode;
     }
 
     pub fn fxaa_settings(&self) -> FxaaSettings {
@@ -1075,13 +1098,19 @@ impl DeferredRenderingPipeline {
                     },
                 ],
             );
+
+            let combine_shader = match self.scene_rendering_mode {
+                SceneRenderingMode::Mode3D => self.combine_shader_3d.clone(),
+                SceneRenderingMode::Mode2D => self.combine_shader_2d.clone(),
+            };
+
             gbuffer_render_pass.set_cull_mode(gpu::CullMode::None);
             gbuffer_render_pass.set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
             gbuffer_render_pass.set_front_face(gpu::FrontFace::ClockWise);
             gbuffer_render_pass.set_enable_depth_test(false);
             gbuffer_render_pass.set_depth_write_enabled(false);
             gbuffer_render_pass.set_vertex_shader(self.screen_quad.clone());
-            gbuffer_render_pass.set_fragment_shader(self.gbuffer_combine.clone());
+            gbuffer_render_pass.set_fragment_shader(combine_shader);
             gbuffer_render_pass.draw(4, 1, 0, 0);
         }
 
@@ -1626,126 +1655,10 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         _gpu: &VkGpu,
         material_description: MaterialDescription,
     ) -> anyhow::Result<MasterMaterial> {
-        let color_attachments = &[
-            // Position
-            RenderPassAttachment {
-                format: ImageFormat::RgbaFloat32,
-                samples: SampleCount::Sample1,
-                load_op: ColorLoadOp::Clear([0.0; 4]),
-                store_op: AttachmentStoreOp::Store,
-                stencil_load_op: StencilLoadOp::DontCare,
-                stencil_store_op: AttachmentStoreOp::Store,
-                initial_layout: ImageLayout::Undefined,
-                final_layout: ImageLayout::ShaderReadOnly,
-                blend_state: BlendState {
-                    blend_enable: true,
-                    src_color_blend_factor: BlendMode::One,
-                    dst_color_blend_factor: BlendMode::Zero,
-                    color_blend_op: BlendOp::Add,
-                    src_alpha_blend_factor: BlendMode::One,
-                    dst_alpha_blend_factor: BlendMode::Zero,
-                    alpha_blend_op: BlendOp::Add,
-                    color_write_mask: ColorComponentFlags::RGBA,
-                },
-            },
-            // Normals
-            RenderPassAttachment {
-                format: ImageFormat::Rgba8,
-                samples: SampleCount::Sample1,
-                load_op: ColorLoadOp::Clear([0.0; 4]),
-                store_op: AttachmentStoreOp::Store,
-                stencil_load_op: StencilLoadOp::DontCare,
-                stencil_store_op: AttachmentStoreOp::DontCare,
-                initial_layout: ImageLayout::Undefined,
-                final_layout: ImageLayout::ShaderReadOnly,
-                blend_state: BlendState {
-                    blend_enable: true,
-                    src_color_blend_factor: BlendMode::One,
-                    dst_color_blend_factor: BlendMode::Zero,
-                    color_blend_op: BlendOp::Add,
-                    src_alpha_blend_factor: BlendMode::One,
-                    dst_alpha_blend_factor: BlendMode::Zero,
-                    alpha_blend_op: BlendOp::Add,
-                    color_write_mask: ColorComponentFlags::RGBA,
-                },
-            },
-            // Diffuse
-            RenderPassAttachment {
-                format: ImageFormat::Rgba8,
-                samples: SampleCount::Sample1,
-                load_op: ColorLoadOp::Clear([0.0; 4]),
-                store_op: AttachmentStoreOp::Store,
-                stencil_load_op: StencilLoadOp::DontCare,
-                stencil_store_op: AttachmentStoreOp::Store,
-                initial_layout: ImageLayout::Undefined,
-                final_layout: ImageLayout::ShaderReadOnly,
-                blend_state: BlendState {
-                    blend_enable: true,
-                    src_color_blend_factor: BlendMode::One,
-                    dst_color_blend_factor: BlendMode::Zero,
-                    color_blend_op: BlendOp::Add,
-                    src_alpha_blend_factor: BlendMode::One,
-                    dst_alpha_blend_factor: BlendMode::Zero,
-                    alpha_blend_op: BlendOp::Add,
-                    color_write_mask: ColorComponentFlags::RGBA,
-                },
-            },
-            // Emissive
-            RenderPassAttachment {
-                format: ImageFormat::Rgba8,
-                samples: SampleCount::Sample1,
-                load_op: ColorLoadOp::Clear([0.0; 4]),
-                store_op: AttachmentStoreOp::Store,
-                stencil_load_op: StencilLoadOp::DontCare,
-                stencil_store_op: AttachmentStoreOp::DontCare,
-                initial_layout: ImageLayout::Undefined,
-                final_layout: ImageLayout::ShaderReadOnly,
-                blend_state: BlendState {
-                    blend_enable: true,
-                    src_color_blend_factor: BlendMode::One,
-                    dst_color_blend_factor: BlendMode::Zero,
-                    color_blend_op: BlendOp::Add,
-                    src_alpha_blend_factor: BlendMode::One,
-                    dst_alpha_blend_factor: BlendMode::Zero,
-                    alpha_blend_op: BlendOp::Add,
-                    color_write_mask: ColorComponentFlags::RGBA,
-                },
-            },
-            // Metal/Roughness
-            RenderPassAttachment {
-                format: ImageFormat::Rgba8,
-                samples: SampleCount::Sample1,
-                load_op: ColorLoadOp::Clear([0.0; 4]),
-                store_op: AttachmentStoreOp::Store,
-                stencil_load_op: StencilLoadOp::DontCare,
-                stencil_store_op: AttachmentStoreOp::DontCare,
-                initial_layout: ImageLayout::Undefined,
-                final_layout: ImageLayout::ShaderReadOnly,
-                blend_state: BlendState {
-                    blend_enable: true,
-                    src_color_blend_factor: BlendMode::One,
-                    dst_color_blend_factor: BlendMode::Zero,
-                    color_blend_op: BlendOp::Add,
-                    src_alpha_blend_factor: BlendMode::One,
-                    dst_alpha_blend_factor: BlendMode::Zero,
-                    alpha_blend_op: BlendOp::Add,
-                    color_write_mask: ColorComponentFlags::RGBA,
-                },
-            },
-        ];
         let master_description = MasterMaterialDescription {
             name: material_description.name,
             domain: material_description.domain,
-            global_inputs: match material_description.domain {
-                MaterialDomain::Surface => &[BindingType::Storage],
-                MaterialDomain::PostProcess => &[
-                    BindingType::Storage,              // Camera buffer
-                    BindingType::CombinedImageSampler, // Previous post process result/ Initial scene color,
-                    BindingType::CombinedImageSampler, // Scene position,
-                    BindingType::CombinedImageSampler, // Scene diffuse,
-                    BindingType::CombinedImageSampler, // Scene normal,
-                ],
-            },
+
             texture_inputs: material_description.texture_inputs,
             material_parameters: material_description.material_parameters,
             vertex_info: &VertexStageInfo {
@@ -1755,18 +1668,11 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             fragment_info: &FragmentStageInfo {
                 entry_point: "main",
                 module: material_description.fragment_module,
-                color_attachments,
-                depth_stencil_attachments: &[],
             },
             primitive_restart: false,
             polygon_mode: gpu::PolygonMode::Fill,
             cull_mode: gpu::CullMode::Back,
             front_face: gpu::FrontFace::CounterClockWise,
-            push_constant_ranges: &[PushConstantRange {
-                stage_flags: ShaderStage::ALL,
-                offset: 0,
-                size: std::mem::size_of::<ObjectDrawInfo>() as u32,
-            }],
             logic_op: None,
             parameters_visibility: material_description.parameter_shader_visibility,
         };

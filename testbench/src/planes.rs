@@ -1,7 +1,6 @@
 mod utils;
 
 use std::collections::HashMap;
-use std::io::BufReader;
 
 use engine::app::{app_state::*, bootstrap, App};
 
@@ -12,7 +11,7 @@ use engine::{
     MeshPrimitiveCreateInfo, RenderingPipeline, ResourceMap, Scene, ScenePrimitive, Texture,
     TextureInput,
 };
-use gpu::{ImageViewType, PresentMode, ShaderStage, VkCommandBuffer};
+use gpu::{PresentMode, ShaderStage, VkCommandBuffer};
 use imgui::Ui;
 use nalgebra::*;
 use winit::{event::ElementState, event_loop::EventLoop};

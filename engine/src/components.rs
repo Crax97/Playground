@@ -1,11 +1,14 @@
-use crate::{resource_map::ResourceHandle, LightType, Scene, ShadowSetup, Texture};
+use crate::{
+    bevy_ecs_app::CommonResources, resource_map::ResourceHandle, LightType, Scene, ShadowSetup,
+    Texture,
+};
 use bevy_ecs::{
     component::Component,
     schedule::Schedule,
-    system::{Commands, Query, Resource},
+    system::{Commands, Query, Res, Resource},
     world::World,
 };
-use nalgebra::{Matrix4, Point3, UnitQuaternion, Vector3};
+use nalgebra::{vector, Matrix4, Point2, Point3, UnitQuaternion, UnitVector3, Vector2, Vector3};
 
 use crate::{MaterialInstance, Mesh};
 
@@ -14,6 +17,16 @@ pub struct Transform {
     pub position: Point3<f32>,
     pub rotation: UnitQuaternion<f32>,
     pub scale: Vector3<f32>,
+}
+
+impl Default for Transform {
+    fn default() -> Self {
+        Self {
+            position: Default::default(),
+            rotation: Default::default(),
+            scale: vector![1.0, 1.0, 1.0],
+        }
+    }
 }
 
 impl Transform {
@@ -25,9 +38,42 @@ impl Transform {
 }
 
 #[derive(Component)]
+pub struct Transform2D {
+    pub position: Point2<f32>,
+    pub rotation: f32,
+    pub scale: Vector2<f32>,
+}
+
+impl Default for Transform2D {
+    fn default() -> Self {
+        Self {
+            position: Default::default(),
+            rotation: 0.0,
+            scale: vector![1.0, 1.0],
+        }
+    }
+}
+
+impl Transform2D {
+    pub fn matrix(&self) -> Matrix4<f32> {
+        Matrix4::new_translation(&vector![self.position.x, self.position.y, 510.0])
+            * Matrix4::new_nonuniform_scaling(&vector![self.scale.x, self.scale.y, 1.0])
+            * UnitQuaternion::from_axis_angle(
+                &UnitVector3::new_normalize(vector![0.0, 0.0, 1.0]),
+                self.rotation.to_radians(),
+            )
+            .to_homogeneous()
+    }
+}
+#[derive(Component)]
 pub struct MeshComponent {
     pub mesh: ResourceHandle<Mesh>,
     pub materials: Vec<ResourceHandle<MaterialInstance>>,
+}
+
+#[derive(Component)]
+pub struct SpriteComponent {
+    pub material: ResourceHandle<MaterialInstance>,
 }
 
 #[derive(Component)]
@@ -74,6 +120,28 @@ pub fn rendering_system(
             intensity: light.intensity,
             enabled: light.enabled,
             shadow_setup: light.shadow_setup,
+        });
+    }
+
+    commands.insert_resource(scene)
+}
+
+pub fn rendering_system_2d(
+    common_resources: Res<CommonResources>,
+    sprites: Query<(&SpriteComponent, &Transform2D)>,
+    world: &World,
+    mut commands: Commands,
+) {
+    let mut scene = Scene::new();
+    if let Some(setup) = world.get_resource::<SceneSetup>() {
+        scene.set_skybox_material(setup.skybox_material.clone());
+        scene.set_skybox_texture(setup.skybox_texture.clone());
+    }
+    for (sprite_component, transform) in sprites.iter() {
+        scene.add(crate::ScenePrimitive {
+            mesh: common_resources.quad_mesh.clone(),
+            materials: vec![sprite_component.material.clone()],
+            transform: transform.matrix(),
         });
     }
 

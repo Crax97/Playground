@@ -1,10 +1,12 @@
+use std::collections::HashMap;
+
 use engine::app::app_state::app_state;
-use engine::app::ConsoleWriter;
-use engine::bevy_ecs::entity::Entity;
-use engine::bevy_ecs::schedule::IntoSystemConfigs;
-use engine::bevy_ecs::system::{Query, Res, ResMut};
-use engine::components::{rendering_system, MeshComponent};
-use engine::{bevy_ecs, Camera, ResourceMap, Texture, Time};
+use engine::bevy_ecs::system::{Res, ResMut};
+use engine::components::{SpriteComponent, Transform2D};
+use engine::{
+    bevy_ecs, Camera, CommonResources, MaterialInstance, MaterialInstanceDescription, ResourceMap,
+    SceneRenderingMode, Texture,
+};
 use engine::{
     bevy_ecs::{component::Component, system::Commands},
     BevyEcsApp,
@@ -16,41 +18,49 @@ pub struct Name(String);
 fn main() -> anyhow::Result<()> {
     let mut app = BevyEcsApp::new()?;
 
-    app.startup_schedule()
-        .add_systems((hello_system, print_system));
+    app.renderer()
+        .set_scene_rendering_mode(SceneRenderingMode::Mode2D);
+    app.startup_schedule().add_systems(setup_player_system);
 
-    app.update_schedule().add_systems(greet_system);
+    app.update_schedule().add_systems(camera_system);
+
     app.post_update_schedule()
-        .add_systems((camera_system, rendering_system.after(camera_system)));
+        .add_systems(engine::components::rendering_system_2d);
 
     app.run()
 }
 
-fn setup_sprite_system(mut resource_map: ResMut<ResourceMap>, mut commands: Commands) {
-    // let texture = resource_map.load::<Texture>("images/texture.jpg", ImageLoader);
-}
-
-fn print_system(mut console_writer: ResMut<ConsoleWriter>) {
-    println!("Hello world!");
-    console_writer.write_message("Hello world!").unwrap();
-}
-fn hello_system(mut commands: Commands) {
-    commands.spawn(Name("John".to_owned()));
-    commands.spawn(Name("Marc".to_owned()));
-    commands.spawn(Name("Jaques".to_owned()));
-}
-
 fn camera_system(mut commands: Commands) {
-    commands.insert_resource(Camera::new_orthographic(100.0, 100.0, 0.0001, 1000.0));
+    commands.insert_resource(Camera::new_orthographic(10.0, 10.0, 0.0001, 1000.0));
 }
 
-fn greet_system(query: Query<(Entity, &Name)>, mut writer: ResMut<ConsoleWriter>) {
-    for (who, name) in query.iter() {
-        writer
-            .write_message(format!(
-                "Greeting {name:?} whose entity id is {who:?} at time {}",
-                app_state().time.frames_since_start()
-            ))
-            .unwrap();
-    }
+fn setup_player_system(
+    mut resource_map: ResMut<ResourceMap>,
+    common_resources: Res<CommonResources>,
+    mut commands: Commands,
+) {
+    let texture = resource_map
+        .load::<Texture>(&app_state().gpu, "images/texture.jpg")
+        .unwrap();
+
+    let mut texture_inputs = HashMap::new();
+    texture_inputs.insert("texSampler".to_owned(), texture);
+
+    let material = MaterialInstance::create_instance(
+        &app_state().gpu,
+        common_resources.default_material.clone(),
+        &resource_map,
+        &MaterialInstanceDescription {
+            name: "Spriteee",
+            texture_inputs,
+        },
+    )
+    .unwrap();
+
+    let material = resource_map.add(material);
+
+    let transform = Transform2D::default();
+    println!("Matrix {:?}", &transform.matrix());
+
+    commands.spawn((SpriteComponent { material }, transform));
 }
