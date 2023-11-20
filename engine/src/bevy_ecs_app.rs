@@ -126,10 +126,10 @@ impl BevyEcsApp {
                         vector![0.0, 0.0, 1.0],
                     ],
                     uvs: vec![
-                        vector![1.0, 0.0],
-                        vector![0.0, 0.0],
-                        vector![0.0, 1.0],
                         vector![1.0, 1.0],
+                        vector![0.0, 1.0],
+                        vector![0.0, 0.0],
+                        vector![1.0, 0.0],
                     ],
                 }],
             };
@@ -227,7 +227,7 @@ impl App for BevyEcsApp {
 
         Self::setup_resource_map(&mut resource_map);
 
-        let mut cvar_manager = CvarManager::new();
+        let cvar_manager = CvarManager::new();
         let (imgui_console, console_writer) = ImguiConsole::new_with_writer();
         let input = InputState::new();
         let cube_mesh = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
@@ -236,7 +236,6 @@ impl App for BevyEcsApp {
             &mut resource_map,
             cube_mesh,
             DeferredRenderingPipeline::make_3d_combine_shader(&app_state.gpu)?,
-            &mut cvar_manager,
         )?;
         let startup_schedule = Schedule::new(StartupSchedule);
         let update_schedule = Schedule::new(UpdateSchedule);

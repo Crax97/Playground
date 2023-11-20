@@ -9,6 +9,7 @@ use std::num::NonZeroU32;
 use engine::app::{app_state::*, bootstrap, App, ImguiConsole};
 
 use engine::input::InputState;
+use engine::post_process_pass::TonemapPass;
 use fps_camera::FpsCamera;
 use gpu::{Extent2D, ImageFormat, PresentMode, ShaderStage, VkCommandBuffer};
 use imgui::{TreeNodeFlags, Ui};
@@ -17,9 +18,9 @@ use winit::dpi::{PhysicalPosition, Position};
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::input::key::Key;
 use engine::{
-    Backbuffer, CvarManager, DeferredRenderingPipeline, Light, LightHandle, LightType,
-    MaterialInstance, RenderingPipeline, ResourceMap, ShadowSetup, TextureInput,
-    FXAA_ITERATIONS_CVAR_NAME,
+    post_process_pass::FxaaPass, Backbuffer, CvarManager, DeferredRenderingPipeline, Light,
+    LightHandle, LightType, MaterialInstance, RenderingPipeline, ResourceMap, ShadowSetup,
+    TextureInput,
 };
 use nalgebra::*;
 use winit::event::MouseButton;
@@ -250,8 +251,10 @@ impl App for GLTFViewer {
             &mut resource_map,
             cube_mesh,
             DeferredRenderingPipeline::make_3d_combine_shader(&app_state.gpu)?,
-            &mut cvar_manager,
         )?;
+
+        scene_renderer.add_post_process_pass(TonemapPass::new(&app_state.gpu)?);
+        scene_renderer.add_post_process_pass(FxaaPass::new(&app_state.gpu, &mut cvar_manager)?);
 
         scene_renderer.set_irradiance_texture(Some(irradiance_map));
 
@@ -335,7 +338,6 @@ impl App for GLTFViewer {
     fn update(&mut self, app_state: &mut AppState, ui: &mut Ui) -> anyhow::Result<()> {
         self.console.update(&self.input);
         self.console.imgui_update(ui, &mut self.cvar_manager);
-        let mut settings = self.scene_renderer.fxaa_settings();
 
         ui.text("Hiii");
 
@@ -344,21 +346,32 @@ impl App for GLTFViewer {
             0,
             12,
             self.cvar_manager
-                .get_named_ref_mut::<i32>(FXAA_ITERATIONS_CVAR_NAME)
+                .get_named_ref_mut::<i32>(FxaaPass::FXAA_ITERATIONS_CVAR_NAME)
                 .unwrap(),
         );
-        ui.slider("FXAA subpix", 0.0, 1.0, &mut settings.fxaa_quality_subpix);
+        ui.slider(
+            "FXAA subpix",
+            0.0,
+            1.0,
+            self.cvar_manager
+                .get_named_ref_mut::<f32>(FxaaPass::FXAA_SUBPIX_CVAR_NAME)
+                .unwrap(),
+        );
         ui.slider(
             "FXAA Edge Threshold",
             0.0,
             1.0,
-            &mut settings.fxaa_quality_edge_threshold,
+            self.cvar_manager
+                .get_named_ref_mut::<f32>(FxaaPass::FXAA_EDGE_THRESHOLD_CVAR_NAME)
+                .unwrap(),
         );
         ui.slider(
             "FXAA Edge Threshold min",
             0.0,
             1.0,
-            &mut settings.fxaa_quality_edge_threshold_min,
+            self.cvar_manager
+                .get_named_ref_mut::<f32>(FxaaPass::FXAA_EDGE_THRESHOLD_MIN_CVAR_NAME)
+                .unwrap(),
         );
 
         ui.separator();
@@ -379,8 +392,6 @@ impl App for GLTFViewer {
         }
 
         self.lights_ui(ui);
-
-        self.scene_renderer.set_fxaa_settings_mut(settings);
 
         if ui.io().want_capture_keyboard || ui.io().want_capture_mouse {
             return Ok(());

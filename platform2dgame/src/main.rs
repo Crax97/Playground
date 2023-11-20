@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use engine::app::app_state::app_state;
 use engine::bevy_ecs::system::{Res, ResMut};
 use engine::components::{SpriteComponent, Transform2D};
+use engine::post_process_pass::{FxaaPass, TonemapPass};
 use engine::{
-    bevy_ecs, Camera, CommonResources, DeferredRenderingPipeline, MaterialInstance,
+    bevy_ecs, Camera, CommonResources, CvarManager, DeferredRenderingPipeline, MaterialInstance,
     MaterialInstanceDescription, ResourceMap, Texture,
 };
 use engine::{
@@ -22,6 +23,7 @@ fn main() -> anyhow::Result<()> {
         .set_combine_shader(DeferredRenderingPipeline::make_2d_combine_shader(
             &app_state().gpu,
         )?);
+
     app.startup_schedule().add_systems(setup_player_system);
 
     app.update_schedule().add_systems(camera_system);
@@ -33,7 +35,14 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn camera_system(mut commands: Commands) {
-    commands.insert_resource(Camera::new_orthographic(10.0, 10.0, 0.0001, 1000.0));
+    let size = app_state().window.inner_size().cast::<f32>();
+    let aspect = size.width / size.height;
+    commands.insert_resource(Camera::new_orthographic(
+        10.0 * aspect,
+        10.0,
+        0.0001,
+        1000.0,
+    ));
 }
 
 fn setup_player_system(

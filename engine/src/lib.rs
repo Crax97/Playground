@@ -8,6 +8,7 @@ pub mod input;
 pub mod loaders;
 mod material;
 mod mesh;
+pub mod post_process_pass;
 pub mod resource_map;
 mod scene;
 mod texture;

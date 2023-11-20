@@ -51,7 +51,7 @@ impl App for PlanesApp {
         let mut resource_map = ResourceMap::new();
         resource_map.install_resource_loader(FileSystemTextureLoader);
 
-        let mut cvar_manager = CvarManager::new();
+        let cvar_manager = CvarManager::new();
         let camera = Camera {
             location: point![2.0, 2.0, 2.0],
             forward: vector![0.0, -1.0, -1.0].normalize(),
@@ -119,7 +119,6 @@ impl App for PlanesApp {
             &mut resource_map,
             cube.clone(),
             DeferredRenderingPipeline::make_3d_combine_shader(&app_state.gpu)?,
-            &mut cvar_manager,
         )?;
 
         let master = scene_renderer.create_material(

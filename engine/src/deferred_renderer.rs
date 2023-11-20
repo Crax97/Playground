@@ -5,8 +5,9 @@ use std::{collections::HashMap, mem::size_of};
 use crate::{
     camera::Camera,
     material::{MasterMaterial, MasterMaterialDescription},
-    Backbuffer, CvarFlags, CvarManager, Light, LightType, MaterialDescription, MaterialInstance,
-    Mesh, MeshPrimitive, PipelineTarget, RenderingPipeline, Scene, Texture,
+    post_process_pass::{PostProcessPass, PostProcessResources},
+    Backbuffer, CvarManager, Light, LightType, MaterialDescription, MaterialInstance, Mesh,
+    MeshPrimitive, PipelineTarget, RenderingPipeline, Scene, Texture,
 };
 
 use crate::resource_map::{ResourceHandle, ResourceMap};
@@ -23,21 +24,15 @@ use gpu::{
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 
-const FXAA_FS: &[u32] = glsl!(
-    kind = fragment,
-    path = "src/shaders/fxaa_fs.frag",
-    entry_point = "main"
-);
-
-const FXAA_VS: &[u32] = glsl!(
-    kind = vertex,
-    path = "src/shaders/fxaa_vs.vert",
-    entry_point = "main"
-);
-
 const SCREEN_QUAD: &[u32] = glsl!(
     kind = vertex,
     path = "src/shaders/screen_quad.vert",
+    entry_point = "main"
+);
+
+const SCREEN_QUAD_FLIPPED: &[u32] = glsl!(
+    kind = vertex,
+    path = "src/shaders/screen_quad_flipped.vert",
     entry_point = "main"
 );
 
@@ -53,12 +48,6 @@ const COMBINE_SHADER_2D: &[u32] = glsl!(
     entry_point = "main"
 );
 
-const TONEMAP: &[u32] = glsl!(
-    kind = fragment,
-    path = "src/shaders/tonemap.frag",
-    entry_point = "main"
-);
-
 const TEXTURE_COPY: &[u32] = glsl!(
     kind = fragment,
     path = "src/shaders/texture_copy.frag",
@@ -69,20 +58,36 @@ const SHADOW_ATLAS_TILE_SIZE: u32 = 128;
 const SHADOW_ATLAS_WIDTH: u32 = 7680;
 const SHADOW_ATLAS_HEIGHT: u32 = 4352;
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct FxaaShaderParams {
-    rcp_frame: Vector2<f32>,
-    fxaa_quality_subpix: f32,
-    fxaa_quality_edge_threshold: f32,
-    fxaa_quality_edge_threshold_min: f32,
-    iterations: u32,
+pub struct DeferredRenderingPipeline {
+    frame_buffers: Vec<FrameBuffers>,
+    image_allocator: ImageAllocator,
+    screen_quad: ShaderModuleHandle,
+    texture_copy: ShaderModuleHandle,
+    combine_shader: ShaderModuleHandle,
+
+    post_process_stack: Vec<Box<dyn PostProcessPass>>,
+
+    in_flight_frame: usize,
+    max_frames_in_flight: usize,
+    light_iteration: u64,
+    active_lights: Vec<GpuLightInfo>,
+    light_povs: Vec<PerFrameData>,
+    pub(crate) irradiance_map: Option<ResourceHandle<Texture>>,
+    default_irradiance_map: ResourceHandle<Texture>,
+
+    cube_mesh: ResourceHandle<Mesh>,
+
+    pub depth_bias_constant: f32,
+    pub depth_bias_clamp: f32,
+    pub depth_bias_slope: f32,
+
+    pub ambient_color: Vector3<f32>,
+    pub ambient_intensity: f32,
+
+    gbuffer_nearest_sampler: SamplerHandle,
+    shadow_atlas_sampler: SamplerHandle,
+    screen_quad_flipped: ShaderModuleHandle,
 }
-
-pub const FXAA_ITERATIONS_CVAR_NAME: &str = "fxaa.iterations";
-
-unsafe impl Pod for FxaaShaderParams {}
-unsafe impl Zeroable for FxaaShaderParams {}
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub struct RenderImageDescription {
@@ -282,46 +287,12 @@ struct DrawCall<'a> {
     material: ResourceHandle<MaterialInstance>,
 }
 
-pub struct DeferredRenderingPipeline {
-    frame_buffers: Vec<FrameBuffers>,
-    image_allocator: ImageAllocator,
-    screen_quad: ShaderModuleHandle,
-    texture_copy: ShaderModuleHandle,
-    combine_shader: ShaderModuleHandle,
-    tonemap_fs: ShaderModuleHandle,
-
-    fxaa_settings: FxaaSettings,
-
-    fxaa_vs: ShaderModuleHandle,
-    fxaa_fs: ShaderModuleHandle,
-    in_flight_frame: usize,
-    max_frames_in_flight: usize,
-    light_iteration: u64,
-    active_lights: Vec<GpuLightInfo>,
-    light_povs: Vec<PerFrameData>,
-    pub(crate) irradiance_map: Option<ResourceHandle<Texture>>,
-    default_irradiance_map: ResourceHandle<Texture>,
-
-    cube_mesh: ResourceHandle<Mesh>,
-
-    pub depth_bias_constant: f32,
-    pub depth_bias_clamp: f32,
-    pub depth_bias_slope: f32,
-
-    pub ambient_color: Vector3<f32>,
-    pub ambient_intensity: f32,
-
-    gbuffer_nearest_sampler: SamplerHandle,
-    shadow_atlas_sampler: SamplerHandle,
-}
-
 impl DeferredRenderingPipeline {
     pub fn new(
         gpu: &VkGpu,
         resource_map: &mut ResourceMap,
         cube_mesh: ResourceHandle<Mesh>,
         combine_shader: ShaderModuleHandle,
-        cvar_manager: &mut CvarManager,
     ) -> anyhow::Result<Self> {
         let mut frame_buffers = vec![];
         for _ in 0..VkSwapchain::MAX_FRAMES_IN_FLIGHT {
@@ -357,21 +328,14 @@ impl DeferredRenderingPipeline {
             })
         }
 
-        let fxaa_vs = gpu.make_shader_module(&ShaderModuleCreateInfo {
-            code: bytemuck::cast_slice(FXAA_VS),
-        })?;
-        let fxaa_fs = gpu.make_shader_module(&ShaderModuleCreateInfo {
-            code: bytemuck::cast_slice(FXAA_FS),
-        })?;
-
-        cvar_manager.register_cvar(FXAA_ITERATIONS_CVAR_NAME, 12, CvarFlags::empty());
-
         let screen_quad = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(SCREEN_QUAD),
         })?;
-        let tonemap_fs = gpu.make_shader_module(&ShaderModuleCreateInfo {
-            code: bytemuck::cast_slice(TONEMAP),
+
+        let screen_quad_flipped = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            code: bytemuck::cast_slice(SCREEN_QUAD_FLIPPED),
         })?;
+
         let texture_copy = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(TEXTURE_COPY),
         })?;
@@ -416,13 +380,11 @@ impl DeferredRenderingPipeline {
         Ok(Self {
             image_allocator: ImageAllocator::new(4),
             screen_quad,
+            screen_quad_flipped,
             combine_shader,
             texture_copy,
             frame_buffers,
-            tonemap_fs,
-            fxaa_vs,
-            fxaa_fs,
-            fxaa_settings: Default::default(),
+            post_process_stack: vec![],
             light_iteration: 0,
             in_flight_frame: 0,
             max_frames_in_flight: VkSwapchain::MAX_FRAMES_IN_FLIGHT,
@@ -460,15 +422,6 @@ impl DeferredRenderingPipeline {
     */
     pub fn set_combine_shader(&mut self, shader_handle: ShaderModuleHandle) {
         self.combine_shader = shader_handle;
-    }
-    pub fn fxaa_settings(&self) -> FxaaSettings {
-        self.fxaa_settings
-    }
-    pub fn fxaa_settings_mut(&mut self) -> &mut FxaaSettings {
-        &mut self.fxaa_settings
-    }
-    pub fn set_fxaa_settings_mut(&mut self, settings: FxaaSettings) {
-        self.fxaa_settings = settings;
     }
 
     fn main_render_loop(
@@ -1138,6 +1091,7 @@ impl DeferredRenderingPipeline {
         graphics_command_buffer: &mut VkCommandBuffer,
         color_output: RenderImage,
         backbuffer: &Backbuffer,
+        flip_render_target: bool,
     ) {
         let mut present_render_pass =
             graphics_command_buffer.begin_render_pass(&gpu::BeginRenderPassInfo {
@@ -1180,12 +1134,19 @@ impl DeferredRenderingPipeline {
                 location: 0,
             }],
         );
+
+        let screen_quad = if flip_render_target {
+            self.screen_quad_flipped.clone()
+        } else {
+            self.screen_quad.clone()
+        };
+
         present_render_pass.set_front_face(gpu::FrontFace::ClockWise);
         present_render_pass.set_cull_mode(gpu::CullMode::None);
         present_render_pass.set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
         present_render_pass.set_enable_depth_test(false);
         present_render_pass.set_depth_write_enabled(false);
-        present_render_pass.set_vertex_shader(self.screen_quad.clone());
+        present_render_pass.set_vertex_shader(screen_quad);
         present_render_pass.set_fragment_shader(self.texture_copy.clone());
         present_render_pass.draw(4, 1, 0, 0);
     }
@@ -1198,6 +1159,51 @@ impl DeferredRenderingPipeline {
         render_size: Extent2D,
         cvar_manager: &CvarManager,
     ) -> RenderImage {
+        if self.post_process_stack.is_empty() {
+            return color_output;
+        }
+
+        let subpasses = self
+            .post_process_stack
+            .iter()
+            .enumerate()
+            .map(|(i, pass)| SubpassDescription {
+                label: Some(pass.name()),
+                input_attachments: if i == 0 {
+                    vec![]
+                } else {
+                    vec![AttachmentReference {
+                        attachment: (i as u32) % 2,
+                        layout: ImageLayout::ShaderReadOnly,
+                    }]
+                },
+                color_attachments: vec![AttachmentReference {
+                    attachment: (i + 1) as u32 % 2,
+                    layout: ImageLayout::ColorAttachment,
+                }],
+                resolve_attachments: vec![],
+                depth_stencil_attachment: None,
+                preserve_attachments: vec![],
+            })
+            .collect::<Vec<_>>();
+
+        let mut dependencies = self
+            .post_process_stack
+            .iter()
+            .enumerate()
+            .map(|(i, _)| SubpassDependency {
+                src_subpass: i as u32,
+                dst_subpass: i as u32 + 1,
+                src_stage_mask: PipelineStageFlags::FRAGMENT_SHADER
+                    | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER
+                    | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                src_access_mask: AccessFlags::SHADER_READ | AccessFlags::COLOR_ATTACHMENT_WRITE,
+                dst_access_mask: AccessFlags::SHADER_READ | AccessFlags::COLOR_ATTACHMENT_WRITE,
+            })
+            .collect::<Vec<_>>();
+        dependencies.pop();
+
         let final_color_output = {
             let final_color_output = {
                 let post_process_backbuffer_1 = color_output;
@@ -1207,7 +1213,7 @@ impl DeferredRenderingPipeline {
                     &color_desc,
                 );
 
-                let mut current_postprocess = 1;
+                let mut current_postprocess = 0;
                 let mut post_process_pass =
                     graphics_command_buffer.begin_render_pass(&BeginRenderPassInfo {
                         label: Some("Post Process"),
@@ -1233,113 +1239,39 @@ impl DeferredRenderingPipeline {
                             offset: Offset2D::default(),
                             extent: render_size,
                         },
-                        subpasses: &[
-                            SubpassDescription {
-                                label: Some("Tonemapping".to_owned()),
-                                input_attachments: vec![],
-                                color_attachments: vec![AttachmentReference {
-                                    attachment: 1,
-                                    layout: ImageLayout::ColorAttachment,
-                                }],
-                                resolve_attachments: vec![],
-                                depth_stencil_attachment: None,
-                                preserve_attachments: vec![],
-                            },
-                            SubpassDescription {
-                                label: Some("Fxaa".to_owned()),
-                                input_attachments: vec![AttachmentReference {
-                                    attachment: 1,
-                                    layout: ImageLayout::ShaderReadOnly,
-                                }],
-                                color_attachments: vec![AttachmentReference {
-                                    attachment: 0,
-                                    layout: ImageLayout::ColorAttachment,
-                                }],
-                                resolve_attachments: vec![],
-                                depth_stencil_attachment: None,
-                                preserve_attachments: vec![],
-                            },
-                        ],
-                        dependencies: &[SubpassDependency {
-                            src_subpass: 0,
-                            dst_subpass: 1,
-                            src_stage_mask: PipelineStageFlags::FRAGMENT_SHADER
-                                | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                            dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER
-                                | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                            src_access_mask: AccessFlags::SHADER_READ
-                                | AccessFlags::COLOR_ATTACHMENT_WRITE,
-                            dst_access_mask: AccessFlags::SHADER_READ
-                                | AccessFlags::COLOR_ATTACHMENT_WRITE,
-                        }],
+                        subpasses: &subpasses,
+                        dependencies: &dependencies,
                     });
                 post_process_pass.set_cull_mode(gpu::CullMode::None);
                 post_process_pass.set_enable_depth_test(false);
                 post_process_pass.set_depth_write_enabled(false);
                 post_process_pass.set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
 
-                // Tonemap
-                post_process_pass.bind_resources(
-                    0,
-                    &[Binding {
-                        ty: gpu::DescriptorBindingType::ImageView {
-                            image_view_handle: post_process_backbuffer_1.view.clone(),
-                            sampler_handle: self.gbuffer_nearest_sampler.clone(),
-                            layout: ImageLayout::ShaderReadOnly,
-                        },
-                        binding_stage: ShaderStage::FRAGMENT,
-                        location: 0,
-                    }],
-                );
-                post_process_pass.set_vertex_shader(self.screen_quad.clone());
-                post_process_pass.set_fragment_shader(self.tonemap_fs.clone());
-                post_process_pass.draw(4, 1, 0, 0);
-                post_process_pass.advance_to_next_subpass();
-                current_postprocess = (current_postprocess + 1) % 2;
+                for pass in &self.post_process_stack {
+                    let previous_pass_result = if current_postprocess == 0 {
+                        &post_process_backbuffer_1.view
+                    } else {
+                        &post_process_backbuffer_2.view
+                    };
 
-                // Fxaa
-                post_process_pass.bind_resources(
-                    0,
-                    &[Binding {
-                        ty: gpu::DescriptorBindingType::ImageView {
-                            image_view_handle: post_process_backbuffer_2.view.clone(),
-                            sampler_handle: self.gbuffer_nearest_sampler.clone(),
-                            layout: ImageLayout::ShaderReadOnly,
+                    pass.apply(
+                        &mut post_process_pass,
+                        &PostProcessResources {
+                            screen_quad: &self.screen_quad,
+                            previous_pass_result,
+                            sampler: &self.gbuffer_nearest_sampler,
+                            cvar_manager,
+                            render_size,
                         },
-                        binding_stage: ShaderStage::FRAGMENT,
-                        location: 0,
-                    }],
-                );
-                let rcp_frame = vector![render_size.width as f32, render_size.height as f32];
-                let rcp_frame = vector![1.0 / rcp_frame.x, 1.0 / rcp_frame.y];
-
-                let iterations = cvar_manager
-                    .get_named::<i32>(FXAA_ITERATIONS_CVAR_NAME)
-                    .expect("Fxaa Cvar not found");
-                let params = FxaaShaderParams {
-                    rcp_frame,
-                    fxaa_quality_subpix: self.fxaa_settings.fxaa_quality_subpix,
-                    fxaa_quality_edge_threshold: self.fxaa_settings.fxaa_quality_edge_threshold,
-                    fxaa_quality_edge_threshold_min: self
-                        .fxaa_settings
-                        .fxaa_quality_edge_threshold_min,
-                    iterations: iterations as _,
-                };
-                post_process_pass.set_vertex_shader(self.fxaa_vs.clone());
-                post_process_pass.set_fragment_shader(self.fxaa_fs.clone());
-                post_process_pass.push_constants(
-                    0,
-                    0,
-                    bytemuck::cast_slice(&[params]),
-                    ShaderStage::ALL_GRAPHICS,
-                );
-                post_process_pass.draw(3, 1, 0, 0);
-                current_postprocess = (current_postprocess + 1) % 2;
+                    );
+                    current_postprocess = (current_postprocess + 1) % 2;
+                    post_process_pass.advance_to_next_subpass();
+                }
 
                 let final_target = if current_postprocess == 0 {
-                    post_process_backbuffer_2
-                } else {
                     post_process_backbuffer_1
+                } else {
+                    post_process_backbuffer_2
                 };
 
                 final_target
@@ -1369,6 +1301,10 @@ impl DeferredRenderingPipeline {
             final_color_output
         };
         final_color_output
+    }
+
+    pub fn add_post_process_pass(&mut self, pass: impl PostProcessPass) {
+        self.post_process_stack.push(Box::new(pass))
     }
 }
 
@@ -1640,7 +1576,12 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             cvar_manager,
         );
 
-        self.copy_to_backbuffer_pass(&mut graphics_command_buffer, final_color_output, backbuffer);
+        self.copy_to_backbuffer_pass(
+            &mut graphics_command_buffer,
+            final_color_output,
+            backbuffer,
+            self.post_process_stack.len() % 2 == 0,
+        );
 
         Ok(graphics_command_buffer)
     }

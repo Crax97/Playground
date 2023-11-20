@@ -3,9 +3,9 @@ use std::ops::DerefMut;
 use std::{ffi::CString, ops::Deref};
 
 use ash::vk::{
-    self, CommandBufferAllocateInfo, CommandBufferBeginInfo,
-    CommandBufferLevel, CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags,
-    PipelineBindPoint, PipelineInputAssemblyStateCreateFlags, StructureType, SubmitInfo,
+    self, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
+    CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags, PipelineBindPoint,
+    PipelineInputAssemblyStateCreateFlags, StructureType, SubmitInfo,
 };
 use ash::{extensions::ext::DebugUtils, prelude::VkResult};
 use log::warn;
@@ -786,6 +786,16 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
 
     pub fn advance_to_next_subpass(&mut self) {
         self.pipeline_state.current_subpass += 1;
+        if self.pipeline_state.current_subpass as usize == self.subpasses.len() {
+            return;
+        }
+        if self.pipeline_state.current_subpass as usize > self.subpasses.len() {
+            panic!(
+                "Tried to start subpass {} but there are {} subpasses!",
+                self.pipeline_state.current_subpass,
+                self.subpasses.len(),
+            );
+        }
         self.subpass_label.take();
         if let Some(ref label) = self.subpasses[self.pipeline_state.current_subpass as usize].label
         {
