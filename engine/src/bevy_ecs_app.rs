@@ -25,6 +25,12 @@ const DEFAULT_DEFERRED_FS: &[u32] = glsl!(
     entry_point = "main"
 );
 
+const DEFAULT_DEFERRED_TRANSPARENCY_FS: &[u32] = glsl!(
+    kind = fragment,
+    path = "src/shaders/default_fragment_deferred_discard.frag",
+    entry_point = "main"
+);
+
 const DEFAULT_DEFERRED_VS: &[u32] = glsl!(
     kind = vertex,
     path = "src/shaders/default_vertex_deferred.vert",
@@ -63,6 +69,7 @@ pub struct CommonResources {
     pub black_texture: ResourceHandle<Texture>,
 
     pub default_material: ResourceHandle<MasterMaterial>,
+    pub default_material_transparency: ResourceHandle<MasterMaterial>,
 }
 
 impl BevyEcsApp {
@@ -166,7 +173,9 @@ impl BevyEcsApp {
         let fragment_module = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(DEFAULT_DEFERRED_FS),
         })?;
-
+        let fragment_module_transparency = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            code: bytemuck::cast_slice(DEFAULT_DEFERRED_TRANSPARENCY_FS),
+        })?;
         let default_material = MasterMaterial::new(&crate::MasterMaterialDescription {
             name: "Default master deferred",
             domain: crate::MaterialDomain::Surface,
@@ -174,7 +183,7 @@ impl BevyEcsApp {
             parameters_visibility: ShaderStage::FRAGMENT,
             vertex_info: &gpu::VertexStageInfo {
                 entry_point: "main",
-                module: vertex_module,
+                module: vertex_module.clone(),
             },
             fragment_info: &gpu::FragmentStageInfo {
                 entry_point: "main",
@@ -192,8 +201,35 @@ impl BevyEcsApp {
                 shader_stage: ShaderStage::FRAGMENT,
             }],
         })?;
+        let default_material_transparency =
+            MasterMaterial::new(&crate::MasterMaterialDescription {
+                name: "Default master deferred - transparency",
+                domain: crate::MaterialDomain::Surface,
+                material_parameters: Default::default(),
+                parameters_visibility: ShaderStage::FRAGMENT,
+                vertex_info: &gpu::VertexStageInfo {
+                    entry_point: "main",
+                    module: vertex_module,
+                },
+                fragment_info: &gpu::FragmentStageInfo {
+                    entry_point: "main",
+                    module: fragment_module_transparency,
+                },
+                primitive_restart: false,
+                polygon_mode: gpu::PolygonMode::Fill,
+                cull_mode: gpu::CullMode::Back,
+                front_face: gpu::FrontFace::CounterClockWise,
+                logic_op: None,
+
+                texture_inputs: &[TextureInput {
+                    name: "texSampler".to_owned(),
+                    format: gpu::ImageFormat::Rgba8,
+                    shader_stage: ShaderStage::FRAGMENT,
+                }],
+            })?;
 
         let default_material = resource_map.add(default_material);
+        let default_material_transparency = resource_map.add(default_material_transparency);
 
         Ok(CommonResources {
             cube_mesh,
@@ -202,6 +238,7 @@ impl BevyEcsApp {
             black_texture,
 
             default_material,
+            default_material_transparency,
         })
     }
 

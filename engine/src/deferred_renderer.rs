@@ -87,6 +87,7 @@ pub struct DeferredRenderingPipeline {
     gbuffer_nearest_sampler: SamplerHandle,
     shadow_atlas_sampler: SamplerHandle,
     screen_quad_flipped: ShaderModuleHandle,
+    early_z_pass_enabled: bool,
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
@@ -400,6 +401,7 @@ impl DeferredRenderingPipeline {
             default_irradiance_map,
             gbuffer_nearest_sampler,
             shadow_atlas_sampler,
+            early_z_pass_enabled: true,
         })
     }
 
@@ -422,6 +424,10 @@ impl DeferredRenderingPipeline {
     */
     pub fn set_combine_shader(&mut self, shader_handle: ShaderModuleHandle) {
         self.combine_shader = shader_handle;
+    }
+
+    pub fn set_early_z_enabled(&mut self, early_z_enabled: bool) {
+        self.early_z_pass_enabled = early_z_enabled;
     }
 
     fn main_render_loop(
@@ -746,6 +752,206 @@ impl DeferredRenderingPipeline {
         );
 
         {
+            let early_z_enabled_descriptions: &[SubpassDescription] = &[
+                SubpassDescription {
+                    label: Some("Z Pass".to_owned()),
+                    input_attachments: vec![],
+                    color_attachments: vec![],
+                    resolve_attachments: vec![],
+                    depth_stencil_attachment: Some(AttachmentReference {
+                        attachment: 6,
+                        layout: ImageLayout::DepthStencilAttachment,
+                    }),
+                    preserve_attachments: vec![],
+                },
+                SubpassDescription {
+                    label: Some("GBuffer output".to_owned()),
+                    input_attachments: vec![],
+                    color_attachments: vec![
+                        AttachmentReference {
+                            attachment: 0,
+                            layout: ImageLayout::ColorAttachment,
+                        },
+                        AttachmentReference {
+                            attachment: 1,
+                            layout: ImageLayout::ColorAttachment,
+                        },
+                        AttachmentReference {
+                            attachment: 2,
+                            layout: ImageLayout::ColorAttachment,
+                        },
+                        AttachmentReference {
+                            attachment: 3,
+                            layout: ImageLayout::ColorAttachment,
+                        },
+                        AttachmentReference {
+                            attachment: 4,
+                            layout: ImageLayout::ColorAttachment,
+                        },
+                    ],
+                    resolve_attachments: vec![],
+                    depth_stencil_attachment: Some(AttachmentReference {
+                        attachment: 6,
+                        layout: ImageLayout::DepthStencilReadOnly,
+                    }),
+                    preserve_attachments: vec![],
+                },
+                SubpassDescription {
+                    label: Some("GBuffer combining".to_owned()),
+                    input_attachments: vec![
+                        AttachmentReference {
+                            attachment: 0,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        AttachmentReference {
+                            attachment: 1,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        AttachmentReference {
+                            attachment: 2,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        AttachmentReference {
+                            attachment: 3,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        AttachmentReference {
+                            attachment: 4,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                    ],
+                    color_attachments: vec![AttachmentReference {
+                        attachment: 5,
+                        layout: ImageLayout::ColorAttachment,
+                    }],
+                    resolve_attachments: vec![],
+                    depth_stencil_attachment: None,
+                    preserve_attachments: vec![],
+                },
+            ];
+            let early_z_disabled_descriptions: &[SubpassDescription] = &[
+                SubpassDescription {
+                    label: Some("GBuffer output".to_owned()),
+                    input_attachments: vec![],
+                    color_attachments: vec![
+                        AttachmentReference {
+                            attachment: 0,
+                            layout: ImageLayout::ColorAttachment,
+                        },
+                        AttachmentReference {
+                            attachment: 1,
+                            layout: ImageLayout::ColorAttachment,
+                        },
+                        AttachmentReference {
+                            attachment: 2,
+                            layout: ImageLayout::ColorAttachment,
+                        },
+                        AttachmentReference {
+                            attachment: 3,
+                            layout: ImageLayout::ColorAttachment,
+                        },
+                        AttachmentReference {
+                            attachment: 4,
+                            layout: ImageLayout::ColorAttachment,
+                        },
+                    ],
+                    resolve_attachments: vec![],
+                    depth_stencil_attachment: Some(AttachmentReference {
+                        attachment: 6,
+                        layout: ImageLayout::DepthStencilAttachment,
+                    }),
+                    preserve_attachments: vec![],
+                },
+                SubpassDescription {
+                    label: Some("GBuffer combining".to_owned()),
+                    input_attachments: vec![
+                        AttachmentReference {
+                            attachment: 0,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        AttachmentReference {
+                            attachment: 1,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        AttachmentReference {
+                            attachment: 2,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        AttachmentReference {
+                            attachment: 3,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        AttachmentReference {
+                            attachment: 4,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                    ],
+                    color_attachments: vec![AttachmentReference {
+                        attachment: 5,
+                        layout: ImageLayout::ColorAttachment,
+                    }],
+                    resolve_attachments: vec![],
+                    depth_stencil_attachment: None,
+                    preserve_attachments: vec![],
+                },
+            ];
+            let early_z_enabled_dependencies: &[SubpassDependency] = &[
+                SubpassDependency {
+                    src_subpass: SubpassDependency::EXTERNAL,
+                    dst_subpass: 0,
+                    src_stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+                    dst_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                        .union(PipelineStageFlags::LATE_FRAGMENT_TESTS),
+                    src_access_mask: AccessFlags::empty(),
+                    dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                },
+                SubpassDependency {
+                    src_subpass: 0,
+                    dst_subpass: 1,
+                    src_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                        .union(PipelineStageFlags::LATE_FRAGMENT_TESTS),
+                    dst_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                        .union(PipelineStageFlags::LATE_FRAGMENT_TESTS)
+                        .union(PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT),
+                    src_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                    dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
+                        .union(AccessFlags::COLOR_ATTACHMENT_WRITE),
+                },
+                SubpassDependency {
+                    src_subpass: 1,
+                    dst_subpass: 2,
+                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
+                    src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                    dst_access_mask: AccessFlags::INPUT_ATTACHMENT_READ
+                        .union(AccessFlags::SHADER_READ),
+                },
+            ];
+            let early_z_disabled_dependencies: &[SubpassDependency] = &[
+                SubpassDependency {
+                    src_subpass: SubpassDependency::EXTERNAL,
+                    dst_subpass: 0,
+                    src_stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+                    dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                        .union(PipelineStageFlags::EARLY_FRAGMENT_TESTS)
+                        .union(PipelineStageFlags::LATE_FRAGMENT_TESTS),
+                    src_access_mask: AccessFlags::empty(),
+                    dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
+                        .union(AccessFlags::COLOR_ATTACHMENT_WRITE),
+                },
+                SubpassDependency {
+                    src_subpass: 0,
+                    dst_subpass: 1,
+                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                        .union(PipelineStageFlags::EARLY_FRAGMENT_TESTS)
+                        .union(PipelineStageFlags::LATE_FRAGMENT_TESTS),
+                    dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    src_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
+                        .union(AccessFlags::COLOR_ATTACHMENT_WRITE),
+                    dst_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                },
+            ];
+
             let mut gbuffer_render_pass =
                 graphics_command_buffer.begin_render_pass(&gpu::BeginRenderPassInfo {
                     label: Some("Main pass"),
@@ -805,133 +1011,36 @@ impl DeferredRenderingPipeline {
                         offset: gpu::Offset2D::default(),
                         extent: render_size,
                     },
-                    subpasses: &[
-                        SubpassDescription {
-                            label: Some("Z Pass".to_owned()),
-                            input_attachments: vec![],
-                            color_attachments: vec![],
-                            resolve_attachments: vec![],
-                            depth_stencil_attachment: Some(AttachmentReference {
-                                attachment: 6,
-                                layout: ImageLayout::DepthStencilAttachment,
-                            }),
-                            preserve_attachments: vec![],
-                        },
-                        SubpassDescription {
-                            label: Some("GBuffer output".to_owned()),
-                            input_attachments: vec![],
-                            color_attachments: vec![
-                                AttachmentReference {
-                                    attachment: 0,
-                                    layout: ImageLayout::ColorAttachment,
-                                },
-                                AttachmentReference {
-                                    attachment: 1,
-                                    layout: ImageLayout::ColorAttachment,
-                                },
-                                AttachmentReference {
-                                    attachment: 2,
-                                    layout: ImageLayout::ColorAttachment,
-                                },
-                                AttachmentReference {
-                                    attachment: 3,
-                                    layout: ImageLayout::ColorAttachment,
-                                },
-                                AttachmentReference {
-                                    attachment: 4,
-                                    layout: ImageLayout::ColorAttachment,
-                                },
-                            ],
-                            resolve_attachments: vec![],
-                            depth_stencil_attachment: Some(AttachmentReference {
-                                attachment: 6,
-                                layout: ImageLayout::DepthStencilReadOnly,
-                            }),
-                            preserve_attachments: vec![],
-                        },
-                        SubpassDescription {
-                            label: Some("GBuffer combining".to_owned()),
-                            input_attachments: vec![
-                                AttachmentReference {
-                                    attachment: 0,
-                                    layout: ImageLayout::ShaderReadOnly,
-                                },
-                                AttachmentReference {
-                                    attachment: 1,
-                                    layout: ImageLayout::ShaderReadOnly,
-                                },
-                                AttachmentReference {
-                                    attachment: 2,
-                                    layout: ImageLayout::ShaderReadOnly,
-                                },
-                                AttachmentReference {
-                                    attachment: 3,
-                                    layout: ImageLayout::ShaderReadOnly,
-                                },
-                                AttachmentReference {
-                                    attachment: 4,
-                                    layout: ImageLayout::ShaderReadOnly,
-                                },
-                            ],
-                            color_attachments: vec![AttachmentReference {
-                                attachment: 5,
-                                layout: ImageLayout::ColorAttachment,
-                            }],
-                            resolve_attachments: vec![],
-                            depth_stencil_attachment: None,
-                            preserve_attachments: vec![],
-                        },
-                    ],
-                    dependencies: &[
-                        SubpassDependency {
-                            src_subpass: SubpassDependency::EXTERNAL,
-                            dst_subpass: 0,
-                            src_stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-                            dst_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS
-                                | PipelineStageFlags::LATE_FRAGMENT_TESTS,
-                            src_access_mask: AccessFlags::empty(),
-                            dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                        },
-                        SubpassDependency {
-                            src_subpass: 0,
-                            dst_subpass: 1,
-                            src_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS
-                                | PipelineStageFlags::LATE_FRAGMENT_TESTS,
-                            dst_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS
-                                | PipelineStageFlags::LATE_FRAGMENT_TESTS
-                                | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                            src_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                            dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
-                                | AccessFlags::COLOR_ATTACHMENT_WRITE,
-                        },
-                        SubpassDependency {
-                            src_subpass: 1,
-                            dst_subpass: 2,
-                            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                            dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
-                            src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                            dst_access_mask: AccessFlags::INPUT_ATTACHMENT_READ
-                                | AccessFlags::SHADER_READ,
-                        },
-                    ],
+                    subpasses: if self.early_z_pass_enabled {
+                        &early_z_enabled_descriptions
+                    } else {
+                        &early_z_disabled_descriptions
+                    },
+                    dependencies: if self.early_z_pass_enabled {
+                        &early_z_enabled_dependencies
+                    } else {
+                        &early_z_disabled_dependencies
+                    },
                 });
 
-            gbuffer_render_pass.set_cull_mode(gpu::CullMode::Back);
-            gbuffer_render_pass.set_depth_compare_op(gpu::CompareOp::LessEqual);
+            if self.early_z_pass_enabled {
+                gbuffer_render_pass.set_cull_mode(gpu::CullMode::Back);
+                gbuffer_render_pass.set_depth_compare_op(gpu::CompareOp::LessEqual);
 
-            gbuffer_render_pass.set_color_output_enabled(false);
-            gbuffer_render_pass.set_enable_depth_test(true);
-            gbuffer_render_pass.set_depth_write_enabled(true);
-            Self::main_render_loop(
-                resource_map,
-                PipelineTarget::DepthOnly,
-                &draw_hashmap,
-                &mut gbuffer_render_pass,
-                0,
-                &current_buffers,
-            );
+                gbuffer_render_pass.set_color_output_enabled(false);
+                gbuffer_render_pass.set_enable_depth_test(true);
+                gbuffer_render_pass.set_depth_write_enabled(true);
+                Self::main_render_loop(
+                    resource_map,
+                    PipelineTarget::DepthOnly,
+                    &draw_hashmap,
+                    &mut gbuffer_render_pass,
+                    0,
+                    &current_buffers,
+                );
 
-            gbuffer_render_pass.advance_to_next_subpass();
+                gbuffer_render_pass.advance_to_next_subpass();
+            }
 
             if let Some(material) = scene.get_skybox_material() {
                 let material = resource_map.get(material);
@@ -955,10 +1064,14 @@ impl DeferredRenderingPipeline {
 
             gbuffer_render_pass.set_front_face(gpu::FrontFace::CounterClockWise);
             gbuffer_render_pass.set_enable_depth_test(true);
-            gbuffer_render_pass.set_depth_write_enabled(false);
+            gbuffer_render_pass.set_depth_write_enabled(!self.early_z_pass_enabled);
             gbuffer_render_pass.set_color_output_enabled(true);
             gbuffer_render_pass.set_cull_mode(gpu::CullMode::Back);
-            gbuffer_render_pass.set_depth_compare_op(gpu::CompareOp::Equal);
+            gbuffer_render_pass.set_depth_compare_op(if self.early_z_pass_enabled {
+                gpu::CompareOp::Equal
+            } else {
+                gpu::CompareOp::LessEqual
+            });
             Self::main_render_loop(
                 resource_map,
                 PipelineTarget::ColorAndDepth,

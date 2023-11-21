@@ -523,9 +523,9 @@ impl VkGpu {
             gpu_memory_allocator: Arc::new(RefCell::new(gpu_memory_allocator)),
             descriptor_set_allocator: Arc::new(RefCell::new(descriptor_set_allocator)),
             messenger,
-            compute_pipeline_cache: LifetimedCache::new(8),
-            graphics_pipeline_cache: LifetimedCache::new(8),
-            pipeline_layout_cache: LifetimedCache::new(8),
+            compute_pipeline_cache: LifetimedCache::new(60),
+            graphics_pipeline_cache: LifetimedCache::new(60),
+            pipeline_layout_cache: LifetimedCache::new(60),
             descriptor_set_layout_cache: LifetimedCache::new(8),
             descriptor_pool_cache: LifetimedCache::new(lifetime_cache_constants::NEVER_DEALLOCATE),
             descriptor_set_cache: LifetimedCache::new(8),
@@ -1065,7 +1065,7 @@ impl VkGpu {
             logic_op: LogicOp::Clear.to_vk(),
             attachment_count: color_attachments.len() as _,
             p_attachments: color_attachments.as_ptr(),
-            blend_constants: [1.0; 4],
+            blend_constants: [0.0; 4],
         };
         let viewport_state = vk::PipelineViewportStateCreateInfo {
             s_type: StructureType::PIPELINE_VIEWPORT_STATE_CREATE_INFO,

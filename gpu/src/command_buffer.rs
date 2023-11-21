@@ -76,6 +76,8 @@ pub(crate) struct GraphicsPipelineState {
     pub(crate) enable_depth_test: bool,
     pub(crate) depth_write_enabled: bool,
 
+    pub(crate) rasterizer_discard_enabled: bool,
+
     pub(crate) depth_compare_op: CompareOp,
     pub(crate) render_area: Rect2D,
     pub(crate) vertex_inputs: Vec<VertexBindingInfo>,
@@ -95,10 +97,10 @@ impl GraphicsPipelineState {
             .map(|_| PipelineColorBlendAttachmentState {
                 blend_enable: true,
                 src_color_blend_factor: BlendMode::One,
-                dst_color_blend_factor: BlendMode::Zero,
+                dst_color_blend_factor: BlendMode::OneMinusSrcAlpha,
                 color_blend_op: BlendOp::Add,
                 src_alpha_blend_factor: BlendMode::One,
-                dst_alpha_blend_factor: BlendMode::Zero,
+                dst_alpha_blend_factor: BlendMode::OneMinusSrcAlpha,
                 alpha_blend_op: BlendOp::Add,
                 color_write_mask: ColorComponentFlags::RGBA,
             })
@@ -114,6 +116,7 @@ impl GraphicsPipelineState {
             depth_write_enabled: false,
             depth_compare_op: CompareOp::Never,
             primitive_topology: PrimitiveTopology::TriangleList,
+            rasterizer_discard_enabled: false,
 
             vertex_inputs: vec![],
             color_blend_states,
@@ -210,12 +213,13 @@ impl GraphicsPipelineState {
     }
 
     pub(crate) fn dynamic_state(&self) -> vk::PipelineDynamicStateCreateInfo {
-        const DYNAMIC_STATES: &'static [vk::DynamicState] = &[
+        static DYNAMIC_STATES: &'static [vk::DynamicState] = &[
             vk::DynamicState::VIEWPORT,
             vk::DynamicState::SCISSOR,
             vk::DynamicState::DEPTH_BIAS,
             vk::DynamicState::DEPTH_BIAS_ENABLE,
             vk::DynamicState::DEPTH_TEST_ENABLE,
+            vk::DynamicState::RASTERIZER_DISCARD_ENABLE,
         ];
         vk::PipelineDynamicStateCreateInfo {
             s_type: StructureType::PIPELINE_DYNAMIC_STATE_CREATE_INFO,
@@ -896,6 +900,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             _ => (0.0, 0.0, 0.0),
         };
         unsafe {
+            device.cmd_set_rasterizer_discard_enable(
+                self.command_buffer.inner(),
+                self.pipeline_state.rasterizer_discard_enabled,
+            );
             device.cmd_set_depth_bias_enable(self.command_buffer.inner(), true);
             device.cmd_set_depth_bias(
                 self.command_buffer.inner(),
@@ -1035,10 +1043,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendMode::One,
-                    dst_color_blend_factor: BlendMode::Zero,
+                    dst_color_blend_factor: BlendMode::OneMinusSrcAlpha,
                     color_blend_op: BlendOp::Add,
                     src_alpha_blend_factor: BlendMode::One,
-                    dst_alpha_blend_factor: BlendMode::Zero,
+                    dst_alpha_blend_factor: BlendMode::OneMinusSrcAlpha,
                     alpha_blend_op: BlendOp::Add,
                     color_write_mask: ColorComponentFlags::RGBA,
                 },
@@ -1065,10 +1073,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                     blend_state: BlendState {
                         blend_enable: true,
                         src_color_blend_factor: BlendMode::One,
-                        dst_color_blend_factor: BlendMode::Zero,
+                        dst_color_blend_factor: BlendMode::OneMinusSrcAlpha,
                         color_blend_op: BlendOp::Add,
                         src_alpha_blend_factor: BlendMode::One,
-                        dst_alpha_blend_factor: BlendMode::Zero,
+                        dst_alpha_blend_factor: BlendMode::OneMinusSrcAlpha,
                         alpha_blend_op: BlendOp::Add,
                         color_write_mask: ColorComponentFlags::RGBA,
                     },

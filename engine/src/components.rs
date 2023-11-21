@@ -40,6 +40,7 @@ impl Transform {
 #[derive(Component)]
 pub struct Transform2D {
     pub position: Point2<f32>,
+    pub layer: u32,
     pub rotation: f32,
     pub scale: Vector2<f32>,
 }
@@ -48,6 +49,7 @@ impl Default for Transform2D {
     fn default() -> Self {
         Self {
             position: Default::default(),
+            layer: 0,
             rotation: 0.0,
             scale: vector![1.0, 1.0],
         }
@@ -56,8 +58,11 @@ impl Default for Transform2D {
 
 impl Transform2D {
     pub fn matrix(&self) -> Matrix4<f32> {
-        Matrix4::new_translation(&vector![self.position.x, self.position.y, 510.0])
-            * Matrix4::new_nonuniform_scaling(&vector![self.scale.x, self.scale.y, 1.0])
+        Matrix4::new_translation(&vector![
+            self.position.x,
+            self.position.y,
+            self.layer as f32 + 510.0
+        ]) * Matrix4::new_nonuniform_scaling(&vector![self.scale.x, self.scale.y, 1.0])
             * UnitQuaternion::from_axis_angle(
                 &UnitVector3::new_normalize(vector![0.0, 0.0, 1.0]),
                 self.rotation.to_radians(),
@@ -74,6 +79,7 @@ pub struct MeshComponent {
 #[derive(Component)]
 pub struct SpriteComponent {
     pub material: ResourceHandle<MaterialInstance>,
+    pub z_layer: u32,
 }
 
 #[derive(Component)]

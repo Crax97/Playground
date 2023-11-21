@@ -211,10 +211,8 @@ impl Scene {
         }
     }
 
-    pub fn add(&mut self, primitive: ScenePrimitive) -> usize {
-        let idx = self.primitives.len();
+    pub fn add(&mut self, primitive: ScenePrimitive) {
         self.primitives.push(primitive);
-        idx
     }
 
     pub fn add_light(&mut self, light: Light) -> LightHandle {
@@ -224,9 +222,6 @@ impl Scene {
         LightHandle(idx)
     }
 
-    pub fn edit(&mut self, idx: usize) -> &mut ScenePrimitive {
-        &mut self.primitives[idx]
-    }
     pub fn edit_light(&mut self, handle: &LightHandle) -> &mut Light {
         self.increment_light_counter();
         &mut self.lights[handle.0]
@@ -245,10 +240,6 @@ impl Scene {
 
     pub fn all_enabled_lights(&self) -> impl Iterator<Item = &Light> {
         self.lights.iter().filter(|l| l.enabled)
-    }
-
-    pub fn edit_all_primitives(&mut self) -> &mut [ScenePrimitive] {
-        &mut self.primitives
     }
 
     pub fn lights_iteration(&self) -> u64 {
