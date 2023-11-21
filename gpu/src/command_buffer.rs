@@ -83,6 +83,7 @@ pub(crate) struct GraphicsPipelineState {
     pub(crate) vertex_inputs: Vec<VertexBindingInfo>,
     pub(crate) color_blend_states: Vec<PipelineColorBlendAttachmentState>,
     pub(crate) primitive_topology: PrimitiveTopology,
+    pub(crate) polygon_mode: PolygonMode,
     pub(crate) color_output_enabled: bool,
 
     pub(crate) current_subpass: u32,
@@ -116,6 +117,7 @@ impl GraphicsPipelineState {
             depth_write_enabled: false,
             depth_compare_op: CompareOp::Never,
             primitive_topology: PrimitiveTopology::TriangleList,
+            polygon_mode: PolygonMode::Fill,
             rasterizer_discard_enabled: false,
 
             vertex_inputs: vec![],
@@ -169,7 +171,7 @@ impl GraphicsPipelineState {
             p_next: std::ptr::null(),
             flags: vk::PipelineRasterizationStateCreateFlags::empty(),
             depth_clamp_enable: vk::FALSE,
-            rasterizer_discard_enable: vk::FALSE,
+            rasterizer_discard_enable: self.rasterizer_discard_enabled.to_vk(),
             polygon_mode: vk::PolygonMode::FILL,
             cull_mode: self.cull_mode.to_vk(),
             front_face: self.front_face.to_vk(),
@@ -219,7 +221,6 @@ impl GraphicsPipelineState {
             vk::DynamicState::DEPTH_BIAS,
             vk::DynamicState::DEPTH_BIAS_ENABLE,
             vk::DynamicState::DEPTH_TEST_ENABLE,
-            vk::DynamicState::RASTERIZER_DISCARD_ENABLE,
         ];
         vk::PipelineDynamicStateCreateInfo {
             s_type: StructureType::PIPELINE_DYNAMIC_STATE_CREATE_INFO,
@@ -772,6 +773,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         self.pipeline_state.front_face = front_face;
     }
 
+    pub fn set_polygon_mode(&mut self, polygon_mode: PolygonMode) {
+        self.pipeline_state.polygon_mode = polygon_mode;
+    }
+
     pub fn set_cull_mode(&mut self, cull_mode: CullMode) {
         self.pipeline_state.cull_mode = cull_mode;
     }
@@ -900,10 +905,6 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             _ => (0.0, 0.0, 0.0),
         };
         unsafe {
-            device.cmd_set_rasterizer_discard_enable(
-                self.command_buffer.inner(),
-                self.pipeline_state.rasterizer_discard_enabled,
-            );
             device.cmd_set_depth_bias_enable(self.command_buffer.inner(), true);
             device.cmd_set_depth_bias(
                 self.command_buffer.inner(),
@@ -1085,6 +1086,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         attachments.subpasses = render_pass_info.subpasses.to_vec();
         attachments.dependencies = render_pass_info.dependencies.to_vec();
         attachments
+    }
+
+    pub fn set_fragment_discard_enabled(&mut self, allow_fragment_discard: bool) {
+        self.pipeline_state.rasterizer_discard_enabled = allow_fragment_discard;
     }
 }
 

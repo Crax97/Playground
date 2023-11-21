@@ -814,7 +814,7 @@ pub enum LogicOp {
     Set,
 }
 
-#[derive(Clone, Copy, Debug, Default, Hash)]
+#[derive(Clone, Copy, Debug, Default, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum FrontFace {
     #[default]
     CounterClockWise,
@@ -924,7 +924,16 @@ pub enum PolygonMode {
     Point,
 }
 
-#[derive(Clone, Copy, Debug, Default, Hash)]
+impl Hash for PolygonMode {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match *self {
+            PolygonMode::Line(width) => state.write(bytemuck::cast_slice(&[width])),
+            _ => std::mem::discriminant(self).hash(state),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum CullMode {
     #[default]
     None,

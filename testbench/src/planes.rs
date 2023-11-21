@@ -135,6 +135,7 @@ impl App for PlanesApp {
                 }],
                 material_parameters: Default::default(),
                 parameter_shader_visibility: ShaderStage::FRAGMENT,
+                rasterization_discard_enabled: false,
             },
         )?;
 

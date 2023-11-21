@@ -189,17 +189,16 @@ impl BevyEcsApp {
                 entry_point: "main",
                 module: fragment_module,
             },
-            primitive_restart: false,
-            polygon_mode: gpu::PolygonMode::Fill,
+
             cull_mode: gpu::CullMode::Back,
             front_face: gpu::FrontFace::CounterClockWise,
-            logic_op: None,
 
             texture_inputs: &[TextureInput {
                 name: "texSampler".to_owned(),
                 format: gpu::ImageFormat::Rgba8,
                 shader_stage: ShaderStage::FRAGMENT,
             }],
+            allow_fragment_discard: false,
         })?;
         let default_material_transparency =
             MasterMaterial::new(&crate::MasterMaterialDescription {
@@ -215,17 +214,16 @@ impl BevyEcsApp {
                     entry_point: "main",
                     module: fragment_module_transparency,
                 },
-                primitive_restart: false,
-                polygon_mode: gpu::PolygonMode::Fill,
+
                 cull_mode: gpu::CullMode::Back,
                 front_face: gpu::FrontFace::CounterClockWise,
-                logic_op: None,
 
                 texture_inputs: &[TextureInput {
                     name: "texSampler".to_owned(),
                     format: gpu::ImageFormat::Rgba8,
                     shader_stage: ShaderStage::FRAGMENT,
                 }],
+                allow_fragment_discard: false,
             })?;
 
         let default_material = resource_map.add(default_material);

@@ -2,8 +2,8 @@ use std::{collections::HashMap, hash::Hash, mem::size_of, num::NonZeroU32};
 
 use crate::resource_map::Resource;
 use gpu::{
-    BindingElement, BindingType, CullMode, FragmentStageInfo, FrontFace, LogicOp, PolygonMode,
-    ShaderModuleHandle, ShaderStage, VertexStageInfo,
+    BindingElement, BindingType, CullMode, FragmentStageInfo, FrontFace, ShaderModuleHandle,
+    ShaderStage, VertexStageInfo,
 };
 
 use crate::{MaterialDomain, MaterialParameterOffsetSize, PipelineTarget, TextureInput};
@@ -30,19 +30,9 @@ pub struct MasterMaterialDescription<'a> {
     pub parameters_visibility: ShaderStage,
     pub vertex_info: &'a VertexStageInfo<'a>,
     pub fragment_info: &'a FragmentStageInfo<'a>,
-    pub primitive_restart: bool,
-    pub polygon_mode: PolygonMode,
     pub cull_mode: CullMode,
     pub front_face: FrontFace,
-    pub logic_op: Option<LogicOp>,
-}
-
-// Different pipeline targets may have different shader permutations
-// E.g a depth target should have one vertex shader, but no fragment shaders
-#[derive(Eq, PartialEq)]
-pub struct ShaderPermutation {
-    pub vertex_shader: ShaderModuleHandle,
-    pub fragment_shader: Option<ShaderModuleHandle>,
+    pub allow_fragment_discard: bool,
 }
 
 #[derive(Eq, PartialEq)]
@@ -53,6 +43,17 @@ pub struct MasterMaterial {
     pub(crate) material_parameters: HashMap<String, MaterialParameterOffsetSize>,
     pub(crate) parameter_block_size: usize,
     pub(crate) parameter_shader_stages: ShaderStage,
+    pub(crate) allow_fragment_discard: bool,
+    pub(crate) cull_mode: CullMode,
+    pub(crate) front_face: FrontFace,
+}
+
+// Different pipeline targets may have different shader permutations
+// E.g a depth target should have one vertex shader, but no fragment shaders
+#[derive(Eq, PartialEq)]
+pub struct ShaderPermutation {
+    pub vertex_shader: ShaderModuleHandle,
+    pub fragment_shader: Option<ShaderModuleHandle>,
 }
 
 impl Hash for MasterMaterial {
@@ -78,6 +79,9 @@ impl MasterMaterial {
             material_parameters: description.material_parameters.clone(),
             parameter_block_size,
             parameter_shader_stages: description.parameters_visibility,
+            allow_fragment_discard: description.allow_fragment_discard,
+            cull_mode: description.cull_mode,
+            front_face: description.front_face,
         })
     }
 

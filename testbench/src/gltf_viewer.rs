@@ -272,6 +272,7 @@ impl App for GLTFViewer {
                 fragment_module: skybox_fragment,
                 vertex_module,
                 parameter_shader_visibility: ShaderStage::ALL_GRAPHICS,
+                rasterization_discard_enabled: false,
             },
         )?;
         let skybox_master = resource_map.add(skybox_material);

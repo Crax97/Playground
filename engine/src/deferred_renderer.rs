@@ -1503,6 +1503,10 @@ fn draw_mesh_primitive(
         });
     }
 
+    render_pass.set_fragment_discard_enabled(master.allow_fragment_discard);
+    render_pass.set_cull_mode(master.cull_mode);
+    render_pass.set_front_face(master.front_face);
+
     render_pass.set_vertex_buffers(&[
         VertexBindingInfo {
             handle: primitive.position_component.clone(),
@@ -1718,12 +1722,10 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 entry_point: "main",
                 module: material_description.fragment_module,
             },
-            primitive_restart: false,
-            polygon_mode: gpu::PolygonMode::Fill,
             cull_mode: gpu::CullMode::Back,
             front_face: gpu::FrontFace::CounterClockWise,
-            logic_op: None,
             parameters_visibility: material_description.parameter_shader_visibility,
+            allow_fragment_discard: material_description.rasterization_discard_enabled,
         };
 
         MasterMaterial::new(&master_description)

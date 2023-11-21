@@ -43,4 +43,5 @@ pub struct MaterialDescription<'a> {
     pub parameter_shader_visibility: ShaderStage,
     pub fragment_module: ShaderModuleHandle,
     pub vertex_module: ShaderModuleHandle,
+    pub rasterization_discard_enabled: bool,
 }
