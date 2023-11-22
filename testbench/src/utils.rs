@@ -395,7 +395,7 @@ fn cubemap_main_loop(
                 engine::to_u8_slice(&[mvp]),
                 ShaderStage::ALL_GRAPHICS,
             );
-            render_pass_command.draw_indexed(mesh.primitives[0].index_count, 1, 0, 0, 0);
+            render_pass_command.draw_indexed(mesh.primitives[0].index_count, 1, 0, 0, 0)?;
         }
         command_buffer.submit(&gpu::CommandBufferSubmitInfo {
             wait_semaphores: &[],

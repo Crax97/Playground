@@ -273,8 +273,6 @@ impl GltfLoader {
                 ],
                 material_parameters: params,
                 parameter_shader_visibility: ShaderStage::FRAGMENT,
-                // Out of laziness
-                rasterization_discard_enabled: false,
             },
         )?;
 

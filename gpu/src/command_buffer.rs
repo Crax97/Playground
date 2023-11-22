@@ -76,7 +76,7 @@ pub(crate) struct GraphicsPipelineState {
     pub(crate) enable_depth_test: bool,
     pub(crate) depth_write_enabled: bool,
 
-    pub(crate) rasterizer_discard_enabled: bool,
+    pub(crate) early_discard_enabled: bool,
 
     pub(crate) depth_compare_op: CompareOp,
     pub(crate) render_area: Rect2D,
@@ -118,7 +118,7 @@ impl GraphicsPipelineState {
             depth_compare_op: CompareOp::Never,
             primitive_topology: PrimitiveTopology::TriangleList,
             polygon_mode: PolygonMode::Fill,
-            rasterizer_discard_enabled: false,
+            early_discard_enabled: false,
 
             vertex_inputs: vec![],
             color_blend_states,
@@ -171,7 +171,7 @@ impl GraphicsPipelineState {
             p_next: std::ptr::null(),
             flags: vk::PipelineRasterizationStateCreateFlags::empty(),
             depth_clamp_enable: vk::FALSE,
-            rasterizer_discard_enable: self.rasterizer_discard_enabled.to_vk(),
+            rasterizer_discard_enable: self.early_discard_enabled.to_vk(),
             polygon_mode: vk::PolygonMode::FILL,
             cull_mode: self.cull_mode.to_vk(),
             front_face: self.front_face.to_vk(),
@@ -817,7 +817,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         }
     }
 
-    fn prepare_draw(&mut self) {
+    fn prepare_draw(&mut self) -> anyhow::Result<()> {
+        #[cfg(debug_assertions)]
+        self.validate_state()?;
+
         self.has_draw_command = true;
         self.command_buffer.has_recorded_anything = true;
 
@@ -919,6 +922,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 self.pipeline_state.enable_depth_test,
             );
         }
+        Ok(())
     }
 
     pub fn bind_index_buffer(&self, buffer: &VkBuffer, offset: u64, index_type: IndexType) {
@@ -954,8 +958,8 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         first_index: u32,
         vertex_offset: i32,
         first_instance: u32,
-    ) {
-        self.prepare_draw();
+    ) -> anyhow::Result<()> {
+        self.prepare_draw()?;
         unsafe {
             self.gpu.vk_logical_device().cmd_draw_indexed(
                 self.inner(),
@@ -966,6 +970,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 first_instance,
             );
         }
+        Ok(())
     }
 
     pub fn draw(
@@ -974,8 +979,8 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         instances: u32,
         first_vertex: u32,
         first_instance: u32,
-    ) {
-        self.prepare_draw();
+    ) -> anyhow::Result<()> {
+        self.prepare_draw()?;
         unsafe {
             self.gpu.vk_logical_device().cmd_draw(
                 self.inner(),
@@ -985,6 +990,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 first_instance,
             );
         }
+        Ok(())
     }
 
     fn find_matching_graphics_pipeline(
@@ -1088,8 +1094,30 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         attachments
     }
 
-    pub fn set_fragment_discard_enabled(&mut self, allow_fragment_discard: bool) {
-        self.pipeline_state.rasterizer_discard_enabled = allow_fragment_discard;
+    /* If enabled, fragments may be discarded after the vertex shader stage,
+    before any fragment shader is executed.
+    When enabled, a valid fragment shader must be set */
+    pub fn set_early_discard_enabled(&mut self, allow_early_discard: bool) {
+        self.pipeline_state.early_discard_enabled = allow_early_discard;
+    }
+
+    #[cfg(debug_assertions)]
+    fn validate_state(&self) -> anyhow::Result<()> {
+        use anyhow::anyhow;
+        macro_rules! validate {
+            ($cond:expr, $err:expr) => {
+                if !($cond) {
+                    return Err(anyhow!($err));
+                }
+            };
+        }
+        validate!(
+            !self.pipeline_state.early_discard_enabled
+                || (self.pipeline_state.early_discard_enabled
+                    && self.pipeline_state.fragment_shader.is_valid()),
+            "Primitive early discard is enabled, but no valid fragment shader has been set"
+        );
+        Ok(())
     }
 }
 

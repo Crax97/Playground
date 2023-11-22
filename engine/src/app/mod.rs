@@ -327,9 +327,10 @@ pub fn run<A: App + 'static>(app: A, event_loop: EventLoop<()>) -> anyhow::Resul
                 *control_flow = flow;
             }
             Err(e) => panic!(
-                "In main body of application: {}\nBacktrace: {}",
-                e,
-                e.backtrace()
+                "Backtrace: {}\nDuring app loop: {}",
+                e.backtrace(),
+                e.chain()
+                    .fold(String::new(), |s, e| s + &e.to_string() + "\n"),
             ),
         },
     )

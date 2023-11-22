@@ -1,3 +1,4 @@
+use anyhow::Context;
 use bytemuck::{Pod, Zeroable};
 use engine_macros::glsl;
 use std::{collections::HashMap, mem::size_of};
@@ -437,7 +438,7 @@ impl DeferredRenderingPipeline {
         render_pass: &mut VkRenderPassCommand,
         camera_index: u32,
         frame_buffers: &FrameBuffers,
-    ) {
+    ) -> anyhow::Result<()> {
         let mut total_primitives_rendered = 0;
         for (master, material_draw_calls) in draw_hashmap.iter() {
             {
@@ -461,16 +462,18 @@ impl DeferredRenderingPipeline {
                         draw_call.transform,
                         resource_map,
                         camera_index,
-                    );
+                    )?;
                     draw_label.end();
                     total_primitives_rendered += 1;
                 }
-                render_pass.insert_debug_label(
-                    &format!("Total primtives drawn this frame: {total_primitives_rendered}"),
-                    [0.0, 0.3, 0.4, 1.0],
-                );
             }
+
+            render_pass.insert_debug_label(
+                &format!("Total primtives drawn this frame: {total_primitives_rendered}"),
+                [0.0, 0.3, 0.4, 1.0],
+            );
         }
+        Ok(())
     }
 
     fn generate_draw_calls<'r, 's>(
@@ -566,7 +569,7 @@ impl DeferredRenderingPipeline {
         skybox_material: &MaterialInstance,
         skybox_master: &MasterMaterial,
         resource_map: &ResourceMap,
-    ) {
+    ) -> anyhow::Result<()> {
         let label = render_pass.begin_debug_region(
             &format!("Skybox - using material {}", skybox_master.name),
             [0.2, 0.2, 0.0, 1.0],
@@ -587,8 +590,9 @@ impl DeferredRenderingPipeline {
             skybox_transform,
             resource_map,
             0,
-        );
+        )?;
         label.end();
+        Ok(())
     }
 
     pub fn set_irradiance_texture(
@@ -606,7 +610,7 @@ impl DeferredRenderingPipeline {
         resource_map: &ResourceMap,
         draw_hashmap: &HashMap<&MasterMaterial, Vec<DrawCall>>,
         current_buffers: &FrameBuffers,
-    ) {
+    ) -> anyhow::Result<()> {
         {
             let mut shadow_atlas_command =
                 graphics_command_buffer.begin_render_pass(&gpu::BeginRenderPassInfo {
@@ -671,7 +675,7 @@ impl DeferredRenderingPipeline {
                     &mut shadow_atlas_command,
                     i as _,
                     &current_buffers,
-                );
+                )?;
             }
         }
 
@@ -697,6 +701,7 @@ impl DeferredRenderingPipeline {
                 },
             }],
         });
+        Ok(())
     }
 
     fn main_pass(
@@ -710,7 +715,7 @@ impl DeferredRenderingPipeline {
         current_buffers: &FrameBuffers,
         pov: &Camera,
         scene: &Scene,
-    ) {
+    ) -> anyhow::Result<()> {
         let irradiance_map_texture = match &self.irradiance_map {
             Some(texture) => texture,
             None => &self.default_irradiance_map,
@@ -1037,7 +1042,8 @@ impl DeferredRenderingPipeline {
                     &mut gbuffer_render_pass,
                     0,
                     &current_buffers,
-                );
+                )
+                .context("Early Z Pass")?;
 
                 gbuffer_render_pass.advance_to_next_subpass();
             }
@@ -1059,7 +1065,7 @@ impl DeferredRenderingPipeline {
                     material,
                     skybox_master,
                     resource_map,
-                );
+                )?;
             }
 
             gbuffer_render_pass.set_front_face(gpu::FrontFace::CounterClockWise);
@@ -1079,7 +1085,8 @@ impl DeferredRenderingPipeline {
                 &mut gbuffer_render_pass,
                 0,
                 &current_buffers,
-            );
+            )
+            .context("Gbuffer output pass")?;
 
             gbuffer_render_pass.advance_to_next_subpass();
 
@@ -1172,7 +1179,9 @@ impl DeferredRenderingPipeline {
             gbuffer_render_pass.set_depth_write_enabled(false);
             gbuffer_render_pass.set_vertex_shader(self.screen_quad.clone());
             gbuffer_render_pass.set_fragment_shader(self.combine_shader.clone());
-            gbuffer_render_pass.draw(4, 1, 0, 0);
+            gbuffer_render_pass
+                .draw(4, 1, 0, 0)
+                .context("Combine subpass")?
         }
 
         graphics_command_buffer.pipeline_barrier(&gpu::PipelineBarrierInfo {
@@ -1197,6 +1206,7 @@ impl DeferredRenderingPipeline {
                 },
             }],
         });
+        Ok(())
     }
 
     fn copy_to_backbuffer_pass(
@@ -1205,7 +1215,7 @@ impl DeferredRenderingPipeline {
         color_output: RenderImage,
         backbuffer: &Backbuffer,
         flip_render_target: bool,
-    ) {
+    ) -> anyhow::Result<()> {
         let mut present_render_pass =
             graphics_command_buffer.begin_render_pass(&gpu::BeginRenderPassInfo {
                 label: Some("Copy to backbuffer"),
@@ -1261,7 +1271,7 @@ impl DeferredRenderingPipeline {
         present_render_pass.set_depth_write_enabled(false);
         present_render_pass.set_vertex_shader(screen_quad);
         present_render_pass.set_fragment_shader(self.texture_copy.clone());
-        present_render_pass.draw(4, 1, 0, 0);
+        present_render_pass.draw(4, 1, 0, 0)
     }
 
     fn post_process_pass(
@@ -1271,9 +1281,9 @@ impl DeferredRenderingPipeline {
         color_desc: RenderImageDescription,
         render_size: Extent2D,
         cvar_manager: &CvarManager,
-    ) -> RenderImage {
+    ) -> anyhow::Result<RenderImage> {
         if self.post_process_stack.is_empty() {
-            return color_output;
+            return Ok(color_output);
         }
 
         let subpasses = self
@@ -1376,7 +1386,7 @@ impl DeferredRenderingPipeline {
                             cvar_manager,
                             render_size,
                         },
-                    );
+                    )?;
                     current_postprocess = (current_postprocess + 1) % 2;
                     post_process_pass.advance_to_next_subpass();
                 }
@@ -1413,7 +1423,7 @@ impl DeferredRenderingPipeline {
             });
             final_color_output
         };
-        final_color_output
+        Ok(final_color_output)
     }
 
     pub fn add_post_process_pass(&mut self, pass: impl PostProcessPass) {
@@ -1467,7 +1477,7 @@ fn draw_mesh_primitive(
     model: Matrix4<f32>,
     resource_map: &ResourceMap,
     camera_index: u32,
-) {
+) -> anyhow::Result<()> {
     render_pass.set_index_buffer(primitive.index_buffer.clone(), IndexType::Uint32, 0);
 
     let mut user_bindings = vec![];
@@ -1503,7 +1513,6 @@ fn draw_mesh_primitive(
         });
     }
 
-    render_pass.set_fragment_discard_enabled(master.allow_fragment_discard);
     render_pass.set_cull_mode(master.cull_mode);
     render_pass.set_front_face(master.front_face);
 
@@ -1559,7 +1568,7 @@ fn draw_mesh_primitive(
         }]),
         ShaderStage::ALL_GRAPHICS,
     );
-    render_pass.draw_indexed(primitive.index_count, 1, 0, 0, 0);
+    render_pass.draw_indexed(primitive.index_count, 1, 0, 0, 0)
 }
 
 impl RenderingPipeline for DeferredRenderingPipeline {
@@ -1621,20 +1630,17 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             &current_buffers.light_buffer,
             0,
             bytemuck::cast_slice(&[ambient.x, ambient.y, ambient.z, ambient.w]),
-        )
-        .unwrap();
+        )?;
         gpu.write_buffer(
             &current_buffers.light_buffer,
             std::mem::size_of::<Vector4<f32>>() as _,
             bytemuck::cast_slice(&[self.active_lights.len() as u32]),
-        )
-        .unwrap();
+        )?;
         gpu.write_buffer(
             &current_buffers.light_buffer,
             std::mem::size_of::<Vector4<f32>>() as u64 + size_of::<u32>() as u64 * 4,
             bytemuck::cast_slice(&self.active_lights),
-        )
-        .unwrap();
+        )?;
 
         let draw_hashmap = Self::generate_draw_calls(resource_map, scene);
 
@@ -1671,7 +1677,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             resource_map,
             &draw_hashmap,
             current_buffers,
-        );
+        )
+        .context("Shadow atlas pass")?;
 
         self.main_pass(
             &mut graphics_command_buffer,
@@ -1683,22 +1690,26 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             current_buffers,
             pov,
             scene,
-        );
+        )
+        .context("Main pass")?;
 
-        let final_color_output = self.post_process_pass(
-            &mut graphics_command_buffer,
-            color_output,
-            color_desc,
-            backbuffer.size,
-            cvar_manager,
-        );
+        let final_color_output = self
+            .post_process_pass(
+                &mut graphics_command_buffer,
+                color_output,
+                color_desc,
+                backbuffer.size,
+                cvar_manager,
+            )
+            .context("Post process pass")?;
 
         self.copy_to_backbuffer_pass(
             &mut graphics_command_buffer,
             final_color_output,
             backbuffer,
             self.post_process_stack.len() % 2 == 0,
-        );
+        )
+        .context("During copy to backbuffer")?;
 
         Ok(graphics_command_buffer)
     }
@@ -1725,7 +1736,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             cull_mode: gpu::CullMode::Back,
             front_face: gpu::FrontFace::CounterClockWise,
             parameters_visibility: material_description.parameter_shader_visibility,
-            allow_fragment_discard: material_description.rasterization_discard_enabled,
         };
 
         MasterMaterial::new(&master_description)

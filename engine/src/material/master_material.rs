@@ -32,7 +32,6 @@ pub struct MasterMaterialDescription<'a> {
     pub fragment_info: &'a FragmentStageInfo<'a>,
     pub cull_mode: CullMode,
     pub front_face: FrontFace,
-    pub allow_fragment_discard: bool,
 }
 
 #[derive(Eq, PartialEq)]
@@ -43,7 +42,6 @@ pub struct MasterMaterial {
     pub(crate) material_parameters: HashMap<String, MaterialParameterOffsetSize>,
     pub(crate) parameter_block_size: usize,
     pub(crate) parameter_shader_stages: ShaderStage,
-    pub(crate) allow_fragment_discard: bool,
     pub(crate) cull_mode: CullMode,
     pub(crate) front_face: FrontFace,
 }
@@ -79,7 +77,6 @@ impl MasterMaterial {
             material_parameters: description.material_parameters.clone(),
             parameter_block_size,
             parameter_shader_stages: description.parameters_visibility,
-            allow_fragment_discard: description.allow_fragment_discard,
             cull_mode: description.cull_mode,
             front_face: description.front_face,
         })

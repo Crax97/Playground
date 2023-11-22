@@ -198,7 +198,6 @@ impl BevyEcsApp {
                 format: gpu::ImageFormat::Rgba8,
                 shader_stage: ShaderStage::FRAGMENT,
             }],
-            allow_fragment_discard: false,
         })?;
         let default_material_transparency =
             MasterMaterial::new(&crate::MasterMaterialDescription {
@@ -223,7 +222,6 @@ impl BevyEcsApp {
                     format: gpu::ImageFormat::Rgba8,
                     shader_stage: ShaderStage::FRAGMENT,
                 }],
-                allow_fragment_discard: false,
             })?;
 
         let default_material = resource_map.add(default_material);

@@ -18,7 +18,11 @@ pub struct PostProcessResources<'a> {
 
 pub trait PostProcessPass: 'static {
     fn name(&self) -> String;
-    fn apply(&self, post_process_pass: &mut VkRenderPassCommand, resources: &PostProcessResources);
+    fn apply(
+        &self,
+        post_process_pass: &mut VkRenderPassCommand,
+        resources: &PostProcessResources,
+    ) -> anyhow::Result<()>;
 }
 
 pub struct TonemapPass {
@@ -49,7 +53,11 @@ impl PostProcessPass for TonemapPass {
     fn name(&self) -> String {
         "Tonemap".to_owned()
     }
-    fn apply(&self, post_process_pass: &mut VkRenderPassCommand, resources: &PostProcessResources) {
+    fn apply(
+        &self,
+        post_process_pass: &mut VkRenderPassCommand,
+        resources: &PostProcessResources,
+    ) -> anyhow::Result<()> {
         post_process_pass.bind_resources(
             0,
             &[Binding {
@@ -64,7 +72,7 @@ impl PostProcessPass for TonemapPass {
         );
         post_process_pass.set_vertex_shader(resources.screen_quad.clone());
         post_process_pass.set_fragment_shader(self.shader_handle.clone());
-        post_process_pass.draw(4, 1, 0, 0);
+        post_process_pass.draw(4, 1, 0, 0)
     }
 }
 #[repr(C)]
@@ -127,7 +135,11 @@ impl PostProcessPass for FxaaPass {
         "FXAA".to_owned()
     }
 
-    fn apply(&self, post_process_pass: &mut VkRenderPassCommand, resources: &PostProcessResources) {
+    fn apply(
+        &self,
+        post_process_pass: &mut VkRenderPassCommand,
+        resources: &PostProcessResources,
+    ) -> anyhow::Result<()> {
         post_process_pass.bind_resources(
             0,
             &[Binding {
@@ -178,6 +190,6 @@ impl PostProcessPass for FxaaPass {
             bytemuck::cast_slice(&[params]),
             ShaderStage::ALL_GRAPHICS,
         );
-        post_process_pass.draw(3, 1, 0, 0);
+        post_process_pass.draw(3, 1, 0, 0)
     }
 }
