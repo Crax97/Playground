@@ -42,7 +42,7 @@ fn main() -> anyhow::Result<()> {
             &app_state().gpu,
         )?);
 
-    app.world().insert_resource(PhysicsContext2D::new());
+    app.setup_2d();
 
     app.renderer().set_early_z_enabled(false);
 
@@ -50,8 +50,6 @@ fn main() -> anyhow::Result<()> {
 
     app.update_schedule()
         .add_systems((camera_system, move_player));
-
-    app.setup_2d();
 
     app.run()
 }
