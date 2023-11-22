@@ -2,9 +2,13 @@ use std::collections::HashMap;
 
 use engine::app::app_state::app_state;
 use engine::bevy_ecs::query::With;
+use engine::bevy_ecs::schedule::{IntoSystemConfigs, SystemSet};
 use engine::bevy_ecs::system::{Query, Res, ResMut};
-use engine::components::{SpriteComponent, Transform2D};
+use engine::components::{rendering_system_2d, SpriteComponent, Transform2D};
 use engine::input::InputState;
+use engine::physics::rapier2d::dynamics::RigidBodyBuilder;
+use engine::physics::rapier2d::geometry::{ColliderBuilder, SharedShape};
+use engine::physics::PhysicsContext2D;
 use engine::{
     bevy_ecs, Camera, CommonResources, DeferredRenderingPipeline, MaterialInstance,
     MaterialInstanceDescription, ResourceMap, Texture,
@@ -21,6 +25,15 @@ pub struct Player;
 #[derive(Component, Debug)]
 pub struct Name(String);
 
+#[derive(SystemSet, Hash, Debug, Eq, PartialEq, Clone)]
+pub struct BeforePhysics;
+
+#[derive(SystemSet, Hash, Debug, Eq, PartialEq, Clone)]
+pub struct DuringPhysics;
+
+#[derive(SystemSet, Hash, Debug, Eq, PartialEq, Clone)]
+pub struct AfterPhysics;
+
 fn main() -> anyhow::Result<()> {
     let mut app = BevyEcsApp::new()?;
 
@@ -29,6 +42,8 @@ fn main() -> anyhow::Result<()> {
             &app_state().gpu,
         )?);
 
+    app.world().insert_resource(PhysicsContext2D::new());
+
     app.renderer().set_early_z_enabled(false);
 
     app.startup_schedule().add_systems(setup_player_system);
@@ -36,8 +51,7 @@ fn main() -> anyhow::Result<()> {
     app.update_schedule()
         .add_systems((camera_system, move_player));
 
-    app.post_update_schedule()
-        .add_systems(engine::components::rendering_system_2d);
+    app.setup_2d();
 
     app.run()
 }
@@ -55,6 +69,7 @@ fn camera_system(mut commands: Commands) {
 
 fn setup_player_system(
     mut resource_map: ResMut<ResourceMap>,
+    mut phys_context: ResMut<PhysicsContext2D>,
     common_resources: Res<CommonResources>,
     mut commands: Commands,
 ) {
@@ -81,12 +96,23 @@ fn setup_player_system(
 
         let transform = Transform2D::default();
 
+        let rigid_body =
+            RigidBodyBuilder::new(engine::physics::rapier2d::dynamics::RigidBodyType::Dynamic)
+                .additional_mass(10.0)
+                .build();
+
+        let collider = ColliderBuilder::new(SharedShape::ball(3.0)).build();
+        let body_handle = phys_context.add_rigidbody(rigid_body);
+        let collider_handle = phys_context.add_collider(collider);
+
         commands.spawn((
             SpriteComponent {
                 material,
                 z_layer: 0,
             },
             transform,
+            body_handle,
+            collider_handle,
             Player,
         ));
     }

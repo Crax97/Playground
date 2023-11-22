@@ -1,7 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
 use bevy_ecs::{
-    schedule::{Schedule, ScheduleLabel},
+    schedule::{IntoSystemConfigs, Schedule, ScheduleLabel},
     system::Resource,
     world::World,
 };
@@ -97,6 +97,21 @@ impl BevyEcsApp {
 
     pub fn post_update_schedule(&mut self) -> &mut Schedule {
         &mut self.post_update_schedule
+    }
+
+    pub fn setup_2d(&mut self) {
+        self.post_update_schedule()
+            .add_systems(crate::physics::update_positions_before_physics_system)
+            .add_systems(crate::physics::update_positions_after_physics_system)
+            .add_systems(
+                crate::physics::update_physics_2d_context
+                    .before(crate::physics::update_positions_after_physics_system)
+                    .after(crate::physics::update_positions_before_physics_system),
+            )
+            .add_systems(
+                crate::components::rendering_system_2d
+                    .after(crate::physics::update_positions_after_physics_system),
+            );
     }
 
     fn create_common_resources(

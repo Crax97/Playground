@@ -1,15 +1,17 @@
 pub mod app;
-mod bevy_ecs_app;
-mod camera;
 pub mod components;
-mod cvar_manager;
 pub mod deferred_renderer;
 pub mod input;
 pub mod loaders;
-mod material;
-mod mesh;
+pub mod physics;
 pub mod post_process_pass;
 pub mod resource_map;
+
+mod bevy_ecs_app;
+mod camera;
+mod cvar_manager;
+mod material;
+mod mesh;
 mod scene;
 mod texture;
 mod time;
