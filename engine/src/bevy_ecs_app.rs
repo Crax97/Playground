@@ -14,6 +14,7 @@ use crate::{
     app::{App, ImguiConsole},
     input::InputState,
     loaders::FileSystemTextureLoader,
+    physics::PhysicsContext2D,
     utils, Camera, CvarManager, DeferredRenderingPipeline, MasterMaterial, Mesh, MeshCreateInfo,
     MeshPrimitiveCreateInfo, RenderingPipeline, ResourceHandle, ResourceMap, Scene, Texture,
     TextureInput,
@@ -100,6 +101,7 @@ impl BevyEcsApp {
     }
 
     pub fn setup_2d(&mut self) {
+        self.world().insert_resource(PhysicsContext2D::new());
         self.post_update_schedule()
             .add_systems(crate::physics::update_positions_before_physics_system)
             .add_systems(crate::physics::update_positions_after_physics_system)
