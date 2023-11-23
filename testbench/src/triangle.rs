@@ -3,7 +3,7 @@ mod utils;
 use std::io::BufReader;
 
 use engine::app::{app_state::*, bootstrap, App};
-use engine::Backbuffer;
+use engine::{Backbuffer, Time};
 use engine_macros::glsl;
 use gpu::{
     AttachmentReference, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags, CullMode,
@@ -12,7 +12,6 @@ use gpu::{
     PresentMode, SamplerCreateInfo, SamplerHandle, ShaderModuleHandle, ShaderStage,
     SubpassDescription, VertexBindingInfo, VkCommandBuffer,
 };
-use imgui::Ui;
 use nalgebra::*;
 use winit::event_loop::EventLoop;
 
@@ -65,6 +64,7 @@ struct VertexData {
 }
 
 pub struct TriangleApp {
+    time: Time,
     triangle_buffer: BufferHandle,
     uv_buffer: BufferHandle,
     index_buffer: BufferHandle,
@@ -84,7 +84,11 @@ impl App for TriangleApp {
         "planes".to_owned()
     }
 
-    fn create(app_state: &mut AppState, _: &EventLoop<()>) -> anyhow::Result<Self>
+    fn create(
+        app_state: &mut AppState,
+        _: &EventLoop<()>,
+        _window: winit::window::Window,
+    ) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
@@ -217,6 +221,7 @@ impl App for TriangleApp {
             david_sampler,
 
             y_rotation: 0.0,
+            time: Time::new(),
         })
     }
 
@@ -327,9 +332,17 @@ impl App for TriangleApp {
         Ok(())
     }
 
-    fn update(&mut self, app_state: &mut AppState, _ui: &mut Ui) -> anyhow::Result<()> {
-        self.y_rotation += app_state.time.delta_frame() * 6.0;
+    fn begin_frame(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
+        self.time.begin_frame();
         Ok(())
+    }
+    fn update(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
+        self.y_rotation += self.time.delta_frame() * 6.0;
+        Ok(())
+    }
+
+    fn end_frame(&mut self, _app_state: &AppState) {
+        self.time.end_frame();
     }
 }
 

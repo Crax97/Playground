@@ -12,7 +12,6 @@ use engine::{
     TextureInput,
 };
 use gpu::{PresentMode, ShaderStage, VkCommandBuffer};
-use imgui::Ui;
 use nalgebra::*;
 use winit::{event::ElementState, event_loop::EventLoop};
 #[repr(C)]
@@ -44,7 +43,11 @@ impl App for PlanesApp {
         "planes".to_owned()
     }
 
-    fn create(app_state: &mut AppState, _: &EventLoop<()>) -> anyhow::Result<Self>
+    fn create(
+        app_state: &mut AppState,
+        _: &EventLoop<()>,
+        _window: winit::window::Window,
+    ) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
@@ -250,7 +253,7 @@ impl App for PlanesApp {
         )
     }
 
-    fn update(&mut self, _app_state: &mut AppState, _ui: &mut Ui) -> anyhow::Result<()> {
+    fn update(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
         if self.rotation_movement > 0.0 {
             self.rot_z += self.movement.y;
             self.rot_z = self.rot_z.clamp(-180.0, 180.0);

@@ -1,5 +1,8 @@
 use std::time::*;
 
+use bevy_ecs::system::Resource;
+
+#[derive(Resource)]
 pub struct Time {
     app_start: Instant,
     last_frame: Instant,

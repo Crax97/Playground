@@ -8,16 +8,13 @@ use bevy_ecs::{
 use engine_macros::glsl;
 use gpu::{Gpu, ShaderModuleCreateInfo, ShaderStage};
 use nalgebra::vector;
-use winit::event_loop::EventLoop;
+use winit::{event_loop::EventLoop, window::Window};
 
 use crate::{
-    app::{App, ImguiConsole},
-    input::InputState,
-    loaders::FileSystemTextureLoader,
-    physics::PhysicsContext2D,
-    utils, Camera, CvarManager, DeferredRenderingPipeline, MasterMaterial, Mesh, MeshCreateInfo,
-    MeshPrimitiveCreateInfo, RenderingPipeline, ResourceHandle, ResourceMap, Scene, Texture,
-    TextureInput,
+    app::App, components::EngineWindow, input::InputState, loaders::FileSystemTextureLoader,
+    physics::PhysicsContext2D, utils, Camera, CvarManager, DeferredRenderingPipeline,
+    MasterMaterial, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo, RenderingPipeline,
+    ResourceHandle, ResourceMap, Scene, Texture, TextureInput, Time,
 };
 
 const DEFAULT_DEFERRED_FS: &[u32] = glsl!(
@@ -38,6 +35,10 @@ const DEFAULT_DEFERRED_VS: &[u32] = glsl!(
     entry_point = "main"
 );
 
+pub trait Plugin {
+    fn apply(self, app: &mut BevyEcsApp);
+}
+
 #[derive(ScheduleLabel, Debug, Hash, Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 struct StartupSchedule;
 
@@ -52,7 +53,6 @@ pub struct BevyEcsApp {
     startup_schedule: Schedule,
     update_schedule: Schedule,
     post_update_schedule: Schedule,
-    imgui_console: ImguiConsole,
     renderer: DeferredRenderingPipeline,
 }
 
@@ -268,6 +268,7 @@ impl App for BevyEcsApp {
     fn create(
         app_state: &mut crate::app::app_state::AppState,
         _event_loop: &winit::event_loop::EventLoop<()>,
+        window: Window,
     ) -> anyhow::Result<Self>
     where
         Self: Sized,
@@ -278,7 +279,6 @@ impl App for BevyEcsApp {
         Self::setup_resource_map(&mut resource_map);
 
         let cvar_manager = CvarManager::new();
-        let (imgui_console, console_writer) = ImguiConsole::new_with_writer();
         let input = InputState::new();
         let cube_mesh = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
         let renderer = DeferredRenderingPipeline::new(
@@ -296,15 +296,15 @@ impl App for BevyEcsApp {
         world.insert_resource(resource_map);
         world.insert_resource(cvar_manager);
         world.insert_resource(input);
-        world.insert_resource(console_writer);
         world.insert_resource(default_resources);
+        world.insert_resource(EngineWindow(window));
+        world.insert_resource(Time::new());
 
         Ok(Self {
             world,
             startup_schedule,
             update_schedule,
             post_update_schedule,
-            imgui_console,
             renderer,
         })
     }
@@ -333,23 +333,28 @@ impl App for BevyEcsApp {
         Ok(())
     }
 
-    fn update(
+    fn begin_frame(
         &mut self,
         _app_state: &mut crate::app::app_state::AppState,
-        ui: &mut imgui::Ui,
     ) -> anyhow::Result<()> {
-        self.imgui_console
-            .update(self.world.get_resource::<InputState>().unwrap());
-        self.imgui_console.imgui_update(
-            ui,
-            &mut self.world.get_resource_mut::<CvarManager>().unwrap(),
-        );
+        self.world.get_resource_mut::<Time>().unwrap().begin_frame();
+        Ok(())
+    }
+
+    fn update(&mut self, _app_state: &mut crate::app::app_state::AppState) -> anyhow::Result<()> {
+        // self.imgui_console
+        //     .update(self.world.get_resource::<InputState>().unwrap());
+        // self.imgui_console.imgui_update(
+        //     ui,
+        //     &mut self.world.get_resource_mut::<CvarManager>().unwrap(),
+        // );
         self.update_schedule.run(&mut self.world);
         self.post_update_schedule.run(&mut self.world);
         Ok(())
     }
 
     fn end_frame(&mut self, _app_state: &crate::app::app_state::AppState) {
+        self.world.get_resource_mut::<Time>().unwrap().end_frame();
         self.world
             .get_resource_mut::<InputState>()
             .unwrap()

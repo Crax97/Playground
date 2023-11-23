@@ -1,6 +1,5 @@
 use bevy_ecs::{
     component::Component,
-    query::Changed,
     system::{Query, Res, ResMut, Resource},
 };
 use nalgebra::{Isometry2, Vector2};
@@ -26,7 +25,7 @@ pub struct PhysicsContext2D {
     ccd_solver: CCDSolver,
 }
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub struct Collider2DHandle(ColliderHandle);
 impl AsRef<ColliderHandle> for Collider2DHandle {
     fn as_ref(&self) -> &ColliderHandle {
@@ -34,7 +33,7 @@ impl AsRef<ColliderHandle> for Collider2DHandle {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub struct RigidBody2DHandle(RigidBodyHandle);
 impl AsRef<RigidBodyHandle> for RigidBody2DHandle {
     fn as_ref(&self) -> &RigidBodyHandle {
@@ -76,6 +75,18 @@ impl PhysicsContext2D {
 
     pub fn add_collider(&mut self, collider: Collider) -> Collider2DHandle {
         Collider2DHandle(self.collider_set.insert(collider))
+    }
+
+    pub fn add_collider_with_parent(
+        &mut self,
+        collider: Collider,
+        parent: RigidBody2DHandle,
+    ) -> Collider2DHandle {
+        Collider2DHandle(self.collider_set.insert_with_parent(
+            collider,
+            parent.0,
+            &mut self.rigid_body_set,
+        ))
     }
 
     pub fn remove_collider(&mut self, handle: Collider2DHandle) -> Option<Collider> {

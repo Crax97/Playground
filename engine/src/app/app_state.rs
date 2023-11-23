@@ -4,37 +4,31 @@ use gpu::{Gpu, GpuConfiguration, VkGpu, VkSwapchain};
 use once_cell::unsync::OnceCell;
 use winit::{dpi::PhysicalSize, window::Window};
 
-use crate::Time;
-
 pub struct AppState {
     pub gpu: VkGpu,
     pub swapchain: VkSwapchain,
-    pub window: Window,
-    pub new_size: Option<PhysicalSize<u32>>,
-    pub time: Time,
+    pub needs_new_swapchain: bool,
+    pub current_window_size: PhysicalSize<u32>,
 }
 
 impl AppState {
-    pub fn new(gpu: VkGpu, window: Window) -> Self {
-        let swapchain = VkSwapchain::new(&gpu, &window).expect("Failed to create swapchain!");
+    pub fn new(gpu: VkGpu, window: &Window) -> Self {
+        let swapchain = VkSwapchain::new(&gpu, window).expect("Failed to create swapchain!");
         Self {
             gpu,
             swapchain,
-            window,
-            new_size: None,
-            time: Time::new(),
+            needs_new_swapchain: false,
+            current_window_size: window.inner_size(),
         }
     }
 
     pub fn begin_frame(&mut self) -> anyhow::Result<()> {
         self.gpu.update();
-        self.time.begin_frame();
         Ok(())
     }
 
     pub fn end_frame(&mut self) -> anyhow::Result<()> {
         self.swapchain.present()?;
-        self.time.end_frame();
         Ok(())
     }
 
@@ -44,10 +38,6 @@ impl AppState {
 
     pub fn swapchain_mut(&mut self) -> &mut VkSwapchain {
         &mut self.swapchain
-    }
-
-    pub fn window(&self) -> &Window {
-        &self.window
     }
 }
 
@@ -69,7 +59,7 @@ static mut STATE: GlobalState = GlobalState::UNINIT;
     Creates a global AppState, which is going to belong to a single thread.
     The AppState can be only accessed by the thread that ran engine::init()
 */
-pub fn init(app_name: &str, window: winit::window::Window) -> anyhow::Result<()> {
+pub fn init(app_name: &str, window: &winit::window::Window) -> anyhow::Result<()> {
     unsafe {
         assert!(
             STATE.app.is_null(),
@@ -91,7 +81,7 @@ pub fn init(app_name: &str, window: winit::window::Window) -> anyhow::Result<()>
             window: Some(&window),
         })?;
 
-        let app_state = AppState::new(gpu, window);
+        let app_state = AppState::new(gpu, &window);
         assert!(DATA.set(app_state).is_ok());
 
         STATE = GlobalState {

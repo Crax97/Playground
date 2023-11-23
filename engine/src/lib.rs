@@ -1,6 +1,7 @@
 pub mod app;
 pub mod components;
 pub mod deferred_renderer;
+pub mod editor;
 pub mod input;
 pub mod loaders;
 pub mod physics;

@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use engine::app::app_state::app_state;
 use engine::bevy_ecs::query::With;
-use engine::bevy_ecs::schedule::{IntoSystemConfigs, SystemSet};
+use engine::bevy_ecs::schedule::IntoSystemConfigs;
 use engine::bevy_ecs::system::{Query, Res, ResMut};
-use engine::components::{rendering_system_2d, SpriteComponent, Transform2D};
+use engine::components::{EngineWindow, SpriteComponent, Transform2D};
 use engine::input::InputState;
 use engine::physics::rapier2d::dynamics::RigidBodyBuilder;
 use engine::physics::rapier2d::geometry::{ColliderBuilder, SharedShape};
@@ -17,22 +17,13 @@ use engine::{
     bevy_ecs::{component::Component, system::Commands},
     BevyEcsApp,
 };
-use nalgebra::vector;
+use nalgebra::{point, vector};
 
 #[derive(Component)]
 pub struct Player;
 
 #[derive(Component, Debug)]
 pub struct Name(String);
-
-#[derive(SystemSet, Hash, Debug, Eq, PartialEq, Clone)]
-pub struct BeforePhysics;
-
-#[derive(SystemSet, Hash, Debug, Eq, PartialEq, Clone)]
-pub struct DuringPhysics;
-
-#[derive(SystemSet, Hash, Debug, Eq, PartialEq, Clone)]
-pub struct AfterPhysics;
 
 fn main() -> anyhow::Result<()> {
     let mut app = BevyEcsApp::new()?;
@@ -49,13 +40,13 @@ fn main() -> anyhow::Result<()> {
     app.startup_schedule().add_systems(setup_player_system);
 
     app.update_schedule()
-        .add_systems((camera_system, move_player));
+        .add_systems((camera_system.after(move_player), move_player));
 
     app.run()
 }
 
-fn camera_system(mut commands: Commands) {
-    let size = app_state().window.inner_size().cast::<f32>();
+fn camera_system(mut commands: Commands, window: Res<EngineWindow>) {
+    let size = window.inner_size().cast::<f32>();
     let aspect = size.width / size.height;
     commands.insert_resource(Camera::new_orthographic(
         10.0 * aspect,
@@ -94,14 +85,14 @@ fn setup_player_system(
 
         let transform = Transform2D::default();
 
-        let rigid_body =
-            RigidBodyBuilder::new(engine::physics::rapier2d::dynamics::RigidBodyType::Dynamic)
-                .additional_mass(10.0)
-                .build();
+        let rigid_body = RigidBodyBuilder::dynamic().build();
 
-        let collider = ColliderBuilder::new(SharedShape::ball(3.0)).build();
+        let collider = ColliderBuilder::new(SharedShape::ball(0.5))
+            .restitution(0.7)
+            .build();
         let body_handle = phys_context.add_rigidbody(rigid_body);
-        let collider_handle = phys_context.add_collider(collider);
+        let collider_handle = phys_context.add_collider_with_parent(collider, body_handle);
+        // let collider_handle = phys_context.add_collider(collider);
 
         commands.spawn((
             SpriteComponent {
@@ -137,11 +128,17 @@ fn setup_player_system(
         let material = resource_map.add(material);
 
         let transform = Transform2D {
-            position: Default::default(),
+            position: point![0.0, -3.0],
             rotation: 0.0,
-            scale: vector![5.0, 5.0],
+            scale: vector![1.0, 1.0],
             layer: 100,
         };
+
+        let collider = ColliderBuilder::new(SharedShape::cuboid(6.0, 6.0))
+            .sensor(false)
+            .translation(vector![0.0, -10.0 + 1.5])
+            .build();
+        let collider_handle = phys_context.add_collider(collider);
 
         commands.spawn((
             SpriteComponent {
@@ -149,6 +146,7 @@ fn setup_player_system(
                 z_layer: 100,
             },
             transform,
+            collider_handle,
         ));
     }
 }

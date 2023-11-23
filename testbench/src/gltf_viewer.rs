@@ -7,13 +7,17 @@ use std::collections::HashMap;
 use std::num::NonZeroU32;
 
 use engine::app::{app_state::*, bootstrap, App, ImguiConsole};
+use engine::Time;
 
 use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
 use fps_camera::FpsCamera;
 use gpu::{Extent2D, ImageFormat, PresentMode, ShaderStage, VkCommandBuffer};
 use imgui::{TreeNodeFlags, Ui};
-use winit::dpi::{PhysicalPosition, Position};
+use winit::{
+    dpi::{PhysicalPosition, Position},
+    window::Window,
+};
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::input::key::Key;
@@ -52,6 +56,8 @@ pub struct GLTFViewer {
     console: ImguiConsole,
     cvar_manager: CvarManager,
     resource_map: ResourceMap,
+    time: Time,
+    window: Window,
 }
 
 impl GLTFViewer {
@@ -206,10 +212,14 @@ impl GLTFViewer {
 
 impl App for GLTFViewer {
     fn window_name(&self, app_state: &AppState) -> String {
-        format!("GLTF Viewer - FPS {}", 1.0 / app_state.time.delta_frame())
+        format!("GLTF Viewer")
     }
 
-    fn create(app_state: &mut AppState, _event_loop: &EventLoop<()>) -> anyhow::Result<Self>
+    fn create(
+        app_state: &mut AppState,
+        _event_loop: &EventLoop<()>,
+        window: Window,
+    ) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
@@ -217,6 +227,7 @@ impl App for GLTFViewer {
         let console = ImguiConsole::new();
         let mut cvar_manager = CvarManager::new();
         let args = GltfViewerArgs::parse();
+        let time = Time::new();
 
         let mut resource_map = ResourceMap::new();
         let cube_mesh = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
@@ -315,6 +326,8 @@ impl App for GLTFViewer {
             input,
             cvar_manager,
             resource_map,
+            time,
+            window,
         })
     }
 
@@ -335,95 +348,96 @@ impl App for GLTFViewer {
         Ok(())
     }
 
-    fn update(&mut self, app_state: &mut AppState, ui: &mut Ui) -> anyhow::Result<()> {
-        self.console.update(&self.input);
-        self.console.imgui_update(ui, &mut self.cvar_manager);
+    fn begin_frame(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
+        self.time.begin_frame();
+        Ok(())
+    }
 
-        ui.text("Hiii");
+    fn update(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
+        // self.console.update(&self.input);
+        // self.console.imgui_update(ui, &mut self.cvar_manager);
 
-        ui.slider(
-            "FXAA iterations",
-            0,
-            12,
-            self.cvar_manager
-                .get_named_ref_mut::<i32>(FxaaPass::FXAA_ITERATIONS_CVAR_NAME)
-                .unwrap(),
-        );
-        ui.slider(
-            "FXAA subpix",
-            0.0,
-            1.0,
-            self.cvar_manager
-                .get_named_ref_mut::<f32>(FxaaPass::FXAA_SUBPIX_CVAR_NAME)
-                .unwrap(),
-        );
-        ui.slider(
-            "FXAA Edge Threshold",
-            0.0,
-            1.0,
-            self.cvar_manager
-                .get_named_ref_mut::<f32>(FxaaPass::FXAA_EDGE_THRESHOLD_CVAR_NAME)
-                .unwrap(),
-        );
-        ui.slider(
-            "FXAA Edge Threshold min",
-            0.0,
-            1.0,
-            self.cvar_manager
-                .get_named_ref_mut::<f32>(FxaaPass::FXAA_EDGE_THRESHOLD_MIN_CVAR_NAME)
-                .unwrap(),
-        );
+        // ui.text("Hiii");
 
-        ui.separator();
+        // ui.slider(
+        //     "FXAA iterations",
+        //     0,
+        //     12,
+        //     self.cvar_manager
+        //         .get_named_ref_mut::<i32>(FxaaPass::FXAA_ITERATIONS_CVAR_NAME)
+        //         .unwrap(),
+        // );
+        // ui.slider(
+        //     "FXAA subpix",
+        //     0.0,
+        //     1.0,
+        //     self.cvar_manager
+        //         .get_named_ref_mut::<f32>(FxaaPass::FXAA_SUBPIX_CVAR_NAME)
+        //         .unwrap(),
+        // );
+        // ui.slider(
+        //     "FXAA Edge Threshold",
+        //     0.0,
+        //     1.0,
+        //     self.cvar_manager
+        //         .get_named_ref_mut::<f32>(FxaaPass::FXAA_EDGE_THRESHOLD_CVAR_NAME)
+        //         .unwrap(),
+        // );
+        // ui.slider(
+        //     "FXAA Edge Threshold min",
+        //     0.0,
+        //     1.0,
+        //     self.cvar_manager
+        //         .get_named_ref_mut::<f32>(FxaaPass::FXAA_EDGE_THRESHOLD_MIN_CVAR_NAME)
+        //         .unwrap(),
+        // );
 
-        if ui.collapsing_header("Shadow settings", TreeNodeFlags::DEFAULT_OPEN) {
-            ui.slider(
-                "Depth Bias constant",
-                -10.0,
-                10.0,
-                &mut self.scene_renderer.depth_bias_constant,
-            );
-            ui.slider(
-                "Depth Bias slope",
-                -10.0,
-                10.0,
-                &mut self.scene_renderer.depth_bias_slope,
-            );
-        }
+        // ui.separator();
 
-        self.lights_ui(ui);
+        // if ui.collapsing_header("Shadow settings", TreeNodeFlags::DEFAULT_OPEN) {
+        //     ui.slider(
+        //         "Depth Bias constant",
+        //         -10.0,
+        //         10.0,
+        //         &mut self.scene_renderer.depth_bias_constant,
+        //     );
+        //     ui.slider(
+        //         "Depth Bias slope",
+        //         -10.0,
+        //         10.0,
+        //         &mut self.scene_renderer.depth_bias_slope,
+        //     );
+        // }
 
-        if ui.io().want_capture_keyboard || ui.io().want_capture_mouse {
-            return Ok(());
-        }
+        // self.lights_ui(ui);
+
+        // if ui.io().want_capture_keyboard || ui.io().want_capture_mouse {
+        //     return Ok(());
+        // }
 
         if self.input.is_key_just_pressed(Key::P) {
             self.print_lights();
         }
 
         if self.input.is_mouse_button_just_pressed(MouseButton::Right) {
-            app_state
-                .window()
+            self.window
                 .set_cursor_grab(winit::window::CursorGrabMode::Confined)?;
-            app_state.window().set_cursor_visible(false);
+            self.window.set_cursor_visible(false);
         }
         if self.input.is_mouse_button_just_released(MouseButton::Right) {
-            app_state
-                .window()
+            self.window
                 .set_cursor_grab(winit::window::CursorGrabMode::None)?;
-            app_state.window().set_cursor_visible(true);
+            self.window.set_cursor_visible(true);
         }
 
         if self
             .input
             .is_mouse_button_pressed(winit::event::MouseButton::Right)
         {
-            self.camera
-                .update(&self.input, app_state.time.delta_frame());
-            let window_size = app_state.window().inner_size();
+            self.camera.update(&self.input, self.time.delta_frame());
+            let window_size = self.window.inner_size();
 
-            app_state
-                .window()
+            self.window
                 .set_cursor_position(Position::Physical(PhysicalPosition {
                     x: window_size.width as i32 / 2,
                     y: window_size.height as i32 / 2,
@@ -446,6 +460,12 @@ impl App for GLTFViewer {
         Ok(())
     }
 
+    fn end_frame(&mut self, _app_state: &AppState) {
+        self.resource_map.update();
+        self.input.end_frame();
+        self.time.end_frame();
+    }
+
     fn draw<'a>(
         &'a mut self,
         app_state: &'a AppState,
@@ -460,11 +480,6 @@ impl App for GLTFViewer {
             &self.cvar_manager,
         )?;
         Ok(command_buffer)
-    }
-
-    fn end_frame(&mut self, _app_state: &AppState) {
-        self.resource_map.update();
-        self.input.end_frame();
     }
 }
 

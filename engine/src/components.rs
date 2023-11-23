@@ -1,3 +1,5 @@
+use std::ops::{Deref, DerefMut};
+
 use crate::{
     bevy_ecs_app::CommonResources, resource_map::ResourceHandle, LightType, Scene, ShadowSetup,
     Texture,
@@ -9,8 +11,26 @@ use bevy_ecs::{
     world::World,
 };
 use nalgebra::{vector, Matrix4, Point2, Point3, UnitQuaternion, UnitVector3, Vector2, Vector3};
+use winit::window::Window;
 
 use crate::{MaterialInstance, Mesh};
+
+#[derive(Resource)]
+pub struct EngineWindow(pub(crate) Window);
+
+impl Deref for EngineWindow {
+    type Target = Window;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for EngineWindow {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 #[derive(Component)]
 pub struct Transform {
@@ -37,7 +57,7 @@ impl Transform {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Debug)]
 pub struct Transform2D {
     pub position: Point2<f32>,
     pub layer: u32,
