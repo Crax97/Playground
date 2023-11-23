@@ -1,6 +1,5 @@
 pub mod app_state;
 pub mod egui_support;
-pub mod imgui_support;
 
 mod console;
 

@@ -1,6 +1,5 @@
 use bevy_ecs::system::Resource;
 use crossbeam::channel::{Receiver, Sender};
-use imgui::{InputTextCallback, InputTextCallbackHandler, InputTextFlags, Ui};
 
 use crate::{
     input::{key::Key, InputState},
@@ -65,66 +64,6 @@ impl ImguiConsole {
         }
         log::info!("{}", message.as_ref());
         self.messages.push(message.as_ref().to_owned());
-    }
-    pub fn imgui_update(&mut self, ui: &Ui, cvar_manager: &mut CvarManager) {
-        struct ConsoleCallback<'a>(&'a mut CvarManager);
-        impl<'a> InputTextCallbackHandler for ConsoleCallback<'a> {
-            fn on_completion(&mut self, mut data: imgui::TextCallbackData) {
-                let content = data.str();
-                for cvar in self.0.cvar_names() {
-                    if cvar.contains(content) {
-                        data.clear();
-                        data.push_str(cvar);
-                        return;
-                    }
-                }
-            }
-
-            fn on_history(&mut self, _: imgui::HistoryDirection, _: imgui::TextCallbackData) {}
-        }
-        if self.show {
-            let display_size = ui.io().display_size;
-            let console_size = [display_size[0], display_size[1] / 3.0];
-            let window = ui
-                .window("Console")
-                .position_pivot([0.0, 0.0])
-                .position([0.0, 0.0], imgui::Condition::Always)
-                .size(console_size, imgui::Condition::Always)
-                .resizable(false)
-                .collapsible(false)
-                .title_bar(false)
-                .begin()
-                .unwrap();
-            ui.set_window_font_scale(0.8);
-            let output = ui
-                .child_window("Output")
-                .size([0.0, -ui.text_line_height() * 2.0])
-                .begin()
-                .unwrap();
-            for message in &self.messages {
-                ui.text(message);
-            }
-            ui.set_scroll_here_y();
-            output.end();
-
-            let w = ui.push_item_width(console_size[0]);
-            ui.set_keyboard_focus_here();
-            if ui
-                .input_text("ConsoleInput", &mut self.pending_input)
-                .flags(InputTextFlags::ENTER_RETURNS_TRUE | InputTextFlags::CALLBACK_RESIZE)
-                .callback(
-                    InputTextCallback::COMPLETION | InputTextCallback::HISTORY,
-                    ConsoleCallback(cvar_manager),
-                )
-                .build()
-            {
-                let input = std::mem::take(&mut self.pending_input);
-                self.add_message(input.clone());
-                self.handle_cvar_command(&input, cvar_manager);
-            }
-            w.end();
-            window.end();
-        }
     }
 
     fn handle_cvar_command(&mut self, command: &str, cvar_manager: &mut CvarManager) {
