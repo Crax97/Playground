@@ -71,6 +71,8 @@ impl EguiSupport {
         swapchain: &VkSwapchain,
         command_buffer: &VkCommandBuffer,
     ) {
+        // the egui integration is currently borked, so no drawing for now
+        return;
         let clipped = self.integration.context().tessellate(output.shapes);
         let image_index = swapchain.current_swapchain_index.get().try_into().unwrap();
         self.integration.paint(

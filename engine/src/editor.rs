@@ -82,8 +82,8 @@ impl Plugin for EditorPlugin {
         command_buffer: &mut VkCommandBuffer,
     ) {
         if let Some(output) = self.output.take() {
-            // self.egui_support
-            //     .paint_frame(output, &app_state.swapchain, command_buffer)
+            self.egui_support
+                .paint_frame(output, &app_state.swapchain, command_buffer)
         }
     }
 }

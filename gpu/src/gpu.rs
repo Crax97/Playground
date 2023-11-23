@@ -878,9 +878,6 @@ impl VkGpu {
                 if heap.flags.contains(MemoryHeapFlags::MULTI_INSTANCE_KHR) {
                     s += "MULTI_INSTANCE_KHR | ";
                 }
-                if heap.flags.contains(MemoryHeapFlags::RESERVED_2_KHR) {
-                    s += "RESERVED_2_KHR ";
-                }
 
                 s += "}";
                 s
