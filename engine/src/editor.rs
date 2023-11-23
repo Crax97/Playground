@@ -69,7 +69,11 @@ impl Plugin for EditorPlugin {
     }
     fn pre_update(&mut self, world: &mut World) {
         let window = world.get_resource::<EngineWindow>().unwrap();
-        self.egui_support.begin_frame(window)
+        self.egui_support.begin_frame(window);
+        let context = self.egui_support.create_context();
+        egui::Window::new("Important message!").show(&context, |ui| {
+            ui.label("Hiiiiii");
+        });
     }
     fn post_update(&mut self, world: &mut World) {
         let window = world.get_resource::<EngineWindow>().unwrap();

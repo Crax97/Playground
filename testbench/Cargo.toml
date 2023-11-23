@@ -27,7 +27,7 @@ path = "src/shader_reflection.rs"
 
 [dependencies]
 anyhow = { version = "1.0.70", features = ["backtrace"] }
-winit = "0.28"
+winit = { version = "0.28", features = [ "x11" ] }
 nalgebra = "0.32.2"
 raw-window-handle = "0.5.2"
 thiserror = "1.0"
@@ -42,9 +42,6 @@ gltf = { version = "1.2.0", features = ["KHR_lights_punctual"] }
 gpu = { path = "../gpu" }
 engine = { path = "../engine" }
 engine_macros = { path = "../engine_macros" }
-imgui = { version = "0.11.0", features = ["docking"] }
-imgui-rs-vulkan-renderer = "1.9.0"
-imgui-winit-support = "0.11.0"
 strum = { version = "0.25.0", features = ["derive", "strum_macros"] }
 strum_macros = "0.25.1"
 clap = { version = "4.4.6", features = ["derive"] }
