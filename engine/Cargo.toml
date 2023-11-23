@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 anyhow = { version = "1.0.*", features = ["backtrace"] }
 anymap = "0.12.*"
-winit = "0.27.5"
+winit = "0.28"
 nalgebra = "0.32.2"
 raw-window-handle = "0.5.2"
 thiserror = "1.0"
@@ -28,6 +28,11 @@ thunderdome = "0.6.*"
 imgui = { version = "0.11.0", features = ["docking"] }
 imgui-rs-vulkan-renderer = "1.9.0"
 imgui-winit-support = "0.11.0"
+
+egui = "0.23.0"
+egui-winit = { version = "0.23.0", default-features = false }
+gpu-allocator = { version = "0.23.0", default-features = false, features = ["vulkan"] }
+egui-winit-ash-integration = { git = "https://github.com/Crax97/egui-winit-ash-integration", features = ["gpu-allocator-feature"] }
 
 rapier2d = { version = "0.17", features = ["simd-stable", "serde-serialize"] }
 

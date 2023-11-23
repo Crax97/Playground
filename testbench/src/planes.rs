@@ -2,6 +2,7 @@ mod utils;
 
 use std::collections::HashMap;
 
+use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App};
 
 use engine::loaders::FileSystemTextureLoader;
@@ -13,6 +14,7 @@ use engine::{
 };
 use gpu::{PresentMode, ShaderStage, VkCommandBuffer};
 use nalgebra::*;
+use winit::window::Window;
 use winit::{event::ElementState, event_loop::EventLoop};
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -25,6 +27,7 @@ const SPEED: f32 = 0.1;
 const ROTATION_SPEED: f32 = 3.0;
 const MIN_DELTA: f32 = 1.0;
 pub struct PlanesApp {
+    window: Window,
     camera: Camera,
     forward_movement: f32,
     rotation_movement: f32,
@@ -36,6 +39,7 @@ pub struct PlanesApp {
     scene: Scene,
     resource_map: ResourceMap,
     cvar_manager: CvarManager,
+    egui_integration: EguiSupport,
 }
 
 impl App for PlanesApp {
@@ -46,7 +50,7 @@ impl App for PlanesApp {
     fn create(
         app_state: &mut AppState,
         _: &EventLoop<()>,
-        _window: winit::window::Window,
+        window: winit::window::Window,
     ) -> anyhow::Result<Self>
     where
         Self: Sized,
@@ -113,6 +117,7 @@ impl App for PlanesApp {
             }],
         };
 
+        let egui_integration = EguiSupport::new(&window, &app_state.gpu, &app_state.swapchain)?;
         let mesh = Mesh::new(&app_state.gpu, &mesh_data)?;
         let mesh = resource_map.add(mesh);
 
@@ -192,6 +197,8 @@ impl App for PlanesApp {
         });
 
         Ok(Self {
+            window,
+            egui_integration,
             camera,
             forward_movement,
             rotation_movement,
@@ -243,14 +250,20 @@ impl App for PlanesApp {
         app_state: &'a AppState,
         backbuffer: &Backbuffer,
     ) -> anyhow::Result<VkCommandBuffer> {
-        self.scene_renderer.render(
+        // self.egui_integration.begin_frame(&self.window);
+        let mut cb = self.scene_renderer.render(
             &app_state.gpu,
             &self.camera,
             &self.scene,
             backbuffer,
             &self.resource_map,
             &self.cvar_manager,
-        )
+        )?;
+        // let out = self.egui_integration.end_frame(&self.window);
+
+        // self.egui_integration
+        // .paint_frame(out, &app_state.swapchain, &mut cb);
+        Ok(cb)
     }
 
     fn update(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {

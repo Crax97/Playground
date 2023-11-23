@@ -108,7 +108,7 @@ pub struct VkSwapchain {
     pub(super) current_swapchain_image_views: Vec<ImageViewHandle>,
     pub(super) frames_in_flight: Vec<SwapchainFrame>,
 
-    current_swapchain_index: Cell<u32>,
+    pub current_swapchain_index: Cell<u32>,
     state: Arc<GpuThreadSharedState>,
     pub current_frame: Cell<usize>,
     pub next_image_fence: GPUFence,

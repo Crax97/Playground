@@ -5,6 +5,7 @@ use engine::bevy_ecs::query::With;
 use engine::bevy_ecs::schedule::IntoSystemConfigs;
 use engine::bevy_ecs::system::{Query, Res, ResMut};
 use engine::components::{EngineWindow, SpriteComponent, Transform2D};
+use engine::editor::EditorPlugin;
 use engine::input::InputState;
 use engine::physics::rapier2d::dynamics::RigidBodyBuilder;
 use engine::physics::rapier2d::geometry::{ColliderBuilder, SharedShape};
@@ -41,6 +42,8 @@ fn main() -> anyhow::Result<()> {
 
     app.update_schedule()
         .add_systems((camera_system.after(move_player), move_player));
+
+    app.add_plugin::<EditorPlugin>();
 
     app.run()
 }

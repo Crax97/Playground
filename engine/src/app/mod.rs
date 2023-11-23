@@ -1,4 +1,5 @@
 pub mod app_state;
+pub mod egui_support;
 pub mod imgui_support;
 
 mod console;
@@ -34,6 +35,8 @@ pub trait App {
         Ok(())
     }
 
+    fn on_resized(&mut self, _app_state: &AppState, _size: PhysicalSize<u32>) {}
+
     fn input(
         &mut self,
         _app_state: &AppState,
@@ -66,16 +69,18 @@ pub fn app_loop<A: App + 'static>(
     app.on_event(&event, app_state_mut)?;
     match event {
         winit::event::Event::NewEvents(_) => {}
-        winit::event::Event::WindowEvent { event, .. } => match event {
-            winit::event::WindowEvent::CloseRequested => {
-                return Ok(ControlFlow::ExitWithCode(0));
-            }
-            winit::event::WindowEvent::Resized(new_size) => {
-                app_state_mut.needs_new_swapchain = true;
-                app_state_mut.current_window_size = new_size;
-            }
-            _ => {}
-        },
+        winit::event::Event::WindowEvent { event, .. } => {
+            match event {
+                winit::event::WindowEvent::CloseRequested => {
+                    return Ok(ControlFlow::ExitWithCode(0));
+                }
+                winit::event::WindowEvent::Resized(new_size) => {
+                    app_state_mut.needs_new_swapchain = true;
+                    app_state_mut.current_window_size = new_size;
+                }
+                _ => {}
+            };
+        }
         winit::event::Event::DeviceEvent { event, .. } => {
             app.input(app_state_mut, event)?;
         }
@@ -86,7 +91,9 @@ pub fn app_loop<A: App + 'static>(
             let sz = app_state_mut.current_window_size;
             if app_state_mut.needs_new_swapchain && sz.width > 0 && sz.height > 0 {
                 app_state_mut.swapchain_mut().recreate_swapchain()?;
+
                 app_state_mut.needs_new_swapchain = false;
+                app.on_resized(&app_state_mut, sz);
             }
 
             if sz.width > 0 && sz.height > 0 {

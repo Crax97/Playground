@@ -6,15 +6,23 @@ use bevy_ecs::{
     world::World,
 };
 use engine_macros::glsl;
-use gpu::{Gpu, ShaderModuleCreateInfo, ShaderStage};
+use gpu::{Gpu, ShaderModuleCreateInfo, ShaderStage, VkCommandBuffer};
 use nalgebra::vector;
-use winit::{event_loop::EventLoop, window::Window};
+use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop, window::Window};
 
 use crate::{
-    app::App, components::EngineWindow, input::InputState, loaders::FileSystemTextureLoader,
-    physics::PhysicsContext2D, utils, Camera, CvarManager, DeferredRenderingPipeline,
-    MasterMaterial, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo, RenderingPipeline,
-    ResourceHandle, ResourceMap, Scene, Texture, TextureInput, Time,
+    app::{
+        app_state::{app_state_mut, AppState},
+        egui_support::EguiSupport,
+        App,
+    },
+    components::EngineWindow,
+    input::InputState,
+    loaders::FileSystemTextureLoader,
+    physics::PhysicsContext2D,
+    utils, Camera, CvarManager, DeferredRenderingPipeline, MasterMaterial, Mesh, MeshCreateInfo,
+    MeshPrimitiveCreateInfo, RenderingPipeline, ResourceHandle, ResourceMap, Scene, Texture,
+    TextureInput, Time,
 };
 
 const DEFAULT_DEFERRED_FS: &[u32] = glsl!(
@@ -35,12 +43,37 @@ const DEFAULT_DEFERRED_VS: &[u32] = glsl!(
     entry_point = "main"
 );
 
-pub trait Plugin {
-    fn apply(self, app: &mut BevyEcsApp);
+pub trait Plugin: 'static {
+    fn construct(app: &mut BevyEcsApp) -> Self
+    where
+        Self: Sized;
+    fn on_start(&mut self, _world: &mut World) {}
+    fn on_event(&mut self, _world: &mut World, _event: &Event<()>) {}
+    fn on_resize(
+        &mut self,
+        _world: &mut World,
+        _app_state: &mut AppState,
+        _new_size: PhysicalSize<u32>,
+    ) {
+    }
+
+    fn pre_update(&mut self, _world: &mut World) {}
+    fn update(&mut self, _world: &mut World) {}
+    fn post_update(&mut self, _world: &mut World) {}
+    fn draw(
+        &mut self,
+        _world: &mut World,
+        _app_state: &mut AppState,
+        _command_buffer: &mut VkCommandBuffer,
+    ) {
+    }
 }
 
 #[derive(ScheduleLabel, Debug, Hash, Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 struct StartupSchedule;
+
+#[derive(ScheduleLabel, Debug, Hash, Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
+struct PreUpdateSchedule;
 
 #[derive(ScheduleLabel, Debug, Hash, Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
 struct UpdateSchedule;
@@ -49,11 +82,13 @@ struct UpdateSchedule;
 struct PostUpdateSchedule;
 
 pub struct BevyEcsApp {
-    world: World,
+    pub world: World,
     startup_schedule: Schedule,
+    pre_update_schedule: Schedule,
     update_schedule: Schedule,
     post_update_schedule: Schedule,
     renderer: DeferredRenderingPipeline,
+    plugins: Vec<Box<dyn Plugin>>,
 }
 
 pub struct BevyEcsAppWithLoop {
@@ -80,6 +115,11 @@ impl BevyEcsApp {
         Ok(BevyEcsAppWithLoop { app, evt_loop })
     }
 
+    pub fn add_plugin<P: Plugin>(&mut self) {
+        let plugin = Box::new(P::construct(self));
+        self.plugins.push(plugin);
+    }
+
     pub fn world(&mut self) -> &mut World {
         &mut self.world
     }
@@ -90,6 +130,10 @@ impl BevyEcsApp {
 
     pub fn startup_schedule(&mut self) -> &mut Schedule {
         &mut self.startup_schedule
+    }
+
+    pub fn pre_update_schedule(&mut self) -> &mut Schedule {
+        &mut self.post_update_schedule
     }
 
     pub fn update_schedule(&mut self) -> &mut Schedule {
@@ -288,10 +332,13 @@ impl App for BevyEcsApp {
             DeferredRenderingPipeline::make_3d_combine_shader(&app_state.gpu)?,
         )?;
         let startup_schedule = Schedule::new(StartupSchedule);
+        let pre_update_schedule = Schedule::new(StartupSchedule);
         let update_schedule = Schedule::new(UpdateSchedule);
         let post_update_schedule = Schedule::new(PostUpdateSchedule);
 
         let default_resources = Self::create_common_resources(&app_state.gpu, &mut resource_map)?;
+
+        let egui_support = EguiSupport::new(&window, &app_state.gpu, &app_state.swapchain)?;
 
         world.insert_resource(resource_map);
         world.insert_resource(cvar_manager);
@@ -299,13 +346,16 @@ impl App for BevyEcsApp {
         world.insert_resource(default_resources);
         world.insert_resource(EngineWindow(window));
         world.insert_resource(Time::new());
+        world.insert_non_send_resource(egui_support);
 
         Ok(Self {
             world,
             startup_schedule,
+            pre_update_schedule,
             update_schedule,
             post_update_schedule,
             renderer,
+            plugins: vec![],
         })
     }
 
@@ -314,6 +364,9 @@ impl App for BevyEcsApp {
         _app_state: &mut crate::app::app_state::AppState,
     ) -> anyhow::Result<()> {
         self.startup_schedule.run(&mut self.world);
+        for plugin in &mut self.plugins {
+            plugin.on_start(&mut self.world);
+        }
         Ok(())
     }
 
@@ -330,6 +383,10 @@ impl App for BevyEcsApp {
             .get_resource_mut::<ResourceMap>()
             .unwrap()
             .update();
+
+        for plugin in &mut self.plugins {
+            plugin.on_event(&mut self.world, event);
+        }
         Ok(())
     }
 
@@ -338,6 +395,7 @@ impl App for BevyEcsApp {
         _app_state: &mut crate::app::app_state::AppState,
     ) -> anyhow::Result<()> {
         self.world.get_resource_mut::<Time>().unwrap().begin_frame();
+
         Ok(())
     }
 
@@ -348,8 +406,20 @@ impl App for BevyEcsApp {
         //     ui,
         //     &mut self.world.get_resource_mut::<CvarManager>().unwrap(),
         // );
+        self.pre_update_schedule.run(&mut self.world);
+        for plugin in &mut self.plugins {
+            plugin.pre_update(&mut self.world);
+        }
+
         self.update_schedule.run(&mut self.world);
+        for plugin in &mut self.plugins {
+            plugin.update(&mut self.world);
+        }
+
         self.post_update_schedule.run(&mut self.world);
+        for plugin in &mut self.plugins {
+            plugin.post_update(&mut self.world);
+        }
         Ok(())
     }
 
@@ -374,14 +444,20 @@ impl App for BevyEcsApp {
         } else {
             Camera::default()
         };
-        self.renderer.render(
+        let mut command_buffer = self.renderer.render(
             &app_state.gpu,
             &pov,
             scene,
             backbuffer,
             resource_map,
             cvar_manager,
-        )
+        )?;
+
+        for plugin in &mut self.plugins {
+            plugin.draw(&mut self.world, app_state_mut(), &mut command_buffer)
+        }
+
+        Ok(command_buffer)
     }
 }
 
