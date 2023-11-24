@@ -12,7 +12,11 @@ use engine::Time;
 use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
 use fps_camera::FpsCamera;
-use gpu::{Extent2D, ImageFormat, PresentMode, ShaderStage, VkCommandBuffer};
+use gpu::{
+    AccessFlags, Extent2D, ImageAspectFlags, ImageFormat, ImageLayout, ImageMemoryBarrier,
+    ImageSubresourceRange, PipelineBarrierInfo, PipelineStageFlags, PresentMode, ShaderStage,
+    VkCommandBuffer,
+};
 use winit::{
     dpi::{PhysicalPosition, Position},
     window::Window,
@@ -470,7 +474,7 @@ impl App for GLTFViewer {
         app_state: &'a AppState,
         backbuffer: &Backbuffer,
     ) -> anyhow::Result<VkCommandBuffer> {
-        let command_buffer = self.scene_renderer.render(
+        let mut command_buffer = self.scene_renderer.render(
             &app_state.gpu,
             &self.camera.camera(),
             self.gltf_loader.scene(),
@@ -478,6 +482,29 @@ impl App for GLTFViewer {
             &self.resource_map,
             &self.cvar_manager,
         )?;
+
+        command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            memory_barriers: &[],
+            buffer_memory_barriers: &[],
+            image_memory_barriers: &[ImageMemoryBarrier {
+                src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                dst_access_mask: AccessFlags::COLOR_ATTACHMENT_READ,
+                old_layout: ImageLayout::ColorAttachment,
+                new_layout: ImageLayout::PresentSrc,
+                src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+                dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+                image: backbuffer.image.clone(),
+                subresource_range: ImageSubresourceRange {
+                    aspect_mask: ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+            }],
+        });
         Ok(command_buffer)
     }
 }

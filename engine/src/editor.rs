@@ -54,7 +54,7 @@ impl Plugin for EditorPlugin {
     fn on_resize(
         &mut self,
         _world: &mut World,
-        app_state: &mut AppState,
+        app_state: &AppState,
         _new_size: winit::dpi::PhysicalSize<u32>,
     ) {
         self.egui_support.swapchain_updated(&app_state.swapchain)

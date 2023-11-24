@@ -12,7 +12,10 @@ use engine::{
     MeshPrimitiveCreateInfo, RenderingPipeline, ResourceMap, Scene, ScenePrimitive, Texture,
     TextureInput,
 };
-use gpu::{PresentMode, ShaderStage, VkCommandBuffer};
+use gpu::{
+    AccessFlags, ImageAspectFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
+    PipelineBarrierInfo, PipelineStageFlags, PresentMode, ShaderStage, VkCommandBuffer,
+};
 use nalgebra::*;
 use winit::window::Window;
 use winit::{event::ElementState, event_loop::EventLoop};
@@ -259,6 +262,28 @@ impl App for PlanesApp {
             &self.resource_map,
             &self.cvar_manager,
         )?;
+        cb.pipeline_barrier(&PipelineBarrierInfo {
+            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            memory_barriers: &[],
+            buffer_memory_barriers: &[],
+            image_memory_barriers: &[ImageMemoryBarrier {
+                src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                dst_access_mask: AccessFlags::COLOR_ATTACHMENT_READ,
+                old_layout: ImageLayout::ColorAttachment,
+                new_layout: ImageLayout::PresentSrc,
+                src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+                dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+                image: backbuffer.image.clone(),
+                subresource_range: ImageSubresourceRange {
+                    aspect_mask: ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+            }],
+        });
         // let out = self.egui_integration.end_frame(&self.window);
 
         // self.egui_integration

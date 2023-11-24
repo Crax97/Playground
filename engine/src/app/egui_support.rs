@@ -73,12 +73,9 @@ impl EguiSupport {
     ) {
         let clipped = self.integration.context().tessellate(output.shapes);
         let image_index = swapchain.current_swapchain_index.get().try_into().unwrap();
-        self.integration.paint(
-            command_buffer.inner(),
-            image_index,
-            clipped,
-            output.textures_delta,
-        );
+        let command_buffer = command_buffer.inner();
+        self.integration
+            .paint(command_buffer, image_index, clipped, output.textures_delta);
     }
 
     pub fn create_context(&self) -> Context {

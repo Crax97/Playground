@@ -13,7 +13,6 @@ use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop, window::Wind
 use crate::{
     app::{
         app_state::{app_state_mut, AppState},
-        egui_support::EguiSupport,
         App,
     },
     components::EngineWindow,
@@ -52,7 +51,7 @@ pub trait Plugin: 'static {
     fn on_resize(
         &mut self,
         _world: &mut World,
-        _app_state: &mut AppState,
+        _app_state: &AppState,
         _new_size: PhysicalSize<u32>,
     ) {
     }
@@ -338,15 +337,12 @@ impl App for BevyEcsApp {
 
         let default_resources = Self::create_common_resources(&app_state.gpu, &mut resource_map)?;
 
-        let egui_support = EguiSupport::new(&window, &app_state.gpu, &app_state.swapchain)?;
-
         world.insert_resource(resource_map);
         world.insert_resource(cvar_manager);
         world.insert_resource(input);
         world.insert_resource(default_resources);
         world.insert_resource(EngineWindow(window));
         world.insert_resource(Time::new());
-        world.insert_non_send_resource(egui_support);
 
         Ok(Self {
             world,
@@ -388,6 +384,12 @@ impl App for BevyEcsApp {
             plugin.on_event(&mut self.world, event);
         }
         Ok(())
+    }
+
+    fn on_resized(&mut self, app_state: &AppState, size: PhysicalSize<u32>) {
+        for plugin in &mut self.plugins {
+            plugin.on_resize(&mut self.world, app_state, size);
+        }
     }
 
     fn begin_frame(
