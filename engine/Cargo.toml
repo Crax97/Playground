@@ -23,6 +23,8 @@ strum_macros = "0.25.1"
 env_logger = "0.10.0"
 bitflags = "2.2.*"
 bevy_ecs = "0.12.*"
+bevy_reflect = "0.12"
+bevy_reflect_derive = "0.12"
 crossbeam = "0.8.*"
 thunderdome = "0.6.*"
 

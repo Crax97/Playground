@@ -877,6 +877,8 @@ dependencies = [
  "anyhow",
  "anymap",
  "bevy_ecs",
+ "bevy_reflect",
+ "bevy_reflect_derive",
  "bitflags 2.2.1",
  "bytemuck",
  "crossbeam",

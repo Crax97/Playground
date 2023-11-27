@@ -43,9 +43,6 @@ const DEFAULT_DEFERRED_VS: &[u32] = glsl!(
 );
 
 pub trait Plugin: 'static {
-    fn construct(app: &mut BevyEcsApp) -> Self
-    where
-        Self: Sized;
     fn on_start(&mut self, _world: &mut World) {}
     fn on_event(&mut self, _world: &mut World, _event: &Event<()>) {}
     fn on_resize(
@@ -114,8 +111,8 @@ impl BevyEcsApp {
         Ok(BevyEcsAppWithLoop { app, evt_loop })
     }
 
-    pub fn add_plugin<P: Plugin>(&mut self) {
-        let plugin = Box::new(P::construct(self));
+    pub fn add_plugin<P: Plugin>(&mut self, plugin: P) {
+        let plugin = Box::new(plugin);
         self.plugins.push(plugin);
     }
 

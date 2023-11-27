@@ -4,7 +4,7 @@ use engine::app::app_state::app_state;
 use engine::bevy_ecs::query::With;
 use engine::bevy_ecs::schedule::IntoSystemConfigs;
 use engine::bevy_ecs::system::{Query, Res, ResMut};
-use engine::components::{EngineWindow, SpriteComponent, Transform2D};
+use engine::components::{EngineWindow, SpriteComponent, TestComponent, Transform2D};
 use engine::editor::EditorPlugin;
 use engine::input::InputState;
 use engine::physics::rapier2d::dynamics::RigidBodyBuilder;
@@ -43,7 +43,8 @@ fn main() -> anyhow::Result<()> {
     app.update_schedule()
         .add_systems((camera_system.after(move_player), move_player));
 
-    app.add_plugin::<EditorPlugin>();
+    let plugin = EditorPlugin::new(&mut app);
+    app.add_plugin::<EditorPlugin>(plugin);
 
     app.run()
 }
@@ -105,6 +106,11 @@ fn setup_player_system(
             transform,
             body_handle,
             collider_handle,
+            TestComponent {
+                num: 12,
+                flo: 42.0,
+                stri: "Hello".to_owned(),
+            },
             Player,
         ));
     }

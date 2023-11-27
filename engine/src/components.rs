@@ -4,12 +4,14 @@ use crate::{
     bevy_ecs_app::CommonResources, resource_map::ResourceHandle, LightType, Scene, ShadowSetup,
     Texture,
 };
+use bevy_ecs::reflect::ReflectComponent;
 use bevy_ecs::{
     component::Component,
     schedule::Schedule,
     system::{Commands, Query, Res, Resource},
     world::World,
 };
+use bevy_reflect::Reflect;
 use nalgebra::{vector, Matrix4, Point2, Point3, UnitQuaternion, UnitVector3, Vector2, Vector3};
 use winit::window::Window;
 
@@ -111,6 +113,14 @@ pub struct LightComponent {
 
     pub enabled: bool,
     pub shadow_setup: Option<ShadowSetup>,
+}
+
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+pub struct TestComponent {
+    pub num: u32,
+    pub flo: f32,
+    pub stri: String,
 }
 
 #[derive(Resource)]

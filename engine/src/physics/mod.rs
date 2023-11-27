@@ -13,20 +13,20 @@ use crate::components::Transform2D;
 pub struct PhysicsContext2D {
     pub gravity: Vector2<f32>,
 
-    pipeline: PhysicsPipeline,
-    rigid_body_set: RigidBodySet,
-    collider_set: ColliderSet,
-    integration_parameters: IntegrationParameters,
-    island_manager: IslandManager,
-    broad_phase: BroadPhase,
-    narrow_phase: NarrowPhase,
-    impulse_joint_set: ImpulseJointSet,
-    multibody_joint_set: MultibodyJointSet,
-    ccd_solver: CCDSolver,
+    pub(crate) pipeline: PhysicsPipeline,
+    pub(crate) rigid_body_set: RigidBodySet,
+    pub(crate) collider_set: ColliderSet,
+    pub(crate) integration_parameters: IntegrationParameters,
+    pub(crate) island_manager: IslandManager,
+    pub(crate) broad_phase: BroadPhase,
+    pub(crate) narrow_phase: NarrowPhase,
+    pub(crate) impulse_joint_set: ImpulseJointSet,
+    pub(crate) multibody_joint_set: MultibodyJointSet,
+    pub(crate) ccd_solver: CCDSolver,
 }
 
 #[derive(Component, Clone, Copy)]
-pub struct Collider2DHandle(ColliderHandle);
+pub struct Collider2DHandle(pub(crate) ColliderHandle);
 impl AsRef<ColliderHandle> for Collider2DHandle {
     fn as_ref(&self) -> &ColliderHandle {
         &self.0
@@ -34,7 +34,7 @@ impl AsRef<ColliderHandle> for Collider2DHandle {
 }
 
 #[derive(Component, Clone, Copy)]
-pub struct RigidBody2DHandle(RigidBodyHandle);
+pub struct RigidBody2DHandle(pub(crate) RigidBodyHandle);
 impl AsRef<RigidBodyHandle> for RigidBody2DHandle {
     fn as_ref(&self) -> &RigidBodyHandle {
         &self.0

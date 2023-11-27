@@ -1,4 +1,14 @@
-use bevy_ecs::{system::Resource, world::World};
+mod editor_ui;
+mod entity_outliner;
+
+pub mod ui_extension;
+
+use std::any::TypeId;
+
+use bevy_reflect::TypeRegistry;
+pub use editor_ui::EditorUi;
+
+use bevy_ecs::{reflect::ReflectComponent, system::Resource, world::World};
 use egui::{Context, FullOutput};
 use gpu::VkCommandBuffer;
 
@@ -7,13 +17,18 @@ use crate::{
         app_state::{app_state, AppState},
         egui_support::EguiSupport,
     },
-    components::EngineWindow,
+    components::{EngineWindow, TestComponent},
     Plugin,
 };
 
+use self::entity_outliner::EntityOutliner;
+
 pub struct EditorPlugin {
     egui_support: EguiSupport,
+    outliner: EntityOutliner,
+    ui_context: Context,
     output: Option<FullOutput>,
+    type_registry: TypeRegistry,
 }
 
 #[derive(Resource)]
@@ -32,25 +47,34 @@ impl std::ops::DerefMut for EguiContext {
         &mut self.0
     }
 }
-
-impl Plugin for EditorPlugin {
-    fn construct(app: &mut crate::BevyEcsApp) -> Self {
+impl EditorPlugin {
+    pub fn new(app: &mut crate::BevyEcsApp) -> Self {
         let window = app.world.get_resource::<EngineWindow>().unwrap();
 
         let egui_support =
             EguiSupport::new(window, &app_state().gpu, &app_state().swapchain).unwrap();
 
         let context = egui_support.create_context();
-        let context = EguiContext(context);
+        let egui_app_context = EguiContext(context.clone());
 
-        app.world.insert_resource(context);
-
+        app.world.insert_resource(egui_app_context);
+        let mut type_registry = TypeRegistry::new();
+        type_registry.register::<TestComponent>();
+        assert!(type_registry
+            .get(TypeId::of::<TestComponent>())
+            .unwrap()
+            .data::<ReflectComponent>()
+            .is_some());
         Self {
             egui_support,
+            ui_context: context,
+            outliner: EntityOutliner::default(),
             output: None,
+            type_registry,
         }
     }
-
+}
+impl Plugin for EditorPlugin {
     fn on_resize(
         &mut self,
         _world: &mut World,
@@ -81,10 +105,16 @@ impl Plugin for EditorPlugin {
     }
     fn draw(
         &mut self,
-        _world: &mut World,
+        world: &mut World,
         app_state: &mut AppState,
         command_buffer: &mut VkCommandBuffer,
     ) {
+        egui::SidePanel::new(egui::panel::Side::Right, "Outliner Panel").show(
+            &self.ui_context,
+            |ui| {
+                self.outliner.draw(world, ui, &self.type_registry);
+            },
+        );
         if let Some(output) = self.output.take() {
             self.egui_support
                 .paint_frame(output, &app_state.swapchain, command_buffer)
