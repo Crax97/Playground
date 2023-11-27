@@ -1,5 +1,6 @@
 use bevy_ecs::world::World;
 use egui::Ui;
+use rapier2d::dynamics::RigidBody;
 
 use crate::{
     components::Transform2D,
@@ -19,20 +20,42 @@ impl EditorUi for Transform2D {
     }
 
     fn ui(&mut self, _world: &mut World, ui: &mut Ui) {
-        ui.horizontal(|ui| {
+        egui::Grid::new("Transform 2D").show(ui, |ui| {
             ui.label("Location");
             ui.edit_numbers(self.position.coords.data.as_mut_slice());
-        });
-        ui.horizontal(|ui| {
+            ui.end_row();
+
             ui.label("Rotation");
             ui.edit_number(&mut self.rotation);
-        });
-        ui.horizontal_with_label("Layer", |ui| ui.edit_number(&mut self.layer));
-        ui.horizontal(|ui| {
+            ui.end_row();
+
+            ui.label("Layer");
+            ui.edit_number(&mut self.layer);
+            ui.end_row();
+
             ui.label("Scale");
             ui.edit_numbers(self.scale.data.as_mut_slice());
+            ui.end_row();
         });
     }
+}
+
+macro_rules! set_get {
+    ($target:expr, $get:path, $set:path, $ui:expr, $($set_params:expr,)* ) => {{
+        let mut temp = $get($target);
+        if $ui.edit_number(&mut temp).changed {
+            $set($target, temp, $($set_params,)*);
+        }
+    }};
+}
+
+macro_rules! set_get_bool {
+    ($target:expr, $get:path, $set:path, $ui:expr, $($set_params:expr,)* ) => {{
+        let mut temp = $get($target);
+        if $ui.checkbox(&mut temp, "").changed {
+            $set($target, temp, $($set_params,)*);
+        }
+    }};
 }
 
 impl EditorUi for RigidBody2DHandle {
@@ -46,7 +69,45 @@ impl EditorUi for RigidBody2DHandle {
             .rigid_body_set
             .get_mut(self.0)
             .expect("Failed to find Rigidbody 2D");
-        ui.label("Todo Rigidbody 2D");
+        egui::Grid::new("Rigidbody2D").show(ui, |ui| {
+            ui.label("Enabled");
+            set_get_bool!(
+                rigidbody_2d,
+                RigidBody::is_enabled,
+                RigidBody::set_enabled,
+                ui,
+            );
+            ui.end_row();
+
+            ui.label("Gravity Scale");
+            set_get!(
+                rigidbody_2d,
+                RigidBody::mass,
+                RigidBody::set_additional_mass,
+                ui,
+                false,
+            );
+            ui.end_row();
+
+            ui.label("Mass");
+            set_get!(
+                rigidbody_2d,
+                RigidBody::gravity_scale,
+                RigidBody::set_gravity_scale,
+                ui,
+                false,
+            );
+            ui.end_row();
+
+            ui.label("CCD Enabled");
+            set_get_bool!(
+                rigidbody_2d,
+                RigidBody::is_ccd_enabled,
+                RigidBody::enable_ccd,
+                ui,
+            );
+            ui.end_row();
+        });
     }
 }
 

@@ -96,11 +96,14 @@ fn components_ui(
 fn reflect_type_recursive(field: &mut dyn Reflect, ui: &mut Ui) {
     match field.reflect_mut() {
         bevy_reflect::ReflectMut::Struct(stru) => {
-            for i in 0..stru.field_len() {
-                ui.label(stru.name_at(i).unwrap());
-                let field = stru.field_at_mut(i).unwrap();
-                reflect_type_recursive(field, ui);
-            }
+            egui::Grid::new(stru.reflect_type_path()).show(ui, |ui| {
+                for i in 0..stru.field_len() {
+                    ui.label(stru.name_at(i).unwrap());
+                    let field = stru.field_at_mut(i).unwrap();
+                    reflect_type_recursive(field, ui);
+                    ui.end_row();
+                }
+            });
         }
         bevy_reflect::ReflectMut::TupleStruct(_) => todo!(),
         bevy_reflect::ReflectMut::Tuple(_) => todo!(),

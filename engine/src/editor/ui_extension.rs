@@ -1,8 +1,8 @@
-use egui::{emath::Numeric, Ui, Widget, WidgetText};
+use egui::{emath::Numeric, Response, Ui, Widget, WidgetText};
 
 pub trait UiExtension {
     fn edit_numbers<N: Numeric>(&mut self, numbers: &mut [N]);
-    fn edit_number<N: Numeric>(&mut self, number: &mut N);
+    fn edit_number<N: Numeric>(&mut self, number: &mut N) -> Response;
     fn horizontal_with_label<R, F: FnOnce(&mut Ui) -> R>(
         &mut self,
         label: impl Into<WidgetText>,
@@ -28,7 +28,7 @@ impl UiExtension for Ui {
             }
         });
     }
-    fn edit_number<N: Numeric>(&mut self, number: &mut N) {
-        egui::DragValue::new(number).ui(self);
+    fn edit_number<N: Numeric>(&mut self, number: &mut N) -> Response {
+        self.add(egui::DragValue::new(number).update_while_editing(false))
     }
 }
