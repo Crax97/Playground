@@ -10,7 +10,6 @@ pub use editor_ui::EditorUi;
 
 use bevy_ecs::{
     component::Component,
-    reflect::ReflectComponent,
     system::Resource,
     world::{EntityWorldMut, World},
 };
@@ -23,7 +22,7 @@ use crate::{
         app_state::{app_state, AppState},
         egui_support::EguiSupport,
     },
-    components::{EngineWindow, TestComponent, Transform2D},
+    components::{DebugName, EngineWindow, Transform2D},
     physics::{Collider2DHandle, RigidBody2DHandle},
     BevyEcsApp, Plugin,
 };
@@ -41,6 +40,7 @@ pub struct EditorPlugin {
     output: Option<FullOutput>,
     type_registry: TypeRegistry,
     with_custom_editor: HashMap<TypeId, Box<dyn FnMut(&mut EntityWorldMut, &mut Ui)>>,
+    test: String,
 }
 
 #[derive(Resource)]
@@ -101,12 +101,7 @@ impl EditorPlugin {
 
         app.world.insert_resource(egui_app_context);
         let mut type_registry = TypeRegistry::new();
-        type_registry.register::<TestComponent>();
-        assert!(type_registry
-            .get(TypeId::of::<TestComponent>())
-            .unwrap()
-            .data::<ReflectComponent>()
-            .is_some());
+        type_registry.register::<DebugName>();
         Self {
             egui_support,
             ui_context: context,
@@ -114,6 +109,7 @@ impl EditorPlugin {
             output: None,
             type_registry,
             with_custom_editor: builder.with_custom_editor,
+            test: String::default(),
         }
     }
 }
@@ -137,21 +133,12 @@ impl Plugin for EditorPlugin {
     fn pre_update(&mut self, world: &mut World) {
         let window = world.get_resource::<EngineWindow>().unwrap();
         self.egui_support.begin_frame(window);
-        let context = self.egui_support.create_context();
-        egui::Window::new("Important message!").show(&context, |ui| {
+        egui::Window::new("Important message!").show(&self.ui_context, |ui| {
             ui.label("Hiiiiii");
+            ui.text_edit_singleline(&mut self.test);
         });
     }
     fn post_update(&mut self, world: &mut World) {
-        let window = world.get_resource::<EngineWindow>().unwrap();
-        self.output = Some(self.egui_support.end_frame(window));
-    }
-    fn draw(
-        &mut self,
-        world: &mut World,
-        app_state: &mut AppState,
-        command_buffer: &mut VkCommandBuffer,
-    ) {
         egui::SidePanel::new(egui::panel::Side::Right, "Outliner Panel").show(
             &self.ui_context,
             |ui| {
@@ -159,6 +146,15 @@ impl Plugin for EditorPlugin {
                     .draw(&mut self.with_custom_editor, world, ui, &self.type_registry);
             },
         );
+    }
+    fn draw(
+        &mut self,
+        world: &mut World,
+        app_state: &mut AppState,
+        command_buffer: &mut VkCommandBuffer,
+    ) {
+        let window = world.get_resource::<EngineWindow>().unwrap();
+        self.output = Some(self.egui_support.end_frame(window));
         if let Some(output) = self.output.take() {
             self.egui_support
                 .paint_frame(output, &app_state.swapchain, command_buffer)

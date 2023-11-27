@@ -64,7 +64,7 @@ impl GltfLoader {
 
     fn build_engine_scene(
         document: Document,
-        allocated_materials: Vec<ResourceHandle<MaterialInstance>>,
+        allocated_materials: Vec<MaterialInstance>,
         meshes: Vec<ResourceHandle<Mesh>>,
     ) -> Scene {
         let mut engine_scene = Scene::new();
@@ -436,7 +436,7 @@ impl GltfLoader {
         pbr_master: ResourceHandle<MasterMaterial>,
         textures: LoadedTextures,
         document: &Document,
-    ) -> anyhow::Result<Vec<ResourceHandle<MaterialInstance>>> {
+    ) -> anyhow::Result<Vec<MaterialInstance>> {
         let LoadedTextures {
             white,
             black,
@@ -474,12 +474,12 @@ impl GltfLoader {
                 white.clone()
             };
 
-            let mut texture_inputs = HashMap::new();
-            texture_inputs.insert("base_texture".to_owned(), base_texture.clone());
-            texture_inputs.insert("normal_texture".to_owned(), normal_texture.clone());
-            texture_inputs.insert("occlusion_texture".to_owned(), occlusion_texture.clone());
-            texture_inputs.insert("emissive_texture".to_owned(), emissive_texture.clone());
-            texture_inputs.insert("metallic_roughness".to_owned(), metallic_roughness.clone());
+            let mut textures = vec![];
+            textures.push(base_texture.clone());
+            textures.push(normal_texture.clone());
+            textures.push(occlusion_texture.clone());
+            textures.push(emissive_texture.clone());
+            textures.push(metallic_roughness.clone());
 
             let material_instance = MaterialInstance::create_instance(
                 gpu,
@@ -490,7 +490,7 @@ impl GltfLoader {
                         "PbrMaterial Instance #{}",
                         gltf_material.index().unwrap_or(0)
                     ),
-                    texture_inputs,
+                    textures,
                 },
             )?;
             let metallic = gltf_material.pbr_metallic_roughness().metallic_factor();
@@ -506,7 +506,6 @@ impl GltfLoader {
                     emissive_color: vector![emissive[0], emissive[1], emissive[2], 1.0],
                 },
             )?;
-            let material_instance = resource_map.add(material_instance);
             allocated_materials.push(material_instance);
         }
 

@@ -1,6 +1,5 @@
+use crate::resource_map::{ResourceHandle, ResourceMap};
 use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, Handle, MemoryDomain, VkGpu};
-use crate::resource_map::{Resource, ResourceHandle, ResourceMap};
-use std::collections::HashMap;
 
 use crate::{texture::Texture, utils::to_u8_slice};
 
@@ -9,22 +8,16 @@ use super::master_material::MasterMaterial;
 #[derive(Clone)]
 pub struct MaterialInstanceDescription<'a> {
     pub name: &'a str,
-    pub texture_inputs: HashMap<String, ResourceHandle<Texture>>,
+    pub textures: Vec<ResourceHandle<Texture>>,
 }
 
+#[derive(Clone, Debug)]
 pub struct MaterialInstance {
-    pub(crate) name: String,
     pub(crate) owner: ResourceHandle<MasterMaterial>,
     pub(crate) parameter_buffer: BufferHandle,
     #[allow(dead_code)]
-    pub(crate) current_inputs: HashMap<String, ResourceHandle<Texture>>,
+    pub(crate) textures: Vec<ResourceHandle<Texture>>,
     pub(crate) parameter_block_size: usize,
-}
-
-impl Resource for MaterialInstance {
-    fn get_description(&self) -> &str {
-        "Material Instance"
-    }
 }
 
 impl MaterialInstance {
@@ -49,10 +42,9 @@ impl MaterialInstance {
             BufferHandle::null()
         };
         Ok(MaterialInstance {
-            name: description.name.to_owned(),
             owner,
             parameter_buffer,
-            current_inputs: description.texture_inputs.clone(),
+            textures: description.textures.clone(),
             parameter_block_size: master_owner.parameter_block_size,
         })
     }

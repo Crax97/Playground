@@ -12,10 +12,11 @@ use bevy_ecs::{
     world::World,
 };
 use bevy_reflect::Reflect;
+use gpu::{BufferHandle, Handle};
 use nalgebra::{vector, Matrix4, Point2, Point3, UnitQuaternion, UnitVector3, Vector2, Vector3};
 use winit::window::Window;
 
-use crate::{MaterialInstance, Mesh};
+use crate::{MasterMaterial, MaterialInstance, Mesh};
 
 #[derive(Resource)]
 pub struct EngineWindow(pub(crate) Window);
@@ -33,6 +34,10 @@ impl DerefMut for EngineWindow {
         &mut self.0
     }
 }
+
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+pub struct DebugName(pub String);
 
 #[derive(Component)]
 pub struct Transform {
@@ -95,12 +100,13 @@ impl Transform2D {
 #[derive(Component)]
 pub struct MeshComponent {
     pub mesh: ResourceHandle<Mesh>,
-    pub materials: Vec<ResourceHandle<MaterialInstance>>,
+    pub materials: Vec<MaterialInstance>,
 }
 
 #[derive(Component)]
 pub struct SpriteComponent {
-    pub material: ResourceHandle<MaterialInstance>,
+    pub texture: ResourceHandle<Texture>,
+    pub material: ResourceHandle<MasterMaterial>,
     pub z_layer: u32,
 }
 
@@ -125,7 +131,7 @@ pub struct TestComponent {
 
 #[derive(Resource)]
 pub struct SceneSetup {
-    pub skybox_material: Option<ResourceHandle<MaterialInstance>>,
+    pub skybox_material: Option<MaterialInstance>,
     pub skybox_texture: Option<ResourceHandle<Texture>>,
 }
 
@@ -174,9 +180,15 @@ pub fn rendering_system_2d(
         scene.set_skybox_texture(setup.skybox_texture.clone());
     }
     for (sprite_component, transform) in sprites.iter() {
+        let material_instance = MaterialInstance {
+            owner: sprite_component.material.clone(),
+            parameter_buffer: BufferHandle::null(),
+            textures: vec![sprite_component.texture.clone()],
+            parameter_block_size: 0,
+        };
         scene.add(crate::ScenePrimitive {
             mesh: common_resources.quad_mesh.clone(),
-            materials: vec![sprite_component.material.clone()],
+            materials: vec![material_instance],
             transform: transform.matrix(),
         });
     }

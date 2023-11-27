@@ -4,8 +4,6 @@ mod utils;
 
 use std::collections::HashMap;
 
-use std::num::NonZeroU32;
-
 use engine::app::{app_state::*, bootstrap, App, ImguiConsole};
 use engine::Time;
 
@@ -25,9 +23,8 @@ use winit::{
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::input::key::Key;
 use engine::{
-    post_process_pass::FxaaPass, Backbuffer, CvarManager, DeferredRenderingPipeline, Light,
-    LightHandle, LightType, MaterialInstance, RenderingPipeline, ResourceMap, ShadowSetup,
-    TextureInput,
+    post_process_pass::FxaaPass, Backbuffer, CvarManager, DeferredRenderingPipeline, LightHandle,
+    MaterialInstance, RenderingPipeline, ResourceMap, TextureInput,
 };
 use nalgebra::*;
 use winit::event::MouseButton;
@@ -290,8 +287,8 @@ impl App for GLTFViewer {
         )?;
         let skybox_master = resource_map.add(skybox_material);
 
-        let mut skybox_textures = HashMap::new();
-        skybox_textures.insert("Cubemap".to_string(), david_texture);
+        let mut skybox_textures = vec![];
+        skybox_textures.push(david_texture);
 
         let skybox_instance = MaterialInstance::create_instance(
             &app_state.gpu,
@@ -299,10 +296,9 @@ impl App for GLTFViewer {
             &resource_map,
             &engine::MaterialInstanceDescription {
                 name: "david skybox",
-                texture_inputs: skybox_textures,
+                textures: skybox_textures,
             },
         )?;
-        let skybox_instance = resource_map.add(skybox_instance);
 
         let mut gltf_loader = GltfLoader::load(
             &args.gltf_file,

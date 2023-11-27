@@ -70,7 +70,6 @@ impl ResourceLoader for BitmapLevelLoader {
                 });
             }
         }
-
         Ok(level)
     }
 }

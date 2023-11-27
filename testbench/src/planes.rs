@@ -1,7 +1,5 @@
 mod utils;
 
-use std::collections::HashMap;
-
 use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App};
 
@@ -149,8 +147,8 @@ impl App for PlanesApp {
             },
         )?;
 
-        let mut texture_inputs = HashMap::new();
-        texture_inputs.insert("texSampler".to_owned(), texture);
+        let mut texture_inputs = Vec::new();
+        texture_inputs.push(texture);
         let material = resource_map.add(master);
         let mat_instance = MaterialInstance::create_instance(
             &app_state.gpu,
@@ -158,10 +156,9 @@ impl App for PlanesApp {
             &resource_map,
             &MaterialInstanceDescription {
                 name: "simple inst",
-                texture_inputs,
+                textures: texture_inputs,
             },
         )?;
-        let mat_instance = resource_map.add(mat_instance);
 
         app_state_mut()
             .swapchain_mut()

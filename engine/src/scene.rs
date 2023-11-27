@@ -19,7 +19,7 @@ use crate::{mesh::Mesh, Camera, MasterMaterial, MaterialDescription, MaterialIns
 #[derive(Clone)]
 pub struct ScenePrimitive {
     pub mesh: ResourceHandle<Mesh>,
-    pub materials: Vec<ResourceHandle<MaterialInstance>>,
+    pub materials: Vec<MaterialInstance>,
     pub transform: Matrix4<f32>,
 }
 
@@ -180,7 +180,7 @@ pub struct Scene {
     pub primitives: Vec<ScenePrimitive>,
     pub lights: Vec<Light>,
 
-    skybox_material: Option<ResourceHandle<MaterialInstance>>,
+    skybox_material: Option<MaterialInstance>,
     skybox_texture: Option<ResourceHandle<Texture>>,
     current_lights_iteration: u64,
 }
@@ -194,7 +194,7 @@ impl Scene {
         &self.skybox_texture
     }
 
-    pub fn get_skybox_material(&self) -> &Option<ResourceHandle<MaterialInstance>> {
+    pub fn get_skybox_material(&self) -> &Option<MaterialInstance> {
         &self.skybox_material
     }
 }
@@ -254,10 +254,7 @@ impl Scene {
         self.skybox_texture = new_skybox_texture;
     }
 
-    pub fn set_skybox_material(
-        &mut self,
-        new_skybox_material: Option<ResourceHandle<MaterialInstance>>,
-    ) {
+    pub fn set_skybox_material(&mut self, new_skybox_material: Option<MaterialInstance>) {
         self.skybox_material = new_skybox_material;
     }
 }

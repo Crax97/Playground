@@ -1,22 +1,17 @@
 mod bitmap_level;
 
-use std::collections::HashMap;
-
-use bitmap_level::{BitmapLevel, BitmapLevelLoader};
+use bitmap_level::{BitmapLevel, BitmapLevelLoader, EntityType};
 use engine::app::app_state::app_state;
 use engine::bevy_ecs::query::With;
 use engine::bevy_ecs::schedule::IntoSystemConfigs;
 use engine::bevy_ecs::system::{Query, Res, ResMut};
-use engine::components::{EngineWindow, SpriteComponent, TestComponent, Transform2D};
+use engine::components::{DebugName, EngineWindow, SpriteComponent, TestComponent, Transform2D};
 use engine::editor::{EditorPlugin, EditorPluginBuilder};
 use engine::input::InputState;
 use engine::physics::rapier2d::dynamics::RigidBodyBuilder;
 use engine::physics::rapier2d::geometry::{ColliderBuilder, SharedShape};
 use engine::physics::PhysicsContext2D;
-use engine::{
-    bevy_ecs, Camera, CommonResources, DeferredRenderingPipeline, MaterialInstance,
-    MaterialInstanceDescription, ResourceMap, Texture,
-};
+use engine::{bevy_ecs, Camera, CommonResources, DeferredRenderingPipeline, ResourceMap, Texture};
 use engine::{
     bevy_ecs::{component::Component, system::Commands},
     BevyEcsApp,
@@ -25,9 +20,6 @@ use nalgebra::{point, vector};
 
 #[derive(Component)]
 pub struct Player;
-
-#[derive(Component, Debug)]
-pub struct Name(String);
 
 fn main() -> anyhow::Result<()> {
     let mut app = BevyEcsApp::new()?;
@@ -43,8 +35,7 @@ fn main() -> anyhow::Result<()> {
 
     app.renderer().set_early_z_enabled(false);
 
-    app.startup_schedule()
-        .add_systems((load_level_system, setup_player_system));
+    app.startup_schedule().add_systems(load_level_system);
 
     app.update_schedule()
         .add_systems((camera_system.after(move_player), move_player));
@@ -66,12 +57,20 @@ fn camera_system(mut commands: Commands, window: Res<EngineWindow>) {
     ));
 }
 
-fn load_level_system(mut resource_map: ResMut<ResourceMap>, mut commands: Commands) {
+fn load_level_system(
+    mut resource_map: ResMut<ResourceMap>,
+    common_resources: Res<CommonResources>,
+    mut commands: Commands,
+) {
     let level = resource_map
         .load::<BitmapLevel>(&app_state().gpu, "images/levels/test_level.bmp")
         .unwrap();
-    let level = resource_map.get(&level);
 
+    let texture = resource_map
+        .load(&app_state().gpu, "images/apple.png")
+        .unwrap();
+
+    let level = resource_map.get(&level);
     for entity in &level.entities {
         match entity.ty {
             bitmap_level::EntityType::Player => {}
@@ -81,106 +80,23 @@ fn load_level_system(mut resource_map: ResMut<ResourceMap>, mut commands: Comman
             bitmap_level::EntityType::Star => {}
             bitmap_level::EntityType::Platform => {}
         }
-    }
-}
 
-fn setup_player_system(
-    mut resource_map: ResMut<ResourceMap>,
-    mut phys_context: ResMut<PhysicsContext2D>,
-    common_resources: Res<CommonResources>,
-    mut commands: Commands,
-) {
-    {
-        let texture = resource_map
-            .load::<Texture>(&app_state().gpu, "images/apple.png")
-            .unwrap();
-
-        let mut texture_inputs = HashMap::new();
-        texture_inputs.insert("texSampler".to_owned(), texture);
-
-        let material = MaterialInstance::create_instance(
-            &app_state().gpu,
-            common_resources.default_material_transparency.clone(),
-            &resource_map,
-            &MaterialInstanceDescription {
-                name: "Spriteee",
-                texture_inputs,
+        let mut entity_spawned = commands.spawn((
+            Transform2D {
+                position: point![entity.x as f32, entity.y as f32] * 0.64,
+                layer: 0,
+                rotation: 0.0,
+                scale: vector![1.0, 1.0],
             },
-        )
-        .unwrap();
-
-        let material = resource_map.add(material);
-
-        let transform = Transform2D::default();
-
-        let rigid_body = RigidBodyBuilder::dynamic().build();
-
-        let collider = ColliderBuilder::new(SharedShape::ball(0.5))
-            .restitution(0.7)
-            .build();
-        let body_handle = phys_context.add_rigidbody(rigid_body);
-        let collider_handle = phys_context.add_collider_with_parent(collider, body_handle);
-        // let collider_handle = phys_context.add_collider(collider);
-
-        commands.spawn((
             SpriteComponent {
-                material,
+                texture: texture.clone(),
+                material: common_resources.default_material_transparency.clone(),
                 z_layer: 0,
             },
-            transform,
-            body_handle,
-            collider_handle,
-            TestComponent {
-                num: 12,
-                flo: 42.0,
-                stri: "Hello".to_owned(),
-            },
-            Player,
         ));
-    }
-
-    {
-        let texture = resource_map
-            .load::<Texture>(&app_state().gpu, "images/texture.jpg")
-            .unwrap();
-
-        let mut texture_inputs = HashMap::new();
-        texture_inputs.insert("texSampler".to_owned(), texture);
-
-        let material = MaterialInstance::create_instance(
-            &app_state().gpu,
-            common_resources.default_material.clone(),
-            &resource_map,
-            &MaterialInstanceDescription {
-                name: "Spriteee",
-                texture_inputs,
-            },
-        )
-        .unwrap();
-
-        let material = resource_map.add(material);
-
-        let transform = Transform2D {
-            position: point![0.0, -3.0],
-            rotation: 0.0,
-            scale: vector![1.0, 1.0],
-            layer: 100,
-        };
-
-        let collider = ColliderBuilder::new(SharedShape::cuboid(6.0, 6.0))
-            .sensor(false)
-            .translation(vector![0.0, -10.0 + 1.5])
-            .build();
-        let collider_handle = phys_context.add_collider(collider);
-
-        commands.spawn((
-            SpriteComponent {
-                material,
-                z_layer: 100,
-            },
-            transform,
-            collider_handle,
-        ));
+        if entity.ty == EntityType::Player {
+            entity_spawned.insert((Player, DebugName("Player".to_owned())));
+        }
     }
 }
 

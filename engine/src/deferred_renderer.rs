@@ -286,7 +286,7 @@ struct FrameBuffers {
 struct DrawCall<'a> {
     prim: &'a MeshPrimitive,
     transform: Matrix4<f32>,
-    material: ResourceHandle<MaterialInstance>,
+    material: MaterialInstance,
 }
 
 impl DeferredRenderingPipeline {
@@ -444,16 +444,8 @@ impl DeferredRenderingPipeline {
             {
                 bind_master_material(master, pipeline_target, render_pass, frame_buffers);
 
-                for (idx, draw_call) in material_draw_calls.iter().enumerate() {
+                for draw_call in material_draw_calls.iter() {
                     let material = &draw_call.material;
-                    let material = resource_map.get(material);
-                    let draw_label = render_pass.begin_debug_region(
-                        &format!(
-                            "{} - {}, total primitives rendered {total_primitives_rendered}",
-                            material.name, idx
-                        ),
-                        [0.0, 0.3, 0.4, 1.0],
-                    );
                     draw_mesh_primitive(
                         render_pass,
                         material,
@@ -463,7 +455,6 @@ impl DeferredRenderingPipeline {
                         resource_map,
                         camera_index,
                     )?;
-                    draw_label.end();
                     total_primitives_rendered += 1;
                 }
             }
@@ -488,13 +479,12 @@ impl DeferredRenderingPipeline {
         for primitive in scene.primitives.iter() {
             let mesh = resource_map.get(&primitive.mesh);
             for (idx, mesh_prim) in mesh.primitives.iter().enumerate() {
-                let material_handle = primitive.materials[idx].clone();
-                let material = resource_map.get(&material_handle);
+                let material = primitive.materials[idx].clone();
                 let master = resource_map.get(&material.owner);
                 draw_hashmap.entry(master).or_default().push(DrawCall {
                     prim: mesh_prim,
                     transform: primitive.transform,
-                    material: material_handle,
+                    material,
                 });
             }
         }
@@ -1049,7 +1039,6 @@ impl DeferredRenderingPipeline {
             }
 
             if let Some(material) = scene.get_skybox_material() {
-                let material = resource_map.get(material);
                 let cube_mesh = resource_map.get(&self.cube_mesh);
                 let skybox_master = resource_map.get(&material.owner);
                 bind_master_material(
@@ -1487,7 +1476,7 @@ fn draw_mesh_primitive(
             .iter()
             .enumerate()
             .map(|(i, tex_info)| {
-                let texture_parameter = &material.current_inputs[&tex_info.name];
+                let texture_parameter = &material.textures[i];
                 let tex = resource_map.get(texture_parameter);
 
                 Binding {
