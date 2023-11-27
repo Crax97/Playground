@@ -1,4 +1,11 @@
-use bevy_ecs::{component::Component, entity::Entity, reflect::ReflectComponent, world::World};
+use std::any::TypeId;
+
+use bevy_ecs::{
+    component::Component,
+    entity::Entity,
+    reflect::ReflectComponent,
+    world::{EntityWorldMut, World},
+};
 use bevy_reflect::{Reflect, TypeRegistry};
 use egui::Ui;
 
@@ -6,6 +13,7 @@ use crate::{
     components::Transform2D,
     physics::{Collider2DHandle, RigidBody2DHandle},
 };
+use std::collections::HashMap;
 
 use super::{ui_extension::UiExtension, EditorUi};
 
@@ -15,7 +23,16 @@ pub(super) struct EntityOutliner {
 }
 
 impl EntityOutliner {
-    pub(super) fn draw(&mut self, world: &mut World, ui: &mut Ui, registry: &TypeRegistry) {
+    pub(super) fn draw(
+        &mut self,
+        components_with_custom_ui: &mut HashMap<
+            TypeId,
+            Box<dyn FnMut(&mut EntityWorldMut, &mut Ui)>,
+        >,
+        world: &mut World,
+        ui: &mut Ui,
+        registry: &TypeRegistry,
+    ) {
         ui.label("Entity outliner");
         ui.group(|ui| {
             for entity in world.iter_entities().map(|e| e.id()) {
@@ -35,7 +52,7 @@ impl EntityOutliner {
             try_edit_type::<Transform2D>(entity, world, ui);
             try_edit_type::<RigidBody2DHandle>(entity, world, ui);
             try_edit_type::<Collider2DHandle>(entity, world, ui);
-            dynamic_components_ui(entity, world, ui, registry);
+            components_ui(components_with_custom_ui, entity, world, ui, registry);
         }
     }
 }
@@ -50,11 +67,26 @@ fn try_edit_type<T: EditorUi + Component>(entity: Entity, world: &mut World, ui:
     }
 }
 
-fn dynamic_components_ui(entity: Entity, world: &mut World, ui: &mut Ui, registry: &TypeRegistry) {
+fn components_ui(
+    components_with_custom_ui: &mut HashMap<TypeId, Box<dyn FnMut(&mut EntityWorldMut, &mut Ui)>>,
+    entity: Entity,
+    world: &mut World,
+    ui: &mut Ui,
+    registry: &TypeRegistry,
+) {
     let mut entity_mut = world.entity_mut(entity);
     for ty in registry.iter() {
-        if let Some(reflect_component) = ty.data::<ReflectComponent>() {
+        if let Some(component_func) = components_with_custom_ui.get_mut(&ty.type_id()) {
+            component_func(&mut entity_mut, ui);
+        } else if let Some(reflect_component) = ty.data::<ReflectComponent>() {
             if let Some(mut component) = reflect_component.reflect_mut(&mut entity_mut) {
+                let component_name = component
+                    .get_represented_type_info()
+                    .unwrap()
+                    .type_path_table()
+                    .ident()
+                    .unwrap();
+                ui.heading(component_name);
                 reflect_type_recursive(component.as_reflect_mut(), ui);
             }
         }

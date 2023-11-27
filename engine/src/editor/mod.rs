@@ -8,20 +8,31 @@ use std::any::TypeId;
 use bevy_reflect::TypeRegistry;
 pub use editor_ui::EditorUi;
 
-use bevy_ecs::{reflect::ReflectComponent, system::Resource, world::World};
-use egui::{Context, FullOutput};
+use bevy_ecs::{
+    component::Component,
+    reflect::ReflectComponent,
+    system::Resource,
+    world::{EntityWorldMut, World},
+};
+use egui::{Context, FullOutput, Ui};
 use gpu::VkCommandBuffer;
+use std::collections::HashMap;
 
 use crate::{
     app::{
         app_state::{app_state, AppState},
         egui_support::EguiSupport,
     },
-    components::{EngineWindow, TestComponent},
-    Plugin,
+    components::{EngineWindow, TestComponent, Transform2D},
+    physics::{Collider2DHandle, RigidBody2DHandle},
+    BevyEcsApp, Plugin,
 };
 
 use self::entity_outliner::EntityOutliner;
+
+pub struct EditorPluginBuilder {
+    with_custom_editor: HashMap<TypeId, Box<dyn FnMut(&mut EntityWorldMut, &mut Ui)>>,
+}
 
 pub struct EditorPlugin {
     egui_support: EguiSupport,
@@ -29,6 +40,7 @@ pub struct EditorPlugin {
     ui_context: Context,
     output: Option<FullOutput>,
     type_registry: TypeRegistry,
+    with_custom_editor: HashMap<TypeId, Box<dyn FnMut(&mut EntityWorldMut, &mut Ui)>>,
 }
 
 #[derive(Resource)]
@@ -47,8 +59,38 @@ impl std::ops::DerefMut for EguiContext {
         &mut self.0
     }
 }
+
+impl EditorPluginBuilder {
+    pub fn new() -> Self {
+        let mut builder = Self {
+            with_custom_editor: HashMap::new(),
+        };
+        builder
+            .add_custom_editor::<Transform2D>()
+            .add_custom_editor::<RigidBody2DHandle>()
+            .add_custom_editor::<Collider2DHandle>();
+        builder
+    }
+
+    pub fn add_custom_editor<T: Component + EditorUi>(&mut self) -> &mut Self {
+        let func = |entity: &mut EntityWorldMut, ui: &mut Ui| {
+            let world_ptr = unsafe { entity.world_mut() } as *mut World;
+            if let Some(mut component) = entity.get_mut::<T>() {
+                component.ui(unsafe { world_ptr.as_mut().unwrap() }, ui);
+            }
+        };
+        self.with_custom_editor
+            .insert(TypeId::of::<T>(), Box::new(func));
+        self
+    }
+
+    pub fn build(self, app: &mut BevyEcsApp) -> EditorPlugin {
+        EditorPlugin::new(app, self)
+    }
+}
+
 impl EditorPlugin {
-    pub fn new(app: &mut crate::BevyEcsApp) -> Self {
+    fn new(app: &mut crate::BevyEcsApp, builder: EditorPluginBuilder) -> Self {
         let window = app.world.get_resource::<EngineWindow>().unwrap();
 
         let egui_support =
@@ -71,6 +113,7 @@ impl EditorPlugin {
             outliner: EntityOutliner::default(),
             output: None,
             type_registry,
+            with_custom_editor: builder.with_custom_editor,
         }
     }
 }
@@ -112,7 +155,8 @@ impl Plugin for EditorPlugin {
         egui::SidePanel::new(egui::panel::Side::Right, "Outliner Panel").show(
             &self.ui_context,
             |ui| {
-                self.outliner.draw(world, ui, &self.type_registry);
+                self.outliner
+                    .draw(&mut self.with_custom_editor, world, ui, &self.type_registry);
             },
         );
         if let Some(output) = self.output.take() {

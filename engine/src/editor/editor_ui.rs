@@ -8,7 +8,7 @@ use crate::{
 
 use super::ui_extension::UiExtension;
 
-pub trait EditorUi {
+pub trait EditorUi: 'static {
     fn name(&self) -> &'static str;
     fn ui(&mut self, world: &mut World, ui: &mut Ui);
 }
