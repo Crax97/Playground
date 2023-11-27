@@ -3,7 +3,7 @@ use std::ops::{Deref, DerefMut};
 use bevy_ecs::{
     schedule::{IntoSystemConfigs, Schedule, ScheduleLabel},
     system::Resource,
-    world::World,
+    world::{Mut, World},
 };
 use engine_macros::glsl;
 use gpu::{Gpu, ShaderModuleCreateInfo, ShaderStage, VkCommandBuffer};
@@ -122,6 +122,10 @@ impl BevyEcsApp {
 
     pub fn renderer(&mut self) -> &mut DeferredRenderingPipeline {
         &mut self.renderer
+    }
+
+    pub fn resource_map(&mut self) -> Mut<'_, ResourceMap> {
+        self.world.get_resource_mut::<ResourceMap>().unwrap()
     }
 
     pub fn startup_schedule(&mut self) -> &mut Schedule {

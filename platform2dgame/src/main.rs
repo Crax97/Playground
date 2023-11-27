@@ -1,5 +1,8 @@
+mod bitmap_level;
+
 use std::collections::HashMap;
 
+use bitmap_level::{BitmapLevel, BitmapLevelLoader};
 use engine::app::app_state::app_state;
 use engine::bevy_ecs::query::With;
 use engine::bevy_ecs::schedule::IntoSystemConfigs;
@@ -35,10 +38,13 @@ fn main() -> anyhow::Result<()> {
         )?);
 
     app.setup_2d();
+    app.resource_map()
+        .install_resource_loader(BitmapLevelLoader);
 
     app.renderer().set_early_z_enabled(false);
 
-    app.startup_schedule().add_systems(setup_player_system);
+    app.startup_schedule()
+        .add_systems((load_level_system, setup_player_system));
 
     app.update_schedule()
         .add_systems((camera_system.after(move_player), move_player));
@@ -58,6 +64,24 @@ fn camera_system(mut commands: Commands, window: Res<EngineWindow>) {
         0.0001,
         1000.0,
     ));
+}
+
+fn load_level_system(mut resource_map: ResMut<ResourceMap>, mut commands: Commands) {
+    let level = resource_map
+        .load::<BitmapLevel>(&app_state().gpu, "images/levels/test_level.bmp")
+        .unwrap();
+    let level = resource_map.get(&level);
+
+    for entity in &level.entities {
+        match entity.ty {
+            bitmap_level::EntityType::Player => {}
+            bitmap_level::EntityType::Enemy => {}
+            bitmap_level::EntityType::Terrain => {}
+            bitmap_level::EntityType::Grass => {}
+            bitmap_level::EntityType::Star => {}
+            bitmap_level::EntityType::Platform => {}
+        }
+    }
 }
 
 fn setup_player_system(
