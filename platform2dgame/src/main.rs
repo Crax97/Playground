@@ -5,7 +5,10 @@ use engine::app::app_state::app_state;
 use engine::bevy_ecs::query::With;
 use engine::bevy_ecs::schedule::IntoSystemConfigs;
 use engine::bevy_ecs::system::{Query, Res, ResMut};
-use engine::components::{DebugName, EngineWindow, SpriteComponent, TestComponent, Transform2D};
+use engine::components::{
+    DebugName, EngineWindow, SpriteComponent, SpriteComponentDescription, TestComponent,
+    Transform2D,
+};
 use engine::editor::{EditorPlugin, EditorPluginBuilder};
 use engine::input::InputState;
 use engine::physics::rapier2d::dynamics::RigidBodyBuilder;
@@ -46,15 +49,19 @@ fn main() -> anyhow::Result<()> {
     app.run()
 }
 
-fn camera_system(mut commands: Commands, window: Res<EngineWindow>) {
+fn camera_system(
+    mut commands: Commands,
+    window: Res<EngineWindow>,
+    player_query: Query<(&Transform2D, With<Player>)>,
+) {
+    let player_transf = player_query.single().0;
     let size = window.inner_size().cast::<f32>();
     let aspect = size.width / size.height;
-    commands.insert_resource(Camera::new_orthographic(
-        10.0 * aspect,
-        10.0,
-        0.0001,
-        1000.0,
-    ));
+    commands.insert_resource({
+        let mut camera = Camera::new_orthographic(10.0 * aspect, 10.0, 0.0001, 1000.0);
+        camera.location = point![player_transf.position.x, player_transf.position.y, 0.0];
+        camera
+    });
 }
 
 fn load_level_system(
@@ -66,20 +73,21 @@ fn load_level_system(
         .load::<BitmapLevel>(&app_state().gpu, "images/levels/test_level.bmp")
         .unwrap();
 
-    let texture = resource_map
-        .load(&app_state().gpu, "images/apple.png")
+    let entities = resource_map
+        .load(&app_state().gpu, "images/sprites/entities.png")
         .unwrap();
 
     let level = resource_map.get(&level);
     for entity in &level.entities {
-        match entity.ty {
-            bitmap_level::EntityType::Player => {}
-            bitmap_level::EntityType::Enemy => {}
-            bitmap_level::EntityType::Terrain => {}
-            bitmap_level::EntityType::Grass => {}
-            bitmap_level::EntityType::Star => {}
-            bitmap_level::EntityType::Platform => {}
-        }
+        let entity_sprite_offset = match entity.ty {
+            bitmap_level::EntityType::Player => 2,
+            bitmap_level::EntityType::Enemy => 4,
+            bitmap_level::EntityType::Terrain => 0,
+            bitmap_level::EntityType::Grass => 1,
+            bitmap_level::EntityType::Star => 3,
+            bitmap_level::EntityType::Platform => 5,
+        };
+        const SPRITE_SIZE: u32 = 8;
 
         let mut entity_spawned = commands.spawn((
             Transform2D {
@@ -88,11 +96,13 @@ fn load_level_system(
                 rotation: 0.0,
                 scale: vector![1.0, 1.0],
             },
-            SpriteComponent {
-                texture: texture.clone(),
-                material: common_resources.default_material_transparency.clone(),
+            SpriteComponent::new(SpriteComponentDescription {
+                texture: entities.clone(),
+                material: common_resources.default_sprite_material.clone(),
+                sprite_offset: vector![entity_sprite_offset * SPRITE_SIZE, 0],
+                sprite_size: vector![SPRITE_SIZE, SPRITE_SIZE],
                 z_layer: 0,
-            },
+            }),
         ));
         if entity.ty == EntityType::Player {
             entity_spawned.insert((Player, DebugName("Player".to_owned())));

@@ -64,8 +64,8 @@ impl ResourceLoader for BitmapLevelLoader {
                 };
 
                 level.entities.push(Entity {
-                    x: x as _,
-                    y: y as _,
+                    x: bitmap_image.width() - x as u32,
+                    y: bitmap_image.height() - y as u32,
                     ty,
                 });
             }

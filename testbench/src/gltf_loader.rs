@@ -482,9 +482,7 @@ impl GltfLoader {
             textures.push(metallic_roughness.clone());
 
             let material_instance = MaterialInstance::create_instance(
-                gpu,
                 pbr_master.clone(),
-                resource_map,
                 &MaterialInstanceDescription {
                     name: &format!(
                         "PbrMaterial Instance #{}",

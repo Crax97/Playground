@@ -1,5 +1,5 @@
-use crate::resource_map::{ResourceHandle, ResourceMap};
-use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, Handle, MemoryDomain, VkGpu};
+use crate::resource_map::ResourceHandle;
+use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
 
 use crate::{texture::Texture, utils::to_u8_slice};
 
@@ -24,13 +24,9 @@ pub struct MaterialInstance {
 
 impl MaterialInstance {
     pub fn create_instance(
-        gpu: &VkGpu,
         owner: ResourceHandle<MasterMaterial>,
-        resource_map: &ResourceMap,
         description: &MaterialInstanceDescription,
     ) -> anyhow::Result<MaterialInstance> {
-        let master_owner = resource_map.get(&owner);
-
         Ok(MaterialInstance {
             owner,
             parameter_buffers: description.parameter_buffers.clone(),
@@ -40,7 +36,7 @@ impl MaterialInstance {
 
     pub fn write_parameters<T: Sized + Copy>(
         &self,
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         block: T,
         buffer: usize,
     ) -> anyhow::Result<()> {

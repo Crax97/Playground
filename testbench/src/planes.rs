@@ -151,9 +151,7 @@ impl App for PlanesApp {
         texture_inputs.push(texture);
         let material = resource_map.add(master);
         let mat_instance = MaterialInstance::create_instance(
-            &app_state.gpu,
             material,
-            &resource_map,
             &MaterialInstanceDescription {
                 name: "simple inst",
                 textures: texture_inputs,

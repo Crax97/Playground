@@ -15,13 +15,12 @@ use crate::resource_map::{ResourceHandle, ResourceMap};
 use gpu::{
     AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, Binding,
     BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorLoadOp, Extent2D, FragmentStageInfo,
-    FramebufferColorAttachment, FramebufferDepthAttachment, Gpu, Handle, ImageAspectFlags,
-    ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
-    ImageUsageFlags, ImageViewHandle, ImageViewType, IndexType, InputRate, LifetimedCache,
-    MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags, Rect2D, SampleCount,
-    SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage, SubpassDependency,
-    SubpassDescription, VertexBindingInfo, VertexStageInfo, VkCommandBuffer, VkGpu,
-    VkRenderPassCommand, VkSwapchain,
+    FramebufferColorAttachment, FramebufferDepthAttachment, Gpu, ImageAspectFlags, ImageFormat,
+    ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageUsageFlags,
+    ImageViewHandle, ImageViewType, IndexType, InputRate, LifetimedCache, MemoryDomain, Offset2D,
+    PipelineBarrierInfo, PipelineStageFlags, Rect2D, SampleCount, SamplerHandle,
+    ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage, SubpassDependency, SubpassDescription,
+    VertexBindingInfo, VertexStageInfo, VkCommandBuffer, VkGpu, VkRenderPassCommand, VkSwapchain,
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 

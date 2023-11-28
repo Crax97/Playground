@@ -291,9 +291,7 @@ impl App for GLTFViewer {
         skybox_textures.push(david_texture);
 
         let skybox_instance = MaterialInstance::create_instance(
-            &app_state.gpu,
             skybox_master,
-            &resource_map,
             &engine::MaterialInstanceDescription {
                 name: "david skybox",
                 textures: skybox_textures,

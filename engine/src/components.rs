@@ -1,5 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
+use crate::app::app_state::app_state;
 use crate::{
     bevy_ecs_app::CommonResources, resource_map::ResourceHandle, LightType, Scene, ShadowSetup,
     Texture,
@@ -12,8 +13,11 @@ use bevy_ecs::{
     world::World,
 };
 use bevy_reflect::Reflect;
-use gpu::{BufferHandle, Handle};
-use nalgebra::{vector, Matrix4, Point2, Point3, UnitQuaternion, UnitVector3, Vector2, Vector3};
+use bytemuck::{Pod, Zeroable};
+use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
+use nalgebra::{
+    vector, Matrix4, Point2, Point3, UnitQuaternion, UnitVector3, Vector2, Vector3, Vector4,
+};
 use winit::window::Window;
 
 use crate::{MasterMaterial, MaterialInstance, Mesh};
@@ -103,11 +107,32 @@ pub struct MeshComponent {
     pub materials: Vec<MaterialInstance>,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct SpriteGpuData {
+    // in pixel coords
+    offset_size: Vector4<u32>,
+}
+
+unsafe impl Pod for SpriteGpuData {}
+unsafe impl Zeroable for SpriteGpuData {}
+
+pub struct SpriteComponentDescription {
+    pub texture: ResourceHandle<Texture>,
+    pub material: ResourceHandle<MasterMaterial>,
+    pub sprite_offset: Vector2<u32>,
+    pub sprite_size: Vector2<u32>,
+    pub z_layer: u32,
+}
+
 #[derive(Component)]
 pub struct SpriteComponent {
     pub texture: ResourceHandle<Texture>,
     pub material: ResourceHandle<MasterMaterial>,
     pub z_layer: u32,
+
+    sprite_gpu_data: SpriteGpuData,
+    parameter_buffer: BufferHandle,
 }
 
 #[derive(Component)]
@@ -133,6 +158,54 @@ pub struct TestComponent {
 pub struct SceneSetup {
     pub skybox_material: Option<MaterialInstance>,
     pub skybox_texture: Option<ResourceHandle<Texture>>,
+}
+
+impl SpriteComponent {
+    pub fn new(description: SpriteComponentDescription) -> Self {
+        let sprite_gpu_data = SpriteGpuData {
+            offset_size: vector![
+                description.sprite_offset.x,
+                description.sprite_offset.y,
+                description.sprite_size.x,
+                description.sprite_size.y
+            ],
+        };
+        let parameter_buffer = app_state()
+            .gpu
+            .make_buffer(
+                &BufferCreateInfo {
+                    label: Some("Sprite parameters"),
+                    size: std::mem::size_of::<SpriteGpuData>(),
+                    usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
+                },
+                MemoryDomain::HostVisible,
+            )
+            .unwrap();
+        app_state()
+            .gpu
+            .write_buffer(
+                &parameter_buffer,
+                0,
+                bytemuck::cast_slice(&[sprite_gpu_data]),
+            )
+            .expect("Failed to write buffer");
+        Self {
+            texture: description.texture,
+            z_layer: description.z_layer,
+            material: description.material,
+            parameter_buffer,
+            sprite_gpu_data,
+        }
+    }
+
+    pub fn update(&self, gpu: &dyn Gpu) {
+        gpu.write_buffer(
+            &self.parameter_buffer,
+            0,
+            bytemuck::cast_slice(&[self.sprite_gpu_data]),
+        )
+        .expect("Failed to write buffer");
+    }
 }
 
 pub fn rendering_system(
@@ -182,7 +255,7 @@ pub fn rendering_system_2d(
     for (sprite_component, transform) in sprites.iter() {
         let material_instance = MaterialInstance {
             owner: sprite_component.material.clone(),
-            parameter_buffers: vec![],
+            parameter_buffers: vec![sprite_component.parameter_buffer.clone()],
             textures: vec![sprite_component.texture.clone()],
         };
         scene.add(crate::ScenePrimitive {
