@@ -182,9 +182,8 @@ pub fn rendering_system_2d(
     for (sprite_component, transform) in sprites.iter() {
         let material_instance = MaterialInstance {
             owner: sprite_component.material.clone(),
-            parameter_buffer: BufferHandle::null(),
+            parameter_buffers: vec![],
             textures: vec![sprite_component.texture.clone()],
-            parameter_block_size: 0,
         };
         scene.add(crate::ScenePrimitive {
             mesh: common_resources.quad_mesh.clone(),

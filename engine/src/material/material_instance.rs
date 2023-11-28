@@ -5,19 +5,21 @@ use crate::{texture::Texture, utils::to_u8_slice};
 
 use super::master_material::MasterMaterial;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MaterialInstanceDescription<'a> {
     pub name: &'a str,
+    // These are optional, and if present will be bound to descriptor set 1
     pub textures: Vec<ResourceHandle<Texture>>,
+    // These are optional, and if present will be bound to descriptor set 2
+    // After the textures
+    pub parameter_buffers: Vec<BufferHandle>,
 }
 
 #[derive(Clone, Debug)]
 pub struct MaterialInstance {
     pub(crate) owner: ResourceHandle<MasterMaterial>,
-    pub(crate) parameter_buffer: BufferHandle,
-    #[allow(dead_code)]
     pub(crate) textures: Vec<ResourceHandle<Texture>>,
-    pub(crate) parameter_block_size: usize,
+    pub(crate) parameter_buffers: Vec<BufferHandle>,
 }
 
 impl MaterialInstance {
@@ -29,32 +31,38 @@ impl MaterialInstance {
     ) -> anyhow::Result<MaterialInstance> {
         let master_owner = resource_map.get(&owner);
 
-        let parameter_buffer = if !master_owner.material_parameters.is_empty() {
-            gpu.make_buffer(
-                &BufferCreateInfo {
-                    label: Some(&format!("{} - Parameter buffer", description.name)),
-                    size: master_owner.parameter_block_size,
-                    usage: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
-                },
-                MemoryDomain::DeviceLocal,
-            )?
-        } else {
-            BufferHandle::null()
-        };
         Ok(MaterialInstance {
             owner,
-            parameter_buffer,
+            parameter_buffers: description.parameter_buffers.clone(),
             textures: description.textures.clone(),
-            parameter_block_size: master_owner.parameter_block_size,
         })
     }
 
-    pub fn write_parameters<T: Sized + Copy>(&self, gpu: &VkGpu, block: T) -> anyhow::Result<()> {
-        assert!(
-            std::mem::size_of::<T>() <= self.parameter_block_size
-                && !self.parameter_buffer.is_null()
-        );
-        gpu.write_buffer(&self.parameter_buffer, 0, to_u8_slice(&[block]))?;
+    pub fn write_parameters<T: Sized + Copy>(
+        &self,
+        gpu: &VkGpu,
+        block: T,
+        buffer: usize,
+    ) -> anyhow::Result<()> {
+        gpu.write_buffer(&self.parameter_buffers[buffer], 0, to_u8_slice(&[block]))?;
         Ok(())
+    }
+
+    pub fn create_material_parameter_buffer(
+        label: &str,
+        gpu: &dyn Gpu,
+        size: usize,
+    ) -> anyhow::Result<BufferHandle> {
+        gpu.make_buffer(
+            &BufferCreateInfo {
+                label: Some(label),
+                size,
+                usage: BufferUsageFlags::UNIFORM_BUFFER
+                    | BufferUsageFlags::STORAGE_BUFFER
+                    | BufferUsageFlags::TRANSFER_DST
+                    | BufferUsageFlags::TRANSFER_SRC,
+            },
+            MemoryDomain::HostVisible,
+        )
     }
 }

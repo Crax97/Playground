@@ -488,9 +488,14 @@ impl GltfLoader {
                 &MaterialInstanceDescription {
                     name: &format!(
                         "PbrMaterial Instance #{}",
-                        gltf_material.index().unwrap_or(0)
+                        gltf_material.index().unwrap_or(0),
                     ),
                     textures,
+                    parameter_buffers: vec![MaterialInstance::create_material_parameter_buffer(
+                        "PBR Data",
+                        gpu,
+                        std::mem::size_of::<PbrProperties>(),
+                    )?],
                 },
             )?;
             let metallic = gltf_material.pbr_metallic_roughness().metallic_factor();
@@ -505,6 +510,7 @@ impl GltfLoader {
                     metallic_roughness: vector![metallic, roughness, 0.0, 1.0],
                     emissive_color: vector![emissive[0], emissive[1], emissive[2], 1.0],
                 },
+                0,
             )?;
             allocated_materials.push(material_instance);
         }

@@ -297,6 +297,7 @@ impl App for GLTFViewer {
             &engine::MaterialInstanceDescription {
                 name: "david skybox",
                 textures: skybox_textures,
+                ..Default::default()
             },
         )?;
 

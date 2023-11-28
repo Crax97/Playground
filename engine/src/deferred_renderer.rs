@@ -1490,10 +1490,10 @@ fn draw_mesh_primitive(
                 }
             }),
     );
-    if material.parameter_buffer.is_valid() {
+    for user_buffer in &material.parameter_buffers {
         user_bindings.push(Binding {
             ty: gpu::DescriptorBindingType::UniformBuffer {
-                handle: material.parameter_buffer.clone(),
+                handle: user_buffer.clone(),
                 offset: 0,
                 range: gpu::WHOLE_SIZE as _,
             },

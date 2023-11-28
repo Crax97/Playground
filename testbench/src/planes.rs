@@ -157,6 +157,7 @@ impl App for PlanesApp {
             &MaterialInstanceDescription {
                 name: "simple inst",
                 textures: texture_inputs,
+                parameter_buffers: vec![],
             },
         )?;
 
