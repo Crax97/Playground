@@ -4,13 +4,14 @@ use engine::{
     LightType, MasterMaterial, MaterialDescription, MaterialDomain, MaterialInstance,
     MaterialInstanceDescription, MaterialParameterOffsetSize, Mesh, MeshCreateInfo,
     MeshPrimitiveCreateInfo, RenderingPipeline, Scene, ScenePrimitive, Texture, TextureInput,
+    TextureSamplerSettings,
 };
 use gltf::image::Data;
 use gltf::Document;
 use gpu::{
     ComponentMapping, Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageHandle,
     ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, ImageViewType,
-    MemoryDomain, SamplerAddressMode, SamplerCreateInfo, SamplerHandle, ShaderStage, VkGpu,
+    MemoryDomain, SamplerAddressMode, ShaderStage, VkGpu,
 };
 use nalgebra::{vector, Matrix4, Point3, Quaternion, UnitQuaternion, Vector3, Vector4};
 use std::collections::HashMap;
@@ -50,11 +51,10 @@ impl GltfLoader {
 
         let pbr_master = Self::create_master_pbr_material(gpu, scene_renderer, resource_map)?;
         let (images, image_views) = Self::load_images(gpu, &mut images)?;
-        let samplers = Self::load_samplers(gpu, &document)?;
+        let samplers = Self::load_samplers(&document)?;
         let textures =
             Self::load_textures(gpu, resource_map, images, image_views, samplers, &document)?;
-        let allocated_materials =
-            Self::load_materials(gpu, resource_map, pbr_master, textures, &document)?;
+        let allocated_materials = Self::load_materials(gpu, pbr_master, textures, &document)?;
         let meshes = Self::load_meshes(gpu, resource_map, &document, &buffers)?;
 
         let engine_scene = Self::build_engine_scene(document, allocated_materials, meshes);
@@ -334,15 +334,15 @@ impl GltfLoader {
         resource_map: &mut ResourceMap,
         allocated_images: Vec<ImageHandle>,
         allocated_image_views: Vec<ImageViewHandle>,
-        allocated_samplers: Vec<SamplerHandle>,
+        allocated_samplers: Vec<TextureSamplerSettings>,
         document: &Document,
     ) -> anyhow::Result<LoadedTextures> {
         let mut all_textures = vec![];
         for texture in document.textures() {
             all_textures.push(resource_map.add(Texture {
-                sampler: allocated_samplers[texture.sampler().index().unwrap_or(0)].clone(),
                 image: allocated_images[texture.source().index()].clone(),
                 view: allocated_image_views[texture.source().index()].clone(),
+                sampler_settings: allocated_samplers[texture.sampler().index().unwrap_or(0)],
             }))
         }
         let white = Texture::new_with_data(
@@ -373,10 +373,10 @@ impl GltfLoader {
         })
     }
 
-    fn load_samplers(gpu: &VkGpu, document: &Document) -> anyhow::Result<Vec<SamplerHandle>> {
+    fn load_samplers(document: &Document) -> anyhow::Result<Vec<TextureSamplerSettings>> {
         let mut allocated_samplers = vec![];
         for sampler in document.samplers() {
-            let sam_desc = SamplerCreateInfo {
+            let sam_desc = TextureSamplerSettings {
                 address_u: match &sampler.wrap_s() {
                     gltf::texture::WrappingMode::ClampToEdge => SamplerAddressMode::ClampToEdge,
                     gltf::texture::WrappingMode::MirroredRepeat => {
@@ -411,20 +411,12 @@ impl GltfLoader {
                 },
                 ..Default::default()
             };
-            let sam = gpu.make_sampler(&sam_desc)?;
-            allocated_samplers.push(sam)
+            allocated_samplers.push(sam_desc)
         }
 
         if allocated_samplers.is_empty() {
             // add default sampler
-            let sam = gpu.make_sampler(&SamplerCreateInfo {
-                address_u: SamplerAddressMode::Repeat,
-                address_v: SamplerAddressMode::Repeat,
-                mag_filter: Filter::Linear,
-                min_filter: Filter::Linear,
-                ..Default::default()
-            })?;
-            allocated_samplers.push(sam)
+            allocated_samplers.push(TextureSamplerSettings::default())
         }
 
         Ok(allocated_samplers)
@@ -432,7 +424,6 @@ impl GltfLoader {
 
     fn load_materials(
         gpu: &VkGpu,
-        resource_map: &mut ResourceMap,
         pbr_master: ResourceHandle<MasterMaterial>,
         textures: LoadedTextures,
         document: &Document,

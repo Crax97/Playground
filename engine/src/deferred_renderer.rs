@@ -8,7 +8,7 @@ use crate::{
     material::{MasterMaterial, MasterMaterialDescription},
     post_process_pass::{PostProcessPass, PostProcessResources},
     Backbuffer, CvarManager, Light, LightType, MaterialDescription, MaterialInstance, Mesh,
-    MeshPrimitive, PipelineTarget, RenderingPipeline, Scene, Texture,
+    MeshPrimitive, PipelineTarget, RenderingPipeline, Scene, Texture, TextureSamplerSettings,
 };
 
 use crate::resource_map::{ResourceHandle, ResourceMap};
@@ -61,6 +61,7 @@ const SHADOW_ATLAS_HEIGHT: u32 = 4352;
 pub struct DeferredRenderingPipeline {
     frame_buffers: Vec<FrameBuffers>,
     image_allocator: ImageAllocator,
+    sampler_allocator: SamplerAllocator,
     screen_quad: ShaderModuleHandle,
     texture_copy: ShaderModuleHandle,
     combine_shader: ShaderModuleHandle,
@@ -111,6 +112,39 @@ pub struct RenderImage {
     pub view: ImageViewHandle,
 }
 
+pub struct SamplerAllocator {
+    sampler_allocator: LifetimedCache<SamplerHandle>,
+}
+
+impl SamplerAllocator {
+    fn get(&self, gpu: &VkGpu, desc: &TextureSamplerSettings) -> SamplerHandle {
+        self.sampler_allocator.get_clone(desc, || {
+            let sampler = gpu
+                .make_sampler(&gpu::SamplerCreateInfo {
+                    mag_filter: desc.mag_filter,
+                    min_filter: desc.min_filter,
+                    address_u: desc.address_u,
+                    address_v: desc.address_v,
+                    address_w: desc.address_w,
+                    // TODO: Have a global lod bias
+                    mip_lod_bias: 0.0,
+                    compare_function: None,
+                    min_lod: 0.0,
+                    max_lod: 1.0,
+                    border_color: [0.0; 4],
+                })
+                .expect("failed to create sampler");
+
+            sampler
+        })
+    }
+
+    fn new(lifetime: u32) -> Self {
+        Self {
+            sampler_allocator: LifetimedCache::new(lifetime),
+        }
+    }
+}
 pub struct ImageAllocator {
     image_allocator: LifetimedCache<RenderImage>,
 }
@@ -380,6 +414,7 @@ impl DeferredRenderingPipeline {
 
         Ok(Self {
             image_allocator: ImageAllocator::new(4),
+            sampler_allocator: SamplerAllocator::new(4),
             screen_quad,
             screen_quad_flipped,
             combine_shader,
@@ -437,6 +472,7 @@ impl DeferredRenderingPipeline {
         render_pass: &mut VkRenderPassCommand,
         camera_index: u32,
         frame_buffers: &FrameBuffers,
+        sampler_allocator: &SamplerAllocator,
     ) -> anyhow::Result<()> {
         let mut total_primitives_rendered = 0;
         for (master, material_draw_calls) in draw_hashmap.iter() {
@@ -452,6 +488,7 @@ impl DeferredRenderingPipeline {
                         &draw_call.prim,
                         draw_call.transform,
                         resource_map,
+                        sampler_allocator,
                         camera_index,
                     )?;
                     total_primitives_rendered += 1;
@@ -558,6 +595,7 @@ impl DeferredRenderingPipeline {
         skybox_material: &MaterialInstance,
         skybox_master: &MasterMaterial,
         resource_map: &ResourceMap,
+        sampler_allocator: &SamplerAllocator,
     ) -> anyhow::Result<()> {
         let label = render_pass.begin_debug_region(
             &format!("Skybox - using material {}", skybox_master.name),
@@ -578,6 +616,7 @@ impl DeferredRenderingPipeline {
             &skybox_mesh.primitives[0],
             skybox_transform,
             resource_map,
+            sampler_allocator,
             0,
         )?;
         label.end();
@@ -664,6 +703,7 @@ impl DeferredRenderingPipeline {
                     &mut shadow_atlas_command,
                     i as _,
                     &current_buffers,
+                    &self.sampler_allocator,
                 )?;
             }
         }
@@ -1031,6 +1071,7 @@ impl DeferredRenderingPipeline {
                     &mut gbuffer_render_pass,
                     0,
                     &current_buffers,
+                    &self.sampler_allocator,
                 )
                 .context("Early Z Pass")?;
 
@@ -1053,6 +1094,7 @@ impl DeferredRenderingPipeline {
                     material,
                     skybox_master,
                     resource_map,
+                    &self.sampler_allocator,
                 )?;
             }
 
@@ -1073,6 +1115,7 @@ impl DeferredRenderingPipeline {
                 &mut gbuffer_render_pass,
                 0,
                 &current_buffers,
+                &self.sampler_allocator,
             )
             .context("Gbuffer output pass")?;
 
@@ -1464,6 +1507,7 @@ fn draw_mesh_primitive(
     primitive: &MeshPrimitive,
     model: Matrix4<f32>,
     resource_map: &ResourceMap,
+    sampler_allocator: &SamplerAllocator,
     camera_index: u32,
 ) -> anyhow::Result<()> {
     render_pass.set_index_buffer(primitive.index_buffer.clone(), IndexType::Uint32, 0);
@@ -1478,10 +1522,13 @@ fn draw_mesh_primitive(
                 let texture_parameter = &material.textures[i];
                 let tex = resource_map.get(texture_parameter);
 
+                let sampler_handle =
+                    sampler_allocator.get(render_pass.gpu(), &tex.sampler_settings);
+
                 Binding {
                     ty: gpu::DescriptorBindingType::ImageView {
                         image_view_handle: tex.view.clone(),
-                        sampler_handle: tex.sampler.clone(),
+                        sampler_handle: sampler_handle,
                         layout: gpu::ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: tex_info.shader_stage,

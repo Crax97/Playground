@@ -14,11 +14,14 @@ use engine::input::InputState;
 use engine::physics::rapier2d::dynamics::RigidBodyBuilder;
 use engine::physics::rapier2d::geometry::{ColliderBuilder, SharedShape};
 use engine::physics::PhysicsContext2D;
-use engine::{bevy_ecs, Camera, CommonResources, DeferredRenderingPipeline, ResourceMap, Texture};
+use engine::{
+    bevy_ecs, Camera, CommonResources, DeferredRenderingPipeline, ResourceMap, Texture, Time,
+};
 use engine::{
     bevy_ecs::{component::Component, system::Commands},
     BevyEcsApp,
 };
+use gpu::Filter;
 use nalgebra::{point, vector};
 
 #[derive(Component)]
@@ -54,11 +57,12 @@ fn camera_system(
     window: Res<EngineWindow>,
     player_query: Query<(&Transform2D, With<Player>)>,
 ) {
+    const WORLD_SIZE: f32 = 5.0;
     let player_transf = player_query.single().0;
     let size = window.inner_size().cast::<f32>();
     let aspect = size.width / size.height;
     commands.insert_resource({
-        let mut camera = Camera::new_orthographic(10.0 * aspect, 10.0, 0.0001, 1000.0);
+        let mut camera = Camera::new_orthographic(WORLD_SIZE * aspect, WORLD_SIZE, 0.0001, 1000.0);
         camera.location = point![player_transf.position.x, player_transf.position.y, 0.0];
         camera
     });
@@ -77,6 +81,15 @@ fn load_level_system(
         .load(&app_state().gpu, "images/sprites/entities.png")
         .unwrap();
 
+    resource_map
+        .get_mut::<Texture>(&entities)
+        .sampler_settings
+        .min_filter = Filter::Nearest;
+    resource_map
+        .get_mut::<Texture>(&entities)
+        .sampler_settings
+        .mag_filter = Filter::Nearest;
+
     let level = resource_map.get(&level);
     for entity in &level.entities {
         let entity_sprite_offset = match entity.ty {
@@ -91,7 +104,7 @@ fn load_level_system(
 
         let mut entity_spawned = commands.spawn((
             Transform2D {
-                position: point![entity.x as f32, entity.y as f32] * 0.64,
+                position: point![entity.x as f32, entity.y as f32] * 0.48,
                 layer: 0,
                 rotation: 0.0,
                 scale: vector![1.0, 1.0],
@@ -110,13 +123,18 @@ fn load_level_system(
     }
 }
 
-fn move_player(mut query: Query<(&mut Transform2D, With<Player>)>, input_state: Res<InputState>) {
+fn move_player(
+    mut query: Query<(&mut Transform2D, With<Player>)>,
+    input_state: Res<InputState>,
+    time: Res<Time>,
+) {
+    const PLAYER_SPEED: f32 = 1.0;
     let (mut player_transform, _) = query.single_mut();
 
     if input_state.is_key_pressed(engine::input::Key::Left) {
-        player_transform.position.x += 1.0;
+        player_transform.position.x += PLAYER_SPEED * time.delta_frame();
     }
     if input_state.is_key_pressed(engine::input::Key::Right) {
-        player_transform.position.x -= 1.0;
+        player_transform.position.x -= PLAYER_SPEED * time.delta_frame();
     }
 }

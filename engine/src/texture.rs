@@ -2,13 +2,40 @@ use crate::resource_map::Resource;
 use gpu::{
     AccessFlags, ComponentMapping, Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat,
     ImageHandle, ImageSubresourceRange, ImageUsageFlags, ImageViewHandle, ImageViewType,
-    MemoryDomain, PipelineStageFlags, SamplerAddressMode, SamplerCreateInfo, SamplerHandle, VkGpu,
+    MemoryDomain, PipelineStageFlags, SamplerAddressMode, SamplerCreateInfo, VkGpu,
 };
+
+/*
+This struct describes how sampling a texture is performed, and can be cheapily modified/cloned:
+the actual samplers are cached by the renderer.
+*/
+#[derive(Copy, Clone, Hash, Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub struct TextureSamplerSettings {
+    pub mag_filter: Filter,
+    pub min_filter: Filter,
+    pub address_u: SamplerAddressMode,
+    pub address_v: SamplerAddressMode,
+
+    // Ignored when Texture Type is 2D
+    pub address_w: SamplerAddressMode,
+}
+
+impl Default for TextureSamplerSettings {
+    fn default() -> Self {
+        Self {
+            mag_filter: Filter::Linear,
+            min_filter: Filter::Linear,
+            address_u: SamplerAddressMode::Repeat,
+            address_v: SamplerAddressMode::Repeat,
+            address_w: SamplerAddressMode::Repeat,
+        }
+    }
+}
 
 pub struct Texture {
     pub image: ImageHandle,
     pub view: ImageViewHandle,
-    pub sampler: SamplerHandle,
+    pub sampler_settings: TextureSamplerSettings,
 }
 
 impl Texture {
@@ -20,7 +47,7 @@ impl Texture {
         label: Option<&str>,
         format: ImageFormat,
         view_type: ImageViewType,
-    ) -> anyhow::Result<(ImageHandle, ImageViewHandle, SamplerHandle)> {
+    ) -> anyhow::Result<(ImageHandle, ImageViewHandle)> {
         let layers = match view_type {
             ImageViewType::Type2D => 1,
             ImageViewType::Cube => 6,
@@ -77,39 +104,14 @@ impl Texture {
             },
         })?;
 
-        let sampler = gpu.make_sampler(&SamplerCreateInfo {
-            mag_filter: Filter::Linear,
-            min_filter: Filter::Linear,
-            address_u: SamplerAddressMode::Repeat,
-            address_v: SamplerAddressMode::Repeat,
-            address_w: SamplerAddressMode::Repeat,
-            mip_lod_bias: 0.0,
-            compare_function: None,
-            min_lod: 0.0,
-            max_lod: 0.0,
-            border_color: [0.0; 4],
-        })?;
-        Ok((image, rgba_view, sampler))
+        Ok((image, rgba_view))
     }
 
     pub fn wrap(gpu: &VkGpu, image: ImageHandle, view: ImageViewHandle) -> anyhow::Result<Self> {
-        let sampler = gpu.make_sampler(&SamplerCreateInfo {
-            mag_filter: Filter::Linear,
-            min_filter: Filter::Linear,
-            address_u: SamplerAddressMode::Repeat,
-            address_v: SamplerAddressMode::Repeat,
-            address_w: SamplerAddressMode::Repeat,
-            mip_lod_bias: 0.0,
-            compare_function: None,
-            min_lod: 0.0,
-            max_lod: 0.0,
-            border_color: [0.0; 4],
-        })?;
-
         Ok(Self {
             image,
             view,
-            sampler,
+            sampler_settings: Default::default(),
         })
     }
     pub fn new_empty(
@@ -120,13 +122,12 @@ impl Texture {
         format: ImageFormat,
         view_type: ImageViewType,
     ) -> anyhow::Result<Self> {
-        let (image, view, sampler) =
-            Self::new_impl(gpu, width, height, None, label, format, view_type)?;
+        let (image, view) = Self::new_impl(gpu, width, height, None, label, format, view_type)?;
 
         Ok(Self {
             image,
             view,
-            sampler,
+            sampler_settings: Default::default(),
         })
     }
     pub fn new_with_data(
@@ -138,13 +139,13 @@ impl Texture {
         format: ImageFormat,
         view_type: ImageViewType,
     ) -> anyhow::Result<Self> {
-        let (image, view, sampler) =
+        let (image, view) =
             Self::new_impl(gpu, width, height, Some(data), label, format, view_type)?;
 
         Ok(Self {
             image,
             view,
-            sampler,
+            sampler_settings: Default::default(),
         })
     }
 }

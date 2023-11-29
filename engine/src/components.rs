@@ -68,7 +68,7 @@ impl Transform {
     }
 }
 
-#[derive(Component, Debug)]
+#[derive(Component, Debug, Clone, Copy)]
 pub struct Transform2D {
     pub position: Point2<f32>,
     pub layer: u32,
@@ -257,6 +257,10 @@ pub fn rendering_system_2d(
             owner: sprite_component.material.clone(),
             parameter_buffers: vec![sprite_component.parameter_buffer.clone()],
             textures: vec![sprite_component.texture.clone()],
+        };
+        let transform = Transform2D {
+            scale: transform.scale * 0.5,
+            ..*transform
         };
         scene.add(crate::ScenePrimitive {
             mesh: common_resources.quad_mesh.clone(),
