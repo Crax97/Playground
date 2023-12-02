@@ -1,7 +1,7 @@
 use egui::{emath::Numeric, Rect, Response, Sense, Ui, Vec2, Widget, WidgetText};
 
 pub trait UiExtension {
-    fn edit_numbers<N: Numeric>(&mut self, numbers: &mut [N]);
+    fn edit_numbers<N: Numeric>(&mut self, numbers: &mut [N]) -> bool;
     fn edit_number<N: Numeric>(&mut self, number: &mut N) -> Response;
     fn horizontal_with_label<R, F: FnOnce(&mut Ui) -> R>(
         &mut self,
@@ -22,12 +22,14 @@ impl UiExtension for Ui {
             add_contents(ui)
         });
     }
-    fn edit_numbers<N: Numeric>(&mut self, numbers: &mut [N]) {
+    fn edit_numbers<N: Numeric>(&mut self, numbers: &mut [N]) -> bool {
+        let mut cum = false;
         self.horizontal(|ui| {
             for num in numbers {
-                egui::DragValue::new(num).ui(ui);
+                cum |= egui::DragValue::new(num).ui(ui).changed();
             }
         });
+        cum
     }
     fn edit_number<N: Numeric>(&mut self, number: &mut N) -> Response {
         self.add(egui::DragValue::new(number).update_while_editing(false))

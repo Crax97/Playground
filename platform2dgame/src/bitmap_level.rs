@@ -13,10 +13,10 @@ pub enum EntityType {
     Platform,
 }
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Entity {
-    pub x: u32,
-    pub y: u32,
+    pub x: f32,
+    pub y: f32,
     pub ty: EntityType,
 }
 
@@ -64,8 +64,8 @@ impl ResourceLoader for BitmapLevelLoader {
                 };
 
                 level.entities.push(Entity {
-                    x: bitmap_image.width() - x as u32,
-                    y: bitmap_image.height() - y as u32,
+                    x: (bitmap_image.width() as f32 - x as f32) * 8.0,
+                    y: y as f32 * -8.0,
                     ty,
                 });
             }

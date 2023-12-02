@@ -1,5 +1,6 @@
 use bevy_ecs::world::World;
 use egui::Ui;
+use nalgebra::Unit;
 use rapier2d::dynamics::RigidBody;
 
 use crate::{
@@ -122,6 +123,28 @@ impl EditorUi for Collider2DHandle {
             .collider_set
             .get_mut(self.0)
             .expect("Failed to find Collider 2D");
-        ui.label("Todo Collider 2D");
+
+        let mut position = collider_2d.position().clone();
+        let mut changed_pos = false;
+        egui::Grid::new("Collider2D").show(ui, |ui| {
+            ui.label("Position");
+            if ui.edit_numbers(position.translation.vector.data.as_mut_slice()) {
+                changed_pos = true;
+            }
+            ui.end_row();
+
+            ui.label("Rotation");
+            let mut rotation = position.rotation.angle();
+            if ui.edit_number(&mut rotation).changed() {
+                position.rotation = Unit::from_angle(rotation);
+                changed_pos = true;
+            }
+
+            ui.end_row();
+        });
+
+        if changed_pos {
+            collider_2d.set_position(position);
+        }
     }
 }

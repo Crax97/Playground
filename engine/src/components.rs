@@ -16,7 +16,7 @@ use bevy_reflect::Reflect;
 use bytemuck::{Pod, Zeroable};
 use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
 use nalgebra::{
-    vector, Matrix4, Point2, Point3, UnitQuaternion, UnitVector3, Vector2, Vector3, Vector4,
+    point, vector, Matrix4, Point2, Point3, UnitQuaternion, UnitVector3, Vector2, Vector3, Vector4,
 };
 use winit::window::Window;
 
@@ -258,9 +258,16 @@ pub fn rendering_system_2d(
             parameter_buffers: vec![sprite_component.parameter_buffer.clone()],
             textures: vec![sprite_component.texture.clone()],
         };
+        let correct_scale = [
+            transform.scale.x * sprite_component.sprite_gpu_data.offset_size.z as f32,
+            transform.scale.y * sprite_component.sprite_gpu_data.offset_size.w as f32,
+        ]
+        .into();
         let transform = Transform2D {
-            scale: transform.scale * 0.5,
-            ..*transform
+            position: transform.position,
+            layer: transform.layer,
+            rotation: transform.rotation,
+            scale: correct_scale,
         };
         scene.add(crate::ScenePrimitive {
             mesh: common_resources.quad_mesh.clone(),

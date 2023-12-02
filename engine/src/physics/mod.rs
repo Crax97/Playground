@@ -62,6 +62,10 @@ impl PhysicsContext2D {
         RigidBody2DHandle(self.rigid_body_set.insert(body))
     }
 
+    pub fn get_rigidbody_mut(&mut self, body: &RigidBody2DHandle) -> Option<&mut RigidBody> {
+        self.rigid_body_set.get_mut(body.0)
+    }
+
     pub fn remove_rigidbody(&mut self, handle: RigidBody2DHandle) -> Option<RigidBody> {
         self.rigid_body_set.remove(
             handle.0,
@@ -124,6 +128,7 @@ pub fn update_physics_2d_context(mut context: ResMut<PhysicsContext2D>) {
 pub fn update_positions_before_physics_system(
     mut context: ResMut<PhysicsContext2D>,
     mut query: Query<(&Transform2D, &RigidBody2DHandle)>,
+    mut collision_query: Query<(&Transform2D, &Collider2DHandle)>,
 ) {
     for (transform, body_handle) in query.iter_mut() {
         if let Some(body) = context.rigid_body_set.get_mut(body_handle.0) {
@@ -133,6 +138,12 @@ pub fn update_positions_before_physics_system(
             );
         }
     }
+
+    // for (transform, collider_handle) in collision_query.iter_mut() {
+    //     if let Some(collider) = context.collider_set.get_mut(collider_handle.0) {
+    //         collider.set_position(Isometry2::new(transform.position.coords, 0.0))
+    //     }
+    // }
 }
 pub fn update_positions_after_physics_system(
     context: Res<PhysicsContext2D>,
