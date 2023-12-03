@@ -20,6 +20,7 @@ mod utils;
 
 pub use bevy_ecs;
 pub use bevy_ecs_app::*;
+pub use bevy_reflect;
 pub use camera::*;
 pub use cvar_manager::*;
 pub use deferred_renderer::*;

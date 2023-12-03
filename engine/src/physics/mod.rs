@@ -23,6 +23,7 @@ pub struct PhysicsContext2D {
     pub(crate) impulse_joint_set: ImpulseJointSet,
     pub(crate) multibody_joint_set: MultibodyJointSet,
     pub(crate) ccd_solver: CCDSolver,
+    query_pipeline: QueryPipeline,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -45,6 +46,7 @@ impl PhysicsContext2D {
     pub fn new() -> Self {
         Self {
             pipeline: PhysicsPipeline::new(),
+            query_pipeline: QueryPipeline::new(),
             rigid_body_set: RigidBodySet::new(),
             collider_set: ColliderSet::new(),
             integration_parameters: IntegrationParameters::default(),
@@ -62,8 +64,41 @@ impl PhysicsContext2D {
         RigidBody2DHandle(self.rigid_body_set.insert(body))
     }
 
+    pub fn get_collider(&self, handle: &Collider2DHandle) -> Option<&Collider> {
+        self.collider_set.get(handle.0)
+    }
+
     pub fn get_rigidbody_mut(&mut self, body: &RigidBody2DHandle) -> Option<&mut RigidBody> {
         self.rigid_body_set.get_mut(body.0)
+    }
+
+    pub fn query_pipeline(&self) -> &QueryPipeline {
+        &self.query_pipeline
+    }
+
+    pub fn cast_shape(
+        &self,
+        shape_pos: Isometry2<f32>,
+        shape_vel: Vector2<f32>,
+        shape: &dyn Shape,
+        max_toi: f32,
+        stop_at_penetration: bool,
+        filter: QueryFilter,
+    ) -> Option<(Collider2DHandle, TOI)> {
+        if let Some((handle, toi)) = self.query_pipeline.cast_shape(
+            &self.rigid_body_set,
+            &self.collider_set,
+            &shape_pos,
+            &shape_vel,
+            shape,
+            max_toi,
+            stop_at_penetration,
+            filter,
+        ) {
+            Some((Collider2DHandle(handle), toi))
+        } else {
+            None
+        }
     }
 
     pub fn remove_rigidbody(&mut self, handle: RigidBody2DHandle) -> Option<RigidBody> {
@@ -117,7 +152,9 @@ impl PhysicsContext2D {
             None,
             &(),
             &(),
-        )
+        );
+        self.query_pipeline
+            .update(&self.rigid_body_set, &self.collider_set);
     }
 }
 
@@ -128,7 +165,6 @@ pub fn update_physics_2d_context(mut context: ResMut<PhysicsContext2D>) {
 pub fn update_positions_before_physics_system(
     mut context: ResMut<PhysicsContext2D>,
     mut query: Query<(&Transform2D, &RigidBody2DHandle)>,
-    mut collision_query: Query<(&Transform2D, &Collider2DHandle)>,
 ) {
     for (transform, body_handle) in query.iter_mut() {
         if let Some(body) = context.rigid_body_set.get_mut(body_handle.0) {

@@ -17,6 +17,7 @@ use nalgebra::{point, vector};
 
 use crate::{
     bitmap_level::{self, BitmapLevel, Entity, EntityType},
+    character::PlayerCharacter,
     Player,
 };
 
@@ -217,7 +218,7 @@ fn spawn_player(
         SPRITE_SIZE as f32 * 0.5,
     ))
     .build();
-    let rigid_body = RigidBodyBuilder::kinematic_velocity_based()
+    let rigid_body = RigidBodyBuilder::kinematic_position_based()
         .translation([entity.x, entity.y].into())
         .additional_mass(10.0)
         .build();
@@ -227,13 +228,15 @@ fn spawn_player(
         SpriteComponent::new(SpriteComponentDescription {
             texture: entities_texture,
             material: common_resources.default_sprite_material.clone(),
-            sprite_offset: [SPRITE_SIZE * 2, 0].into(),
-            sprite_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
+            atlas_offset: [SPRITE_SIZE * 2, 0].into(),
+            atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
+            sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
             z_layer: 0,
         }),
         rigid_body,
         collider,
         Player,
+        PlayerCharacter::new(50.0, 0.25),
         DebugName("Player".to_owned()),
     ));
 }
@@ -262,8 +265,9 @@ fn spawn_terrain(
         SpriteComponent::new(SpriteComponentDescription {
             texture: entities_texture,
             material: common_resources.default_sprite_material.clone(),
-            sprite_offset: [SPRITE_SIZE * 0, 0].into(),
-            sprite_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
+            atlas_offset: [SPRITE_SIZE * 0, 0].into(),
+            atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
+            sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
             z_layer: 0,
         }),
         collider,
@@ -285,8 +289,9 @@ fn spawn_grass(
         SpriteComponent::new(SpriteComponentDescription {
             texture: entities_texture,
             material: common_resources.default_sprite_material.clone(),
-            sprite_offset: [SPRITE_SIZE * 1, 0].into(),
-            sprite_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
+            atlas_offset: [SPRITE_SIZE * 1, 0].into(),
+            atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
+            sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
             z_layer: 0,
         }),
         collider,

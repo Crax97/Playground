@@ -16,7 +16,7 @@ use bevy_reflect::Reflect;
 use bytemuck::{Pod, Zeroable};
 use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
 use nalgebra::{
-    point, vector, Matrix4, Point2, Point3, UnitQuaternion, UnitVector3, Vector2, Vector3, Vector4,
+    vector, Matrix4, Point2, Point3, UnitQuaternion, UnitVector3, Vector2, Vector3, Vector4,
 };
 use winit::window::Window;
 
@@ -120,8 +120,9 @@ unsafe impl Zeroable for SpriteGpuData {}
 pub struct SpriteComponentDescription {
     pub texture: ResourceHandle<Texture>,
     pub material: ResourceHandle<MasterMaterial>,
-    pub sprite_offset: Vector2<u32>,
-    pub sprite_size: Vector2<u32>,
+    pub atlas_offset: Vector2<u32>,
+    pub atlas_size: Vector2<u32>,
+    pub sprite_size: Vector2<f32>,
     pub z_layer: u32,
 }
 
@@ -129,6 +130,7 @@ pub struct SpriteComponentDescription {
 pub struct SpriteComponent {
     pub texture: ResourceHandle<Texture>,
     pub material: ResourceHandle<MasterMaterial>,
+    pub sprite_size: Vector2<f32>,
     pub z_layer: u32,
 
     sprite_gpu_data: SpriteGpuData,
@@ -164,10 +166,10 @@ impl SpriteComponent {
     pub fn new(description: SpriteComponentDescription) -> Self {
         let sprite_gpu_data = SpriteGpuData {
             offset_size: vector![
-                description.sprite_offset.x,
-                description.sprite_offset.y,
-                description.sprite_size.x,
-                description.sprite_size.y
+                description.atlas_offset.x,
+                description.atlas_offset.y,
+                description.atlas_size.x,
+                description.atlas_size.y
             ],
         };
         let parameter_buffer = app_state()
@@ -193,6 +195,7 @@ impl SpriteComponent {
             texture: description.texture,
             z_layer: description.z_layer,
             material: description.material,
+            sprite_size: description.sprite_size,
             parameter_buffer,
             sprite_gpu_data,
         }
@@ -259,8 +262,8 @@ pub fn rendering_system_2d(
             textures: vec![sprite_component.texture.clone()],
         };
         let correct_scale = [
-            transform.scale.x * sprite_component.sprite_gpu_data.offset_size.z as f32,
-            transform.scale.y * sprite_component.sprite_gpu_data.offset_size.w as f32,
+            transform.scale.x * sprite_component.sprite_size.x,
+            transform.scale.y * sprite_component.sprite_size.y,
         ]
         .into();
         let transform = Transform2D {
