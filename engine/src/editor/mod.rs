@@ -5,7 +5,6 @@ pub mod ui_extension;
 
 use std::any::TypeId;
 
-use bevy_reflect::TypeRegistry;
 pub use editor_ui::EditorUi;
 
 use bevy_ecs::{
@@ -24,7 +23,7 @@ use crate::{
     },
     components::{DebugName, EngineWindow, Transform2D},
     physics::{Collider2DHandle, RigidBody2DHandle},
-    BevyEcsApp, Plugin,
+    AppTypeRegistry, BevyEcsApp, Plugin,
 };
 
 use self::entity_outliner::EntityOutliner;
@@ -38,9 +37,9 @@ pub struct EditorPlugin {
     outliner: EntityOutliner,
     ui_context: Context,
     output: Option<FullOutput>,
-    type_registry: TypeRegistry,
     with_custom_editor: HashMap<TypeId, Box<dyn FnMut(&mut EntityWorldMut, &mut Ui)>>,
     test: String,
+    type_registry: AppTypeRegistry,
 }
 
 #[derive(Resource)]
@@ -100,14 +99,13 @@ impl EditorPlugin {
         let egui_app_context = EguiContext(context.clone());
 
         app.world.insert_resource(egui_app_context);
-        let mut type_registry = TypeRegistry::new();
-        type_registry.register::<DebugName>();
+        app.register_type::<DebugName>();
         Self {
             egui_support,
             ui_context: context,
             outliner: EntityOutliner::default(),
             output: None,
-            type_registry,
+            type_registry: app.type_registry().clone(),
             with_custom_editor: builder.with_custom_editor,
             test: String::default(),
         }
@@ -142,8 +140,12 @@ impl Plugin for EditorPlugin {
         egui::SidePanel::new(egui::panel::Side::Right, "Outliner Panel").show(
             &self.ui_context,
             |ui| {
-                self.outliner
-                    .draw(&mut self.with_custom_editor, world, ui, &self.type_registry);
+                self.outliner.draw(
+                    &mut self.with_custom_editor,
+                    world,
+                    ui,
+                    &self.type_registry.read(),
+                );
             },
         );
     }

@@ -5,7 +5,7 @@ use engine::{
     physics::{
         rapier2d::{
             dynamics::RigidBodyBuilder,
-            geometry::{Collider, ColliderBuilder, SharedShape},
+            geometry::{ColliderBuilder, SharedShape},
             math::Isometry,
         },
         PhysicsContext2D,
@@ -28,6 +28,7 @@ pub fn load_level_system(
     common_resources: Res<CommonResources>,
     mut commands: Commands,
 ) {
+    physics_context.gravity = [0.0, -15.0].into();
     let level = resource_map
         .load::<BitmapLevel>(&app_state().gpu, "images/levels/test_level.bmp")
         .unwrap();
@@ -46,13 +47,7 @@ pub fn load_level_system(
         .mag_filter = Filter::Nearest;
 
     let level = resource_map.get(&level);
-    // test_spawn_entities(
-    //     &mut commands,
-    //     &common_resources,
-    //     &entities,
-    //     &mut physics_context,
-    // );
-    // return;
+
     for entity in &level.entities {
         let entity_spawned = commands.spawn((Transform2D {
             position: point![entity.x as f32, entity.y as f32],
@@ -213,11 +208,7 @@ fn spawn_player(
     mut entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
     physics_context: &mut PhysicsContext2D,
 ) {
-    let collider = ColliderBuilder::new(SharedShape::cuboid(
-        SPRITE_SIZE as f32 * 0.5,
-        SPRITE_SIZE as f32 * 0.5,
-    ))
-    .build();
+    let collider = ColliderBuilder::new(SharedShape::ball(SPRITE_SIZE as f32 * 0.5)).build();
     let rigid_body = RigidBodyBuilder::kinematic_position_based()
         .translation([entity.x, entity.y].into())
         .additional_mass(10.0)
@@ -236,7 +227,7 @@ fn spawn_player(
         rigid_body,
         collider,
         Player,
-        PlayerCharacter::new(50.0, 0.25),
+        PlayerCharacter::new(50.0, 0.125),
         DebugName("Player".to_owned()),
     ));
 }

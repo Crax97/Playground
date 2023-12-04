@@ -1,10 +1,15 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use bevy_ecs::{
     schedule::{IntoSystemConfigs, Schedule, ScheduleLabel},
     system::Resource,
     world::{Mut, World},
 };
+use bevy_reflect::{GetTypeRegistration, TypeRegistry};
+use egui::mutex::RwLock;
 use engine_macros::glsl;
 use gpu::{Gpu, ShaderModuleCreateInfo, ShaderStage, VkCommandBuffer};
 use nalgebra::vector;
@@ -47,6 +52,17 @@ const DEFAULT_DEFERRED_VS: &[u32] = glsl!(
     path = "src/shaders/default_vertex_deferred.vert",
     entry_point = "main"
 );
+
+#[derive(Default, Clone)]
+pub struct AppTypeRegistry(Arc<RwLock<TypeRegistry>>);
+
+impl Deref for AppTypeRegistry {
+    type Target = RwLock<TypeRegistry>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 pub trait Plugin: 'static {
     fn on_start(&mut self, _world: &mut World) {}
@@ -91,6 +107,7 @@ pub struct BevyEcsApp {
     post_update_schedule: Schedule,
     renderer: DeferredRenderingPipeline,
     plugins: Vec<Box<dyn Plugin>>,
+    type_registry: AppTypeRegistry,
 }
 
 pub struct BevyEcsAppWithLoop {
@@ -149,6 +166,18 @@ impl BevyEcsApp {
 
     pub fn post_update_schedule(&mut self) -> &mut Schedule {
         &mut self.post_update_schedule
+    }
+
+    pub fn type_registry(&self) -> &AppTypeRegistry {
+        &self.type_registry
+    }
+
+    pub fn register_type<T: GetTypeRegistration>(&mut self) -> &mut Self {
+        self.type_registry
+            .0
+            .write()
+            .add_registration(T::get_type_registration());
+        self
     }
 
     pub fn setup_2d(&mut self) {
@@ -387,6 +416,7 @@ impl App for BevyEcsApp {
             post_update_schedule,
             renderer,
             plugins: vec![],
+            type_registry: AppTypeRegistry::default(),
         })
     }
 

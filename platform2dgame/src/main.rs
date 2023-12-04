@@ -3,7 +3,7 @@ mod character;
 mod entities;
 
 use bitmap_level::BitmapLevelLoader;
-use character::{player_input_system, player_movement_system};
+use character::{player_input_system, player_movement_system, PlayerCharacter};
 use engine::app::app_state::app_state;
 use engine::bevy_ecs::query::With;
 use engine::bevy_ecs::schedule::IntoSystemConfigs;
@@ -33,6 +33,7 @@ fn main() -> anyhow::Result<()> {
     app.resource_map()
         .install_resource_loader(BitmapLevelLoader);
 
+    app.register_type::<PlayerCharacter>();
     app.renderer().set_early_z_enabled(false);
 
     app.startup_schedule().add_systems(load_level_system);

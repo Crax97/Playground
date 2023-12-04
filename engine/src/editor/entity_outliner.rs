@@ -155,6 +155,13 @@ fn reflect_type_recursive(field: &mut dyn Reflect, ui: &mut Ui) {
                     x: ui.available_width(),
                     y: 0.0,
                 }));
+            } else if value.is::<bool>() {
+                ui.checkbox(value.as_any_mut().downcast_mut::<bool>().unwrap(), "");
+            } else {
+                ui.label(format!(
+                    "Type {} isn't reflected yet!",
+                    value.reflect_type_path(),
+                ));
             }
         }
     }
