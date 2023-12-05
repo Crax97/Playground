@@ -2,7 +2,7 @@ use bevy_ecs::{
     component::Component,
     system::{Query, Res, ResMut, Resource},
 };
-use nalgebra::{Isometry2, Vector2};
+use nalgebra::{Isometry2, Point2, UnitVector2, Vector2};
 pub use rapier2d;
 
 use rapier2d::prelude::*;
@@ -74,6 +74,27 @@ impl PhysicsContext2D {
 
     pub fn query_pipeline(&self) -> &QueryPipeline {
         &self.query_pipeline
+    }
+
+    pub fn cast_ray(
+        &self,
+        origin: Point2<f32>,
+        direction: UnitVector2<f32>,
+        length: f32,
+        stop_at_penetration: bool,
+        filter: QueryFilter,
+    ) -> Option<(Collider2DHandle, f32)> {
+        let ray = Ray::new(origin, *direction);
+        self.query_pipeline
+            .cast_ray(
+                &self.rigid_body_set,
+                &self.collider_set,
+                &ray,
+                length,
+                stop_at_penetration,
+                filter,
+            )
+            .map(|(h, d)| (Collider2DHandle(h), d))
     }
 
     pub fn cast_shape(

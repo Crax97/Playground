@@ -14,8 +14,14 @@ use nalgebra::{vector, Isometry2, Unit, Vector2};
 
 use crate::Player;
 
-#[derive(Reflect, Clone, Copy)]
-pub struct CharacterState {}
+#[derive(Reflect, Clone, Copy, Default, Debug)]
+pub struct CharacterState {
+    #[reflect(ignore)]
+    pub velocity: Vector2<f32>,
+    pub grounded: bool,
+    pub against_wall: bool,
+    pub facing_forward_x: f32,
+}
 
 #[derive(Component, Default, Reflect)]
 #[reflect(Component)]
@@ -23,14 +29,14 @@ pub struct PlayerCharacter {
     pub player_speed: f32,
     pub jump_height: f32,
     pub min_angle_for_wall_degrees: f32,
-    #[reflect(ignore)]
-    pub velocity: Vector2<f32>,
     pub skin_size: f32,
+    pub surface_check_distance: f32,
 
-    is_in_air: bool,
-    is_grounded: bool,
     enabled: bool,
     reset: bool,
+
+    current_state: CharacterState,
+    last_state: CharacterState,
 }
 
 impl PlayerCharacter {
@@ -38,11 +44,11 @@ impl PlayerCharacter {
         Self {
             player_speed,
             jump_height,
-            velocity: Vector2::zeros(),
             min_angle_for_wall_degrees: 45.0,
             skin_size: 0.01,
-            is_in_air: true,
-            is_grounded: false,
+            surface_check_distance: 0.08,
+            current_state: CharacterState::default(),
+            last_state: CharacterState::default(),
             enabled: true,
             reset: false,
         }
@@ -57,7 +63,7 @@ pub fn player_input_system(
 ) {
     let (mut character, _) = query.single_mut();
 
-    character.velocity.y += 0.5 * physics.gravity.y * time.delta_frame();
+    character.current_state.velocity.y += physics.gravity.y * time.delta_frame();
     let mut input_x = 0.0;
     if input.is_key_pressed(Key::Left) {
         input_x += 1.0;
@@ -65,26 +71,24 @@ pub fn player_input_system(
     if input.is_key_pressed(Key::Right) {
         input_x -= 1.0;
     }
-    character.velocity.x = character.player_speed * time.delta_frame() * input_x;
+    character.current_state.velocity.x = character.player_speed * time.delta_frame() * input_x;
 
-    if input.is_key_just_pressed(Key::Space) && character.is_grounded {
-        character.is_in_air = true;
-        character.is_grounded = false;
+    if input.is_key_just_pressed(Key::Space) && character.current_state.grounded {
+        character.current_state.grounded = false;
         let grav = physics.gravity.magnitude();
         let jump_impulse = (2.0 * character.jump_height * grav).sqrt();
-        character.velocity.y = jump_impulse;
+        character.current_state.velocity.y = jump_impulse;
     }
 }
 
 pub fn player_movement_system(
     mut query: Query<(&mut Transform2D, &mut PlayerCharacter, &Collider2DHandle)>,
     physics: Res<PhysicsContext2D>,
-    time: Res<Time>,
 ) {
     let (mut transform, mut player_character, player_collider) = query.single_mut();
     if player_character.reset {
         player_character.reset = false;
-        player_character.velocity = [0.0, 0.0].into();
+        player_character.current_state.velocity = [0.0, 0.0].into();
     }
 
     if !player_character.enabled {
@@ -96,22 +100,50 @@ pub fn player_movement_system(
         .shared_shape()
         .clone();
 
-    let velocity = player_character.velocity;
+    player_character.last_state = player_character.current_state;
+    player_character.current_state.grounded = false;
+    player_character.current_state.against_wall = false;
+    if player_character.current_state.velocity.x.abs() > 0.0 {
+        player_character.current_state.facing_forward_x =
+            player_character.current_state.velocity.x.signum();
+    }
     move_and_slide(
         2,
         &mut player_character,
-        velocity,
         &physics,
         &mut transform,
         &shape,
         player_collider,
     );
+
+    let forward = vector![player_character.current_state.facing_forward_x, 0.0];
+    let surface_check_distance = player_character.surface_check_distance;
+
+    if let Some(_) = physics.cast_shape(
+        Isometry2::translation(transform.position.x, transform.position.y),
+        forward,
+        shape.0.as_ref(),
+        surface_check_distance,
+        true,
+        QueryFilter::new().exclude_collider(player_collider.as_ref().clone()),
+    ) {
+        player_character.current_state.against_wall = true;
+    }
+    if let Some(_) = physics.cast_shape(
+        Isometry2::translation(transform.position.x, transform.position.y),
+        vector![0.0, -1.0],
+        shape.0.as_ref(),
+        surface_check_distance,
+        true,
+        QueryFilter::new().exclude_collider(player_collider.as_ref().clone()),
+    ) {
+        player_character.current_state.grounded = true;
+    }
 }
 
 fn move_and_slide(
     iterations: u32,
     player_character: &mut PlayerCharacter,
-    velocity: Vector2<f32>,
     physics: &PhysicsContext2D,
     transform: &mut Transform2D,
     collision_shape: &engine::physics::rapier2d::prelude::SharedShape,
@@ -119,13 +151,13 @@ fn move_and_slide(
 ) {
     if player_character.reset {
         player_character.reset = false;
-        player_character.velocity = [0.0, 0.0].into();
+        player_character.current_state.velocity = [0.0, 0.0].into();
     }
 
     if !player_character.enabled {
         return;
     }
-    let translation = velocity;
+    let translation = player_character.current_state.velocity;
     if translation.magnitude_squared() <= 0.025 {
         return;
     }
@@ -146,8 +178,7 @@ fn move_and_slide(
 
         let surface_angle = vector![0.0, 1.0].angle(&*normal);
         if surface_angle.to_degrees() < player_character.min_angle_for_wall_degrees {
-            player_character.is_grounded = true;
-            player_character.velocity.y = 0.0;
+            player_character.current_state.velocity.y = 0.0;
         }
 
         let toi = (toi.toi - player_character.skin_size) / distance;
@@ -155,11 +186,11 @@ fn move_and_slide(
         let doable_translation = translation * toi;
         let remaining_translation = translation * (1.0 - toi);
         let remaining_translation = slide_vector(remaining_translation, normal);
+        player_character.current_state.velocity = remaining_translation;
         if iterations > 0 {
             move_and_slide(
                 iterations - 1,
                 player_character,
-                remaining_translation,
                 physics,
                 transform,
                 collision_shape,

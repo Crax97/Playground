@@ -122,9 +122,12 @@ fn reflect_type_recursive(field: &mut dyn Reflect, ui: &mut Ui) {
         bevy_reflect::ReflectMut::Struct(stru) => {
             egui::Grid::new(stru.reflect_type_path()).show(ui, |ui| {
                 for i in 0..stru.field_len() {
-                    ui.label(stru.name_at(i).unwrap());
-                    let field = stru.field_at_mut(i).unwrap();
-                    reflect_type_recursive(field, ui);
+                    let name = stru.name_at(i).unwrap();
+                    ui.label(name);
+                    ui.push_id(name.to_owned(), |ui| {
+                        let field = stru.field_at_mut(i).unwrap();
+                        reflect_type_recursive(field, ui);
+                    });
                     ui.end_row();
                 }
             });

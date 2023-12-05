@@ -227,7 +227,7 @@ fn spawn_player(
         rigid_body,
         collider,
         Player,
-        PlayerCharacter::new(50.0, 0.125),
+        PlayerCharacter::new(50.0, 0.25),
         DebugName("Player".to_owned()),
     ));
 }
