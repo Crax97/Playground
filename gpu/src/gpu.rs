@@ -450,7 +450,6 @@ impl VkGpu {
         let supported_features = find_supported_features(&instance, physical_device);
 
         let logical_device = Self::create_device(
-            &configuration,
             &device_extensions,
             &instance,
             physical_device,
@@ -675,15 +674,12 @@ impl VkGpu {
     }
 
     fn create_device(
-        configuration: &GpuConfiguration,
         device_extensions: &[String],
         instance: &Instance,
         selected_device: SelectedPhysicalDevice,
         queue_indices: &QueueFamilies,
     ) -> VkResult<Device> {
         let priority_one: f32 = 1.0;
-        let vk_layer_khronos_validation = CString::new(KHRONOS_VALIDATION_LAYER).unwrap();
-        let vk_layer_khronos_validation = vk_layer_khronos_validation.as_ptr();
 
         let c_string_device_extensions: Vec<CString> = device_extensions
             .iter()
@@ -733,19 +729,11 @@ impl VkGpu {
             flags: DeviceCreateFlags::empty(),
             queue_create_info_count: 3,
             p_queue_create_infos: queue_create_infos.as_ptr(),
-            enabled_layer_count: if configuration.enable_debug_utilities {
-                1
-            } else {
-                0
-            },
-            pp_enabled_layer_names: if configuration.enable_debug_utilities {
-                addr_of!(vk_layer_khronos_validation)
-            } else {
-                null()
-            },
             enabled_extension_count: c_ptr_device_extensions.len() as u32,
             pp_enabled_extension_names: c_ptr_device_extensions.as_ptr(),
             p_enabled_features: std::ptr::null(),
+
+            ..Default::default()
         };
 
         unsafe { instance.create_device(selected_device.physical_device, &create_info, None) }
