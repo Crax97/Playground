@@ -152,7 +152,7 @@ pub struct GpuThreadSharedState {
     pub transfer_queue: Queue,
     pub queue_families: QueueFamilies,
     pub description: GpuDescription,
-    pub gpu_memory_allocator: Arc<RefCell<dyn GpuAllocator>>,
+    pub gpu_memory_allocator: Arc<RwLock<dyn GpuAllocator>>,
     pub descriptor_set_allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
     pub debug_utilities: Option<DebugUtils>,
     descriptor_pool_cache: LifetimedCache<Vec<DescriptorPoolAllocation>>,
@@ -530,7 +530,7 @@ impl VkGpu {
             debug_utilities,
             features: supported_features,
             vk_pipeline_cache: pipeline_cache,
-            gpu_memory_allocator: Arc::new(RefCell::new(gpu_memory_allocator)),
+            gpu_memory_allocator: Arc::new(RwLock::new(gpu_memory_allocator)),
             descriptor_set_allocator: Arc::new(RefCell::new(descriptor_set_allocator)),
             messenger,
             compute_pipeline_cache: LifetimedCache::new(60),
@@ -1876,7 +1876,8 @@ fn create_staging_buffer(state: &Arc<GpuThreadSharedState>) -> VkResult<BufferHa
     };
     let allocation = state
         .gpu_memory_allocator
-        .borrow_mut()
+        .write()
+        .unwrap()
         .allocate(allocation_requirements)?;
     unsafe {
         state
@@ -1944,7 +1945,8 @@ impl VkGpu {
         let allocation = self
             .state
             .gpu_memory_allocator
-            .borrow_mut()
+            .write()
+            .unwrap()
             .allocate(allocation_requirements)?;
         unsafe {
             self.state
@@ -2186,7 +2188,8 @@ impl VkGpu {
         let allocation = self
             .state
             .gpu_memory_allocator
-            .borrow_mut()
+            .write()
+            .unwrap()
             .allocate(allocation_requirements)?;
         unsafe {
             self.state
@@ -2372,7 +2375,7 @@ impl VkGpu {
         }
     }
 
-    pub fn allocator(&self) -> Arc<RefCell<dyn GpuAllocator>> {
+    pub fn allocator(&self) -> Arc<RwLock<dyn GpuAllocator>> {
         self.state.gpu_memory_allocator.clone()
     }
 
@@ -2559,7 +2562,8 @@ impl Gpu for VkGpu {
                     .destroy_buffer(buf.inner, get_allocation_callbacks());
                 self.state
                     .gpu_memory_allocator
-                    .borrow_mut()
+                    .write()
+                    .unwrap()
                     .deallocate(&buf.allocation);
             },
         );
@@ -2573,7 +2577,8 @@ impl Gpu for VkGpu {
                             .destroy_image(img.inner, get_allocation_callbacks());
                         self.state
                             .gpu_memory_allocator
-                            .borrow_mut()
+                            .write()
+                            .unwrap()
                             .deallocate(allocation);
                     }
                 }
