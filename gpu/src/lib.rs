@@ -30,7 +30,7 @@ pub struct GpuConfiguration<'a> {
     pub window: Option<&'a Window>,
 }
 
-pub trait Gpu {
+pub trait Gpu: Send + Sync {
     fn update(&self);
 
     fn make_buffer(

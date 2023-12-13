@@ -48,15 +48,25 @@ pub struct AllocationRequirements {
     pub memory_domain: MemoryDomain,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub struct HostVisibilePointer(pub(crate) NonNull<c_void>);
+unsafe impl Send for HostVisibilePointer {}
+unsafe impl Sync for HostVisibilePointer {}
+impl HostVisibilePointer {
+    pub fn as_ptr<T: Sized>(self) -> *mut T {
+        self.0.as_ptr() as *mut T
+    }
+}
+
 #[derive(Clone, Eq, Ord, PartialOrd, PartialEq)]
 pub struct MemoryAllocation {
     pub device_memory: DeviceMemory,
     pub offset: u64,
     pub size: u64,
-    pub persistent_ptr: Option<NonNull<c_void>>,
+    pub persistent_ptr: Option<HostVisibilePointer>,
 }
 
-pub trait GpuAllocator {
+pub trait GpuAllocator: Send + Sync {
     fn new(instance: &Instance, physical_device: PhysicalDevice, device: &Device) -> VkResult<Self>
     where
         Self: Sized;
@@ -131,14 +141,17 @@ impl GpuAllocator for PasstroughAllocator {
             .memory_domain
             .contains(MemoryDomain::HostVisible)
         {
-            NonNull::new(unsafe {
+            let ptr = unsafe {
                 self.device.map_memory(
                     device_memory,
                     0,
                     allocation_requirements.memory_requirements.size,
                     MemoryMapFlags::empty(),
                 )?
-            })
+            };
+            Some(HostVisibilePointer(
+                NonNull::new(ptr).expect("Pointer was null!"),
+            ))
         } else {
             None
         };

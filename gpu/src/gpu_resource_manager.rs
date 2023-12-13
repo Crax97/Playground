@@ -4,7 +4,10 @@ use std::{
     collections::HashMap,
     hash::Hasher,
     ops::DerefMut,
-    sync::atomic::{AtomicU32, Ordering},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        RwLock, RwLockReadGuard, RwLockWriteGuard,
+    },
 };
 
 use crate::{Handle, HandleType};
@@ -84,7 +87,7 @@ impl<T: HasAssociatedHandle + Clone> AllocatedResourceMap<T> {
 }
 
 pub struct GpuResourceMap {
-    maps: HashMap<HandleType, Box<dyn Any>>,
+    maps: HashMap<HandleType, Box<dyn Any + Send + Sync + 'static>>,
 }
 
 impl GpuResourceMap {
@@ -93,7 +96,7 @@ impl GpuResourceMap {
             maps: HashMap::new(),
         }
     }
-    pub fn insert<T: HasAssociatedHandle + Clone + 'static>(
+    pub fn insert<T: HasAssociatedHandle + Clone + Send + Sync + 'static>(
         &mut self,
         handle: &T::AssociatedHandle,
         resource: T,
@@ -102,7 +105,7 @@ impl GpuResourceMap {
         if !self.maps.contains_key(&T::AssociatedHandle::handle_type()) {
             self.maps.insert(
                 T::AssociatedHandle::handle_type(),
-                Box::new(RefCell::new(AllocatedResourceMap::<T>::new())),
+                Box::new(RwLock::new(AllocatedResourceMap::<T>::new())),
             );
         }
         self.get_map_mut().insert(handle, resource)
@@ -116,27 +119,27 @@ impl GpuResourceMap {
     }
     pub fn get_map_mut<T: HasAssociatedHandle + Clone + 'static>(
         &self,
-    ) -> RefMut<AllocatedResourceMap<T>> {
+    ) -> RwLockWriteGuard<AllocatedResourceMap<T>> {
         let map = self
             .maps
             .get(&T::AssociatedHandle::handle_type())
             .unwrap()
-            .downcast_ref::<RefCell<AllocatedResourceMap<T>>>()
+            .downcast_ref::<RwLock<AllocatedResourceMap<T>>>()
             .unwrap();
 
-        map.borrow_mut()
+        map.write().unwrap()
     }
     pub fn get_map<T: HasAssociatedHandle + Clone + 'static>(
         &self,
-    ) -> Ref<AllocatedResourceMap<T>> {
+    ) -> RwLockReadGuard<AllocatedResourceMap<T>> {
         let map = self
             .maps
             .get(&T::AssociatedHandle::handle_type())
             .unwrap()
-            .downcast_ref::<RefCell<AllocatedResourceMap<T>>>()
+            .downcast_ref::<RwLock<AllocatedResourceMap<T>>>()
             .unwrap();
 
-        map.borrow()
+        map.read().unwrap()
     }
 }
 
@@ -145,8 +148,8 @@ struct Lifetimed<T: Sized> {
     current_lifetime: u32,
 }
 
-pub struct LifetimedCache<T: Sized> {
-    map: RefCell<HashMap<u64, Lifetimed<T>>>,
+pub struct LifetimedCache<T: Sized + Send + Sync> {
+    map: RwLock<HashMap<u64, Lifetimed<T>>>,
     resource_lifetime: u32,
 }
 
@@ -160,16 +163,16 @@ pub fn quick_hash<H: std::hash::Hash>(hashable: &H) -> u64 {
     hasher.finish()
 }
 
-impl<T: Sized> LifetimedCache<T> {
+impl<T: Sized + Send + Sync + 'static> LifetimedCache<T> {
     pub fn new(resource_lifetime: u32) -> Self {
         Self {
-            map: RefCell::new(HashMap::new()),
+            map: RwLock::new(HashMap::new()),
             resource_lifetime,
         }
     }
 
     pub fn ensure_existing<C: FnOnce() -> T>(&self, hash: u64, creation_func: C) {
-        let mut map = self.map.borrow_mut();
+        let mut map = self.map.write().unwrap();
         if map.contains_key(&hash) {
             map.get_mut(&hash)
                 .map(|l| l.current_lifetime = self.resource_lifetime);
@@ -185,52 +188,46 @@ impl<T: Sized> LifetimedCache<T> {
         }
     }
 
-    pub fn get_ref<D: std::hash::Hash, C: FnOnce() -> T>(
+    pub fn use_ref<D: std::hash::Hash, R, U: FnOnce(&T) -> R, C: FnOnce() -> T>(
         &self,
         description: &D,
+        use_fun: U,
         creation_func: C,
-    ) -> Ref<T> {
+    ) -> R {
         let hash = quick_hash(description);
 
         self.ensure_existing(hash, creation_func);
-        unsafe { self.get_ref_raw(&hash) }
+        unsafe { self.use_ref_raw(&hash, use_fun) }
     }
 
-    pub fn get_ref_mut<D: std::hash::Hash, C: FnOnce() -> T>(
+    pub fn use_ref_mut<D: std::hash::Hash, R, U: FnMut(&mut T) -> R, C: FnOnce() -> T>(
         &self,
         description: &D,
+        use_fun: U,
         creation_func: C,
-    ) -> RefMut<T> {
+    ) -> R {
         let hash = quick_hash(description);
 
         self.ensure_existing(hash, creation_func);
-        unsafe { self.get_ref_mut_raw(&hash) }
+        unsafe { self.use_ref_mut_raw(&hash, use_fun) }
     }
 
     /// # Safety
     /// The inner map must have a valid item with hash 'hash'
     /// Otherwise, this function will panic
-    pub unsafe fn get_ref_raw(&self, hash: &u64) -> Ref<T> {
-        Ref::map(self.map.borrow(), |m: &HashMap<u64, Lifetimed<T>>| {
-            &m.get(hash)
-                .expect("LifetimedCache::get_ref_raw(): resource not found")
-                .resource
-        })
+    pub unsafe fn use_ref_raw<R, F: FnOnce(&T) -> R>(&self, hash: &u64, fun: F) -> R {
+        let r = self.map.read().unwrap();
+        let r = r.get(hash).unwrap();
+        fun(&r.resource)
     }
 
     /// # Safety
     /// The inner map must have a valid item with hash 'hash'
     /// Otherwise, this function will panic
-    pub unsafe fn get_ref_mut_raw(&self, hash: &u64) -> RefMut<T> {
-        RefMut::map(
-            self.map.borrow_mut(),
-            |m: &mut HashMap<u64, Lifetimed<T>>| {
-                &mut m
-                    .get_mut(&hash)
-                    .expect("LifetimedCache::get_ref_mut_raw(): resource not found")
-                    .resource
-            },
-        )
+    pub unsafe fn use_ref_mut_raw<R, F: FnMut(&mut T) -> R>(&self, hash: &u64, mut fun: F) -> R {
+        let mut r = self.map.write().unwrap();
+        let r = r.get_mut(hash).unwrap();
+        fun(&mut r.resource)
     }
 
     pub fn update<D: Fn(T)>(&self, destroy_func: D) {
@@ -238,36 +235,37 @@ impl<T: Sized> LifetimedCache<T> {
             return;
         }
         let (alive, dead) = {
-            let mut map = self.map.borrow_mut();
+            let mut map = self.map.write().unwrap();
             map.values_mut().for_each(|v| v.current_lifetime -= 1);
 
             let map = std::mem::take(map.deref_mut());
             map.into_iter().partition(|(_, v)| v.current_lifetime > 0)
         };
 
-        self.map.replace(alive);
+        *self.map.write().unwrap() = alive;
         for resource in dead {
             destroy_func(resource.1.resource);
         }
     }
 }
 
-impl<T: Sized + Copy> LifetimedCache<T> {
+impl<T: Sized + Copy + Send + Sync + 'static> LifetimedCache<T> {
     pub fn get<D: std::hash::Hash, C: FnOnce() -> T>(
         &self,
         description: &D,
         creation_func: C,
     ) -> T {
-        *self.get_ref(description, creation_func)
+        self.use_ref(description, |r| *r, creation_func)
     }
 }
 
-impl<T: Sized + Clone> LifetimedCache<T> {
+impl<T: Sized + Clone + Send + Sync + 'static> LifetimedCache<T> {
     pub fn get_clone<D: std::hash::Hash, C: FnOnce() -> T>(
         &self,
         description: &D,
         creation_func: C,
     ) -> T {
-        self.get_ref(description, creation_func).clone()
+        self.use_ref(description, |r| r.clone(), creation_func)
+            .clone()
     }
 }

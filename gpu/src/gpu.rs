@@ -132,11 +132,11 @@ impl<T: std::fmt::Debug> DestroyedResource<T> {
 
 #[derive(Default)]
 pub struct DestroyedResources {
-    destroyed_shader_modules: RefCell<Vec<DestroyedResource<VkShaderModule>>>,
-    destroyed_buffers: RefCell<Vec<DestroyedResource<VkBuffer>>>,
-    destroyed_images: RefCell<Vec<DestroyedResource<VkImage>>>,
-    destroyed_image_views: RefCell<Vec<DestroyedResource<VkImageView>>>,
-    destroyed_samplers: RefCell<Vec<DestroyedResource<VkSampler>>>,
+    destroyed_shader_modules: RwLock<Vec<DestroyedResource<VkShaderModule>>>,
+    destroyed_buffers: RwLock<Vec<DestroyedResource<VkBuffer>>>,
+    destroyed_images: RwLock<Vec<DestroyedResource<VkImage>>>,
+    destroyed_image_views: RwLock<Vec<DestroyedResource<VkImageView>>>,
+    destroyed_samplers: RwLock<Vec<DestroyedResource<VkSampler>>>,
 }
 
 /*
@@ -153,7 +153,6 @@ pub struct GpuThreadSharedState {
     pub queue_families: QueueFamilies,
     pub description: GpuDescription,
     pub gpu_memory_allocator: Arc<RwLock<dyn GpuAllocator>>,
-    pub descriptor_set_allocator: Arc<RefCell<dyn DescriptorSetAllocator>>,
     pub debug_utilities: Option<DebugUtils>,
     descriptor_pool_cache: LifetimedCache<Vec<DescriptorPoolAllocation>>,
     pub(crate) vk_pipeline_cache: vk::PipelineCache,
@@ -531,7 +530,6 @@ impl VkGpu {
             features: supported_features,
             vk_pipeline_cache: pipeline_cache,
             gpu_memory_allocator: Arc::new(RwLock::new(gpu_memory_allocator)),
-            descriptor_set_allocator: Arc::new(RefCell::new(descriptor_set_allocator)),
             messenger,
             compute_pipeline_cache: LifetimedCache::new(60),
             graphics_pipeline_cache: LifetimedCache::new(60),
@@ -1187,105 +1185,109 @@ impl VkGpu {
 
         let pool_hash = quick_hash(info);
 
-        let mut pools = self
-            .state
-            .descriptor_pool_cache
-            .get_ref_mut(info, || vec![]);
-        let (pool_index, descriptor_pool) = {
-            if let Some((idx, pool)) = pools
-                .iter_mut()
-                .enumerate()
-                .find(|(_, p)| p.allocated_descriptors < p.max_descriptors)
-            {
-                (idx, pool)
-            } else {
-                const MAX_DESCRIPTORS: u32 = 100;
-                let mut samplers = 0;
-                let mut combined_image_samplers = 0;
-                let mut uniform_buffers = 0;
-                let mut storage_buffers = 0;
-                let mut input_attachments = 0;
+        self.state.descriptor_pool_cache.use_ref_mut(
+            info,
+            |pools| {
+                let (pool_index, descriptor_pool) = {
+                    if let Some((idx, pool)) = pools
+                        .iter_mut()
+                        .enumerate()
+                        .find(|(_, p)| p.allocated_descriptors < p.max_descriptors)
+                    {
+                        (idx, pool)
+                    } else {
+                        const MAX_DESCRIPTORS: u32 = 100;
+                        let mut samplers = 0;
+                        let mut combined_image_samplers = 0;
+                        let mut uniform_buffers = 0;
+                        let mut storage_buffers = 0;
+                        let mut input_attachments = 0;
 
-                for binding in &descriptor_set_bindings.elements {
-                    match binding.binding_type {
-                        crate::BindingType::Uniform => uniform_buffers += 1,
-                        crate::BindingType::Storage => storage_buffers += 1,
-                        crate::BindingType::Sampler => samplers += 1,
-                        crate::BindingType::CombinedImageSampler => combined_image_samplers += 1,
-                        crate::BindingType::InputAttachment => input_attachments += 1,
+                        for binding in &descriptor_set_bindings.elements {
+                            match binding.binding_type {
+                                crate::BindingType::Uniform => uniform_buffers += 1,
+                                crate::BindingType::Storage => storage_buffers += 1,
+                                crate::BindingType::Sampler => samplers += 1,
+                                crate::BindingType::CombinedImageSampler => {
+                                    combined_image_samplers += 1
+                                }
+                                crate::BindingType::InputAttachment => input_attachments += 1,
+                            }
+                        }
+
+                        let mut pool_sizes = vec![];
+                        if samplers > 0 {
+                            pool_sizes.push(vk::DescriptorPoolSize {
+                                ty: vk::DescriptorType::SAMPLER,
+                                descriptor_count: samplers as _,
+                            });
+                        }
+                        if combined_image_samplers > 0 {
+                            pool_sizes.push(vk::DescriptorPoolSize {
+                                ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                                descriptor_count: combined_image_samplers as _,
+                            });
+                        }
+                        if uniform_buffers > 0 {
+                            pool_sizes.push(vk::DescriptorPoolSize {
+                                ty: vk::DescriptorType::UNIFORM_BUFFER,
+                                descriptor_count: uniform_buffers as _,
+                            });
+                        }
+                        if storage_buffers > 0 {
+                            pool_sizes.push(vk::DescriptorPoolSize {
+                                ty: vk::DescriptorType::STORAGE_BUFFER,
+                                descriptor_count: storage_buffers as _,
+                            });
+                        }
+                        if input_attachments > 0 {
+                            pool_sizes.push(vk::DescriptorPoolSize {
+                                ty: vk::DescriptorType::INPUT_ATTACHMENT,
+                                descriptor_count: input_attachments as _,
+                            });
+                        }
+                        let pool = unsafe {
+                            self.vk_logical_device().create_descriptor_pool(
+                                &vk::DescriptorPoolCreateInfo {
+                                    s_type: StructureType::DESCRIPTOR_POOL_CREATE_INFO,
+                                    p_next: std::ptr::null(),
+                                    flags: vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET,
+                                    max_sets: MAX_DESCRIPTORS,
+                                    pool_size_count: pool_sizes.len() as _,
+                                    p_pool_sizes: pool_sizes.as_ptr() as *const _,
+                                },
+                                get_allocation_callbacks(),
+                            )
+                        }
+                        .expect("Failed to create pool");
+                        let pool_allocation = DescriptorPoolAllocation::new(pool, MAX_DESCRIPTORS);
+                        let idx = pools.len();
+
+                        pools.push(pool_allocation);
+                        (idx, &mut pools[idx])
                     }
-                }
-
-                let mut pool_sizes = vec![];
-                if samplers > 0 {
-                    pool_sizes.push(vk::DescriptorPoolSize {
-                        ty: vk::DescriptorType::SAMPLER,
-                        descriptor_count: samplers as _,
-                    });
-                }
-                if combined_image_samplers > 0 {
-                    pool_sizes.push(vk::DescriptorPoolSize {
-                        ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                        descriptor_count: combined_image_samplers as _,
-                    });
-                }
-                if uniform_buffers > 0 {
-                    pool_sizes.push(vk::DescriptorPoolSize {
-                        ty: vk::DescriptorType::UNIFORM_BUFFER,
-                        descriptor_count: uniform_buffers as _,
-                    });
-                }
-                if storage_buffers > 0 {
-                    pool_sizes.push(vk::DescriptorPoolSize {
-                        ty: vk::DescriptorType::STORAGE_BUFFER,
-                        descriptor_count: storage_buffers as _,
-                    });
-                }
-                if input_attachments > 0 {
-                    pool_sizes.push(vk::DescriptorPoolSize {
-                        ty: vk::DescriptorType::INPUT_ATTACHMENT,
-                        descriptor_count: input_attachments as _,
-                    });
-                }
-                let pool = unsafe {
-                    self.vk_logical_device().create_descriptor_pool(
-                        &vk::DescriptorPoolCreateInfo {
-                            s_type: StructureType::DESCRIPTOR_POOL_CREATE_INFO,
+                };
+                let set = unsafe {
+                    self.vk_logical_device()
+                        .allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo {
+                            s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
                             p_next: std::ptr::null(),
-                            flags: vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET,
-                            max_sets: MAX_DESCRIPTORS,
-                            pool_size_count: pool_sizes.len() as _,
-                            p_pool_sizes: pool_sizes.as_ptr() as *const _,
-                        },
-                        get_allocation_callbacks(),
-                    )
+                            descriptor_pool: descriptor_pool.pool,
+                            descriptor_set_count: 1,
+                            p_set_layouts: addr_of!(layout) as *const _,
+                        })
+                        .expect("Failed to allocate descriptor set")[0]
+                };
+                descriptor_pool.allocated_descriptors += 1;
+                info!("Created a new descriptor set");
+                DescriptorSetAllocation {
+                    set,
+                    pool_hash,
+                    pool_index,
                 }
-                .expect("Failed to create pool");
-                let pool_allocation = DescriptorPoolAllocation::new(pool, MAX_DESCRIPTORS);
-                let idx = pools.len();
-
-                pools.push(pool_allocation);
-                (idx, &mut pools[idx])
-            }
-        };
-        let set = unsafe {
-            self.vk_logical_device()
-                .allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo {
-                    s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
-                    p_next: std::ptr::null(),
-                    descriptor_pool: descriptor_pool.pool,
-                    descriptor_set_count: 1,
-                    p_set_layouts: addr_of!(layout) as *const _,
-                })
-                .expect("Failed to allocate descriptor set")[0]
-        };
-        descriptor_pool.allocated_descriptors += 1;
-        info!("Created a new descriptor set");
-        DescriptorSetAllocation {
-            set,
-            pool_hash,
-            pool_index,
-        }
+            },
+            || vec![],
+        )
     }
 
     pub(crate) fn get_pipeline_layout(
@@ -1452,15 +1454,15 @@ impl VkGpu {
                 .state
                 .descriptor_set_layout_cache
                 .get(set_info, || self.create_descriptor_set_layout(set_info));
-            let descriptor = self
-                .state
-                .descriptor_set_cache
-                .get_ref(&set_info, || {
+            let descriptor = self.state.descriptor_set_cache.use_ref(
+                &set_info,
+                |s| s.set,
+                || {
                     let set = self.create_descriptor_set(set_info, layout);
                     self.write_descriptor_set(set.set, set_info);
                     set
-                })
-                .set;
+                },
+            );
             descriptors.push(descriptor)
         }
 
@@ -2431,15 +2433,16 @@ impl Gpu for VkGpu {
         let device = self.vk_logical_device();
         self.state.descriptor_set_cache.update(|set| unsafe {
             info!("Destroying descriptor set");
-            let mut owner_pool = self
-                .state
-                .descriptor_pool_cache
-                .get_ref_mut_raw(&set.pool_hash);
-            let owner_pool = &mut owner_pool[set.pool_index];
-            device
-                .free_descriptor_sets(owner_pool.pool, &[set.set])
-                .expect("Failed to free descriptor set");
-            owner_pool.allocated_descriptors -= 1;
+            let mut owner_pool =
+                self.state
+                    .descriptor_pool_cache
+                    .use_ref_mut_raw(&set.pool_hash, |owner_pool| {
+                        let owner_pool = &mut owner_pool[set.pool_index];
+                        device
+                            .free_descriptor_sets(owner_pool.pool, &[set.set])
+                            .expect("Failed to free descriptor set");
+                        owner_pool.allocated_descriptors -= 1;
+                    });
         });
         self.state.descriptor_set_layout_cache.update(|l| unsafe {
             info!("Destroying descriptor layout");
@@ -2468,7 +2471,8 @@ impl Gpu for VkGpu {
                 .state
                 .destroyed_resources
                 .destroyed_image_views
-                .borrow_mut(),
+                .write()
+                .unwrap(),
         );
         self.drain_dead_resources(
             &mut self
@@ -2481,7 +2485,8 @@ impl Gpu for VkGpu {
                 .state
                 .destroyed_resources
                 .destroyed_buffers
-                .borrow_mut(),
+                .write()
+                .unwrap(),
         );
         self.drain_dead_resources(
             &mut self
@@ -2494,7 +2499,8 @@ impl Gpu for VkGpu {
                 .state
                 .destroyed_resources
                 .destroyed_samplers
-                .borrow_mut(),
+                .write()
+                .unwrap(),
         );
         self.drain_dead_resources(
             &mut self
@@ -2507,7 +2513,8 @@ impl Gpu for VkGpu {
                 .state
                 .destroyed_resources
                 .destroyed_shader_modules
-                .borrow_mut(),
+                .write()
+                .unwrap(),
         );
         self.drain_dead_resources(
             &mut self
@@ -2516,14 +2523,20 @@ impl Gpu for VkGpu {
                 .write()
                 .unwrap()
                 .get_map_mut::<VkImage>(),
-            &mut self.state.destroyed_resources.destroyed_images.borrow_mut(),
+            &mut self
+                .state
+                .destroyed_resources
+                .destroyed_images
+                .write()
+                .unwrap(),
         );
         self.update_cycle_for_deleted_resources(
             &mut self
                 .state
                 .destroyed_resources
                 .destroyed_shader_modules
-                .borrow_mut(),
+                .write()
+                .unwrap(),
             |sm| unsafe {
                 self.vk_logical_device()
                     .destroy_shader_module(sm.inner, get_allocation_callbacks())
@@ -2534,7 +2547,8 @@ impl Gpu for VkGpu {
                 .state
                 .destroyed_resources
                 .destroyed_image_views
-                .borrow_mut(),
+                .write()
+                .unwrap(),
             |view| unsafe {
                 self.vk_logical_device()
                     .destroy_image_view(view.inner, get_allocation_callbacks());
@@ -2545,7 +2559,8 @@ impl Gpu for VkGpu {
                 .state
                 .destroyed_resources
                 .destroyed_samplers
-                .borrow_mut(),
+                .write()
+                .unwrap(),
             |sam| unsafe {
                 self.vk_logical_device()
                     .destroy_sampler(sam.inner, get_allocation_callbacks());
@@ -2556,7 +2571,8 @@ impl Gpu for VkGpu {
                 .state
                 .destroyed_resources
                 .destroyed_buffers
-                .borrow_mut(),
+                .write()
+                .unwrap(),
             |buf| unsafe {
                 self.vk_logical_device()
                     .destroy_buffer(buf.inner, get_allocation_callbacks());
@@ -2568,7 +2584,12 @@ impl Gpu for VkGpu {
             },
         );
         self.update_cycle_for_deleted_resources(
-            &mut self.state.destroyed_resources.destroyed_images.borrow_mut(),
+            &mut self
+                .state
+                .destroyed_resources
+                .destroyed_images
+                .write()
+                .unwrap(),
             |img| {
                 // Otherwise it's a wrapped image, e.g a swapchain image
                 if let Some(allocation) = &img.allocation {
@@ -2639,7 +2660,7 @@ impl Gpu for VkGpu {
                 .allocation
                 .persistent_ptr
                 .expect("Tried to read from a buffer without a persistent ptr!")
-                .as_ptr()
+                .as_ptr::<u8>()
                 .add(offset as _)
         } as *mut u8;
         let slice = unsafe { std::slice::from_raw_parts_mut(address, size) };
