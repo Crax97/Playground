@@ -1,6 +1,5 @@
 mod allocator;
 mod command_buffer;
-mod descriptor_set;
 mod gpu;
 mod gpu_resource_manager;
 mod handle;

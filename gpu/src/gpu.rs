@@ -1,5 +1,4 @@
 use std::{
-    cell::RefCell,
     collections::HashMap,
     ffi::{c_void, CStr, CString},
     ptr::addr_of_mut,
@@ -56,11 +55,8 @@ use crate::{
     ShaderInfo,
 };
 
-use super::descriptor_set::PooledDescriptorSetAllocator;
-
 use super::{
     allocator::{GpuAllocator, PasstroughAllocator},
-    descriptor_set::DescriptorSetAllocator,
     AccessFlags, AllocationRequirements, MemoryDomain, VkBuffer, VkImage, VkSampler,
 };
 
@@ -473,8 +469,6 @@ impl VkGpu {
 
         let gpu_memory_allocator =
             PasstroughAllocator::new(&instance, physical_device.physical_device, &logical_device)?;
-
-        let descriptor_set_allocator = PooledDescriptorSetAllocator::new(logical_device.clone())?;
 
         let debug_utilities = if configuration.enable_debug_utilities {
             let utilities = DebugUtils::new(&entry, &instance);
@@ -2433,16 +2427,15 @@ impl Gpu for VkGpu {
         let device = self.vk_logical_device();
         self.state.descriptor_set_cache.update(|set| unsafe {
             info!("Destroying descriptor set");
-            let mut owner_pool =
-                self.state
-                    .descriptor_pool_cache
-                    .use_ref_mut_raw(&set.pool_hash, |owner_pool| {
-                        let owner_pool = &mut owner_pool[set.pool_index];
-                        device
-                            .free_descriptor_sets(owner_pool.pool, &[set.set])
-                            .expect("Failed to free descriptor set");
-                        owner_pool.allocated_descriptors -= 1;
-                    });
+            self.state
+                .descriptor_pool_cache
+                .use_ref_mut_raw(&set.pool_hash, |owner_pool| {
+                    let owner_pool = &mut owner_pool[set.pool_index];
+                    device
+                        .free_descriptor_sets(owner_pool.pool, &[set.set])
+                        .expect("Failed to free descriptor set");
+                    owner_pool.allocated_descriptors -= 1;
+                });
         });
         self.state.descriptor_set_layout_cache.update(|l| unsafe {
             info!("Destroying descriptor layout");
