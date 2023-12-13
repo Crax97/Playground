@@ -4,7 +4,7 @@ use std::{
     ffi::{c_void, CStr, CString},
     ptr::addr_of_mut,
     ptr::{addr_of, null},
-    sync::Arc,
+    sync::{Arc, RwLock, RwLockReadGuard},
 };
 
 use anyhow::{bail, Result};
@@ -167,7 +167,7 @@ pub struct GpuThreadSharedState {
     features: SupportedFeatures,
     messenger: Option<vk::DebugUtilsMessengerEXT>,
     pub dynamic_rendering: DynamicRendering,
-    pub allocated_resources: RefCell<GpuResourceMap>,
+    pub allocated_resources: Arc<RwLock<GpuResourceMap>>,
     pub destroyed_resources: DestroyedResources,
     pub context: Arc<VkGpuContext>,
     operations_receiver: Receiver<ResourceOperation>,
@@ -260,27 +260,32 @@ impl GpuThreadSharedState {
         match resource_type {
             crate::HandleType::Buffer => self
                 .allocated_resources
-                .borrow()
+                .read()
+                .unwrap()
                 .get_map_mut::<VkBuffer>()
                 .increment_resource_count(id),
             crate::HandleType::ShaderModule => self
                 .allocated_resources
-                .borrow()
+                .read()
+                .unwrap()
                 .get_map_mut::<VkShaderModule>()
                 .increment_resource_count(id),
             crate::HandleType::Image => self
                 .allocated_resources
-                .borrow()
+                .read()
+                .unwrap()
                 .get_map_mut::<VkImage>()
                 .increment_resource_count(id),
             crate::HandleType::ImageView => self
                 .allocated_resources
-                .borrow()
+                .read()
+                .unwrap()
                 .get_map_mut::<VkImageView>()
                 .increment_resource_count(id),
             crate::HandleType::Sampler => self
                 .allocated_resources
-                .borrow()
+                .read()
+                .unwrap()
                 .get_map_mut::<VkSampler>()
                 .increment_resource_count(id),
         }
@@ -290,27 +295,32 @@ impl GpuThreadSharedState {
         match resource_type {
             crate::HandleType::Buffer => self
                 .allocated_resources
-                .borrow()
+                .read()
+                .unwrap()
                 .get_map_mut::<VkBuffer>()
                 .decrement_resource_count(id),
             crate::HandleType::ShaderModule => self
                 .allocated_resources
-                .borrow()
+                .read()
+                .unwrap()
                 .get_map_mut::<VkShaderModule>()
                 .decrement_resource_count(id),
             crate::HandleType::Image => self
                 .allocated_resources
-                .borrow()
+                .read()
+                .unwrap()
                 .get_map_mut::<VkImage>()
                 .decrement_resource_count(id),
             crate::HandleType::ImageView => self
                 .allocated_resources
-                .borrow()
+                .read()
+                .unwrap()
                 .get_map_mut::<VkImageView>()
                 .decrement_resource_count(id),
             crate::HandleType::Sampler => self
                 .allocated_resources
-                .borrow()
+                .read()
+                .unwrap()
                 .get_map_mut::<VkSampler>()
                 .decrement_resource_count(id),
         }
@@ -532,7 +542,7 @@ impl VkGpu {
             render_pass_cache: LifetimedCache::new(lifetime_cache_constants::NEVER_DEALLOCATE),
             framebuffer_cache: LifetimedCache::new(lifetime_cache_constants::NEVER_DEALLOCATE),
             dynamic_rendering,
-            allocated_resources: RefCell::new(GpuResourceMap::new()),
+            allocated_resources: Arc::new(RwLock::new(GpuResourceMap::new())),
             destroyed_resources: DestroyedResources::default(),
             context: Arc::new(VkGpuContext { operations_sender }),
             operations_receiver,
@@ -992,8 +1002,8 @@ impl VkGpu {
         Ok(dynamic_rendering)
     }
 
-    pub(crate) fn allocated_resources(&self) -> &RefCell<GpuResourceMap> {
-        &self.state.allocated_resources
+    pub(crate) fn allocated_resources(&self) -> RwLockReadGuard<GpuResourceMap> {
+        self.state.allocated_resources.read().unwrap()
     }
 
     fn create_graphics_pipeline(
@@ -1480,7 +1490,11 @@ impl VkGpu {
         &self,
         source: &T::AssociatedHandle,
     ) -> T {
-        self.state.allocated_resources.borrow().resolve(source)
+        self.state
+            .allocated_resources
+            .read()
+            .unwrap()
+            .resolve(source)
     }
 
     fn reflect_spirv(code: &[u32]) -> anyhow::Result<ShaderInfo> {
@@ -1879,7 +1893,8 @@ fn create_staging_buffer(state: &Arc<GpuThreadSharedState>) -> VkResult<BufferHa
     let handle = BufferHandle::new(state.context.clone());
     state
         .allocated_resources
-        .borrow_mut()
+        .write()
+        .unwrap()
         .insert(&handle, buffer);
     Ok(handle)
 }
@@ -2443,7 +2458,8 @@ impl Gpu for VkGpu {
             &mut self
                 .state
                 .allocated_resources
-                .borrow()
+                .write()
+                .unwrap()
                 .get_map_mut::<VkImageView>(),
             &mut self
                 .state
@@ -2455,7 +2471,8 @@ impl Gpu for VkGpu {
             &mut self
                 .state
                 .allocated_resources
-                .borrow()
+                .write()
+                .unwrap()
                 .get_map_mut::<VkBuffer>(),
             &mut self
                 .state
@@ -2467,7 +2484,8 @@ impl Gpu for VkGpu {
             &mut self
                 .state
                 .allocated_resources
-                .borrow()
+                .write()
+                .unwrap()
                 .get_map_mut::<VkSampler>(),
             &mut self
                 .state
@@ -2479,7 +2497,8 @@ impl Gpu for VkGpu {
             &mut self
                 .state
                 .allocated_resources
-                .borrow()
+                .write()
+                .unwrap()
                 .get_map_mut::<VkShaderModule>(),
             &mut self
                 .state
@@ -2491,7 +2510,8 @@ impl Gpu for VkGpu {
             &mut self
                 .state
                 .allocated_resources
-                .borrow()
+                .write()
+                .unwrap()
                 .get_map_mut::<VkImage>(),
             &mut self.state.destroyed_resources.destroyed_images.borrow_mut(),
         );
@@ -2567,8 +2587,10 @@ impl Gpu for VkGpu {
     ) -> anyhow::Result<crate::ShaderModuleHandle> {
         let buffer = self.create_shader_module(info)?;
         let handle = ShaderModuleHandle::new(self.state.context.clone());
-        self.allocated_resources()
-            .borrow_mut()
+        self.state
+            .allocated_resources
+            .write()
+            .unwrap()
             .insert(&handle, buffer);
 
         Ok(handle)
@@ -2581,15 +2603,17 @@ impl Gpu for VkGpu {
     ) -> anyhow::Result<crate::BufferHandle> {
         let buffer = self.create_buffer(buffer_info, memory_domain)?;
         let handle = BufferHandle::new(self.state.context.clone());
-        self.allocated_resources()
-            .borrow_mut()
+        self.state
+            .allocated_resources
+            .write()
+            .unwrap()
             .insert(&handle, buffer);
 
         Ok(handle)
     }
 
     fn write_buffer(&self, buffer: &BufferHandle, offset: u64, data: &[u8]) -> anyhow::Result<()> {
-        let buffer = self.allocated_resources().borrow().resolve(buffer);
+        let buffer = self.allocated_resources().resolve(buffer);
         self.write_buffer_data_with_offset(&buffer, offset, data)?;
         Ok(())
     }
@@ -2628,8 +2652,10 @@ impl Gpu for VkGpu {
 
         let handle = ImageHandle::new(self.state.context.clone());
 
-        self.allocated_resources()
-            .borrow_mut()
+        self.state
+            .allocated_resources
+            .write()
+            .unwrap()
             .insert(&handle, image);
 
         let write_layered_image = |data: &[u8]| -> VkResult<()> {
@@ -2866,8 +2892,10 @@ impl Gpu for VkGpu {
             )
         }?;
         let handle = ImageViewHandle::new(self.state.context.clone());
-        self.allocated_resources()
-            .borrow_mut()
+        self.state
+            .allocated_resources
+            .write()
+            .unwrap()
             .insert(&handle, view);
         Ok(handle)
     }
@@ -2875,8 +2903,10 @@ impl Gpu for VkGpu {
     fn make_sampler(&self, info: &SamplerCreateInfo) -> anyhow::Result<crate::SamplerHandle> {
         let sampler = self.create_sampler(info)?;
         let handle = SamplerHandle::new(self.state.context.clone());
-        self.allocated_resources()
-            .borrow_mut()
+        self.state
+            .allocated_resources
+            .write()
+            .unwrap()
             .insert(&handle, sampler);
 
         Ok(handle)

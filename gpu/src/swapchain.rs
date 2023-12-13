@@ -433,7 +433,8 @@ impl VkSwapchain {
                 let handle = <ImageHandle as crate::Handle>::new(self.state.context.clone());
                 self.state
                     .allocated_resources
-                    .borrow_mut()
+                    .write()
+                    .unwrap()
                     .insert(&handle, img);
                 handle
             })
@@ -451,7 +452,8 @@ impl VkSwapchain {
             let vk_image = self
                 .state
                 .allocated_resources
-                .borrow()
+                .write()
+                .unwrap()
                 .resolve::<VkImage>(&image)
                 .inner;
             let view_info = ash::vk::ImageViewCreateInfo {
@@ -487,7 +489,8 @@ impl VkSwapchain {
             let view_handle = <ImageViewHandle as crate::Handle>::new(self.state.context.clone());
             self.state
                 .allocated_resources
-                .borrow_mut()
+                .write()
+                .unwrap()
                 .insert(&view_handle, view);
             self.current_swapchain_image_views[i] = view_handle;
         }
