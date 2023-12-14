@@ -391,13 +391,17 @@ impl App for BevyEcsApp {
     where
         Self: Sized,
     {
+        let startup_schedule = Schedule::new(StartupSchedule);
+        let pre_update_schedule = Schedule::new(StartupSchedule);
+        let update_schedule = Schedule::new(UpdateSchedule);
+        let post_update_schedule = Schedule::new(PostUpdateSchedule);
+
         let mut world = World::new();
         let mut resource_map = ResourceMap::new();
 
         Self::setup_resource_map(&mut resource_map, app_state.gpu.clone());
 
         let cvar_manager = CvarManager::new();
-        let input = InputState::new();
         let cube_mesh = utils::load_cube_to_resource_map(app_state.gpu(), &mut resource_map)?;
         let renderer = DeferredRenderingPipeline::new(
             app_state.gpu(),
@@ -405,20 +409,17 @@ impl App for BevyEcsApp {
             cube_mesh,
             DeferredRenderingPipeline::make_3d_combine_shader(app_state.gpu.as_ref())?,
         )?;
-        let startup_schedule = Schedule::new(StartupSchedule);
-        let pre_update_schedule = Schedule::new(StartupSchedule);
-        let update_schedule = Schedule::new(UpdateSchedule);
-        let post_update_schedule = Schedule::new(PostUpdateSchedule);
 
         let default_resources = Self::create_common_resources(app_state.gpu(), &mut resource_map)?;
 
-        world.insert_resource(resource_map);
-        world.insert_resource(cvar_manager);
-        world.insert_resource(input);
-        world.insert_resource(default_resources);
-        world.insert_resource(EngineWindow(window));
-        world.insert_resource(Time::new());
-        world.insert_resource(GpuDevice(app_state.gpu.clone()));
+        setup_world_resources(
+            &mut world,
+            resource_map,
+            cvar_manager,
+            default_resources,
+            window,
+            app_state,
+        );
 
         Ok(Self {
             world,
@@ -538,6 +539,23 @@ impl App for BevyEcsApp {
 
         Ok(command_buffer)
     }
+}
+
+fn setup_world_resources(
+    world: &mut World,
+    resource_map: ResourceMap,
+    cvar_manager: CvarManager,
+    default_resources: CommonResources,
+    window: Window,
+    app_state: &mut AppState,
+) {
+    world.insert_resource(resource_map);
+    world.insert_resource(cvar_manager);
+    world.insert_resource(default_resources);
+    world.insert_resource(InputState::new());
+    world.insert_resource(EngineWindow(window));
+    world.insert_resource(Time::new());
+    world.insert_resource(GpuDevice(app_state.gpu.clone()));
 }
 
 impl BevyEcsAppWithLoop {
