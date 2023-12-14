@@ -119,15 +119,15 @@ impl App for PlanesApp {
         };
 
         let egui_integration = EguiSupport::new(&window, &app_state.gpu, &app_state.swapchain)?;
-        let mesh = Mesh::new(&app_state.gpu, &mesh_data)?;
+        let mesh = Mesh::new(app_state.gpu(), &mesh_data)?;
         let mesh = resource_map.add(mesh);
 
         let texture = resource_map.load::<Texture>(&app_state.gpu, "images/texture.jpg")?;
         let mut scene_renderer = DeferredRenderingPipeline::new(
-            &app_state.gpu,
+            app_state.gpu(),
             &mut resource_map,
             cube.clone(),
-            DeferredRenderingPipeline::make_3d_combine_shader(&app_state.gpu)?,
+            DeferredRenderingPipeline::make_3d_combine_shader(app_state.gpu.as_ref())?,
         )?;
 
         let master = scene_renderer.create_material(

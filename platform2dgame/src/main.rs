@@ -26,7 +26,7 @@ fn main() -> anyhow::Result<()> {
 
     app.renderer()
         .set_combine_shader(DeferredRenderingPipeline::make_2d_combine_shader(
-            &app_state().gpu,
+            app_state().gpu.as_ref(),
         )?);
 
     app.setup_2d();

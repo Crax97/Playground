@@ -894,7 +894,7 @@ impl VkGpu {
         trace!("{}", s);
     }
 
-    pub fn wait_device_idle(&self) -> VkResult<()> {
+    pub fn wait_device_idle_impl(&self) -> VkResult<()> {
         unsafe { self.vk_logical_device().device_wait_idle() }
     }
     pub fn wait_queue_idle(&self, queue_type: QueueType) -> VkResult<()> {
@@ -1999,7 +1999,7 @@ impl VkGpu {
         layer: u32,
     ) -> VkResult<()> {
         let vk_image = self.resolve_resource::<VkImage>(image);
-        self.transition_image_layout(
+        self.transition_image_layout_impl(
             image,
             TransitionInfo {
                 layout: ImageLayout::Undefined,
@@ -2095,7 +2095,7 @@ impl VkGpu {
                 num_layers: 1,
             })?;
         }
-        self.transition_image_layout(
+        self.transition_image_layout_impl(
             image,
             TransitionInfo {
                 layout: ImageLayout::TransferDst,
@@ -2251,7 +2251,7 @@ impl VkGpu {
         Ok(())
     }
 
-    pub fn transition_image_layout(
+    pub fn transition_image_layout_impl(
         &self,
         image: &ImageHandle,
         old_layout: TransitionInfo,
@@ -2344,7 +2344,7 @@ impl VkGpu {
         VkCommandBuffer::new(self, command_pool, queue_type)
     }
 
-    pub fn save_pipeline_cache(&self, path: &str) -> VkResult<()> {
+    pub fn save_pipeline_cache_impl(&self, path: &str) -> VkResult<()> {
         let cache_data = unsafe {
             self.vk_logical_device()
                 .get_pipeline_cache_data(self.state.vk_pipeline_cache)
@@ -2923,5 +2923,26 @@ impl Gpu for VkGpu {
         self.resolve_resource::<VkShaderModule>(shader_handle)
             .shader_info
             .clone()
+    }
+
+    fn transition_image_layout(
+        &self,
+        image: &ImageHandle,
+        old_layout: TransitionInfo,
+        new_layout: TransitionInfo,
+        subresource_range: ImageSubresourceRange,
+    ) -> anyhow::Result<()> {
+        self.transition_image_layout_impl(image, old_layout, new_layout, subresource_range)?;
+        Ok(())
+    }
+
+    fn wait_device_idle(&self) -> anyhow::Result<()> {
+        self.wait_device_idle_impl()?;
+        Ok(())
+    }
+
+    fn save_pipeline_cache(&self, path: &str) -> anyhow::Result<()> {
+        self.save_pipeline_cache_impl(path)?;
+        Ok(())
     }
 }

@@ -324,7 +324,7 @@ struct DrawCall<'a> {
 
 impl DeferredRenderingPipeline {
     pub fn new(
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         resource_map: &mut ResourceMap,
         cube_mesh: ResourceHandle<Mesh>,
         combine_shader: ShaderModuleHandle,

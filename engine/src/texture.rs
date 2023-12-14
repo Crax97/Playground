@@ -2,7 +2,7 @@ use crate::resource_map::Resource;
 use gpu::{
     AccessFlags, ComponentMapping, Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat,
     ImageHandle, ImageSubresourceRange, ImageUsageFlags, ImageViewHandle, ImageViewType,
-    MemoryDomain, PipelineStageFlags, SamplerAddressMode, SamplerCreateInfo, VkGpu,
+    MemoryDomain, PipelineStageFlags, SamplerAddressMode,
 };
 
 /*
@@ -40,7 +40,7 @@ pub struct Texture {
 
 impl Texture {
     fn new_impl(
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         width: u32,
         height: u32,
         data: Option<&[u8]>,
@@ -107,7 +107,7 @@ impl Texture {
         Ok((image, rgba_view))
     }
 
-    pub fn wrap(gpu: &VkGpu, image: ImageHandle, view: ImageViewHandle) -> anyhow::Result<Self> {
+    pub fn wrap(image: ImageHandle, view: ImageViewHandle) -> anyhow::Result<Self> {
         Ok(Self {
             image,
             view,
@@ -115,7 +115,7 @@ impl Texture {
         })
     }
     pub fn new_empty(
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         width: u32,
         height: u32,
         label: Option<&str>,
@@ -131,7 +131,7 @@ impl Texture {
         })
     }
     pub fn new_with_data(
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         width: u32,
         height: u32,
         data: &[u8],

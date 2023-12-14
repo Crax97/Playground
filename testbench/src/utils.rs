@@ -176,7 +176,7 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
         &cube_mesh,
     )?;
 
-    Texture::wrap(gpu, backing_image, view)
+    Texture::wrap(backing_image, view)
 }
 
 fn cubemap_main_loop(
@@ -463,7 +463,7 @@ pub fn generate_irradiance_map(
         resource_map,
         cube_mesh,
     )?;
-    Texture::wrap(gpu, backing_image, view)
+    Texture::wrap(backing_image, view)
 }
 
 pub fn load_cube_to_resource_map(

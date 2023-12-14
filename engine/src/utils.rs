@@ -1,4 +1,4 @@
-use gpu::VkGpu;
+use gpu::Gpu;
 use nalgebra::vector;
 
 use crate::{Mesh, MeshPrimitiveCreateInfo, ResourceHandle, ResourceMap};
@@ -170,7 +170,7 @@ mod tests {
 }
 
 pub fn load_cube_to_resource_map(
-    gpu: &VkGpu,
+    gpu: &dyn Gpu,
     resource_map: &mut ResourceMap,
 ) -> anyhow::Result<ResourceHandle<crate::Mesh>> {
     let mesh_create_info = crate::MeshCreateInfo {

@@ -258,14 +258,15 @@ impl App for GLTFViewer {
         let irradiance_map = resource_map.add(irradiance_map);
 
         let mut scene_renderer = DeferredRenderingPipeline::new(
-            &app_state.gpu,
+            app_state.gpu(),
             &mut resource_map,
             cube_mesh,
-            DeferredRenderingPipeline::make_3d_combine_shader(&app_state.gpu)?,
+            DeferredRenderingPipeline::make_3d_combine_shader(app_state.gpu.as_ref())?,
         )?;
 
-        scene_renderer.add_post_process_pass(TonemapPass::new(&app_state.gpu)?);
-        scene_renderer.add_post_process_pass(FxaaPass::new(&app_state.gpu, &mut cvar_manager)?);
+        scene_renderer.add_post_process_pass(TonemapPass::new(app_state.gpu.as_ref())?);
+        scene_renderer
+            .add_post_process_pass(FxaaPass::new(app_state.gpu.as_ref(), &mut cvar_manager)?);
 
         scene_renderer.set_irradiance_texture(Some(irradiance_map));
 

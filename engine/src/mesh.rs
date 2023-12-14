@@ -1,7 +1,7 @@
 use nalgebra::{Vector2, Vector3};
 
 use crate::resource_map::Resource;
-use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain, VkGpu};
+use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
 
 use crate::utils::to_u8_slice;
 
@@ -37,7 +37,7 @@ pub struct Mesh {
 }
 
 impl Mesh {
-    pub fn new(gpu: &VkGpu, mesh_create_info: &MeshCreateInfo) -> anyhow::Result<Self> {
+    pub fn new(gpu: &dyn Gpu, mesh_create_info: &MeshCreateInfo) -> anyhow::Result<Self> {
         let primitives: Vec<anyhow::Result<MeshPrimitive>> = mesh_create_info
             .primitives
             .iter()

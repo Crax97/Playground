@@ -197,7 +197,7 @@ impl BevyEcsApp {
     }
 
     fn create_common_resources(
-        gpu: &gpu::VkGpu,
+        gpu: &dyn Gpu,
         resource_map: &mut ResourceMap,
     ) -> anyhow::Result<CommonResources> {
         let quad_mesh = {
@@ -387,19 +387,19 @@ impl App for BevyEcsApp {
 
         let cvar_manager = CvarManager::new();
         let input = InputState::new();
-        let cube_mesh = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
+        let cube_mesh = utils::load_cube_to_resource_map(app_state.gpu(), &mut resource_map)?;
         let renderer = DeferredRenderingPipeline::new(
-            &app_state.gpu,
+            app_state.gpu(),
             &mut resource_map,
             cube_mesh,
-            DeferredRenderingPipeline::make_3d_combine_shader(&app_state.gpu)?,
+            DeferredRenderingPipeline::make_3d_combine_shader(app_state.gpu.as_ref())?,
         )?;
         let startup_schedule = Schedule::new(StartupSchedule);
         let pre_update_schedule = Schedule::new(StartupSchedule);
         let update_schedule = Schedule::new(UpdateSchedule);
         let post_update_schedule = Schedule::new(PostUpdateSchedule);
 
-        let default_resources = Self::create_common_resources(&app_state.gpu, &mut resource_map)?;
+        let default_resources = Self::create_common_resources(app_state.gpu(), &mut resource_map)?;
 
         world.insert_resource(resource_map);
         world.insert_resource(cvar_manager);
@@ -407,6 +407,7 @@ impl App for BevyEcsApp {
         world.insert_resource(default_resources);
         world.insert_resource(EngineWindow(window));
         world.insert_resource(Time::new());
+        // world.insert_resource(Device(app_state.gpu.clone()));
 
         Ok(Self {
             world,

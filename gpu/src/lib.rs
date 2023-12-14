@@ -29,7 +29,7 @@ pub struct GpuConfiguration<'a> {
     pub window: Option<&'a Window>,
 }
 
-pub trait Gpu: Send + Sync {
+pub trait Gpu: Send + Sync + 'static {
     fn update(&self);
 
     fn make_buffer(
@@ -68,6 +68,16 @@ pub trait Gpu: Send + Sync {
         &self,
         info: &ShaderModuleCreateInfo,
     ) -> anyhow::Result<ShaderModuleHandle>;
+    fn transition_image_layout(
+        &self,
+        image: &ImageHandle,
+        old_layout: TransitionInfo,
+        new_layout: TransitionInfo,
+        subresource_range: ImageSubresourceRange,
+    ) -> anyhow::Result<()>;
+
+    fn wait_device_idle(&self) -> anyhow::Result<()>;
+    fn save_pipeline_cache(&self, path: &str) -> anyhow::Result<()>;
 }
 
 bitflags! {
