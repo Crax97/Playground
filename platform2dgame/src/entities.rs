@@ -30,12 +30,10 @@ pub fn load_level_system(
 ) {
     physics_context.gravity = [0.0, -15.0].into();
     let level = resource_map
-        .load::<BitmapLevel>(&app_state().gpu, "images/levels/test_level.bmp")
+        .load::<BitmapLevel>("images/levels/test_level.bmp")
         .unwrap();
 
-    let entities = resource_map
-        .load(&app_state().gpu, "images/sprites/entities.png")
-        .unwrap();
+    let entities = resource_map.load("images/sprites/entities.png").unwrap();
 
     resource_map
         .get_mut::<Texture>(&entities)

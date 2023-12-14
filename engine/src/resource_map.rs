@@ -19,7 +19,7 @@ pub trait Resource: Send + Sync + 'static {
 pub trait ResourceLoader: Send + Sync + 'static {
     type LoadedResource: Resource;
 
-    fn load(&self, gpu: &VkGpu, path: &Path) -> anyhow::Result<Self::LoadedResource>;
+    fn load(&self, path: &Path) -> anyhow::Result<Self::LoadedResource>;
 }
 
 #[repr(transparent)]
@@ -59,15 +59,15 @@ impl RefCounted {
 }
 
 trait ErasedResourceLoader: Send + Sync + 'static {
-    fn load_erased(&self, gpu: &VkGpu, path: &Path) -> anyhow::Result<ResourcePtr>;
+    fn load_erased(&self, path: &Path) -> anyhow::Result<ResourcePtr>;
 }
 
 impl<T: ResourceLoader> ErasedResourceLoader for T
 where
     T: Send + Sync + 'static,
 {
-    fn load_erased(&self, gpu: &VkGpu, path: &Path) -> anyhow::Result<ResourcePtr> {
-        let inner = self.load(gpu, path)?;
+    fn load_erased(&self, path: &Path) -> anyhow::Result<ResourcePtr> {
+        let inner = self.load(path)?;
 
         Ok(Arc::new(inner))
     }
@@ -236,11 +236,10 @@ impl ResourceMap {
 
     pub fn load<R: Resource>(
         &mut self,
-        gpu: &VkGpu,
         path: impl AsRef<Path>,
     ) -> anyhow::Result<ResourceHandle<R>> {
         if let Some(loader) = self.resource_loaders.get(&TypeId::of::<R>()) {
-            let loaded_resource = loader.load_erased(gpu, path.as_ref())?;
+            let loaded_resource = loader.load_erased(path.as_ref())?;
 
             let id = {
                 let mut handle = self.get_or_insert_arena_mut::<R>();

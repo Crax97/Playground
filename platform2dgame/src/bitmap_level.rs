@@ -34,11 +34,7 @@ impl Resource for BitmapLevel {
 impl ResourceLoader for BitmapLevelLoader {
     type LoadedResource = BitmapLevel;
 
-    fn load(
-        &self,
-        _gpu: &gpu::VkGpu,
-        path: &std::path::Path,
-    ) -> anyhow::Result<Self::LoadedResource> {
+    fn load(&self, path: &std::path::Path) -> anyhow::Result<Self::LoadedResource> {
         const TERRAIN: Rgb<u8> = Rgb([142, 65, 11]);
         const GRASS: Rgb<u8> = Rgb([108, 201, 85]);
         const PLAYER: Rgb<u8> = Rgb([255, 40, 60]);

@@ -53,6 +53,17 @@ const DEFAULT_DEFERRED_VS: &[u32] = glsl!(
     entry_point = "main"
 );
 
+#[derive(Clone, Resource)]
+pub struct GpuDevice(Arc<dyn Gpu>);
+
+impl Deref for GpuDevice {
+    type Target = dyn Gpu;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref()
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct AppTypeRegistry(Arc<RwLock<TypeRegistry>>);
 
@@ -362,8 +373,8 @@ impl BevyEcsApp {
         })
     }
 
-    fn setup_resource_map(resource_map: &mut ResourceMap) {
-        resource_map.install_resource_loader(FileSystemTextureLoader);
+    fn setup_resource_map(resource_map: &mut ResourceMap, gpu: Arc<dyn Gpu>) {
+        resource_map.install_resource_loader(FileSystemTextureLoader { gpu: gpu.clone() });
     }
 }
 
@@ -383,7 +394,7 @@ impl App for BevyEcsApp {
         let mut world = World::new();
         let mut resource_map = ResourceMap::new();
 
-        Self::setup_resource_map(&mut resource_map);
+        Self::setup_resource_map(&mut resource_map, app_state.gpu.clone());
 
         let cvar_manager = CvarManager::new();
         let input = InputState::new();
@@ -407,7 +418,7 @@ impl App for BevyEcsApp {
         world.insert_resource(default_resources);
         world.insert_resource(EngineWindow(window));
         world.insert_resource(Time::new());
-        // world.insert_resource(Device(app_state.gpu.clone()));
+        world.insert_resource(GpuDevice(app_state.gpu.clone()));
 
         Ok(Self {
             world,

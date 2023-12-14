@@ -1,16 +1,24 @@
-use std::{ffi::OsStr, io::BufReader};
+use std::{ffi::OsStr, io::BufReader, sync::Arc};
 
-use gpu::{ImageFormat, ImageViewType, VkGpu};
+use gpu::{Gpu, ImageFormat, ImageViewType};
 
 // A texture loader that works directly with the file system
 use crate::{ResourceLoader, Texture};
 
-pub struct FileSystemTextureLoader;
+pub struct FileSystemTextureLoader {
+    pub(crate) gpu: Arc<dyn Gpu>,
+}
+
+impl FileSystemTextureLoader {
+    pub fn new(gpu: Arc<dyn Gpu>) -> Self {
+        Self { gpu }
+    }
+}
 
 impl ResourceLoader for FileSystemTextureLoader {
     type LoadedResource = Texture;
 
-    fn load(&self, gpu: &VkGpu, path: &std::path::Path) -> anyhow::Result<Self::LoadedResource> {
+    fn load(&self, path: &std::path::Path) -> anyhow::Result<Self::LoadedResource> {
         let cpu_image = image::load(
             BufReader::new(std::fs::File::open(path)?),
             image::ImageFormat::from_path(path)?,
@@ -25,7 +33,7 @@ impl ResourceLoader for FileSystemTextureLoader {
         };
 
         Ok(Texture::new_with_data(
-            gpu,
+            self.gpu.as_ref(),
             cpu_image.width(),
             cpu_image.height(),
             cpu_image.as_bytes(),

@@ -57,7 +57,7 @@ impl App for PlanesApp {
         Self: Sized,
     {
         let mut resource_map = ResourceMap::new();
-        resource_map.install_resource_loader(FileSystemTextureLoader);
+        resource_map.install_resource_loader(FileSystemTextureLoader::new(app_state.gpu.clone()));
 
         let cvar_manager = CvarManager::new();
         let camera = Camera {
@@ -122,7 +122,7 @@ impl App for PlanesApp {
         let mesh = Mesh::new(app_state.gpu(), &mesh_data)?;
         let mesh = resource_map.add(mesh);
 
-        let texture = resource_map.load::<Texture>(&app_state.gpu, "images/texture.jpg")?;
+        let texture = resource_map.load::<Texture>("images/texture.jpg")?;
         let mut scene_renderer = DeferredRenderingPipeline::new(
             app_state.gpu(),
             &mut resource_map,
