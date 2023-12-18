@@ -18,8 +18,7 @@ use super::{QueueType, VkBuffer, VkGpu};
 const RENDER_PASSS_LABEL_COLOR: [f32; 4] = [0.6, 0.6, 0.6, 1.0];
 const SUBPASS_LABEL_COLOR: [f32; 4] = [0.373, 0.792, 0.988, 1.0];
 
-pub struct VkCommandBuffer<'g> {
-    gpu: &'g VkGpu,
+pub struct VkCommandBuffer {
     state: Arc<GpuThreadSharedState>,
     inner_command_buffer: vk::CommandBuffer,
     has_recorded_anything: bool,
@@ -29,11 +28,8 @@ pub struct VkCommandBuffer<'g> {
     push_constant_data: Vec<Vec<u8>>,
 }
 
-pub struct VkRenderPassCommand<'c, 'g>
-where
-    'g: 'c,
-{
-    command_buffer: &'c mut VkCommandBuffer<'g>,
+pub struct VkRenderPassCommand<'c> {
+    command_buffer: &'c mut VkCommandBuffer,
     state: Arc<GpuThreadSharedState>,
     has_draw_command: bool,
     viewport_area: Option<Viewport>,
@@ -59,11 +55,8 @@ impl ComputePipelineState {
     }
 }
 
-pub struct VkComputePassCommand<'c, 'g>
-where
-    'g: 'c,
-{
-    command_buffer: &'c mut VkCommandBuffer<'g>,
+pub struct VkComputePassCommand<'c> {
+    command_buffer: &'c mut VkCommandBuffer,
     pipeline_state: ComputePipelineState,
 }
 
@@ -294,9 +287,9 @@ impl DescriptorSetLayoutDescription {
     }
 }
 
-impl<'g> VkCommandBuffer<'g> {
+impl VkCommandBuffer {
     pub(crate) fn new(
-        gpu: &'g VkGpu,
+        gpu: &VkGpu,
         command_pool: &VkCommandPool,
         target_queue: QueueType,
     ) -> VkResult<Self> {
@@ -326,7 +319,6 @@ impl<'g> VkCommandBuffer<'g> {
         }?;
 
         Ok(Self {
-            gpu,
             state: gpu.state.clone(),
             inner_command_buffer,
             has_recorded_anything: false,
@@ -336,18 +328,16 @@ impl<'g> VkCommandBuffer<'g> {
             push_constant_data: vec![],
         })
     }
-    pub fn gpu(&self) -> &VkGpu {
-        &self.gpu
-    }
+
     pub fn begin_render_pass<'p>(
         &'p mut self,
         info: &BeginRenderPassInfo,
-    ) -> VkRenderPassCommand<'p, 'g> {
-        VkRenderPassCommand::<'p, 'g>::new(self, info)
+    ) -> VkRenderPassCommand<'p> {
+        VkRenderPassCommand::<'p>::new(self, info)
     }
 
-    pub fn begin_compute_pass<'p>(&'p mut self) -> VkComputePassCommand<'p, 'g> {
-        VkComputePassCommand::<'p, 'g>::new(self)
+    pub fn begin_compute_pass<'p>(&'p mut self) -> VkComputePassCommand<'p> {
+        VkComputePassCommand::<'p>::new(self)
     }
 
     pub fn push_constants(
@@ -627,7 +617,7 @@ impl Drop for ScopedDebugLabel {
     }
 }
 
-impl<'g> VkCommandBuffer<'g> {
+impl VkCommandBuffer {
     pub fn begin_debug_region(&self, label: &str, color: [f32; 4]) -> ScopedDebugLabel {
         ScopedDebugLabel {
             inner: self.state.debug_utilities.as_ref().map(|debug_utils| {
@@ -654,7 +644,7 @@ impl<'g> VkCommandBuffer<'g> {
     }
 }
 
-impl<'g> Drop for VkCommandBuffer<'g> {
+impl Drop for VkCommandBuffer {
     fn drop(&mut self) {
         if !self.has_been_submitted {
             warn!("CommandBuffer::submit has not been called!");
@@ -663,9 +653,9 @@ impl<'g> Drop for VkCommandBuffer<'g> {
     }
 }
 
-impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
+impl<'c> VkRenderPassCommand<'c> {
     fn new(
-        command_buffer: &'c mut VkCommandBuffer<'g>,
+        command_buffer: &'c mut VkCommandBuffer,
         render_pass_info: &BeginRenderPassInfo,
     ) -> Self {
         assert!(render_pass_info.subpasses.len() > 0);
@@ -1126,21 +1116,21 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
     }
 }
 
-impl<'c, 'g> AsRef<VkCommandBuffer<'g>> for VkRenderPassCommand<'c, 'g> {
-    fn as_ref(&self) -> &VkCommandBuffer<'g> {
+impl<'c> AsRef<VkCommandBuffer> for VkRenderPassCommand<'c> {
+    fn as_ref(&self) -> &VkCommandBuffer {
         self.command_buffer
     }
 }
 
-impl<'c, 'g> Deref for VkRenderPassCommand<'c, 'g> {
-    type Target = VkCommandBuffer<'g>;
+impl<'c> Deref for VkRenderPassCommand<'c> {
+    type Target = VkCommandBuffer;
 
     fn deref(&self) -> &Self::Target {
         self.command_buffer
     }
 }
 
-impl<'c, 'g> Drop for VkRenderPassCommand<'c, 'g> {
+impl<'c> Drop for VkRenderPassCommand<'c> {
     fn drop(&mut self) {
         self.subpass_label.take();
         self.render_pass_label.end_from_render_pass();
@@ -1153,8 +1143,8 @@ impl<'c, 'g> Drop for VkRenderPassCommand<'c, 'g> {
     }
 }
 
-impl<'c, 'g> VkComputePassCommand<'c, 'g> {
-    fn new(command_buffer: &'c mut VkCommandBuffer<'g>) -> Self {
+impl<'c> VkComputePassCommand<'c> {
+    fn new(command_buffer: &'c mut VkCommandBuffer) -> Self {
         Self {
             command_buffer,
             pipeline_state: ComputePipelineState::new(),
@@ -1169,7 +1159,7 @@ impl<'c, 'g> VkComputePassCommand<'c, 'g> {
         assert!(self.pipeline_state.shader.is_valid());
         let pipeline_layout = self.find_matching_pipeline_layout(&self.descriptor_state);
         let pipeline = self.find_matching_compute_pipeline(pipeline_layout);
-        let device = self.command_buffer.state.logical_device;
+        let device = &self.command_buffer.state.logical_device;
         unsafe {
             device.cmd_bind_pipeline(self.inner(), PipelineBindPoint::COMPUTE, pipeline);
 
@@ -1198,26 +1188,26 @@ impl<'c, 'g> VkComputePassCommand<'c, 'g> {
     }
 }
 
-impl<'c, 'g> AsRef<VkCommandBuffer<'g>> for VkComputePassCommand<'c, 'g> {
-    fn as_ref(&self) -> &VkCommandBuffer<'g> {
+impl<'c> AsRef<VkCommandBuffer> for VkComputePassCommand<'c> {
+    fn as_ref(&self) -> &VkCommandBuffer {
         self.command_buffer
     }
 }
 
-impl<'c, 'g> Deref for VkComputePassCommand<'c, 'g> {
-    type Target = VkCommandBuffer<'g>;
+impl<'c> Deref for VkComputePassCommand<'c> {
+    type Target = VkCommandBuffer;
 
     fn deref(&self) -> &Self::Target {
         self.command_buffer
     }
 }
 
-impl<'c, 'g> DerefMut for VkRenderPassCommand<'c, 'g> {
+impl<'c> DerefMut for VkRenderPassCommand<'c> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.command_buffer
     }
 }
-impl<'c, 'g> DerefMut for VkComputePassCommand<'c, 'g> {
+impl<'c> DerefMut for VkComputePassCommand<'c> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.command_buffer
     }

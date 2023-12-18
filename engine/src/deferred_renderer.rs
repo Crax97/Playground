@@ -466,6 +466,7 @@ impl DeferredRenderingPipeline {
     }
 
     fn main_render_loop(
+        gpu: &VkGpu,
         resource_map: &ResourceMap,
         pipeline_target: PipelineTarget,
         draw_hashmap: &HashMap<&MasterMaterial, Vec<DrawCall>>,
@@ -482,6 +483,7 @@ impl DeferredRenderingPipeline {
                 for draw_call in material_draw_calls.iter() {
                     let material = &draw_call.material;
                     draw_mesh_primitive(
+                        gpu,
                         render_pass,
                         material,
                         master,
@@ -589,6 +591,7 @@ impl DeferredRenderingPipeline {
     }
 
     fn draw_skybox(
+        gpu: &VkGpu,
         camera_location: &Point3<f32>,
         render_pass: &mut VkRenderPassCommand,
         skybox_mesh: &Mesh,
@@ -610,6 +613,7 @@ impl DeferredRenderingPipeline {
         render_pass.set_cull_mode(gpu::CullMode::None);
         render_pass.set_depth_compare_op(gpu::CompareOp::Always);
         draw_mesh_primitive(
+            gpu,
             render_pass,
             skybox_material,
             skybox_master,
@@ -632,6 +636,7 @@ impl DeferredRenderingPipeline {
 
     fn shadow_atlas_pass(
         &self,
+        gpu: &VkGpu,
         graphics_command_buffer: &mut VkCommandBuffer,
         shadow_atlas_component: &RenderImage,
         per_frame_data: Vec<PerFrameData>,
@@ -697,6 +702,7 @@ impl DeferredRenderingPipeline {
                 });
 
                 Self::main_render_loop(
+                    gpu,
                     resource_map,
                     PipelineTarget::DepthOnly,
                     draw_hashmap,
@@ -735,7 +741,8 @@ impl DeferredRenderingPipeline {
 
     fn main_pass(
         &self,
-        graphics_command_buffer: &mut VkCommandBuffer<'_>,
+        gpu: &VkGpu,
+        graphics_command_buffer: &mut VkCommandBuffer,
         resource_map: &ResourceMap,
         color_output: &RenderImage,
         shadow_atlas_component: &RenderImage,
@@ -764,26 +771,12 @@ impl DeferredRenderingPipeline {
             height: render_size.height,
             view_type: ImageViewType::Type2D,
         };
-        let depth_component =
-            self.image_allocator
-                .get(&graphics_command_buffer.gpu(), "depth", &depth_desc);
-        let pos_component =
-            self.image_allocator
-                .get(&graphics_command_buffer.gpu(), "position", &vector_desc);
-        let normal_component =
-            self.image_allocator
-                .get(&graphics_command_buffer.gpu(), "normal", &vector_desc);
-        let diffuse_component =
-            self.image_allocator
-                .get(&graphics_command_buffer.gpu(), "diffuse", &vector_desc);
-        let emissive_component =
-            self.image_allocator
-                .get(&graphics_command_buffer.gpu(), "emissive", &vector_desc);
-        let pbr_component = self.image_allocator.get(
-            &graphics_command_buffer.gpu(),
-            "pbr_component",
-            &vector_desc,
-        );
+        let depth_component = self.image_allocator.get(gpu, "depth", &depth_desc);
+        let pos_component = self.image_allocator.get(gpu, "position", &vector_desc);
+        let normal_component = self.image_allocator.get(gpu, "normal", &vector_desc);
+        let diffuse_component = self.image_allocator.get(gpu, "diffuse", &vector_desc);
+        let emissive_component = self.image_allocator.get(gpu, "emissive", &vector_desc);
+        let pbr_component = self.image_allocator.get(gpu, "pbr_component", &vector_desc);
 
         {
             let early_z_enabled_descriptions: &[SubpassDescription] = &[
@@ -1065,6 +1058,7 @@ impl DeferredRenderingPipeline {
                 gbuffer_render_pass.set_enable_depth_test(true);
                 gbuffer_render_pass.set_depth_write_enabled(true);
                 Self::main_render_loop(
+                    gpu,
                     resource_map,
                     PipelineTarget::DepthOnly,
                     &draw_hashmap,
@@ -1088,6 +1082,7 @@ impl DeferredRenderingPipeline {
                     &current_buffers,
                 );
                 Self::draw_skybox(
+                    gpu,
                     &pov.location,
                     &mut gbuffer_render_pass,
                     cube_mesh,
@@ -1109,6 +1104,7 @@ impl DeferredRenderingPipeline {
                 gpu::CompareOp::LessEqual
             });
             Self::main_render_loop(
+                gpu,
                 resource_map,
                 PipelineTarget::ColorAndDepth,
                 &draw_hashmap,
@@ -1307,6 +1303,7 @@ impl DeferredRenderingPipeline {
 
     fn post_process_pass(
         &self,
+        gpu: &VkGpu,
         graphics_command_buffer: &mut VkCommandBuffer,
         color_output: RenderImage,
         color_desc: RenderImageDescription,
@@ -1361,11 +1358,8 @@ impl DeferredRenderingPipeline {
         let final_color_output = {
             let final_color_output = {
                 let post_process_backbuffer_1 = color_output;
-                let post_process_backbuffer_2 = self.image_allocator.get(
-                    &graphics_command_buffer.gpu(),
-                    "post_process2",
-                    &color_desc,
-                );
+                let post_process_backbuffer_2 =
+                    self.image_allocator.get(gpu, "post_process2", &color_desc);
 
                 let mut current_postprocess = 0;
                 let mut post_process_pass =
@@ -1465,7 +1459,7 @@ impl DeferredRenderingPipeline {
 fn bind_master_material(
     master: &MasterMaterial,
     pipeline_target: PipelineTarget,
-    render_pass: &mut VkRenderPassCommand<'_, '_>,
+    render_pass: &mut VkRenderPassCommand<'_>,
     frame_buffers: &FrameBuffers,
 ) {
     let permutation = master
@@ -1501,6 +1495,7 @@ fn bind_master_material(
 }
 
 fn draw_mesh_primitive(
+    gpu: &VkGpu,
     render_pass: &mut VkRenderPassCommand,
     material: &MaterialInstance,
     master: &MasterMaterial,
@@ -1522,8 +1517,7 @@ fn draw_mesh_primitive(
                 let texture_parameter = &material.textures[i];
                 let tex = resource_map.get(texture_parameter);
 
-                let sampler_handle =
-                    sampler_allocator.get(render_pass.gpu(), &tex.sampler_settings);
+                let sampler_handle = sampler_allocator.get(gpu, &tex.sampler_settings);
 
                 Binding {
                     ty: gpu::DescriptorBindingType::ImageView {
@@ -1706,6 +1700,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let mut graphics_command_buffer = gpu.create_command_buffer(gpu::QueueType::Graphics)?;
 
         self.shadow_atlas_pass(
+            gpu,
             &mut graphics_command_buffer,
             &shadow_atlas_component,
             per_frame_data,
@@ -1716,6 +1711,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         .context("Shadow atlas pass")?;
 
         self.main_pass(
+            gpu,
             &mut graphics_command_buffer,
             resource_map,
             &color_output,
@@ -1730,6 +1726,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let final_color_output = self
             .post_process_pass(
+                gpu,
                 &mut graphics_command_buffer,
                 color_output,
                 color_desc,
