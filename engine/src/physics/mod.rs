@@ -26,7 +26,7 @@ pub struct PhysicsContext2D {
     query_pipeline: QueryPipeline,
 }
 
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, Eq, PartialEq)]
 pub struct Collider2DHandle(pub(crate) ColliderHandle);
 impl AsRef<ColliderHandle> for Collider2DHandle {
     fn as_ref(&self) -> &ColliderHandle {
@@ -137,6 +137,31 @@ impl PhysicsContext2D {
         Collider2DHandle(self.collider_set.insert(collider))
     }
 
+    pub fn are_colliding(
+        &self,
+        collider_a: &Collider2DHandle,
+        collider_b: &Collider2DHandle,
+    ) -> bool {
+        match self
+            .narrow_phase
+            .intersection_pair(collider_a.0, collider_b.0)
+        {
+            Some(true) => {
+                return true;
+            }
+            _ => {}
+        }
+
+        match self.narrow_phase.contact_pair(collider_a.0, collider_b.0) {
+            Some(collision) => {
+                return collision.has_any_active_contact;
+            }
+            _ => {}
+        }
+
+        false
+    }
+
     pub fn add_collider_with_parent(
         &mut self,
         collider: Collider,
@@ -159,6 +184,9 @@ impl PhysicsContext2D {
     }
 
     pub fn update(&mut self) {
+        let (collision_send, collision_recv) = crossbeam::channel::unbounded();
+        let (contact_force_send, contact_force_recv) = crossbeam::channel::unbounded();
+        let evt_handler = ChannelEventCollector::new(collision_send, contact_force_send);
         self.pipeline.step(
             &self.gravity,
             &self.integration_parameters,
@@ -172,10 +200,19 @@ impl PhysicsContext2D {
             &mut self.ccd_solver,
             None,
             &(),
-            &(),
+            &evt_handler,
         );
         self.query_pipeline
             .update(&self.rigid_body_set, &self.collider_set);
+        while let Ok(collision_event) = collision_recv.try_recv() {
+            // Handle the collision event.
+            println!("Received collision event: {:?}", collision_event);
+        }
+
+        while let Ok(contact_force_event) = contact_force_recv.try_recv() {
+            // Handle the contact force event.
+            println!("Received contact force event: {:?}", contact_force_event);
+        }
     }
 }
 
@@ -195,12 +232,6 @@ pub fn update_positions_before_physics_system(
             );
         }
     }
-
-    // for (transform, collider_handle) in collision_query.iter_mut() {
-    //     if let Some(collider) = context.collider_set.get_mut(collider_handle.0) {
-    //         collider.set_position(Isometry2::new(transform.position.coords, 0.0))
-    //     }
-    // }
 }
 pub fn update_positions_after_physics_system(
     context: Res<PhysicsContext2D>,

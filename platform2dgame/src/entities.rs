@@ -1,12 +1,16 @@
+use engine::bevy_ecs;
 use engine::{
-    app::app_state::app_state,
-    bevy_ecs::system::{Commands, Res, ResMut},
+    bevy_ecs::{
+        component::Component,
+        system::{Commands, Res, ResMut},
+    },
     components::{DebugName, SpriteComponent, SpriteComponentDescription, Transform2D},
     physics::{
         rapier2d::{
             dynamics::RigidBodyBuilder,
             geometry::{ColliderBuilder, SharedShape},
             math::Isometry,
+            pipeline::ActiveEvents,
         },
         PhysicsContext2D,
     },
@@ -17,9 +21,12 @@ use nalgebra::{point, vector};
 
 use crate::{
     bitmap_level::{self, BitmapLevel, Entity, EntityType},
-    character::PlayerCharacter,
-    Player,
+    character::KinematicCharacter,
+    Enemy, Player,
 };
+
+#[derive(Component)]
+pub struct Star;
 
 const SPRITE_SIZE: u32 = 8;
 pub fn load_level_system(
@@ -206,7 +213,10 @@ fn spawn_player(
     mut entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
     physics_context: &mut PhysicsContext2D,
 ) {
-    let collider = ColliderBuilder::new(SharedShape::ball(SPRITE_SIZE as f32 * 0.5)).build();
+    let collider = ColliderBuilder::new(SharedShape::ball(SPRITE_SIZE as f32 * 0.5))
+        .sensor(true)
+        .active_events(ActiveEvents::COLLISION_EVENTS)
+        .build();
     let rigid_body = RigidBodyBuilder::kinematic_position_based()
         .translation([entity.x, entity.y].into())
         .additional_mass(10.0)
@@ -225,7 +235,7 @@ fn spawn_player(
         rigid_body,
         collider,
         Player,
-        PlayerCharacter::new(50.0, 0.25),
+        KinematicCharacter::new(50.0, 0.25),
         DebugName("Player".to_owned()),
     ));
 }
@@ -234,9 +244,31 @@ fn spawn_enemy(
     entity: &Entity,
     common_resources: &CommonResources,
     entities_texture: engine::ResourceHandle<Texture>,
-    entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
+    mut entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
     physics_context: &mut PhysicsContext2D,
 ) {
+    let collider = ColliderBuilder::new(SharedShape::ball(SPRITE_SIZE as f32 * 0.5)).build();
+    let rigid_body = RigidBodyBuilder::kinematic_position_based()
+        .translation([entity.x, entity.y].into())
+        .additional_mass(10.0)
+        .build();
+    let rigid_body = physics_context.add_rigidbody(rigid_body);
+    let collider = physics_context.add_collider_with_parent(collider, rigid_body);
+    entity_spawned.insert((
+        SpriteComponent::new(SpriteComponentDescription {
+            texture: entities_texture,
+            material: common_resources.default_sprite_material.clone(),
+            atlas_offset: [SPRITE_SIZE * 2, 0].into(),
+            atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
+            sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
+            z_layer: 0,
+        }),
+        rigid_body,
+        collider,
+        Enemy,
+        KinematicCharacter::new(50.0, 0.25),
+        DebugName("Enemy".to_owned()),
+    ));
 }
 
 fn spawn_terrain(
@@ -270,6 +302,51 @@ fn spawn_grass(
     mut entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
     physics_context: &mut PhysicsContext2D,
 ) {
+    entity_spawned.insert((SpriteComponent::new(SpriteComponentDescription {
+        texture: entities_texture,
+        material: common_resources.default_sprite_material.clone(),
+        atlas_offset: [SPRITE_SIZE * 1, 0].into(),
+        atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
+        sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
+        z_layer: 0,
+    }),));
+}
+
+fn spawn_star(
+    entity: &Entity,
+    common_resources: &CommonResources,
+    entities_texture: engine::ResourceHandle<Texture>,
+    mut entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
+    physics_context: &mut PhysicsContext2D,
+) {
+    let collider = make_collider()
+        .position(Isometry::translation(entity.x as f32, entity.y as f32))
+        .sensor(true)
+        .active_events(ActiveEvents::COLLISION_EVENTS)
+        .build();
+    let collider = physics_context.add_collider(collider);
+    entity_spawned.insert((
+        SpriteComponent::new(SpriteComponentDescription {
+            texture: entities_texture,
+            material: common_resources.default_sprite_material.clone(),
+            atlas_offset: [SPRITE_SIZE * 3, 0].into(),
+            atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
+            sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
+            z_layer: 0,
+        }),
+        collider,
+        Star,
+        DebugName("Star".to_owned()),
+    ));
+}
+
+fn spawn_platform(
+    entity: &Entity,
+    common_resources: &CommonResources,
+    entities_texture: engine::ResourceHandle<Texture>,
+    mut entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
+    physics_context: &mut PhysicsContext2D,
+) {
     let collider = make_collider()
         .position(Isometry::translation(entity.x as f32, entity.y as f32))
         .build();
@@ -278,29 +355,11 @@ fn spawn_grass(
         SpriteComponent::new(SpriteComponentDescription {
             texture: entities_texture,
             material: common_resources.default_sprite_material.clone(),
-            atlas_offset: [SPRITE_SIZE * 1, 0].into(),
+            atlas_offset: [SPRITE_SIZE * 5, 0].into(),
             atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
             sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
             z_layer: 0,
         }),
         collider,
     ));
-}
-
-fn spawn_star(
-    entity: &Entity,
-    common_resources: &CommonResources,
-    entities_texture: engine::ResourceHandle<Texture>,
-    entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
-    physics_context: &mut PhysicsContext2D,
-) {
-}
-
-fn spawn_platform(
-    entity: &Entity,
-    common_resources: &CommonResources,
-    entities_texture: engine::ResourceHandle<Texture>,
-    entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
-    physics_context: &mut PhysicsContext2D,
-) {
 }

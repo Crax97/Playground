@@ -25,8 +25,8 @@ pub struct CharacterState {
 
 #[derive(Component, Default, Reflect)]
 #[reflect(Component)]
-pub struct PlayerCharacter {
-    pub player_speed: f32,
+pub struct KinematicCharacter {
+    pub character_speed: f32,
     pub jump_height: f32,
     pub min_angle_for_wall_degrees: f32,
     pub skin_size: f32,
@@ -39,10 +39,10 @@ pub struct PlayerCharacter {
     last_state: CharacterState,
 }
 
-impl PlayerCharacter {
-    pub fn new(player_speed: f32, jump_height: f32) -> Self {
+impl KinematicCharacter {
+    pub fn new(character_speed: f32, jump_height: f32) -> Self {
         Self {
-            player_speed,
+            character_speed,
             jump_height,
             min_angle_for_wall_degrees: 45.0,
             skin_size: 0.01,
@@ -56,7 +56,7 @@ impl PlayerCharacter {
 }
 
 pub fn player_input_system(
-    mut query: Query<(&mut PlayerCharacter, With<Player>)>,
+    mut query: Query<(&mut KinematicCharacter, With<Player>)>,
     input: Res<InputState>,
     physics: Res<PhysicsContext2D>,
     time: Res<Time>,
@@ -71,7 +71,7 @@ pub fn player_input_system(
     if input.is_key_pressed(Key::Right) {
         input_x -= 1.0;
     }
-    character.current_state.velocity.x = character.player_speed * time.delta_frame() * input_x;
+    character.current_state.velocity.x = character.character_speed * time.delta_frame() * input_x;
 
     if input.is_key_just_pressed(Key::Space) && character.current_state.grounded {
         character.current_state.grounded = false;
@@ -82,7 +82,7 @@ pub fn player_input_system(
 }
 
 pub fn player_movement_system(
-    mut query: Query<(&mut Transform2D, &mut PlayerCharacter, &Collider2DHandle)>,
+    mut query: Query<(&mut Transform2D, &mut KinematicCharacter, &Collider2DHandle)>,
     physics: Res<PhysicsContext2D>,
 ) {
     let (mut transform, mut player_character, player_collider) = query.single_mut();
@@ -125,7 +125,9 @@ pub fn player_movement_system(
         shape.0.as_ref(),
         surface_check_distance,
         true,
-        QueryFilter::new().exclude_collider(player_collider.as_ref().clone()),
+        QueryFilter::new()
+            .exclude_sensors()
+            .exclude_collider(player_collider.as_ref().clone()),
     ) {
         player_character.current_state.against_wall = true;
     }
@@ -135,7 +137,9 @@ pub fn player_movement_system(
         shape.0.as_ref(),
         surface_check_distance,
         true,
-        QueryFilter::new().exclude_collider(player_collider.as_ref().clone()),
+        QueryFilter::new()
+            .exclude_sensors()
+            .exclude_collider(player_collider.as_ref().clone()),
     ) {
         player_character.current_state.grounded = true;
     }
@@ -143,7 +147,7 @@ pub fn player_movement_system(
 
 fn move_and_slide(
     iterations: u32,
-    player_character: &mut PlayerCharacter,
+    player_character: &mut KinematicCharacter,
     physics: &PhysicsContext2D,
     transform: &mut Transform2D,
     collision_shape: &engine::physics::rapier2d::prelude::SharedShape,
@@ -169,7 +173,9 @@ fn move_and_slide(
         collision_shape.0.as_ref(),
         distance,
         true,
-        QueryFilter::new().exclude_collider(player_collider.as_ref().clone()),
+        QueryFilter::new()
+            .exclude_sensors()
+            .exclude_collider(player_collider.as_ref().clone()),
     ) {
         if toi.status == TOIStatus::Penetrating {
             println!("Penetrating");
