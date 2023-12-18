@@ -168,6 +168,718 @@ pub struct GpuThreadSharedState {
     operations_receiver: Receiver<ResourceOperation>,
 }
 
+impl GpuThreadSharedState {
+    pub(crate) fn allocated_resources(&self) -> RwLockReadGuard<'_, GpuResourceMap> {
+        self.allocated_resources
+            .read()
+            .expect("Failed to RWLock read Gpu Resource Map")
+    }
+
+    pub(crate) fn resolve_resource<T: HasAssociatedHandle + Clone + 'static>(
+        &self,
+        source: &T::AssociatedHandle,
+    ) -> T {
+        self.allocated_resources().resolve(source)
+    }
+
+    fn create_graphics_pipeline(
+        &self,
+        pipeline_state: &GraphicsPipelineState,
+        render_pass: vk::RenderPass,
+        subpass_description: &SubpassDescription,
+        layout: vk::PipelineLayout,
+    ) -> vk::Pipeline {
+        assert!(pipeline_state.vertex_shader.is_valid());
+        assert!(render_pass != vk::RenderPass::null());
+        let mut stages = vec![];
+        let main_name = std::ffi::CString::new("main").unwrap();
+        let vertex_shader = self.resolve_resource::<VkShaderModule>(&pipeline_state.vertex_shader);
+        stages.push(vk::PipelineShaderStageCreateInfo {
+            s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineShaderStageCreateFlags::empty(),
+            stage: vk::ShaderStageFlags::VERTEX,
+            module: vertex_shader.inner,
+            p_name: main_name.as_ptr(),
+            p_specialization_info: std::ptr::null(),
+        });
+        if !pipeline_state.fragment_shader.is_null() {
+            let fragment_shader =
+                self.resolve_resource::<VkShaderModule>(&pipeline_state.fragment_shader);
+            stages.push(vk::PipelineShaderStageCreateInfo {
+                s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+                p_next: std::ptr::null(),
+                flags: vk::PipelineShaderStageCreateFlags::empty(),
+                stage: vk::ShaderStageFlags::FRAGMENT,
+                module: fragment_shader.inner,
+                p_name: main_name.as_ptr(),
+                p_specialization_info: std::ptr::null(),
+            });
+        }
+
+        let mut color_attachments = vec![];
+        for subpass in &subpass_description.color_attachments {
+            color_attachments
+                .push(pipeline_state.color_blend_states[subpass.attachment as usize].to_vk());
+        }
+
+        let (vertex_input_bindings, vertex_attribute_descriptions) =
+            pipeline_state.get_vertex_inputs_description();
+
+        let vertex_input_state = vk::PipelineVertexInputStateCreateInfo {
+            s_type: StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineVertexInputStateCreateFlags::empty(),
+            vertex_binding_description_count: vertex_input_bindings.len() as _,
+            p_vertex_binding_descriptions: vertex_input_bindings.as_ptr() as *const _,
+            vertex_attribute_description_count: vertex_attribute_descriptions.len() as _,
+            p_vertex_attribute_descriptions: vertex_attribute_descriptions.as_ptr() as *const _,
+        };
+
+        let input_assembly_state = pipeline_state.input_assembly_state();
+        let rasterization_state = pipeline_state.rasterization_state();
+        let multisample_state = pipeline_state.multisample_state();
+        let depth_stencil_state = pipeline_state.depth_stencil_state();
+        let color_blend_state = vk::PipelineColorBlendStateCreateInfo {
+            s_type: StructureType::PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineColorBlendStateCreateFlags::empty(),
+            logic_op_enable: false.to_vk(),
+            logic_op: LogicOp::Clear.to_vk(),
+            attachment_count: color_attachments.len() as _,
+            p_attachments: color_attachments.as_ptr(),
+            blend_constants: [0.0; 4],
+        };
+        let viewport_state = vk::PipelineViewportStateCreateInfo {
+            s_type: StructureType::PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineViewportStateCreateFlags::empty(),
+            viewport_count: 1,
+            p_viewports: std::ptr::null(),
+            scissor_count: 1,
+            p_scissors: std::ptr::null(),
+        };
+        let dynamic_state = pipeline_state.dynamic_state();
+
+        let create_info = vk::GraphicsPipelineCreateInfo {
+            s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineCreateFlags::empty(),
+            stage_count: stages.len() as _,
+            p_stages: stages.as_ptr() as *const _,
+            p_vertex_input_state: addr_of!(vertex_input_state),
+            p_input_assembly_state: addr_of!(input_assembly_state),
+            p_tessellation_state: std::ptr::null(),
+            p_viewport_state: addr_of!(viewport_state), // It's part of the dynamic state
+            p_rasterization_state: addr_of!(rasterization_state),
+            p_multisample_state: addr_of!(multisample_state),
+            p_depth_stencil_state: addr_of!(depth_stencil_state),
+            p_color_blend_state: addr_of!(color_blend_state),
+            p_dynamic_state: addr_of!(dynamic_state),
+            layout,
+            render_pass,
+            subpass: pipeline_state.current_subpass as _,
+            base_pipeline_handle: vk::Pipeline::null(),
+            base_pipeline_index: 0,
+        };
+        let pipeline = unsafe {
+            self.logical_device.create_graphics_pipelines(
+                self.vk_pipeline_cache,
+                &[create_info],
+                get_allocation_callbacks(),
+            )
+        }
+        .expect("Failed to create pipelines");
+        info!("Created a new graphics pipeline");
+        pipeline[0]
+    }
+    pub(crate) fn get_graphics_pipeline(
+        &self,
+        pipeline_state: &GraphicsPipelineState,
+        layout: vk::PipelineLayout,
+        render_pass: vk::RenderPass,
+        subpass_description: &SubpassDescription,
+    ) -> vk::Pipeline {
+        self.graphics_pipeline_cache.get(&pipeline_state, || {
+            self.create_graphics_pipeline(pipeline_state, render_pass, subpass_description, layout)
+        })
+    }
+
+    fn create_compute_pipeline(
+        &self,
+        pipeline_state: &ComputePipelineState,
+        layout: vk::PipelineLayout,
+    ) -> vk::Pipeline {
+        let main_name = std::ffi::CString::new("main").unwrap();
+        let stage = vk::PipelineShaderStageCreateInfo {
+            s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineShaderStageCreateFlags::empty(),
+            stage: vk::ShaderStageFlags::COMPUTE,
+            module: self
+                .resolve_resource::<VkShaderModule>(&pipeline_state.shader)
+                .inner,
+            p_name: main_name.as_ptr(),
+            p_specialization_info: std::ptr::null(),
+        };
+        let create_info = vk::ComputePipelineCreateInfo {
+            s_type: StructureType::COMPUTE_PIPELINE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineCreateFlags::empty(),
+            stage,
+            layout,
+            base_pipeline_handle: vk::Pipeline::null(),
+            base_pipeline_index: 0,
+        };
+
+        let pipeline = unsafe {
+            self.logical_device.create_compute_pipelines(
+                self.vk_pipeline_cache,
+                &[create_info],
+                get_allocation_callbacks(),
+            )
+        }
+        .expect("Failed to create pipelines");
+        info!("Created a new compute pipeline");
+        pipeline[0]
+    }
+
+    pub(crate) fn get_compute_pipeline(
+        &self,
+        pipeline_state: &crate::ComputePipelineState,
+        layout: vk::PipelineLayout,
+    ) -> vk::Pipeline {
+        self.compute_pipeline_cache.get(pipeline_state, || {
+            self.create_compute_pipeline(pipeline_state, layout)
+        })
+    }
+
+    pub(crate) fn create_descriptor_set(
+        &self,
+        info: &DescriptorSetInfo2,
+        layout: vk::DescriptorSetLayout,
+    ) -> DescriptorSetAllocation {
+        let descriptor_set_bindings = info.descriptor_set_layout();
+
+        let pool_hash = quick_hash(info);
+
+        self.descriptor_pool_cache.use_ref_mut(
+            info,
+            |pools| {
+                let (pool_index, descriptor_pool) = {
+                    if let Some((idx, pool)) = pools
+                        .iter_mut()
+                        .enumerate()
+                        .find(|(_, p)| p.allocated_descriptors < p.max_descriptors)
+                    {
+                        (idx, pool)
+                    } else {
+                        const MAX_DESCRIPTORS: u32 = 100;
+                        let mut samplers = 0;
+                        let mut combined_image_samplers = 0;
+                        let mut uniform_buffers = 0;
+                        let mut storage_buffers = 0;
+                        let mut input_attachments = 0;
+
+                        for binding in &descriptor_set_bindings.elements {
+                            match binding.binding_type {
+                                crate::BindingType::Uniform => uniform_buffers += 1,
+                                crate::BindingType::Storage => storage_buffers += 1,
+                                crate::BindingType::Sampler => samplers += 1,
+                                crate::BindingType::CombinedImageSampler => {
+                                    combined_image_samplers += 1
+                                }
+                                crate::BindingType::InputAttachment => input_attachments += 1,
+                            }
+                        }
+
+                        let mut pool_sizes = vec![];
+                        if samplers > 0 {
+                            pool_sizes.push(vk::DescriptorPoolSize {
+                                ty: vk::DescriptorType::SAMPLER,
+                                descriptor_count: samplers as _,
+                            });
+                        }
+                        if combined_image_samplers > 0 {
+                            pool_sizes.push(vk::DescriptorPoolSize {
+                                ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                                descriptor_count: combined_image_samplers as _,
+                            });
+                        }
+                        if uniform_buffers > 0 {
+                            pool_sizes.push(vk::DescriptorPoolSize {
+                                ty: vk::DescriptorType::UNIFORM_BUFFER,
+                                descriptor_count: uniform_buffers as _,
+                            });
+                        }
+                        if storage_buffers > 0 {
+                            pool_sizes.push(vk::DescriptorPoolSize {
+                                ty: vk::DescriptorType::STORAGE_BUFFER,
+                                descriptor_count: storage_buffers as _,
+                            });
+                        }
+                        if input_attachments > 0 {
+                            pool_sizes.push(vk::DescriptorPoolSize {
+                                ty: vk::DescriptorType::INPUT_ATTACHMENT,
+                                descriptor_count: input_attachments as _,
+                            });
+                        }
+                        let pool = unsafe {
+                            self.logical_device.create_descriptor_pool(
+                                &vk::DescriptorPoolCreateInfo {
+                                    s_type: StructureType::DESCRIPTOR_POOL_CREATE_INFO,
+                                    p_next: std::ptr::null(),
+                                    flags: vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET,
+                                    max_sets: MAX_DESCRIPTORS,
+                                    pool_size_count: pool_sizes.len() as _,
+                                    p_pool_sizes: pool_sizes.as_ptr() as *const _,
+                                },
+                                get_allocation_callbacks(),
+                            )
+                        }
+                        .expect("Failed to create pool");
+                        let pool_allocation = DescriptorPoolAllocation::new(pool, MAX_DESCRIPTORS);
+                        let idx = pools.len();
+
+                        pools.push(pool_allocation);
+                        (idx, &mut pools[idx])
+                    }
+                };
+                let set = unsafe {
+                    self.logical_device
+                        .allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo {
+                            s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
+                            p_next: std::ptr::null(),
+                            descriptor_pool: descriptor_pool.pool,
+                            descriptor_set_count: 1,
+                            p_set_layouts: addr_of!(layout) as *const _,
+                        })
+                        .expect("Failed to allocate descriptor set")[0]
+                };
+                descriptor_pool.allocated_descriptors += 1;
+                info!("Created a new descriptor set");
+                DescriptorSetAllocation {
+                    set,
+                    pool_hash,
+                    pool_index,
+                }
+            },
+            || vec![],
+        )
+    }
+
+    pub(crate) fn get_pipeline_layout(
+        &self,
+        descriptor_state: &DescriptorSetState,
+    ) -> vk::PipelineLayout {
+        self.pipeline_layout_cache.get(descriptor_state, || {
+            self.create_pipeline_layout(descriptor_state, &self.descriptor_set_layout_cache)
+        })
+    }
+
+    fn write_descriptor_set(&self, set: vk::DescriptorSet, info: &DescriptorSetInfo2) {
+        let mut buffer_descriptors = vec![];
+        let mut image_descriptors = vec![];
+        info.bindings.iter().for_each(|b| match &b.ty {
+            crate::DescriptorBindingType::StorageBuffer {
+                handle,
+                offset,
+                range,
+            } => buffer_descriptors.push((
+                b.location,
+                DescriptorBufferInfo {
+                    buffer: self.resolve_resource::<VkBuffer>(&handle).inner,
+                    offset: *offset,
+                    range: if *range as vk::DeviceSize == crate::WHOLE_SIZE {
+                        vk::WHOLE_SIZE
+                    } else {
+                        *range as _
+                    },
+                },
+                vk::DescriptorType::STORAGE_BUFFER,
+            )),
+            crate::DescriptorBindingType::UniformBuffer {
+                handle,
+                offset,
+                range,
+            } => buffer_descriptors.push((
+                b.location,
+                DescriptorBufferInfo {
+                    buffer: self.resolve_resource::<VkBuffer>(&handle).inner,
+                    offset: *offset,
+                    range: if *range as vk::DeviceSize == crate::WHOLE_SIZE {
+                        vk::WHOLE_SIZE
+                    } else {
+                        *range as _
+                    },
+                },
+                vk::DescriptorType::UNIFORM_BUFFER,
+            )),
+            crate::DescriptorBindingType::ImageView {
+                image_view_handle,
+                sampler_handle,
+                layout,
+            } => image_descriptors.push((
+                b.location,
+                DescriptorImageInfo {
+                    sampler: self.resolve_resource::<VkSampler>(&sampler_handle).inner,
+                    image_view: self
+                        .resolve_resource::<VkImageView>(&image_view_handle)
+                        .inner,
+                    image_layout: layout.to_vk(),
+                },
+                vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            )),
+            crate::DescriptorBindingType::InputAttachment {
+                image_view_handle,
+                layout,
+            } => image_descriptors.push((
+                b.location,
+                DescriptorImageInfo {
+                    sampler: vk::Sampler::null(),
+                    image_view: self
+                        .resolve_resource::<VkImageView>(&image_view_handle)
+                        .inner,
+                    image_layout: layout.to_vk(),
+                },
+                vk::DescriptorType::INPUT_ATTACHMENT,
+            )),
+        });
+
+        let mut write_descriptor_sets = vec![];
+
+        for (bind, desc, ty) in &buffer_descriptors {
+            write_descriptor_sets.push(WriteDescriptorSet {
+                s_type: StructureType::WRITE_DESCRIPTOR_SET,
+                p_next: null(),
+                dst_set: set,
+                dst_binding: *bind as _,
+                dst_array_element: 0,
+                descriptor_count: 1,
+                descriptor_type: *ty,
+                p_image_info: std::ptr::null(),
+                p_buffer_info: addr_of!(*desc),
+                p_texel_buffer_view: std::ptr::null(),
+            });
+        }
+        for (bind, desc, ty) in &image_descriptors {
+            write_descriptor_sets.push(WriteDescriptorSet {
+                s_type: StructureType::WRITE_DESCRIPTOR_SET,
+                p_next: null(),
+                dst_set: set,
+                dst_binding: *bind as _,
+                dst_array_element: 0,
+                descriptor_count: 1,
+                descriptor_type: *ty,
+                p_image_info: addr_of!(*desc),
+                p_buffer_info: std::ptr::null(),
+                p_texel_buffer_view: std::ptr::null(),
+            });
+        }
+        unsafe {
+            self.logical_device
+                .update_descriptor_sets(&write_descriptor_sets, &[]);
+        }
+    }
+
+    fn create_pipeline_layout(
+        &self,
+        info: &DescriptorSetState,
+        descriptor_set_layout_cache: &LifetimedCache<vk::DescriptorSetLayout>,
+    ) -> vk::PipelineLayout {
+        info!("Creating a new Pipeline Layout");
+
+        let mut descriptor_set_layouts = vec![];
+        for set in &info.sets {
+            let layout =
+                descriptor_set_layout_cache.get(set, || self.create_descriptor_set_layout(set));
+            descriptor_set_layouts.push(layout);
+        }
+        let constant_ranges = info
+            .push_constant_range
+            .iter()
+            .map(|c| vk::PushConstantRange {
+                stage_flags: c.stage_flags.to_vk(),
+                offset: c.offset,
+                size: c.size,
+            })
+            .collect::<Vec<_>>();
+
+        let create_info = vk::PipelineLayoutCreateInfo {
+            s_type: StructureType::PIPELINE_LAYOUT_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineLayoutCreateFlags::empty(),
+            set_layout_count: descriptor_set_layouts.len() as _,
+            p_set_layouts: descriptor_set_layouts.as_ptr() as *const _,
+            push_constant_range_count: constant_ranges.len() as _,
+            p_push_constant_ranges: constant_ranges.as_ptr() as *const _,
+        };
+
+        unsafe {
+            self.logical_device
+                .create_pipeline_layout(&create_info, get_allocation_callbacks())
+                .expect("Failed to create pipeline layout")
+        }
+    }
+    pub(crate) fn get_descriptor_sets(
+        &self,
+        descriptor_set_state: &DescriptorSetState,
+    ) -> Vec<vk::DescriptorSet> {
+        let mut descriptors = vec![];
+
+        for set_info in &descriptor_set_state.sets {
+            let layout = self
+                .descriptor_set_layout_cache
+                .get(set_info, || self.create_descriptor_set_layout(set_info));
+            let descriptor = self.descriptor_set_cache.use_ref(
+                &set_info,
+                |s| s.set,
+                || {
+                    let set = self.create_descriptor_set(set_info, layout);
+                    self.write_descriptor_set(set.set, set_info);
+                    set
+                },
+            );
+            descriptors.push(descriptor)
+        }
+
+        descriptors
+    }
+
+    fn create_descriptor_set_layout(&self, info: &DescriptorSetInfo2) -> vk::DescriptorSetLayout {
+        let descriptor_set_bindings = info.descriptor_set_layout().vk_set_layout_bindings();
+        info!("Created a new descriptor set layout");
+        unsafe {
+            self.logical_device
+                .create_descriptor_set_layout(
+                    &vk::DescriptorSetLayoutCreateInfo {
+                        s_type: StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                        p_next: std::ptr::null(),
+                        flags: vk::DescriptorSetLayoutCreateFlags::empty(),
+                        binding_count: descriptor_set_bindings.len() as _,
+                        p_bindings: descriptor_set_bindings.as_ptr(),
+                    },
+                    None,
+                )
+                .expect("Failure in descriptor set layout creation")
+        }
+    }
+    pub fn get_render_pass(
+        &self,
+        render_pass_info: &RenderPassAttachments,
+        debug_label: Option<&str>,
+    ) -> vk::RenderPass {
+        self.render_pass_cache.get(render_pass_info, || {
+            let render_pass = self.create_render_pass(render_pass_info);
+
+            if let (Some(debug_utils), Some(label)) = (&self.debug_utilities, debug_label) {
+                let object_c_name = CString::new(label).unwrap();
+
+                unsafe {
+                    debug_utils
+                        .set_debug_utils_object_name(
+                            self.logical_device.handle(),
+                            &vk::DebugUtilsObjectNameInfoEXT {
+                                s_type: StructureType::DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+                                p_next: std::ptr::null(),
+                                object_type: vk::ObjectType::RENDER_PASS,
+                                object_handle: render_pass.as_raw(),
+                                p_object_name: object_c_name.as_ptr(),
+                            },
+                        )
+                        .unwrap();
+                }
+            }
+
+            render_pass
+        })
+    }
+
+    fn create_render_pass(&self, render_pass_info: &RenderPassAttachments) -> vk::RenderPass {
+        let mut attachments = render_pass_info
+            .color_attachments
+            .iter()
+            .map(|att| vk::AttachmentDescription {
+                flags: vk::AttachmentDescriptionFlags::empty(),
+                format: att.format.to_vk(),
+                samples: SampleCount::Sample1.to_vk(),
+                load_op: att.load_op.to_vk(),
+                store_op: att.store_op.to_vk(),
+                stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+                stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+                initial_layout: att.initial_layout.to_vk(),
+                final_layout: att.final_layout.to_vk(),
+            })
+            .collect::<Vec<_>>();
+
+        if let Some(att) = &render_pass_info.depth_attachment {
+            assert!(att.format == ImageFormat::Depth);
+            attachments.push(vk::AttachmentDescription {
+                flags: vk::AttachmentDescriptionFlags::empty(),
+                format: att.format.to_vk(),
+                samples: SampleCount::Sample1.to_vk(),
+                load_op: att.load_op.to_vk(),
+                store_op: att.store_op.to_vk(),
+                stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+                stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+                initial_layout: att.initial_layout.to_vk(),
+                final_layout: att.final_layout.to_vk(),
+            });
+        };
+        let mut all_inputs: Vec<vk::AttachmentReference> = vec![];
+        let mut all_colors: Vec<vk::AttachmentReference> = vec![];
+        let mut all_resolve: Vec<vk::AttachmentReference> = vec![];
+        let mut all_depths: Vec<vk::AttachmentReference> = vec![];
+        let mut all_preserve: Vec<u32> = vec![];
+
+        for s in render_pass_info.subpasses.iter() {
+            all_inputs.extend(
+                s.input_attachments
+                    .iter()
+                    .map(|i| i.to_vk())
+                    .collect::<Vec<_>>(),
+            );
+            all_colors.extend(
+                s.color_attachments
+                    .iter()
+                    .map(|i| i.to_vk())
+                    .collect::<Vec<_>>(),
+            );
+            all_resolve.extend(
+                s.resolve_attachments
+                    .iter()
+                    .map(|i| i.to_vk())
+                    .collect::<Vec<_>>(),
+            );
+
+            all_depths.push(match s.depth_stencil_attachment {
+                Some(d) => d.to_vk(),
+                None => vk::AttachmentReference {
+                    attachment: vk::ATTACHMENT_UNUSED,
+                    layout: vk::ImageLayout::UNDEFINED,
+                },
+            });
+            all_preserve.extend(s.preserve_attachments.clone());
+        }
+
+        let mut cur_input = 0;
+        let mut cur_color = 0;
+        let mut cur_resolve = 0;
+        let mut cur_depth = 0;
+        let mut cur_preserve = 0;
+
+        let subpasses = render_pass_info
+            .subpasses
+            .iter()
+            .map(|s| unsafe {
+                assert!(
+                    s.resolve_attachments.len() == 0
+                        || s.resolve_attachments.len() == s.color_attachments.len()
+                );
+                let p_input_attachments = all_inputs.as_ptr().add(cur_input);
+                let p_color_attachments = all_colors.as_ptr().add(cur_color);
+                let p_resolve_attachments = all_resolve.as_ptr().add(cur_resolve);
+                let p_depth_stencil_attachment = all_depths.as_ptr().add(cur_depth);
+                let p_preserve_attachments = all_preserve.as_ptr().add(cur_preserve);
+                cur_input += s.input_attachments.len();
+                cur_color += s.color_attachments.len();
+                cur_resolve += s.resolve_attachments.len();
+                cur_depth += if s.depth_stencil_attachment.is_some() {
+                    1
+                } else {
+                    0
+                };
+                cur_preserve += s.preserve_attachments.len();
+                vk::SubpassDescription {
+                    flags: SubpassDescriptionFlags::empty(),
+                    pipeline_bind_point: PipelineBindPoint::GRAPHICS,
+                    input_attachment_count: s.input_attachments.len() as _,
+                    p_input_attachments,
+                    color_attachment_count: s.color_attachments.len() as _,
+                    p_color_attachments,
+                    p_resolve_attachments: if s.resolve_attachments.len() > 0 {
+                        p_resolve_attachments
+                    } else {
+                        std::ptr::null()
+                    },
+                    p_depth_stencil_attachment,
+                    preserve_attachment_count: s.preserve_attachments.len() as _,
+                    p_preserve_attachments,
+                }
+            })
+            .collect::<Vec<_>>();
+        let dependencies = render_pass_info
+            .dependencies
+            .iter()
+            .map(|d| d.to_vk())
+            .collect::<Vec<_>>();
+
+        assert!(subpasses.len() > 0);
+
+        let create_info = vk::RenderPassCreateInfo {
+            s_type: StructureType::RENDER_PASS_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::RenderPassCreateFlags::empty(),
+            attachment_count: attachments.len() as _,
+            p_attachments: attachments.as_ptr() as *const _,
+            subpass_count: subpasses.len() as _,
+            p_subpasses: subpasses.as_ptr(),
+            dependency_count: dependencies.len() as _,
+            p_dependencies: dependencies.as_ptr(),
+        };
+
+        unsafe {
+            self.logical_device
+                .create_render_pass(&create_info, get_allocation_callbacks())
+                .expect("Failed to create render pass")
+        }
+    }
+
+    pub(crate) fn get_framebuffer(
+        &self,
+        render_pass_info: &BeginRenderPassInfo,
+        render_pass: vk::RenderPass,
+    ) -> vk::Framebuffer {
+        self.framebuffer_cache.get(render_pass_info, || {
+            self.create_framebuffer(render_pass_info, render_pass)
+        })
+    }
+
+    fn create_framebuffer(
+        &self,
+        render_pass_info: &BeginRenderPassInfo,
+        render_pass: vk::RenderPass,
+    ) -> vk::Framebuffer {
+        let mut attachments = render_pass_info
+            .color_attachments
+            .iter()
+            .map(|att| self.resolve_resource::<VkImageView>(&att.image_view).inner)
+            .collect::<Vec<_>>();
+        if let Some(ref depth) = render_pass_info.depth_attachment {
+            attachments.push(
+                self.resolve_resource::<VkImageView>(&depth.image_view)
+                    .inner,
+            );
+        }
+        let create_info = vk::FramebufferCreateInfo {
+            s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::FramebufferCreateFlags::empty(),
+            render_pass,
+            attachment_count: attachments.len() as _,
+            p_attachments: attachments.as_ptr(),
+            width: render_pass_info.render_area.extent.width,
+            height: render_pass_info.render_area.extent.height,
+            layers: 1,
+        };
+        unsafe {
+            self.logical_device
+                .create_framebuffer(&create_info, get_allocation_callbacks())
+                .expect("Failed to create framebuffer")
+        }
+    }
+}
+
 impl Drop for GpuThreadSharedState {
     fn drop(&mut self) {
         if let (Some(messenger), Some(debug_utils)) = (&self.messenger, &self.debug_utilities) {
@@ -983,502 +1695,7 @@ impl VkGpu {
     }
 
     pub(crate) fn allocated_resources(&self) -> RwLockReadGuard<GpuResourceMap> {
-        self.state.allocated_resources.read().unwrap()
-    }
-
-    fn create_graphics_pipeline(
-        &self,
-        pipeline_state: &GraphicsPipelineState,
-        render_pass: vk::RenderPass,
-        subpass_description: &SubpassDescription,
-        layout: vk::PipelineLayout,
-    ) -> vk::Pipeline {
-        assert!(pipeline_state.vertex_shader.is_valid());
-        assert!(render_pass != vk::RenderPass::null());
-        let mut stages = vec![];
-        let main_name = std::ffi::CString::new("main").unwrap();
-        let vertex_shader = self.resolve_resource::<VkShaderModule>(&pipeline_state.vertex_shader);
-        stages.push(vk::PipelineShaderStageCreateInfo {
-            s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::PipelineShaderStageCreateFlags::empty(),
-            stage: vk::ShaderStageFlags::VERTEX,
-            module: vertex_shader.inner,
-            p_name: main_name.as_ptr(),
-            p_specialization_info: std::ptr::null(),
-        });
-        if !pipeline_state.fragment_shader.is_null() {
-            let fragment_shader =
-                self.resolve_resource::<VkShaderModule>(&pipeline_state.fragment_shader);
-            stages.push(vk::PipelineShaderStageCreateInfo {
-                s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
-                p_next: std::ptr::null(),
-                flags: vk::PipelineShaderStageCreateFlags::empty(),
-                stage: vk::ShaderStageFlags::FRAGMENT,
-                module: fragment_shader.inner,
-                p_name: main_name.as_ptr(),
-                p_specialization_info: std::ptr::null(),
-            });
-        }
-
-        let mut color_attachments = vec![];
-        for subpass in &subpass_description.color_attachments {
-            color_attachments
-                .push(pipeline_state.color_blend_states[subpass.attachment as usize].to_vk());
-        }
-
-        let (vertex_input_bindings, vertex_attribute_descriptions) =
-            pipeline_state.get_vertex_inputs_description();
-
-        let vertex_input_state = vk::PipelineVertexInputStateCreateInfo {
-            s_type: StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::PipelineVertexInputStateCreateFlags::empty(),
-            vertex_binding_description_count: vertex_input_bindings.len() as _,
-            p_vertex_binding_descriptions: vertex_input_bindings.as_ptr() as *const _,
-            vertex_attribute_description_count: vertex_attribute_descriptions.len() as _,
-            p_vertex_attribute_descriptions: vertex_attribute_descriptions.as_ptr() as *const _,
-        };
-
-        let input_assembly_state = pipeline_state.input_assembly_state();
-        let rasterization_state = pipeline_state.rasterization_state();
-        let multisample_state = pipeline_state.multisample_state();
-        let depth_stencil_state = pipeline_state.depth_stencil_state();
-        let color_blend_state = vk::PipelineColorBlendStateCreateInfo {
-            s_type: StructureType::PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::PipelineColorBlendStateCreateFlags::empty(),
-            logic_op_enable: false.to_vk(),
-            logic_op: LogicOp::Clear.to_vk(),
-            attachment_count: color_attachments.len() as _,
-            p_attachments: color_attachments.as_ptr(),
-            blend_constants: [0.0; 4],
-        };
-        let viewport_state = vk::PipelineViewportStateCreateInfo {
-            s_type: StructureType::PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::PipelineViewportStateCreateFlags::empty(),
-            viewport_count: 1,
-            p_viewports: std::ptr::null(),
-            scissor_count: 1,
-            p_scissors: std::ptr::null(),
-        };
-        let dynamic_state = pipeline_state.dynamic_state();
-
-        let create_info = vk::GraphicsPipelineCreateInfo {
-            s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::PipelineCreateFlags::empty(),
-            stage_count: stages.len() as _,
-            p_stages: stages.as_ptr() as *const _,
-            p_vertex_input_state: addr_of!(vertex_input_state),
-            p_input_assembly_state: addr_of!(input_assembly_state),
-            p_tessellation_state: std::ptr::null(),
-            p_viewport_state: addr_of!(viewport_state), // It's part of the dynamic state
-            p_rasterization_state: addr_of!(rasterization_state),
-            p_multisample_state: addr_of!(multisample_state),
-            p_depth_stencil_state: addr_of!(depth_stencil_state),
-            p_color_blend_state: addr_of!(color_blend_state),
-            p_dynamic_state: addr_of!(dynamic_state),
-            layout,
-            render_pass,
-            subpass: pipeline_state.current_subpass as _,
-            base_pipeline_handle: vk::Pipeline::null(),
-            base_pipeline_index: 0,
-        };
-        let pipeline = unsafe {
-            self.vk_logical_device().create_graphics_pipelines(
-                self.state.vk_pipeline_cache,
-                &[create_info],
-                get_allocation_callbacks(),
-            )
-        }
-        .expect("Failed to create pipelines");
-        info!("Created a new graphics pipeline");
-        pipeline[0]
-    }
-    pub(crate) fn get_graphics_pipeline(
-        &self,
-        pipeline_state: &GraphicsPipelineState,
-        layout: vk::PipelineLayout,
-        render_pass: vk::RenderPass,
-        subpass_description: &SubpassDescription,
-    ) -> vk::Pipeline {
-        self.state.graphics_pipeline_cache.get(&pipeline_state, || {
-            self.create_graphics_pipeline(pipeline_state, render_pass, subpass_description, layout)
-        })
-    }
-
-    fn create_compute_pipeline(
-        &self,
-        pipeline_state: &ComputePipelineState,
-        layout: vk::PipelineLayout,
-    ) -> vk::Pipeline {
-        let main_name = std::ffi::CString::new("main").unwrap();
-        let stage = vk::PipelineShaderStageCreateInfo {
-            s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::PipelineShaderStageCreateFlags::empty(),
-            stage: vk::ShaderStageFlags::COMPUTE,
-            module: self
-                .resolve_resource::<VkShaderModule>(&pipeline_state.shader)
-                .inner,
-            p_name: main_name.as_ptr(),
-            p_specialization_info: std::ptr::null(),
-        };
-        let create_info = vk::ComputePipelineCreateInfo {
-            s_type: StructureType::COMPUTE_PIPELINE_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::PipelineCreateFlags::empty(),
-            stage,
-            layout,
-            base_pipeline_handle: vk::Pipeline::null(),
-            base_pipeline_index: 0,
-        };
-
-        let pipeline = unsafe {
-            self.vk_logical_device().create_compute_pipelines(
-                self.state.vk_pipeline_cache,
-                &[create_info],
-                get_allocation_callbacks(),
-            )
-        }
-        .expect("Failed to create pipelines");
-        info!("Created a new compute pipeline");
-        pipeline[0]
-    }
-
-    pub(crate) fn get_compute_pipeline(
-        &self,
-        pipeline_state: &crate::ComputePipelineState,
-        layout: vk::PipelineLayout,
-    ) -> vk::Pipeline {
-        self.state.compute_pipeline_cache.get(pipeline_state, || {
-            self.create_compute_pipeline(pipeline_state, layout)
-        })
-    }
-
-    pub(crate) fn create_descriptor_set(
-        &self,
-        info: &DescriptorSetInfo2,
-        layout: vk::DescriptorSetLayout,
-    ) -> DescriptorSetAllocation {
-        let descriptor_set_bindings = info.descriptor_set_layout();
-
-        let pool_hash = quick_hash(info);
-
-        self.state.descriptor_pool_cache.use_ref_mut(
-            info,
-            |pools| {
-                let (pool_index, descriptor_pool) = {
-                    if let Some((idx, pool)) = pools
-                        .iter_mut()
-                        .enumerate()
-                        .find(|(_, p)| p.allocated_descriptors < p.max_descriptors)
-                    {
-                        (idx, pool)
-                    } else {
-                        const MAX_DESCRIPTORS: u32 = 100;
-                        let mut samplers = 0;
-                        let mut combined_image_samplers = 0;
-                        let mut uniform_buffers = 0;
-                        let mut storage_buffers = 0;
-                        let mut input_attachments = 0;
-
-                        for binding in &descriptor_set_bindings.elements {
-                            match binding.binding_type {
-                                crate::BindingType::Uniform => uniform_buffers += 1,
-                                crate::BindingType::Storage => storage_buffers += 1,
-                                crate::BindingType::Sampler => samplers += 1,
-                                crate::BindingType::CombinedImageSampler => {
-                                    combined_image_samplers += 1
-                                }
-                                crate::BindingType::InputAttachment => input_attachments += 1,
-                            }
-                        }
-
-                        let mut pool_sizes = vec![];
-                        if samplers > 0 {
-                            pool_sizes.push(vk::DescriptorPoolSize {
-                                ty: vk::DescriptorType::SAMPLER,
-                                descriptor_count: samplers as _,
-                            });
-                        }
-                        if combined_image_samplers > 0 {
-                            pool_sizes.push(vk::DescriptorPoolSize {
-                                ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                                descriptor_count: combined_image_samplers as _,
-                            });
-                        }
-                        if uniform_buffers > 0 {
-                            pool_sizes.push(vk::DescriptorPoolSize {
-                                ty: vk::DescriptorType::UNIFORM_BUFFER,
-                                descriptor_count: uniform_buffers as _,
-                            });
-                        }
-                        if storage_buffers > 0 {
-                            pool_sizes.push(vk::DescriptorPoolSize {
-                                ty: vk::DescriptorType::STORAGE_BUFFER,
-                                descriptor_count: storage_buffers as _,
-                            });
-                        }
-                        if input_attachments > 0 {
-                            pool_sizes.push(vk::DescriptorPoolSize {
-                                ty: vk::DescriptorType::INPUT_ATTACHMENT,
-                                descriptor_count: input_attachments as _,
-                            });
-                        }
-                        let pool = unsafe {
-                            self.vk_logical_device().create_descriptor_pool(
-                                &vk::DescriptorPoolCreateInfo {
-                                    s_type: StructureType::DESCRIPTOR_POOL_CREATE_INFO,
-                                    p_next: std::ptr::null(),
-                                    flags: vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET,
-                                    max_sets: MAX_DESCRIPTORS,
-                                    pool_size_count: pool_sizes.len() as _,
-                                    p_pool_sizes: pool_sizes.as_ptr() as *const _,
-                                },
-                                get_allocation_callbacks(),
-                            )
-                        }
-                        .expect("Failed to create pool");
-                        let pool_allocation = DescriptorPoolAllocation::new(pool, MAX_DESCRIPTORS);
-                        let idx = pools.len();
-
-                        pools.push(pool_allocation);
-                        (idx, &mut pools[idx])
-                    }
-                };
-                let set = unsafe {
-                    self.vk_logical_device()
-                        .allocate_descriptor_sets(&vk::DescriptorSetAllocateInfo {
-                            s_type: StructureType::DESCRIPTOR_SET_ALLOCATE_INFO,
-                            p_next: std::ptr::null(),
-                            descriptor_pool: descriptor_pool.pool,
-                            descriptor_set_count: 1,
-                            p_set_layouts: addr_of!(layout) as *const _,
-                        })
-                        .expect("Failed to allocate descriptor set")[0]
-                };
-                descriptor_pool.allocated_descriptors += 1;
-                info!("Created a new descriptor set");
-                DescriptorSetAllocation {
-                    set,
-                    pool_hash,
-                    pool_index,
-                }
-            },
-            || vec![],
-        )
-    }
-
-    pub(crate) fn get_pipeline_layout(
-        &self,
-        descriptor_state: &DescriptorSetState,
-    ) -> vk::PipelineLayout {
-        self.state.pipeline_layout_cache.get(descriptor_state, || {
-            self.create_pipeline_layout(descriptor_state, &self.state.descriptor_set_layout_cache)
-        })
-    }
-
-    fn write_descriptor_set(&self, set: vk::DescriptorSet, info: &DescriptorSetInfo2) {
-        let mut buffer_descriptors = vec![];
-        let mut image_descriptors = vec![];
-        info.bindings.iter().for_each(|b| match &b.ty {
-            crate::DescriptorBindingType::StorageBuffer {
-                handle,
-                offset,
-                range,
-            } => buffer_descriptors.push((
-                b.location,
-                DescriptorBufferInfo {
-                    buffer: self.resolve_resource::<VkBuffer>(&handle).inner,
-                    offset: *offset,
-                    range: if *range as vk::DeviceSize == crate::WHOLE_SIZE {
-                        vk::WHOLE_SIZE
-                    } else {
-                        *range as _
-                    },
-                },
-                vk::DescriptorType::STORAGE_BUFFER,
-            )),
-            crate::DescriptorBindingType::UniformBuffer {
-                handle,
-                offset,
-                range,
-            } => buffer_descriptors.push((
-                b.location,
-                DescriptorBufferInfo {
-                    buffer: self.resolve_resource::<VkBuffer>(&handle).inner,
-                    offset: *offset,
-                    range: if *range as vk::DeviceSize == crate::WHOLE_SIZE {
-                        vk::WHOLE_SIZE
-                    } else {
-                        *range as _
-                    },
-                },
-                vk::DescriptorType::UNIFORM_BUFFER,
-            )),
-            crate::DescriptorBindingType::ImageView {
-                image_view_handle,
-                sampler_handle,
-                layout,
-            } => image_descriptors.push((
-                b.location,
-                DescriptorImageInfo {
-                    sampler: self.resolve_resource::<VkSampler>(&sampler_handle).inner,
-                    image_view: self
-                        .resolve_resource::<VkImageView>(&image_view_handle)
-                        .inner,
-                    image_layout: layout.to_vk(),
-                },
-                vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            )),
-            crate::DescriptorBindingType::InputAttachment {
-                image_view_handle,
-                layout,
-            } => image_descriptors.push((
-                b.location,
-                DescriptorImageInfo {
-                    sampler: vk::Sampler::null(),
-                    image_view: self
-                        .resolve_resource::<VkImageView>(&image_view_handle)
-                        .inner,
-                    image_layout: layout.to_vk(),
-                },
-                vk::DescriptorType::INPUT_ATTACHMENT,
-            )),
-        });
-
-        let mut write_descriptor_sets = vec![];
-
-        for (bind, desc, ty) in &buffer_descriptors {
-            write_descriptor_sets.push(WriteDescriptorSet {
-                s_type: StructureType::WRITE_DESCRIPTOR_SET,
-                p_next: null(),
-                dst_set: set,
-                dst_binding: *bind as _,
-                dst_array_element: 0,
-                descriptor_count: 1,
-                descriptor_type: *ty,
-                p_image_info: std::ptr::null(),
-                p_buffer_info: addr_of!(*desc),
-                p_texel_buffer_view: std::ptr::null(),
-            });
-        }
-        for (bind, desc, ty) in &image_descriptors {
-            write_descriptor_sets.push(WriteDescriptorSet {
-                s_type: StructureType::WRITE_DESCRIPTOR_SET,
-                p_next: null(),
-                dst_set: set,
-                dst_binding: *bind as _,
-                dst_array_element: 0,
-                descriptor_count: 1,
-                descriptor_type: *ty,
-                p_image_info: addr_of!(*desc),
-                p_buffer_info: std::ptr::null(),
-                p_texel_buffer_view: std::ptr::null(),
-            });
-        }
-        unsafe {
-            self.vk_logical_device()
-                .update_descriptor_sets(&write_descriptor_sets, &[]);
-        }
-    }
-
-    fn create_pipeline_layout(
-        &self,
-        info: &DescriptorSetState,
-        descriptor_set_layout_cache: &LifetimedCache<vk::DescriptorSetLayout>,
-    ) -> vk::PipelineLayout {
-        info!("Creating a new Pipeline Layout");
-
-        let mut descriptor_set_layouts = vec![];
-        for set in &info.sets {
-            let layout =
-                descriptor_set_layout_cache.get(set, || self.create_descriptor_set_layout(set));
-            descriptor_set_layouts.push(layout);
-        }
-        let constant_ranges = info
-            .push_constant_range
-            .iter()
-            .map(|c| vk::PushConstantRange {
-                stage_flags: c.stage_flags.to_vk(),
-                offset: c.offset,
-                size: c.size,
-            })
-            .collect::<Vec<_>>();
-
-        let create_info = vk::PipelineLayoutCreateInfo {
-            s_type: StructureType::PIPELINE_LAYOUT_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::PipelineLayoutCreateFlags::empty(),
-            set_layout_count: descriptor_set_layouts.len() as _,
-            p_set_layouts: descriptor_set_layouts.as_ptr() as *const _,
-            push_constant_range_count: constant_ranges.len() as _,
-            p_push_constant_ranges: constant_ranges.as_ptr() as *const _,
-        };
-
-        unsafe {
-            self.vk_logical_device()
-                .create_pipeline_layout(&create_info, get_allocation_callbacks())
-                .expect("Failed to create pipeline layout")
-        }
-    }
-    pub(crate) fn get_descriptor_sets(
-        &self,
-        descriptor_set_state: &DescriptorSetState,
-    ) -> Vec<vk::DescriptorSet> {
-        let mut descriptors = vec![];
-
-        for set_info in &descriptor_set_state.sets {
-            let layout = self
-                .state
-                .descriptor_set_layout_cache
-                .get(set_info, || self.create_descriptor_set_layout(set_info));
-            let descriptor = self.state.descriptor_set_cache.use_ref(
-                &set_info,
-                |s| s.set,
-                || {
-                    let set = self.create_descriptor_set(set_info, layout);
-                    self.write_descriptor_set(set.set, set_info);
-                    set
-                },
-            );
-            descriptors.push(descriptor)
-        }
-
-        descriptors
-    }
-
-    fn create_descriptor_set_layout(&self, info: &DescriptorSetInfo2) -> vk::DescriptorSetLayout {
-        let descriptor_set_bindings = info.descriptor_set_layout().vk_set_layout_bindings();
-        info!("Created a new descriptor set layout");
-        unsafe {
-            self.vk_logical_device()
-                .create_descriptor_set_layout(
-                    &vk::DescriptorSetLayoutCreateInfo {
-                        s_type: StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                        p_next: std::ptr::null(),
-                        flags: vk::DescriptorSetLayoutCreateFlags::empty(),
-                        binding_count: descriptor_set_bindings.len() as _,
-                        p_bindings: descriptor_set_bindings.as_ptr(),
-                    },
-                    None,
-                )
-                .expect("Failure in descriptor set layout creation")
-        }
-    }
-
-    pub(crate) fn resolve_resource<T: HasAssociatedHandle + Clone + 'static>(
-        &self,
-        source: &T::AssociatedHandle,
-    ) -> T {
-        self.state
-            .allocated_resources
-            .read()
-            .unwrap()
-            .resolve(source)
+        self.state.allocated_resources()
     }
 
     fn reflect_spirv(code: &[u32]) -> anyhow::Result<ShaderInfo> {
@@ -1579,219 +1796,11 @@ impl VkGpu {
         Ok(info)
     }
 
-    pub fn get_render_pass(
+    pub fn resolve_resource<H: HasAssociatedHandle + Clone + 'static>(
         &self,
-        render_pass_info: &RenderPassAttachments,
-        debug_label: Option<&str>,
-    ) -> vk::RenderPass {
-        self.state.render_pass_cache.get(render_pass_info, || {
-            let render_pass = self.create_render_pass(render_pass_info);
-
-            if let (Some(debug_utils), Some(label)) = (&self.state.debug_utilities, debug_label) {
-                let object_c_name = CString::new(label).unwrap();
-
-                unsafe {
-                    debug_utils
-                        .set_debug_utils_object_name(
-                            self.vk_logical_device().handle(),
-                            &vk::DebugUtilsObjectNameInfoEXT {
-                                s_type: StructureType::DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
-                                p_next: std::ptr::null(),
-                                object_type: vk::ObjectType::RENDER_PASS,
-                                object_handle: render_pass.as_raw(),
-                                p_object_name: object_c_name.as_ptr(),
-                            },
-                        )
-                        .unwrap();
-                }
-            }
-
-            render_pass
-        })
-    }
-
-    fn create_render_pass(&self, render_pass_info: &RenderPassAttachments) -> vk::RenderPass {
-        let mut attachments = render_pass_info
-            .color_attachments
-            .iter()
-            .map(|att| vk::AttachmentDescription {
-                flags: vk::AttachmentDescriptionFlags::empty(),
-                format: att.format.to_vk(),
-                samples: SampleCount::Sample1.to_vk(),
-                load_op: att.load_op.to_vk(),
-                store_op: att.store_op.to_vk(),
-                stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-                initial_layout: att.initial_layout.to_vk(),
-                final_layout: att.final_layout.to_vk(),
-            })
-            .collect::<Vec<_>>();
-
-        if let Some(att) = &render_pass_info.depth_attachment {
-            assert!(att.format == ImageFormat::Depth);
-            attachments.push(vk::AttachmentDescription {
-                flags: vk::AttachmentDescriptionFlags::empty(),
-                format: att.format.to_vk(),
-                samples: SampleCount::Sample1.to_vk(),
-                load_op: att.load_op.to_vk(),
-                store_op: att.store_op.to_vk(),
-                stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-                initial_layout: att.initial_layout.to_vk(),
-                final_layout: att.final_layout.to_vk(),
-            });
-        };
-        let mut all_inputs: Vec<vk::AttachmentReference> = vec![];
-        let mut all_colors: Vec<vk::AttachmentReference> = vec![];
-        let mut all_resolve: Vec<vk::AttachmentReference> = vec![];
-        let mut all_depths: Vec<vk::AttachmentReference> = vec![];
-        let mut all_preserve: Vec<u32> = vec![];
-
-        for s in render_pass_info.subpasses.iter() {
-            all_inputs.extend(
-                s.input_attachments
-                    .iter()
-                    .map(|i| i.to_vk())
-                    .collect::<Vec<_>>(),
-            );
-            all_colors.extend(
-                s.color_attachments
-                    .iter()
-                    .map(|i| i.to_vk())
-                    .collect::<Vec<_>>(),
-            );
-            all_resolve.extend(
-                s.resolve_attachments
-                    .iter()
-                    .map(|i| i.to_vk())
-                    .collect::<Vec<_>>(),
-            );
-
-            all_depths.push(match s.depth_stencil_attachment {
-                Some(d) => d.to_vk(),
-                None => vk::AttachmentReference {
-                    attachment: vk::ATTACHMENT_UNUSED,
-                    layout: vk::ImageLayout::UNDEFINED,
-                },
-            });
-            all_preserve.extend(s.preserve_attachments.clone());
-        }
-
-        let mut cur_input = 0;
-        let mut cur_color = 0;
-        let mut cur_resolve = 0;
-        let mut cur_depth = 0;
-        let mut cur_preserve = 0;
-
-        let subpasses = render_pass_info
-            .subpasses
-            .iter()
-            .map(|s| unsafe {
-                assert!(
-                    s.resolve_attachments.len() == 0
-                        || s.resolve_attachments.len() == s.color_attachments.len()
-                );
-                let p_input_attachments = all_inputs.as_ptr().add(cur_input);
-                let p_color_attachments = all_colors.as_ptr().add(cur_color);
-                let p_resolve_attachments = all_resolve.as_ptr().add(cur_resolve);
-                let p_depth_stencil_attachment = all_depths.as_ptr().add(cur_depth);
-                let p_preserve_attachments = all_preserve.as_ptr().add(cur_preserve);
-                cur_input += s.input_attachments.len();
-                cur_color += s.color_attachments.len();
-                cur_resolve += s.resolve_attachments.len();
-                cur_depth += if s.depth_stencil_attachment.is_some() {
-                    1
-                } else {
-                    0
-                };
-                cur_preserve += s.preserve_attachments.len();
-                vk::SubpassDescription {
-                    flags: SubpassDescriptionFlags::empty(),
-                    pipeline_bind_point: PipelineBindPoint::GRAPHICS,
-                    input_attachment_count: s.input_attachments.len() as _,
-                    p_input_attachments,
-                    color_attachment_count: s.color_attachments.len() as _,
-                    p_color_attachments,
-                    p_resolve_attachments: if s.resolve_attachments.len() > 0 {
-                        p_resolve_attachments
-                    } else {
-                        std::ptr::null()
-                    },
-                    p_depth_stencil_attachment,
-                    preserve_attachment_count: s.preserve_attachments.len() as _,
-                    p_preserve_attachments,
-                }
-            })
-            .collect::<Vec<_>>();
-        let dependencies = render_pass_info
-            .dependencies
-            .iter()
-            .map(|d| d.to_vk())
-            .collect::<Vec<_>>();
-
-        assert!(subpasses.len() > 0);
-
-        let create_info = vk::RenderPassCreateInfo {
-            s_type: StructureType::RENDER_PASS_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::RenderPassCreateFlags::empty(),
-            attachment_count: attachments.len() as _,
-            p_attachments: attachments.as_ptr() as *const _,
-            subpass_count: subpasses.len() as _,
-            p_subpasses: subpasses.as_ptr(),
-            dependency_count: dependencies.len() as _,
-            p_dependencies: dependencies.as_ptr(),
-        };
-
-        unsafe {
-            self.vk_logical_device()
-                .create_render_pass(&create_info, get_allocation_callbacks())
-                .expect("Failed to create render pass")
-        }
-    }
-
-    pub(crate) fn get_framebuffer(
-        &self,
-        render_pass_info: &BeginRenderPassInfo,
-        render_pass: vk::RenderPass,
-    ) -> vk::Framebuffer {
-        self.state.framebuffer_cache.get(render_pass_info, || {
-            self.create_framebuffer(render_pass_info, render_pass)
-        })
-    }
-
-    fn create_framebuffer(
-        &self,
-        render_pass_info: &BeginRenderPassInfo,
-        render_pass: vk::RenderPass,
-    ) -> vk::Framebuffer {
-        let mut attachments = render_pass_info
-            .color_attachments
-            .iter()
-            .map(|att| self.resolve_resource::<VkImageView>(&att.image_view).inner)
-            .collect::<Vec<_>>();
-        if let Some(ref depth) = render_pass_info.depth_attachment {
-            attachments.push(
-                self.resolve_resource::<VkImageView>(&depth.image_view)
-                    .inner,
-            );
-        }
-        let create_info = vk::FramebufferCreateInfo {
-            s_type: StructureType::FRAMEBUFFER_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::FramebufferCreateFlags::empty(),
-            render_pass,
-            attachment_count: attachments.len() as _,
-            p_attachments: attachments.as_ptr(),
-            width: render_pass_info.render_area.extent.width,
-            height: render_pass_info.render_area.extent.height,
-            layers: 1,
-        };
-        unsafe {
-            self.vk_logical_device()
-                .create_framebuffer(&create_info, get_allocation_callbacks())
-                .expect("Failed to create framebuffer")
-        }
+        handle: &H::AssociatedHandle,
+    ) -> H {
+        self.state.resolve_resource(handle)
     }
 }
 fn parse_members(

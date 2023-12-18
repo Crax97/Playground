@@ -1,5 +1,6 @@
 use std::ops::DerefMut;
 
+use std::sync::Arc;
 use std::{ffi::CString, ops::Deref};
 
 use ash::vk::{
@@ -19,6 +20,7 @@ const SUBPASS_LABEL_COLOR: [f32; 4] = [0.373, 0.792, 0.988, 1.0];
 
 pub struct VkCommandBuffer<'g> {
     gpu: &'g VkGpu,
+    state: Arc<GpuThreadSharedState>,
     inner_command_buffer: vk::CommandBuffer,
     has_recorded_anything: bool,
     has_been_submitted: bool,
@@ -32,6 +34,7 @@ where
     'g: 'c,
 {
     command_buffer: &'c mut VkCommandBuffer<'g>,
+    state: Arc<GpuThreadSharedState>,
     has_draw_command: bool,
     viewport_area: Option<Viewport>,
     depth_bias_setup: Option<(f32, f32, f32)>,
@@ -324,6 +327,7 @@ impl<'g> VkCommandBuffer<'g> {
 
         Ok(Self {
             gpu,
+            state: gpu.state.clone(),
             inner_command_buffer,
             has_recorded_anything: false,
             has_been_submitted: false,
@@ -382,7 +386,7 @@ impl<'g> VkCommandBuffer<'g> {
 
     pub fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo) {
         self.has_recorded_anything = true;
-        let device = self.gpu.vk_logical_device();
+        let device = &self.state.logical_device;
         let memory_barriers: Vec<_> = barrier_info
             .memory_barriers
             .iter()
@@ -399,7 +403,6 @@ impl<'g> VkCommandBuffer<'g> {
                 src_queue_family_index: b.src_queue_family_index,
                 dst_queue_family_index: b.dst_queue_family_index,
                 buffer: self
-                    .gpu
                     .state
                     .allocated_resources
                     .read()
@@ -422,7 +425,7 @@ impl<'g> VkCommandBuffer<'g> {
                 dst_queue_family_index: b.dst_queue_family_index,
                 old_layout: b.old_layout.to_vk(),
                 new_layout: b.new_layout.to_vk(),
-                image: self.gpu.resolve_resource::<VkImage>(&b.image).inner,
+                image: self.state.resolve_resource::<VkImage>(&b.image).inner,
                 subresource_range: b.subresource_range.to_vk(),
             })
             .collect();
@@ -445,7 +448,7 @@ impl<'g> VkCommandBuffer<'g> {
             return Ok(());
         }
 
-        let device = self.gpu.vk_logical_device();
+        let device = &self.state.logical_device;
         unsafe {
             device
                 .end_command_buffer(self.inner())
@@ -501,7 +504,7 @@ impl<'g> VkCommandBuffer<'g> {
     ) -> VkResult<()> {
         self.has_recorded_anything = true;
         unsafe {
-            self.gpu.vk_logical_device().cmd_copy_buffer(
+            self.state.logical_device.cmd_copy_buffer(
                 self.inner(),
                 src_buffer.inner,
                 dst_buffer.inner,
@@ -518,10 +521,10 @@ impl<'g> VkCommandBuffer<'g> {
 
     pub fn copy_buffer_to_image(&mut self, info: &BufferImageCopyInfo) -> VkResult<()> {
         self.has_recorded_anything = true;
-        let source = self.gpu.resolve_resource::<VkBuffer>(&info.source).inner;
-        let image = self.gpu.resolve_resource::<VkImage>(&info.dest).inner;
+        let source = self.state.resolve_resource::<VkBuffer>(&info.source).inner;
+        let image = self.state.resolve_resource::<VkImage>(&info.dest).inner;
         unsafe {
-            self.gpu.vk_logical_device().cmd_copy_buffer_to_image(
+            self.state.logical_device.cmd_copy_buffer_to_image(
                 self.inner(),
                 source,
                 image,
@@ -549,14 +552,14 @@ impl<'g> VkCommandBuffer<'g> {
         &self,
         descriptor_state: &DescriptorSetState,
     ) -> vk::PipelineLayout {
-        self.gpu.get_pipeline_layout(descriptor_state)
+        self.state.get_pipeline_layout(descriptor_state)
     }
 
     fn find_matching_descriptor_sets(
         &self,
         descriptor_state: &DescriptorSetState,
     ) -> Vec<vk::DescriptorSet> {
-        self.gpu.get_descriptor_sets(descriptor_state)
+        self.state.get_descriptor_sets(descriptor_state)
     }
 }
 
@@ -627,14 +630,14 @@ impl Drop for ScopedDebugLabel {
 impl<'g> VkCommandBuffer<'g> {
     pub fn begin_debug_region(&self, label: &str, color: [f32; 4]) -> ScopedDebugLabel {
         ScopedDebugLabel {
-            inner: self.gpu.state.debug_utilities.as_ref().map(|debug_utils| {
+            inner: self.state.debug_utilities.as_ref().map(|debug_utils| {
                 ScopedDebugLabelInner::new(label, color, debug_utils.clone(), self.inner())
             }),
         }
     }
 
     pub fn insert_debug_label(&self, label: &str, color: [f32; 4]) {
-        if let Some(debug_utils) = &self.gpu.state.debug_utilities {
+        if let Some(debug_utils) = &self.state.debug_utilities {
             unsafe {
                 let c_label = CString::new(label).unwrap();
                 debug_utils.cmd_insert_debug_utils_label(
@@ -666,13 +669,13 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         render_pass_info: &BeginRenderPassInfo,
     ) -> Self {
         assert!(render_pass_info.subpasses.len() > 0);
-        let render_pass = command_buffer.gpu.get_render_pass(
-            &Self::get_attachments(&command_buffer.gpu, render_pass_info),
+        let render_pass = command_buffer.state.get_render_pass(
+            &Self::get_attachments(&command_buffer.state, render_pass_info),
             render_pass_info.label,
         );
 
         let framebuffer = command_buffer
-            .gpu
+            .state
             .get_framebuffer(&render_pass_info, render_pass);
 
         let mut clear_colors = render_pass_info
@@ -709,14 +712,11 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         };
 
         unsafe {
-            command_buffer
-                .gpu
-                .vk_logical_device()
-                .cmd_begin_render_pass(
-                    command_buffer.inner(),
-                    &begin_render_pass_info,
-                    vk::SubpassContents::default(),
-                );
+            command_buffer.state.logical_device.cmd_begin_render_pass(
+                command_buffer.inner(),
+                &begin_render_pass_info,
+                vk::SubpassContents::default(),
+            );
         };
 
         let render_pass_label = command_buffer.begin_debug_region(
@@ -729,8 +729,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             .as_ref()
             .map(|l| command_buffer.begin_debug_region(l, SUBPASS_LABEL_COLOR));
 
+        let state = command_buffer.state.clone();
         Self {
             command_buffer,
+            state,
             has_draw_command: false,
             viewport_area: None,
             depth_bias_setup: None,
@@ -812,8 +814,8 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             self.subpass_label = Some(self.begin_debug_region(&label, SUBPASS_LABEL_COLOR));
         }
         unsafe {
-            self.gpu
-                .vk_logical_device()
+            self.state
+                .logical_device
                 .cmd_next_subpass(self.inner(), vk::SubpassContents::default());
         }
     }
@@ -827,7 +829,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
 
         let layout = self.find_matching_pipeline_layout(&self.descriptor_state);
         let pipeline = self.find_matching_graphics_pipeline(layout, self.render_pass);
-        let device = self.gpu.vk_logical_device();
+        let device = &self.state.logical_device;
         {
             unsafe {
                 for (idx, constant_range) in
@@ -847,7 +849,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                         .vertex_inputs
                         .iter()
                         .map(|b| {
-                            self.gpu
+                            self.state
                                 .allocated_resources()
                                 .resolve::<VkBuffer>(&b.handle)
                                 .inner
@@ -926,7 +928,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
     }
 
     pub fn bind_index_buffer(&self, buffer: &VkBuffer, offset: u64, index_type: IndexType) {
-        let device = self.command_buffer.gpu.vk_logical_device();
+        let device = &self.state.logical_device;
         let index_buffer = buffer.inner;
         unsafe {
             device.cmd_bind_index_buffer(
@@ -939,7 +941,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
     }
     pub fn bind_vertex_buffer(&self, first_binding: u32, buffers: &[&VkBuffer], offsets: &[u64]) {
         assert!(buffers.len() == offsets.len());
-        let device = self.command_buffer.gpu.vk_logical_device();
+        let device = &self.state.logical_device;
         let vertex_buffers: Vec<_> = buffers.iter().map(|b| b.inner).collect();
         unsafe {
             device.cmd_bind_vertex_buffers(
@@ -961,7 +963,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
     ) -> anyhow::Result<()> {
         self.prepare_draw()?;
         unsafe {
-            self.gpu.vk_logical_device().cmd_draw_indexed(
+            self.state.logical_device.cmd_draw_indexed(
                 self.inner(),
                 num_indices,
                 instances,
@@ -982,7 +984,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
     ) -> anyhow::Result<()> {
         self.prepare_draw()?;
         unsafe {
-            self.gpu.vk_logical_device().cmd_draw(
+            self.state.logical_device.cmd_draw(
                 self.inner(),
                 num_vertices,
                 instances,
@@ -998,7 +1000,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
         layout: vk::PipelineLayout,
         render_pass: vk::RenderPass,
     ) -> vk::Pipeline {
-        self.gpu.get_graphics_pipeline(
+        self.state.get_graphics_pipeline(
             &self.pipeline_state,
             layout,
             render_pass,
@@ -1014,10 +1016,10 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
     ) {
         assert!(!index_buffer.is_null());
         let index_buffer = self
-            .gpu
+            .state
             .allocated_resources()
             .resolve::<VkBuffer>(&index_buffer);
-        let device = self.gpu.vk_logical_device();
+        let device = &self.state.logical_device;
         unsafe {
             device.cmd_bind_index_buffer(
                 self.inner(),
@@ -1029,7 +1031,7 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
     }
 
     fn get_attachments(
-        gpu: &VkGpu,
+        state: &GpuThreadSharedState,
         render_pass_info: &BeginRenderPassInfo<'_>,
     ) -> RenderPassAttachments {
         let mut attachments = RenderPassAttachments::default();
@@ -1037,7 +1039,9 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
             .color_attachments
             .iter()
             .map(|att| RenderPassAttachment {
-                format: gpu.resolve_resource::<VkImageView>(&att.image_view).format,
+                format: state
+                    .resolve_resource::<VkImageView>(&att.image_view)
+                    .format,
                 samples: SampleCount::Sample1,
                 load_op: att.load_op,
                 store_op: att.store_op,
@@ -1063,7 +1067,9 @@ impl<'c, 'g> VkRenderPassCommand<'c, 'g> {
                 .depth_attachment
                 .as_ref()
                 .map(|att| RenderPassAttachment {
-                    format: gpu.resolve_resource::<VkImageView>(&att.image_view).format,
+                    format: state
+                        .resolve_resource::<VkImageView>(&att.image_view)
+                        .format,
                     samples: SampleCount::Sample1,
                     load_op: match att.load_op {
                         DepthLoadOp::DontCare => ColorLoadOp::DontCare,
@@ -1140,8 +1146,8 @@ impl<'c, 'g> Drop for VkRenderPassCommand<'c, 'g> {
         self.render_pass_label.end_from_render_pass();
         unsafe {
             self.command_buffer
-                .gpu
-                .vk_logical_device()
+                .state
+                .logical_device
                 .cmd_end_render_pass(self.command_buffer.inner());
         }
     }
@@ -1163,7 +1169,7 @@ impl<'c, 'g> VkComputePassCommand<'c, 'g> {
         assert!(self.pipeline_state.shader.is_valid());
         let pipeline_layout = self.find_matching_pipeline_layout(&self.descriptor_state);
         let pipeline = self.find_matching_compute_pipeline(pipeline_layout);
-        let device = self.command_buffer.gpu.vk_logical_device();
+        let device = self.command_buffer.state.logical_device;
         unsafe {
             device.cmd_bind_pipeline(self.inner(), PipelineBindPoint::COMPUTE, pipeline);
 
@@ -1187,7 +1193,8 @@ impl<'c, 'g> VkComputePassCommand<'c, 'g> {
     }
 
     fn find_matching_compute_pipeline(&mut self, layout: vk::PipelineLayout) -> vk::Pipeline {
-        self.gpu.get_compute_pipeline(&self.pipeline_state, layout)
+        self.state
+            .get_compute_pipeline(&self.pipeline_state, layout)
     }
 }
 
