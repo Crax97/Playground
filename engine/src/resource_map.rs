@@ -1,6 +1,5 @@
 use bevy_ecs::system::Resource as BevyResource;
 use crossbeam::channel::{Receiver, Sender};
-use gpu::VkGpu;
 use log::{error, info};
 use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;

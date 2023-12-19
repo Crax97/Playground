@@ -525,7 +525,7 @@ impl App for BevyEcsApp {
             Camera::default()
         };
         let mut command_buffer = self.renderer.render(
-            &app_state.gpu,
+            app_state.gpu.as_ref(),
             &pov,
             scene,
             backbuffer,

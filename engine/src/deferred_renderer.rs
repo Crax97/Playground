@@ -20,7 +20,7 @@ use gpu::{
     ImageSubresourceRange, ImageUsageFlags, ImageViewHandle, ImageViewType, IndexType, InputRate,
     LifetimedCache, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags, Rect2D,
     RenderPass, SampleCount, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle,
-    ShaderStage, SubpassDependency, SubpassDescription, VertexBindingInfo, VertexStageInfo, VkGpu,
+    ShaderStage, SubpassDependency, SubpassDescription, VertexBindingInfo, VertexStageInfo,
     VkSwapchain,
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
@@ -118,7 +118,7 @@ pub struct SamplerAllocator {
 }
 
 impl SamplerAllocator {
-    fn get(&self, gpu: &VkGpu, desc: &TextureSamplerSettings) -> SamplerHandle {
+    fn get(&self, gpu: &dyn Gpu, desc: &TextureSamplerSettings) -> SamplerHandle {
         self.sampler_allocator.get_clone(desc, || {
             let sampler = gpu
                 .make_sampler(&gpu::SamplerCreateInfo {
@@ -151,7 +151,12 @@ pub struct ImageAllocator {
 }
 
 impl ImageAllocator {
-    fn get(&self, gpu: &VkGpu, label: &'static str, desc: &RenderImageDescription) -> RenderImage {
+    fn get(
+        &self,
+        gpu: &dyn Gpu,
+        label: &'static str,
+        desc: &RenderImageDescription,
+    ) -> RenderImage {
         self.image_allocator
             .get_clone(&ImageId { label, desc: *desc }, || {
                 let image = gpu
@@ -467,7 +472,7 @@ impl DeferredRenderingPipeline {
     }
 
     fn main_render_loop(
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         resource_map: &ResourceMap,
         pipeline_target: PipelineTarget,
         draw_hashmap: &HashMap<&MasterMaterial, Vec<DrawCall>>,
@@ -592,7 +597,7 @@ impl DeferredRenderingPipeline {
     }
 
     fn draw_skybox(
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         camera_location: &Point3<f32>,
         render_pass: &mut RenderPass,
         skybox_mesh: &Mesh,
@@ -637,7 +642,7 @@ impl DeferredRenderingPipeline {
 
     fn shadow_atlas_pass(
         &self,
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         graphics_command_buffer: &mut CommandBuffer,
         shadow_atlas_component: &RenderImage,
         per_frame_data: Vec<PerFrameData>,
@@ -742,7 +747,7 @@ impl DeferredRenderingPipeline {
 
     fn main_pass(
         &self,
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         graphics_command_buffer: &mut CommandBuffer,
         resource_map: &ResourceMap,
         color_output: &RenderImage,
@@ -1304,7 +1309,7 @@ impl DeferredRenderingPipeline {
 
     fn post_process_pass(
         &self,
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         graphics_command_buffer: &mut CommandBuffer,
         color_output: RenderImage,
         color_desc: RenderImageDescription,
@@ -1496,7 +1501,7 @@ fn bind_master_material(
 }
 
 fn draw_mesh_primitive(
-    gpu: &VkGpu,
+    gpu: &dyn Gpu,
     render_pass: &mut RenderPass,
     material: &MaterialInstance,
     master: &MasterMaterial,
@@ -1604,7 +1609,7 @@ fn draw_mesh_primitive(
 impl RenderingPipeline for DeferredRenderingPipeline {
     fn render<'a>(
         &'a mut self,
-        gpu: &'a VkGpu,
+        gpu: &dyn Gpu,
         pov: &Camera,
         scene: &Scene,
         backbuffer: &Backbuffer,
@@ -1749,7 +1754,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
     fn create_material(
         &mut self,
-        _gpu: &VkGpu,
+        _gpu: &dyn Gpu,
         material_description: MaterialDescription,
     ) -> anyhow::Result<MasterMaterial> {
         let master_description = MasterMaterialDescription {

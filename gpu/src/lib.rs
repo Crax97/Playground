@@ -12,9 +12,11 @@ pub use bitflags::bitflags;
 pub use command_buffer::*;
 pub use gpu_resource_manager::*;
 pub use handle::*;
+use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
+use std::sync::Arc;
 pub use swapchain::VkSwapchain;
 pub use types::*;
 use winit::window::Window;
@@ -27,6 +29,15 @@ pub struct GpuConfiguration<'a> {
     pub pipeline_cache_path: Option<&'a str>,
     pub enable_debug_utilities: bool,
     pub window: Option<&'a Window>,
+}
+pub trait AsAnyArc {
+    fn as_any_arc(self: Arc<Self>) -> Arc<dyn Any>;
+}
+
+impl<T: 'static> AsAnyArc for T {
+    fn as_any_arc(self: Arc<Self>) -> Arc<dyn Any> {
+        self
+    }
 }
 
 pub trait CommandBufferPassBegin {
@@ -242,7 +253,7 @@ pub use self::{
     command_buffer_2::CommandBuffer, compute_pass::ComputePass, render_pass::RenderPass,
 };
 
-pub trait Gpu: Send + Sync + 'static {
+pub trait Gpu: Send + Sync + AsAnyArc + 'static {
     fn update(&self);
 
     fn make_buffer(

@@ -5,7 +5,7 @@ use once_cell::unsync::OnceCell;
 use winit::{dpi::PhysicalSize, window::Window};
 
 pub struct AppState {
-    pub gpu: Arc<VkGpu>,
+    pub gpu: Arc<dyn Gpu>,
     pub swapchain: VkSwapchain,
     pub needs_new_swapchain: bool,
     pub current_window_size: PhysicalSize<u32>,

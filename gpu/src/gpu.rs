@@ -35,19 +35,18 @@ use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 
 use crate::{
-    command_buffer_2::{self, CommandBuffer},
-    get_allocation_callbacks, lifetime_cache_constants, quick_hash, BeginRenderPassInfo,
-    BufferCreateInfo, BufferHandle, BufferImageCopyInfo, CommandBufferSubmitInfo,
-    CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineState, Context,
-    DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2, DescriptorSetState,
-    Extent2D, GPUFence, Gpu, GpuConfiguration, GpuResourceMap, GraphicsPipelineState,
-    Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout,
-    ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, ImageViewHandle, LogicOp,
-    Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags, PushConstantBlockDescription,
-    QueueType, Rect2D, RenderPassAttachments, SampleCount, SamplerCreateInfo, SamplerHandle,
-    ShaderAttribute, ShaderModuleCreateInfo, ShaderModuleHandle, SubpassDescription, ToVk,
-    TransitionInfo, UniformVariableDescription, VkCommandBuffer, VkCommandPool, VkImageView,
-    VkShaderModule,
+    command_buffer_2::CommandBuffer, get_allocation_callbacks, lifetime_cache_constants,
+    quick_hash, BeginRenderPassInfo, BufferCreateInfo, BufferHandle, BufferImageCopyInfo,
+    CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineState,
+    Context, DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2,
+    DescriptorSetState, Extent2D, GPUFence, Gpu, GpuConfiguration, GpuResourceMap,
+    GraphicsPipelineState, Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat,
+    ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
+    ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
+    PushConstantBlockDescription, QueueType, Rect2D, RenderPassAttachments, SampleCount,
+    SamplerCreateInfo, SamplerHandle, ShaderAttribute, ShaderModuleCreateInfo, ShaderModuleHandle,
+    SubpassDescription, ToVk, TransitionInfo, UniformVariableDescription, VkCommandBuffer,
+    VkCommandPool, VkImageView, VkShaderModule,
 };
 use crate::{
     gpu_resource_manager::{

@@ -13,7 +13,6 @@ use engine::{
 use gpu::{
     AccessFlags, CommandBuffer, ImageAspectFlags, ImageLayout, ImageMemoryBarrier,
     ImageSubresourceRange, PipelineBarrierInfo, PipelineStageFlags, PresentMode, ShaderStage,
-    VkCommandBuffer,
 };
 use nalgebra::*;
 use winit::window::Window;
@@ -76,11 +75,11 @@ impl App for PlanesApp {
 
         let movement: Vector3<f32> = vector![0.0, 0.0, 0.0];
         let vertex_module =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/vertex_deferred.spirv")?;
+            utils::read_file_to_vk_module(app_state.gpu(), "./shaders/vertex_deferred.spirv")?;
         let fragment_module =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/fragment_deferred.spirv")?;
+            utils::read_file_to_vk_module(app_state.gpu(), "./shaders/fragment_deferred.spirv")?;
 
-        let cube = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
+        let cube = utils::load_cube_to_resource_map(app_state.gpu(), &mut resource_map)?;
 
         let mesh_data = MeshCreateInfo {
             label: Some("Quad mesh"),
@@ -132,7 +131,7 @@ impl App for PlanesApp {
         )?;
 
         let master = scene_renderer.create_material(
-            &app_state.gpu,
+            app_state.gpu(),
             MaterialDescription {
                 name: "Simple",
                 domain: MaterialDomain::Surface,
@@ -252,7 +251,7 @@ impl App for PlanesApp {
     ) -> anyhow::Result<CommandBuffer> {
         // self.egui_integration.begin_frame(&self.window);
         let mut cb = self.scene_renderer.render(
-            &app_state.gpu,
+            app_state.gpu(),
             &self.camera,
             &self.scene,
             backbuffer,

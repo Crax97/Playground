@@ -2,8 +2,6 @@ mod bitmap_level;
 mod character;
 mod entities;
 
-use std::default;
-
 use bitmap_level::BitmapLevelLoader;
 use character::{player_input_system, player_movement_system, KinematicCharacter};
 use engine::app::app_state::app_state;
@@ -112,7 +110,7 @@ fn collision_checking(
             .exclude_solids()
             .exclude_collider(player_collider.as_ref().clone()),
     ) {
-        if let Some((entity, star_collider)) = stars.iter().find(|(e, c)| **c == collider) {
+        if let Some((entity, star_collider)) = stars.iter().find(|(_e, c)| **c == collider) {
             commands.entity(*entity).despawn();
             phys_context.remove_collider(**star_collider);
             state.points += 1;

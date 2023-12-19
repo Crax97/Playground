@@ -13,7 +13,7 @@ use fps_camera::FpsCamera;
 use gpu::{
     AccessFlags, CommandBuffer, Extent2D, ImageAspectFlags, ImageFormat, ImageLayout,
     ImageMemoryBarrier, ImageSubresourceRange, PipelineBarrierInfo, PipelineStageFlags,
-    PresentMode, ShaderStage, VkCommandBuffer,
+    PresentMode, ShaderStage,
 };
 use winit::{
     dpi::{PhysicalPosition, Position},
@@ -230,16 +230,16 @@ impl App for GLTFViewer {
         let time = Time::new();
 
         let mut resource_map = ResourceMap::new();
-        let cube_mesh = utils::load_cube_to_resource_map(&app_state.gpu, &mut resource_map)?;
+        let cube_mesh = utils::load_cube_to_resource_map(app_state.gpu(), &mut resource_map)?;
 
         // TODO: avoid duplicating this module creation
         let vertex_module =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/vertex_deferred.spirv")?;
+            utils::read_file_to_vk_module(app_state.gpu(), "./shaders/vertex_deferred.spirv")?;
         let skybox_fragment =
-            utils::read_file_to_vk_module(&app_state.gpu, "./shaders/skybox_master.spirv")?;
+            utils::read_file_to_vk_module(app_state.gpu(), "./shaders/skybox_master.spirv")?;
 
         let david_texture = utils::load_hdr_to_cubemap(
-            &app_state.gpu,
+            app_state.gpu.as_ref(),
             Extent2D {
                 width: 1024,
                 height: 1024,
@@ -249,7 +249,7 @@ impl App for GLTFViewer {
             "images/skybox/hdr/evening_road.hdr",
         )?;
         let irradiance_map = utils::generate_irradiance_map(
-            &app_state.gpu,
+            app_state.gpu(),
             &david_texture,
             &mut resource_map,
             &cube_mesh,
@@ -271,7 +271,7 @@ impl App for GLTFViewer {
         scene_renderer.set_irradiance_texture(Some(irradiance_map));
 
         let skybox_material = scene_renderer.create_material(
-            &app_state.gpu,
+            app_state.gpu(),
             engine::MaterialDescription {
                 name: "skybox material",
                 domain: engine::MaterialDomain::Surface,
@@ -302,7 +302,7 @@ impl App for GLTFViewer {
 
         let mut gltf_loader = GltfLoader::load(
             &args.gltf_file,
-            &app_state.gpu,
+            app_state.gpu(),
             &mut scene_renderer,
             &mut resource_map,
             GltfLoadOptions {},
@@ -471,7 +471,7 @@ impl App for GLTFViewer {
         backbuffer: &Backbuffer,
     ) -> anyhow::Result<CommandBuffer> {
         let mut command_buffer = self.scene_renderer.render(
-            &app_state.gpu,
+            app_state.gpu(),
             &self.camera.camera(),
             self.gltf_loader.scene(),
             backbuffer,

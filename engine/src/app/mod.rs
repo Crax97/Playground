@@ -5,7 +5,7 @@ mod console;
 
 use crate::Backbuffer;
 pub use console::*;
-use gpu::{CommandBuffer, CommandBufferSubmitInfo, Gpu, PipelineStageFlags, VkCommandBuffer};
+use gpu::{CommandBuffer, CommandBufferSubmitInfo, PipelineStageFlags};
 
 use log::{info, trace};
 use winit::{

@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use egui::{Context, FontDefinitions, FullOutput};
 use egui_winit::EventResponse;
 use egui_winit_ash_integration::Integration;
-use gpu::{CommandBuffer, VkCommandBuffer, VkGpu, VkSwapchain};
+use gpu::{CommandBuffer, Gpu, VkCommandBuffer, VkGpu, VkSwapchain};
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 use winit::{event::WindowEvent, window::Window};
 
@@ -14,7 +14,13 @@ pub struct EguiSupport {
 }
 
 impl EguiSupport {
-    pub fn new(window: &Window, gpu: &VkGpu, swapchain: &VkSwapchain) -> anyhow::Result<Self> {
+    pub fn new(
+        window: &Window,
+        gpu: &Arc<dyn Gpu>,
+        swapchain: &VkSwapchain,
+    ) -> anyhow::Result<Self> {
+        let gpu = gpu.clone().as_any_arc();
+        let gpu = gpu.downcast_ref::<VkGpu>().unwrap();
         let device = gpu.vk_logical_device();
         let allocator = Allocator::new(&AllocatorCreateDesc {
             instance: gpu.instance().clone(),

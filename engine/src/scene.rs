@@ -3,9 +3,7 @@ use crate::{
     CvarManager,
 };
 use bevy_ecs::system::Resource;
-use gpu::{
-    CommandBuffer, Extent2D, ImageFormat, ImageHandle, ImageViewHandle, VkCommandBuffer, VkGpu,
-};
+use gpu::{CommandBuffer, Extent2D, Gpu, ImageFormat, ImageHandle, ImageViewHandle};
 use nalgebra::{vector, Matrix4, Point3, Vector2, Vector3};
 use std::num::NonZeroU32;
 
@@ -271,7 +269,7 @@ pub struct Backbuffer {
 pub trait RenderingPipeline {
     fn render<'a>(
         &'a mut self,
-        gpu: &'a VkGpu,
+        gpu: &dyn Gpu,
         pov: &Camera,
         scene: &Scene,
         backbuffer: &Backbuffer,
@@ -281,7 +279,7 @@ pub trait RenderingPipeline {
 
     fn create_material(
         &mut self,
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         material_description: MaterialDescription,
     ) -> anyhow::Result<MasterMaterial>;
 }

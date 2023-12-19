@@ -23,7 +23,7 @@ use gpu::{
 };
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
-    gpu: &VkGpu,
+    gpu: &dyn Gpu,
     path: P,
 ) -> anyhow::Result<ShaderModuleHandle> {
     info!("Reading path from {:?}", path.as_ref());
@@ -127,7 +127,7 @@ pub fn load_cubemap_from_path<P: AsRef<Path>>(
 }
 
 pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
-    gpu: &VkGpu,
+    gpu: &dyn Gpu,
     output_size: Extent2D,
     cube_mesh: ResourceHandle<Mesh>,
     resource_map: &mut ResourceMap,
@@ -165,7 +165,7 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
         },
     })?;
 
-    let equilateral_fragment = read_file_to_vk_module(&gpu, "./shaders/skybox_spherical.spirv")?;
+    let equilateral_fragment = read_file_to_vk_module(gpu, "./shaders/skybox_spherical.spirv")?;
     let (backing_image, view) = cubemap_main_loop(
         gpu,
         cube_image_format,
@@ -180,7 +180,7 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
 }
 
 fn cubemap_main_loop(
-    gpu: &VkGpu,
+    gpu: &dyn Gpu,
     cube_image_format: ImageFormat,
     input_texture_view: &ImageViewHandle,
     fragment_shader_to_apply: ShaderModuleHandle,
@@ -188,7 +188,7 @@ fn cubemap_main_loop(
     resource_map: &ResourceMap,
     cube_mesh: &ResourceHandle<Mesh>,
 ) -> Result<(ImageHandle, ImageViewHandle), anyhow::Error> {
-    let vertex_module = read_file_to_vk_module(&gpu, "./shaders/vertex_simple.spirv")?;
+    let vertex_module = read_file_to_vk_module(gpu, "./shaders/vertex_simple.spirv")?;
     let backing_image = gpu.make_image(
         &ImageCreateInfo {
             label: Some("Cubemap"),
@@ -444,7 +444,7 @@ fn cubemap_main_loop(
 }
 
 pub fn generate_irradiance_map(
-    gpu: &VkGpu,
+    gpu: &dyn Gpu,
     source_cubemap: &Texture,
     resource_map: &mut ResourceMap,
     cube_mesh: &ResourceHandle<Mesh>,
@@ -453,7 +453,7 @@ pub fn generate_irradiance_map(
         width: 512,
         height: 512,
     };
-    let convolve = read_file_to_vk_module(&gpu, "./shaders/skybox_convolve_irradiance.spirv")?;
+    let convolve = read_file_to_vk_module(gpu, "./shaders/skybox_convolve_irradiance.spirv")?;
     let (backing_image, view) = cubemap_main_loop(
         gpu,
         ImageFormat::RgbaFloat16,
@@ -467,7 +467,7 @@ pub fn generate_irradiance_map(
 }
 
 pub fn load_cube_to_resource_map(
-    gpu: &VkGpu,
+    gpu: &dyn Gpu,
     resource_map: &mut ResourceMap,
 ) -> anyhow::Result<ResourceHandle<engine::Mesh>> {
     let mesh_create_info = engine::MeshCreateInfo {

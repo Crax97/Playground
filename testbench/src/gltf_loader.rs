@@ -11,7 +11,7 @@ use gltf::Document;
 use gpu::{
     ComponentMapping, Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageHandle,
     ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, ImageViewType,
-    MemoryDomain, SamplerAddressMode, ShaderStage, VkGpu,
+    MemoryDomain, SamplerAddressMode, ShaderStage,
 };
 use nalgebra::{vector, Matrix4, Point3, Quaternion, UnitQuaternion, Vector3, Vector4};
 use std::collections::HashMap;
@@ -42,7 +42,7 @@ struct LoadedTextures {
 impl GltfLoader {
     pub fn load<P: AsRef<Path>, R: RenderingPipeline>(
         path: P,
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         scene_renderer: &mut R,
         resource_map: &mut ResourceMap,
         _options: GltfLoadOptions,
@@ -138,7 +138,7 @@ impl GltfLoader {
     }
 
     fn load_meshes(
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         resource_map: &mut ResourceMap,
         document: &Document,
         buffers: &[gltf::buffer::Data],
@@ -207,7 +207,7 @@ impl GltfLoader {
     }
 
     fn create_master_pbr_material<R: RenderingPipeline>(
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         scene_renderer: &mut R,
         resource_map: &mut ResourceMap,
     ) -> anyhow::Result<ResourceHandle<MasterMaterial>> {
@@ -280,7 +280,7 @@ impl GltfLoader {
     }
 
     fn load_images(
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         images: &mut [Data],
     ) -> anyhow::Result<(Vec<ImageHandle>, Vec<ImageViewHandle>)> {
         let mut allocated_images = vec![];
@@ -330,7 +330,7 @@ impl GltfLoader {
     }
 
     fn load_textures(
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         resource_map: &mut ResourceMap,
         allocated_images: Vec<ImageHandle>,
         allocated_image_views: Vec<ImageViewHandle>,
@@ -423,7 +423,7 @@ impl GltfLoader {
     }
 
     fn load_materials(
-        gpu: &VkGpu,
+        gpu: &dyn Gpu,
         pbr_master: ResourceHandle<MasterMaterial>,
         textures: LoadedTextures,
         document: &Document,
