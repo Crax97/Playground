@@ -727,6 +727,10 @@ impl command_buffer_2::Impl for VkCommandBuffer {
             }
         }
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 // Debug utilities
 

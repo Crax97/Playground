@@ -39,7 +39,6 @@ impl<T: 'static> AsAnyArc for T {
         self
     }
 }
-
 pub trait CommandBufferPassBegin {
     fn create_render_pass_impl(&mut self, info: &BeginRenderPassInfo)
         -> Box<dyn render_pass::Impl>;
@@ -108,8 +107,10 @@ macro_rules! define_command_buffer_type {
     ( $stru_name:ident {
         $($inner:tt)*
     }) => {
-        pub trait Impl : crate::CommandBufferPassBegin {
+        pub trait Impl : crate::CommandBufferPassBegin + 'static {
             expand_impl!($($inner)*);
+
+            fn as_any(&self) -> &dyn std::any::Any;
         }
 
         pub struct $stru_name {
@@ -185,7 +186,7 @@ pub mod command_buffer_2 {
             }
         }
 
-        pub fn pimpl_as_any(&self) -> &dyn std::any::Any {
+        pub fn pimpl(&self) -> &Box<dyn Impl> {
             &self.pimpl
         }
     }

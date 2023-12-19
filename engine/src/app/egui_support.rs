@@ -79,8 +79,9 @@ impl EguiSupport {
     ) {
         let clipped = self.integration.context().tessellate(output.shapes);
         let image_index = swapchain.current_swapchain_index.get().try_into().unwrap();
+        let command_buffer = command_buffer.pimpl();
+        let command_buffer = command_buffer.as_any();
         let command_buffer = command_buffer
-            .pimpl_as_any()
             .downcast_ref::<VkCommandBuffer>()
             .unwrap()
             .vk_command_buffer();
