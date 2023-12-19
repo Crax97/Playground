@@ -11,7 +11,7 @@ use bevy_ecs::{
 use bevy_reflect::{GetTypeRegistration, TypeRegistry};
 use egui::mutex::RwLock;
 use engine_macros::glsl;
-use gpu::{Gpu, ShaderModuleCreateInfo, ShaderStage, VkCommandBuffer};
+use gpu::{CommandBuffer, Gpu, ShaderModuleCreateInfo, ShaderStage};
 use nalgebra::vector;
 use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop, window::Window};
 
@@ -93,7 +93,7 @@ pub trait Plugin: 'static {
         &mut self,
         _world: &mut World,
         _app_state: &mut AppState,
-        _command_buffer: &mut VkCommandBuffer,
+        _command_buffer: &mut CommandBuffer,
     ) {
     }
 }
@@ -514,7 +514,7 @@ impl App for BevyEcsApp {
         &'a mut self,
         app_state: &'a crate::app::app_state::AppState,
         backbuffer: &crate::Backbuffer,
-    ) -> anyhow::Result<gpu::VkCommandBuffer> {
+    ) -> anyhow::Result<gpu::CommandBuffer> {
         let empty_scene = Scene::default();
         let scene = self.world.get_resource::<Scene>().unwrap_or(&empty_scene);
         let resource_map = self.world.get_resource::<ResourceMap>().unwrap();

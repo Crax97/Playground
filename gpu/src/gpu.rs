@@ -35,6 +35,7 @@ use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
 
 use crate::{
+    command_buffer_2::{self, CommandBuffer},
     get_allocation_callbacks, lifetime_cache_constants, quick_hash, BeginRenderPassInfo,
     BufferCreateInfo, BufferHandle, BufferImageCopyInfo, CommandBufferSubmitInfo,
     CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineState, Context,
@@ -2953,5 +2954,12 @@ impl Gpu for VkGpu {
     fn save_pipeline_cache(&self, path: &str) -> anyhow::Result<()> {
         self.save_pipeline_cache_impl(path)?;
         Ok(())
+    }
+
+    fn start_command_buffer(&self, queue_type: QueueType) -> anyhow::Result<CommandBuffer> {
+        let command_buffer = self.create_command_buffer(queue_type)?;
+        Ok(CommandBuffer {
+            pimpl: Box::new(command_buffer),
+        })
     }
 }

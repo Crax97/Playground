@@ -1,8 +1,8 @@
 use bytemuck::{Pod, Zeroable};
 use engine_macros::glsl;
 use gpu::{
-    Binding, Extent2D, Gpu, ImageLayout, ImageViewHandle, SamplerHandle, ShaderModuleCreateInfo,
-    ShaderModuleHandle, ShaderStage, VkRenderPassCommand,
+    Binding, Extent2D, Gpu, ImageLayout, ImageViewHandle, RenderPass, SamplerHandle,
+    ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
 };
 use nalgebra::{vector, Vector2};
 
@@ -20,7 +20,7 @@ pub trait PostProcessPass: 'static {
     fn name(&self) -> String;
     fn apply(
         &self,
-        post_process_pass: &mut VkRenderPassCommand,
+        post_process_pass: &mut RenderPass,
         resources: &PostProcessResources,
     ) -> anyhow::Result<()>;
 }
@@ -55,7 +55,7 @@ impl PostProcessPass for TonemapPass {
     }
     fn apply(
         &self,
-        post_process_pass: &mut VkRenderPassCommand,
+        post_process_pass: &mut RenderPass,
         resources: &PostProcessResources,
     ) -> anyhow::Result<()> {
         post_process_pass.bind_resources(
@@ -137,7 +137,7 @@ impl PostProcessPass for FxaaPass {
 
     fn apply(
         &self,
-        post_process_pass: &mut VkRenderPassCommand,
+        post_process_pass: &mut RenderPass,
         resources: &PostProcessResources,
     ) -> anyhow::Result<()> {
         post_process_pass.bind_resources(

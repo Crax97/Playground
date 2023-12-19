@@ -11,8 +11,9 @@ use engine::{
     TextureInput,
 };
 use gpu::{
-    AccessFlags, ImageAspectFlags, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
-    PipelineBarrierInfo, PipelineStageFlags, PresentMode, ShaderStage, VkCommandBuffer,
+    AccessFlags, CommandBuffer, ImageAspectFlags, ImageLayout, ImageMemoryBarrier,
+    ImageSubresourceRange, PipelineBarrierInfo, PipelineStageFlags, PresentMode, ShaderStage,
+    VkCommandBuffer,
 };
 use nalgebra::*;
 use winit::window::Window;
@@ -248,7 +249,7 @@ impl App for PlanesApp {
         &'a mut self,
         app_state: &'a AppState,
         backbuffer: &Backbuffer,
-    ) -> anyhow::Result<VkCommandBuffer> {
+    ) -> anyhow::Result<CommandBuffer> {
         // self.egui_integration.begin_frame(&self.window);
         let mut cb = self.scene_renderer.render(
             &app_state.gpu,

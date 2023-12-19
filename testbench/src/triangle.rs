@@ -6,10 +6,10 @@ use engine::app::{app_state::*, bootstrap, App};
 use engine::{Backbuffer, Time};
 use engine_macros::glsl;
 use gpu::{
-    AttachmentReference, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags, CullMode,
-    FramebufferColorAttachment, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageLayout,
-    ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, IndexType, InputRate, MemoryDomain,
-    PresentMode, SamplerCreateInfo, SamplerHandle, ShaderModuleHandle, ShaderStage,
+    AttachmentReference, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags, CommandBuffer,
+    CullMode, FramebufferColorAttachment, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat,
+    ImageLayout, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, IndexType, InputRate,
+    MemoryDomain, PresentMode, SamplerCreateInfo, SamplerHandle, ShaderModuleHandle, ShaderStage,
     SubpassDescription, VertexBindingInfo, VkCommandBuffer,
 };
 use nalgebra::*;
@@ -229,9 +229,9 @@ impl App for TriangleApp {
         &'a mut self,
         app_state: &'a AppState,
         backbuffer: &Backbuffer,
-    ) -> anyhow::Result<VkCommandBuffer> {
+    ) -> anyhow::Result<CommandBuffer> {
         let gpu = &app_state.gpu;
-        let mut command_buffer = gpu.create_command_buffer(gpu::QueueType::Graphics)?;
+        let mut command_buffer = gpu.start_command_buffer(gpu::QueueType::Graphics)?;
         {
             let color_attachments = vec![FramebufferColorAttachment {
                 image_view: backbuffer.image_view.clone(),
@@ -241,7 +241,7 @@ impl App for TriangleApp {
                 final_layout: gpu::ImageLayout::ColorAttachment,
             }];
 
-            let mut pass = command_buffer.begin_render_pass(&gpu::BeginRenderPassInfo {
+            let mut pass = command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
                 color_attachments: &color_attachments,
                 depth_attachment: None,
                 stencil_attachment: None,

@@ -5,7 +5,7 @@ mod console;
 
 use crate::Backbuffer;
 pub use console::*;
-use gpu::{CommandBufferSubmitInfo, Gpu, PipelineStageFlags, VkCommandBuffer};
+use gpu::{CommandBuffer, CommandBufferSubmitInfo, Gpu, PipelineStageFlags, VkCommandBuffer};
 
 use log::{info, trace};
 use winit::{
@@ -54,7 +54,7 @@ pub trait App {
         &'a mut self,
         app_state: &'a AppState,
         backbuffer: &Backbuffer,
-    ) -> anyhow::Result<VkCommandBuffer>;
+    ) -> anyhow::Result<CommandBuffer>;
 }
 
 pub fn app_loop<A: App + 'static>(

@@ -15,7 +15,6 @@ pub use handle::*;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
-use std::ops::{Deref, DerefMut};
 pub use swapchain::VkSwapchain;
 pub use types::*;
 use winit::window::Window;
@@ -29,6 +28,219 @@ pub struct GpuConfiguration<'a> {
     pub enable_debug_utilities: bool,
     pub window: Option<&'a Window>,
 }
+
+pub trait CommandBufferPassBegin {
+    fn create_render_pass_impl(&mut self, info: &BeginRenderPassInfo)
+        -> Box<dyn render_pass::Impl>;
+
+    fn create_compute_pass_impl(&mut self) -> Box<dyn compute_pass::Impl>;
+}
+
+macro_rules! expand_impl {
+    () => {};
+    (fn $fn_name:ident(&self $(, $arg:ident:$arg_ty:ty)*); $($rest:tt)*) => {
+        fn $fn_name(&self, $($arg:$arg_ty,)*);
+        expand_impl!($($rest)*);
+    };
+    (fn $fn_name:ident(&mut self $(, $arg:ident:$arg_ty:ty)*); $($rest:tt)*) => {
+        fn $fn_name(&mut self, $($arg:$arg_ty,)*);
+        expand_impl!($($rest)*);
+    };
+    (fn $fn_name:ident(&self $(, $arg:ident:$arg_ty:ty)*) -> $ret:ty ; $($rest:tt)*) => {
+        fn $fn_name(&self, $($arg:$arg_ty,)*) -> $ret;
+        expand_impl!($($rest)*);
+    };
+    (fn $fn_name:ident(&mut self $(, $arg:ident:$arg_ty:ty)*) -> $ret:ty ; $($rest:tt)*)=> {
+        fn $fn_name(&mut self, $($arg:$arg_ty,)*) -> $ret;
+        expand_impl!($($rest)*);
+    };
+    (fn $fn_name:ident<'c>(&'c mut self $(, $arg:ident:$arg_ty:ty)*) -> $ret:ty; $($rest:tt)*)=> {
+        fn $fn_name<'c>(&mut self, $($arg:$arg_ty,)*) -> $ret;
+        expand_impl!($($rest)*);
+    };
+}
+
+macro_rules! expand_pimpl {
+    () => {};
+    (fn $fn_name:ident(&self $(, $arg:ident:$arg_ty:ty)*); $($rest:tt)*) => {
+        pub fn $fn_name(&self, $($arg:$arg_ty,)*) {
+            self.pimpl.$fn_name($($arg,)*)
+        }
+        expand_pimpl!($($rest)*);
+    };
+    (fn $fn_name:ident(&mut self $(, $arg:ident:$arg_ty:ty)*); $($rest:tt)*) => {
+        pub fn $fn_name(&mut self, $($arg:$arg_ty,)*) {
+            self.pimpl.$fn_name($($arg,)*)
+        }
+        expand_pimpl!($($rest)*);
+    };
+   (fn $fn_name:ident(&self $(, $arg:ident:$arg_ty:ty)*) -> $ret:ty ; $($rest:tt)*) => {
+        pub fn $fn_name(&self, $($arg:$arg_ty,)*) -> $ret  {
+            self.pimpl.$fn_name($($arg,)*)
+        }
+        expand_pimpl!($($rest)*);
+    };
+    (fn $fn_name:ident(&mut self $(, $arg:ident:$arg_ty:ty)*) -> $ret:ty ; $($rest:tt)*)=> {
+        pub fn $fn_name(&mut self, $($arg:$arg_ty,)*) -> $ret {
+            self.pimpl.$fn_name($($arg,)*)
+        }
+        expand_pimpl!($($rest)*);
+    };
+    (fn $fn_name:ident<'c>(&'c mut self $(, $arg:ident:$arg_ty:ty)*) -> $ret:ty; $($rest:tt)*)=> {
+        pub fn $fn_name<'c>(&mut self, $($arg:$arg_ty,)*) -> $ret {
+            self.pimpl.$fn_name($($arg,)*)
+        }
+        expand_pimpl!($($rest)*);
+    };
+}
+macro_rules! define_command_buffer_type {
+    ( $stru_name:ident {
+        $($inner:tt)*
+    }) => {
+        pub trait Impl : crate::CommandBufferPassBegin {
+            expand_impl!($($inner)*);
+        }
+
+        pub struct $stru_name {
+            pub pimpl: Box<dyn Impl>,
+        }
+
+        impl $stru_name {
+            expand_pimpl!($($inner)*);
+        }
+    };
+}
+
+macro_rules! define_pass_type {
+    ( $stru_name:ident {
+        $($inner:tt)*
+    }) => {
+        pub trait Impl {
+            expand_impl!($($inner)*);
+        }
+
+        pub struct $stru_name<'c> {
+            pub(crate) pimpl: Box<dyn Impl>,
+            pub(crate) parent: &'c mut crate::command_buffer_2::CommandBuffer,
+        }
+
+        impl<'c> $stru_name<'c> {
+            expand_pimpl!($($inner)*);
+        }
+
+        impl<'c> std::ops::Deref for $stru_name<'c> {
+            type Target = super::command_buffer_2::CommandBuffer;
+            fn deref(&self) -> &Self::Target {
+                &self.parent
+            }
+        }
+        impl<'c> std::ops::DerefMut for $stru_name<'c> {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.parent
+            }
+        }
+    };
+}
+
+pub mod command_buffer_2 {
+    use crate::{
+        compute_pass::ComputePass, render_pass::RenderPass, BeginRenderPassInfo, Binding,
+        CommandBufferSubmitInfo, PipelineBarrierInfo, ShaderStage,
+    };
+
+    define_command_buffer_type!(CommandBuffer {
+        fn push_constants(&mut self, index: u32, offset: u32, data: &[u8], shader_stage: ShaderStage);
+        fn bind_resources(&mut self, set: u32, bindings: &[Binding]);
+        fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo);
+        fn submit(&mut self, submit_info: &CommandBufferSubmitInfo) -> anyhow::Result<()>;
+
+        fn insert_debug_label(&self, label: &str, color: [f32; 4]);
+    });
+
+    impl CommandBuffer {
+        pub fn start_render_pass<'c>(&'c mut self, info: &BeginRenderPassInfo) -> RenderPass<'c> {
+            let inner = self.pimpl.create_render_pass_impl(info);
+            RenderPass {
+                pimpl: inner,
+                parent: self,
+            }
+        }
+
+        pub fn start_compute_pass<'c>(&'c mut self) -> ComputePass<'c> {
+            let inner = self.pimpl.create_compute_pass_impl();
+            ComputePass {
+                pimpl: inner,
+                parent: self,
+            }
+        }
+
+        pub fn pimpl_as_any(&self) -> &dyn std::any::Any {
+            &self.pimpl
+        }
+    }
+}
+pub mod render_pass {
+    use crate::{
+        BufferHandle, CompareOp, CullMode, FrontFace, IndexType, PolygonMode, PrimitiveTopology,
+        ShaderModuleHandle, VertexBindingInfo, Viewport,
+    };
+    define_pass_type!(RenderPass {
+     fn set_primitive_topology(&mut self, new_topology: PrimitiveTopology) ;
+     fn set_vertex_shader(&mut self, vertex_shader: ShaderModuleHandle) ;
+     fn set_fragment_shader(&mut self, fragment_shader: ShaderModuleHandle) ;
+     fn set_vertex_buffers(&mut self, bindings: &[VertexBindingInfo]) ;
+     fn set_color_output_enabled(&mut self, color_output_enabled: bool) ;
+     fn set_viewport(&mut self, viewport: Viewport) ;
+     fn set_depth_bias(&mut self, constant: f32, clamp: f32, slope: f32) ;
+     fn set_front_face(&mut self, front_face: FrontFace) ;
+     fn set_polygon_mode(&mut self, polygon_mode: PolygonMode) ;
+     fn set_cull_mode(&mut self, cull_mode: CullMode) ;
+     fn set_enable_depth_test(&mut self, enable_depth_test: bool) ;
+     fn set_depth_write_enabled(&mut self, depth_write_enabled: bool) ;
+     fn set_depth_compare_op(&mut self, depth_compare_op: CompareOp) ;
+     fn advance_to_next_subpass(&mut self) ;
+    /* If enabled, fragments may be discarded after the vertex shader stage,
+    before any fragment shader is executed.
+    When enabled, a valid fragment shader must be set */
+     fn set_early_discard_enabled(&mut self, allow_early_discard: bool) ;
+
+     fn draw_indexed(
+        &mut self,
+        num_indices: u32,
+        instances: u32,
+        first_index: u32,
+        vertex_offset: i32,
+        first_instance: u32
+    ) -> anyhow::Result<()> ;
+
+     fn draw(
+        &mut self,
+        num_vertices: u32,
+        instances: u32,
+        first_vertex: u32,
+        first_instance: u32
+    ) -> anyhow::Result<()> ;
+
+     fn set_index_buffer(
+        &self,
+        index_buffer: BufferHandle,
+        index_type: IndexType,
+        offset: usize
+    ) ;
+    });
+}
+pub mod compute_pass {
+    use crate::ShaderModuleHandle;
+
+    define_pass_type!(ComputePass {
+        fn set_compute_shader(&mut self, compute_shader: ShaderModuleHandle);
+        fn dispatch(&mut self, group_size_x: u32, group_size_y: u32, group_size_z: u32);
+    });
+}
+
+pub use self::{
+    command_buffer_2::CommandBuffer, compute_pass::ComputePass, render_pass::RenderPass,
+};
 
 pub trait Gpu: Send + Sync + 'static {
     fn update(&self);
@@ -79,127 +291,10 @@ pub trait Gpu: Send + Sync + 'static {
 
     fn wait_device_idle(&self) -> anyhow::Result<()>;
     fn save_pipeline_cache(&self, path: &str) -> anyhow::Result<()>;
+
+    fn start_command_buffer(&self, queue_type: QueueType) -> anyhow::Result<CommandBuffer>;
 }
 
-macro_rules! expand_impl {
-    () => {};
-    (fn $fn_name:ident(&self $(, $arg:ident:$arg_ty:ty)*); $($rest:tt)*) => {
-        fn $fn_name(&self, $($arg:$arg_ty,)*);
-        expand_impl!($($rest)*);
-    };
-    (fn $fn_name:ident(&mut self $(, $arg:ident:$arg_ty:ty)*); $($rest:tt)*) => {
-        fn $fn_name(&mut self, $($arg:$arg_ty,)*);
-        expand_impl!($($rest)*);
-    };
-    (fn $fn_name:ident(&self $(, $arg:ident:$arg_ty:ty)*) -> $ret:ty ; $($rest:tt)*) => {
-        fn $fn_name(&self, $($arg:$arg_ty,)*) -> $ret;
-        expand_impl!($($rest)*);
-    };
-    (fn $fn_name:ident(&mut self $(, $arg:ident:$arg_ty:ty)*) -> $ret:ty ; $($rest:tt)*)=> {
-        fn $fn_name(&mut self, $($arg:$arg_ty,)*) -> $ret;
-        expand_impl!($($rest)*);
-    };
-}
-
-macro_rules! expand_pimpl {
-    () => {};
-    (fn $fn_name:ident(&self $(, $arg:ident:$arg_ty:ty)*); $($rest:tt)*) => {
-        pub fn $fn_name(&self, $($arg:$arg_ty,)*) {
-            self.pimpl.$fn_name($($arg,)*)
-        }
-        expand_pimpl!($($rest)*);
-    };
-    (fn $fn_name:ident(&mut self $(, $arg:ident:$arg_ty:ty)*); $($rest:tt)*) => {
-        pub fn $fn_name(&mut self, $($arg:$arg_ty,)*) {
-            self.pimpl.$fn_name($($arg,)*)
-        }
-        expand_pimpl!($($rest)*);
-    };
-   (fn $fn_name:ident(&self $(, $arg:ident:$arg_ty:ty)*) -> $ret:ty ; $($rest:tt)*) => {
-        pub fn $fn_name(&self, $($arg:$arg_ty,)*) -> $ret  {
-            self.pimpl.$fn_name($($arg,)*)
-        }
-        expand_pimpl!($($rest)*);
-    };
-    (fn $fn_name:ident(&mut self $(, $arg:ident:$arg_ty:ty)*) -> $ret:ty ; $($rest:tt)*)=> {
-        pub fn $fn_name(&mut self, $($arg:$arg_ty,)*) -> $ret {
-            self.pimpl.$fn_name($($arg,)*)
-        }
-        expand_pimpl!($($rest)*);
-    };
-}
-macro_rules! define_command_buffer_type {
-    ( $stru_name:ident {
-        $($inner:tt)*
-    }) => {
-        pub trait Impl {
-            expand_impl!($($inner)*);
-        }
-
-        pub struct $stru_name {
-            pimpl: Box<dyn Impl>,
-        }
-
-        impl $stru_name {
-            expand_pimpl!($($inner)*);
-        }
-    };
-}
-
-macro_rules! define_pass_type {
-    ( $stru_name:ident {
-        $($inner:tt)*
-    }) => {
-        pub trait Impl {
-            expand_impl!($($inner)*);
-        }
-
-        pub struct $stru_name<'c> {
-            pimpl: Box<dyn Impl>,
-            parent: &'c mut super::command_buffer_2::CommandBuffer
-        }
-
-        impl<'c> $stru_name<'c> {
-            expand_pimpl!($($inner)*);
-        }
-
-        impl<'c> std::ops::Deref for $stru_name<'c> {
-            type Target = super::command_buffer_2::CommandBuffer;
-            fn deref(&self) -> &Self::Target {
-                &self.parent
-            }
-        }
-        impl<'c> std::ops::DerefMut for $stru_name<'c> {
-            fn deref_mut(&mut self) -> &mut Self::Target {
-                &mut self.parent
-            }
-        }
-    };
-}
-
-mod pippo {
-    define_command_buffer_type!(Pippo {
-        fn pippa(&self, how_much: u32, again: bool);
-        fn pippa_mut(&mut self, how_much: u32);
-    });
-}
-
-pub mod command_buffer_2 {
-    use crate::{Binding, CommandBufferSubmitInfo, PipelineBarrierInfo, ShaderStage};
-
-    define_command_buffer_type!(CommandBuffer {
-        fn push_constants(&mut self, index: u32, offset: u32, data: &[u8], shader_stage: ShaderStage);
-        fn bind_resources(&mut self, set: u32, bindings: &[Binding]);
-        fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo);
-        fn submit(&mut self, submit_info: &CommandBufferSubmitInfo) -> anyhow::Result<()>;
-    });
-}
-pub mod render_pass {
-    define_pass_type!(RenderPass {});
-}
-pub mod compute_pass {
-    define_pass_type!(ComputePass {});
-}
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct FenceCreateFlags : u32 {

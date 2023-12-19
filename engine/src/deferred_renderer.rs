@@ -14,13 +14,14 @@ use crate::{
 use crate::resource_map::{ResourceHandle, ResourceMap};
 use gpu::{
     AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, Binding,
-    BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorLoadOp, Extent2D, FragmentStageInfo,
-    FramebufferColorAttachment, FramebufferDepthAttachment, Gpu, ImageAspectFlags, ImageFormat,
-    ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageUsageFlags,
-    ImageViewHandle, ImageViewType, IndexType, InputRate, LifetimedCache, MemoryDomain, Offset2D,
-    PipelineBarrierInfo, PipelineStageFlags, Rect2D, SampleCount, SamplerHandle,
-    ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage, SubpassDependency, SubpassDescription,
-    VertexBindingInfo, VertexStageInfo, VkCommandBuffer, VkGpu, VkRenderPassCommand, VkSwapchain,
+    BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorLoadOp, CommandBuffer, Extent2D,
+    FragmentStageInfo, FramebufferColorAttachment, FramebufferDepthAttachment, Gpu,
+    ImageAspectFlags, ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier,
+    ImageSubresourceRange, ImageUsageFlags, ImageViewHandle, ImageViewType, IndexType, InputRate,
+    LifetimedCache, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags, Rect2D,
+    RenderPass, SampleCount, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle,
+    ShaderStage, SubpassDependency, SubpassDescription, VertexBindingInfo, VertexStageInfo, VkGpu,
+    VkSwapchain,
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 
@@ -470,7 +471,7 @@ impl DeferredRenderingPipeline {
         resource_map: &ResourceMap,
         pipeline_target: PipelineTarget,
         draw_hashmap: &HashMap<&MasterMaterial, Vec<DrawCall>>,
-        render_pass: &mut VkRenderPassCommand,
+        render_pass: &mut RenderPass,
         camera_index: u32,
         frame_buffers: &FrameBuffers,
         sampler_allocator: &SamplerAllocator,
@@ -593,17 +594,17 @@ impl DeferredRenderingPipeline {
     fn draw_skybox(
         gpu: &VkGpu,
         camera_location: &Point3<f32>,
-        render_pass: &mut VkRenderPassCommand,
+        render_pass: &mut RenderPass,
         skybox_mesh: &Mesh,
         skybox_material: &MaterialInstance,
         skybox_master: &MasterMaterial,
         resource_map: &ResourceMap,
         sampler_allocator: &SamplerAllocator,
     ) -> anyhow::Result<()> {
-        let label = render_pass.begin_debug_region(
-            &format!("Skybox - using material {}", skybox_master.name),
-            [0.2, 0.2, 0.0, 1.0],
-        );
+        // let label = render_pass.begin_debug_region(
+        //     &format!("Skybox - using material {}", skybox_master.name),
+        //     [0.2, 0.2, 0.0, 1.0],
+        // );
         const SKYBOX_SCALE: f32 = 1.0;
         let skybox_transform =
             Matrix4::new_translation(&camera_location.coords) * Matrix4::new_scaling(SKYBOX_SCALE);
@@ -623,7 +624,7 @@ impl DeferredRenderingPipeline {
             sampler_allocator,
             0,
         )?;
-        label.end();
+        // label.end();
         Ok(())
     }
 
@@ -637,7 +638,7 @@ impl DeferredRenderingPipeline {
     fn shadow_atlas_pass(
         &self,
         gpu: &VkGpu,
-        graphics_command_buffer: &mut VkCommandBuffer,
+        graphics_command_buffer: &mut CommandBuffer,
         shadow_atlas_component: &RenderImage,
         per_frame_data: Vec<PerFrameData>,
         resource_map: &ResourceMap,
@@ -646,7 +647,7 @@ impl DeferredRenderingPipeline {
     ) -> anyhow::Result<()> {
         {
             let mut shadow_atlas_command =
-                graphics_command_buffer.begin_render_pass(&gpu::BeginRenderPassInfo {
+                graphics_command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
                     label: Some("Shadow atlas"),
                     color_attachments: &[],
                     depth_attachment: Some(FramebufferDepthAttachment {
@@ -742,7 +743,7 @@ impl DeferredRenderingPipeline {
     fn main_pass(
         &self,
         gpu: &VkGpu,
-        graphics_command_buffer: &mut VkCommandBuffer,
+        graphics_command_buffer: &mut CommandBuffer,
         resource_map: &ResourceMap,
         color_output: &RenderImage,
         shadow_atlas_component: &RenderImage,
@@ -980,7 +981,7 @@ impl DeferredRenderingPipeline {
             ];
 
             let mut gbuffer_render_pass =
-                graphics_command_buffer.begin_render_pass(&gpu::BeginRenderPassInfo {
+                graphics_command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
                     label: Some("Main pass"),
                     color_attachments: &[
                         FramebufferColorAttachment {
@@ -1238,13 +1239,13 @@ impl DeferredRenderingPipeline {
 
     fn copy_to_backbuffer_pass(
         &self,
-        graphics_command_buffer: &mut VkCommandBuffer,
+        graphics_command_buffer: &mut CommandBuffer,
         color_output: RenderImage,
         backbuffer: &Backbuffer,
         flip_render_target: bool,
     ) -> anyhow::Result<()> {
         let mut present_render_pass =
-            graphics_command_buffer.begin_render_pass(&gpu::BeginRenderPassInfo {
+            graphics_command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
                 label: Some("Copy to backbuffer"),
                 color_attachments: &[FramebufferColorAttachment {
                     image_view: backbuffer.image_view.clone(),
@@ -1304,7 +1305,7 @@ impl DeferredRenderingPipeline {
     fn post_process_pass(
         &self,
         gpu: &VkGpu,
-        graphics_command_buffer: &mut VkCommandBuffer,
+        graphics_command_buffer: &mut CommandBuffer,
         color_output: RenderImage,
         color_desc: RenderImageDescription,
         render_size: Extent2D,
@@ -1363,7 +1364,7 @@ impl DeferredRenderingPipeline {
 
                 let mut current_postprocess = 0;
                 let mut post_process_pass =
-                    graphics_command_buffer.begin_render_pass(&BeginRenderPassInfo {
+                    graphics_command_buffer.start_render_pass(&BeginRenderPassInfo {
                         label: Some("Post Process"),
                         color_attachments: &[
                             FramebufferColorAttachment {
@@ -1459,7 +1460,7 @@ impl DeferredRenderingPipeline {
 fn bind_master_material(
     master: &MasterMaterial,
     pipeline_target: PipelineTarget,
-    render_pass: &mut VkRenderPassCommand<'_>,
+    render_pass: &mut RenderPass,
     frame_buffers: &FrameBuffers,
 ) {
     let permutation = master
@@ -1496,7 +1497,7 @@ fn bind_master_material(
 
 fn draw_mesh_primitive(
     gpu: &VkGpu,
-    render_pass: &mut VkRenderPassCommand,
+    render_pass: &mut RenderPass,
     material: &MaterialInstance,
     master: &MasterMaterial,
     primitive: &MeshPrimitive,
@@ -1609,7 +1610,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         backbuffer: &Backbuffer,
         resource_map: &ResourceMap,
         cvar_manager: &CvarManager,
-    ) -> anyhow::Result<VkCommandBuffer> {
+    ) -> anyhow::Result<CommandBuffer> {
         let projection = pov.projection();
 
         if self.light_iteration != scene.lights_iteration() {
@@ -1697,7 +1698,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             self.image_allocator
                 .get(gpu, "color_output/post_process_1", &color_desc);
 
-        let mut graphics_command_buffer = gpu.create_command_buffer(gpu::QueueType::Graphics)?;
+        let mut graphics_command_buffer = gpu.start_command_buffer(gpu::QueueType::Graphics)?;
 
         self.shadow_atlas_pass(
             gpu,

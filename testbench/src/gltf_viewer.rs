@@ -11,9 +11,9 @@ use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
 use fps_camera::FpsCamera;
 use gpu::{
-    AccessFlags, Extent2D, ImageAspectFlags, ImageFormat, ImageLayout, ImageMemoryBarrier,
-    ImageSubresourceRange, PipelineBarrierInfo, PipelineStageFlags, PresentMode, ShaderStage,
-    VkCommandBuffer,
+    AccessFlags, CommandBuffer, Extent2D, ImageAspectFlags, ImageFormat, ImageLayout,
+    ImageMemoryBarrier, ImageSubresourceRange, PipelineBarrierInfo, PipelineStageFlags,
+    PresentMode, ShaderStage, VkCommandBuffer,
 };
 use winit::{
     dpi::{PhysicalPosition, Position},
@@ -469,7 +469,7 @@ impl App for GLTFViewer {
         &'a mut self,
         app_state: &'a AppState,
         backbuffer: &Backbuffer,
-    ) -> anyhow::Result<VkCommandBuffer> {
+    ) -> anyhow::Result<CommandBuffer> {
         let mut command_buffer = self.scene_renderer.render(
             &app_state.gpu,
             &self.camera.camera(),

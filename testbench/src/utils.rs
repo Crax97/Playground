@@ -292,9 +292,9 @@ fn cubemap_main_loop(
             initial_layout: gpu::ImageLayout::ColorAttachment,
             final_layout: gpu::ImageLayout::ColorAttachment,
         }];
-        let mut command_buffer = gpu.create_command_buffer(gpu::QueueType::Graphics)?;
+        let mut command_buffer = gpu.start_command_buffer(gpu::QueueType::Graphics)?;
         {
-            let mut render_pass_command = command_buffer.begin_render_pass(&BeginRenderPassInfo {
+            let mut render_pass_command = command_buffer.start_render_pass(&BeginRenderPassInfo {
                 color_attachments: &views,
                 depth_attachment: None,
                 stencil_attachment: None,

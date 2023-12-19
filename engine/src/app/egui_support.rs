@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use egui::{Context, FontDefinitions, FullOutput};
 use egui_winit::EventResponse;
 use egui_winit_ash_integration::Integration;
-use gpu::{VkCommandBuffer, VkGpu, VkSwapchain};
+use gpu::{CommandBuffer, VkCommandBuffer, VkGpu, VkSwapchain};
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 use winit::{event::WindowEvent, window::Window};
 
@@ -69,11 +69,15 @@ impl EguiSupport {
         &mut self,
         output: FullOutput,
         swapchain: &VkSwapchain,
-        command_buffer: &VkCommandBuffer,
+        command_buffer: &CommandBuffer,
     ) {
         let clipped = self.integration.context().tessellate(output.shapes);
         let image_index = swapchain.current_swapchain_index.get().try_into().unwrap();
-        let command_buffer = command_buffer.inner();
+        let command_buffer = command_buffer
+            .pimpl_as_any()
+            .downcast_ref::<VkCommandBuffer>()
+            .unwrap()
+            .vk_command_buffer();
         self.integration
             .paint(command_buffer, image_index, clipped, output.textures_delta);
     }

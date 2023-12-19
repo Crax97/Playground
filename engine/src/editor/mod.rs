@@ -13,7 +13,7 @@ use bevy_ecs::{
     world::{EntityWorldMut, World},
 };
 use egui::{Context, FullOutput, Ui};
-use gpu::VkCommandBuffer;
+use gpu::{CommandBuffer, VkCommandBuffer};
 use std::collections::HashMap;
 
 use crate::{
@@ -153,7 +153,7 @@ impl Plugin for EditorPlugin {
         &mut self,
         world: &mut World,
         app_state: &mut AppState,
-        command_buffer: &mut VkCommandBuffer,
+        command_buffer: &mut CommandBuffer,
     ) {
         let window = world.get_resource::<EngineWindow>().unwrap();
         self.output = Some(self.egui_support.end_frame(window));

@@ -3,7 +3,9 @@ use crate::{
     CvarManager,
 };
 use bevy_ecs::system::Resource;
-use gpu::{Extent2D, ImageFormat, ImageHandle, ImageViewHandle, VkCommandBuffer, VkGpu};
+use gpu::{
+    CommandBuffer, Extent2D, ImageFormat, ImageHandle, ImageViewHandle, VkCommandBuffer, VkGpu,
+};
 use nalgebra::{vector, Matrix4, Point3, Vector2, Vector3};
 use std::num::NonZeroU32;
 
@@ -275,7 +277,7 @@ pub trait RenderingPipeline {
         backbuffer: &Backbuffer,
         resource_map: &ResourceMap,
         cvar_manager: &CvarManager,
-    ) -> anyhow::Result<VkCommandBuffer>;
+    ) -> anyhow::Result<CommandBuffer>;
 
     fn create_material(
         &mut self,

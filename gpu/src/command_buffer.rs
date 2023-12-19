@@ -1,7 +1,7 @@
-use std::ops::DerefMut;
-
+use std::cell::RefCell;
+use std::ffi::CString;
+use std::rc::Rc;
 use std::sync::Arc;
-use std::{ffi::CString, ops::Deref};
 
 use ash::vk::{
     self, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
@@ -18,8 +18,7 @@ use super::{QueueType, VkBuffer, VkGpu};
 const RENDER_PASSS_LABEL_COLOR: [f32; 4] = [0.6, 0.6, 0.6, 1.0];
 const SUBPASS_LABEL_COLOR: [f32; 4] = [0.373, 0.792, 0.988, 1.0];
 
-pub struct VkCommandBuffer {
-    state: Arc<GpuThreadSharedState>,
+struct VkCommandBufferState {
     inner_command_buffer: vk::CommandBuffer,
     has_recorded_anything: bool,
     has_been_submitted: bool,
@@ -28,9 +27,18 @@ pub struct VkCommandBuffer {
     push_constant_data: Vec<Vec<u8>>,
 }
 
-pub struct VkRenderPassCommand<'c> {
-    command_buffer: &'c mut VkCommandBuffer,
+impl VkCommandBufferState {}
+
+pub struct VkCommandBuffer {
     state: Arc<GpuThreadSharedState>,
+    command_buffer_state: Rc<RefCell<VkCommandBufferState>>,
+    vk_command_buffer: vk::CommandBuffer,
+}
+
+pub struct VkRenderPassCommand {
+    command_buffer: vk::CommandBuffer,
+    state: Arc<GpuThreadSharedState>,
+    command_buffer_state: Rc<RefCell<VkCommandBufferState>>,
     has_draw_command: bool,
     viewport_area: Option<Viewport>,
     depth_bias_setup: Option<(f32, f32, f32)>,
@@ -55,9 +63,11 @@ impl ComputePipelineState {
     }
 }
 
-pub struct VkComputePassCommand<'c> {
-    command_buffer: &'c mut VkCommandBuffer,
+pub struct VkComputePassCommand {
     pipeline_state: ComputePipelineState,
+    command_buffer: vk::CommandBuffer,
+    command_buffer_state: Rc<RefCell<VkCommandBufferState>>,
+    state: Arc<GpuThreadSharedState>,
 }
 
 #[derive(Hash)]
@@ -320,28 +330,24 @@ impl VkCommandBuffer {
 
         Ok(Self {
             state: gpu.state.clone(),
-            inner_command_buffer,
-            has_recorded_anything: false,
-            has_been_submitted: false,
-            target_queue: target_queue.get_vk_queue(gpu),
-            descriptor_state: DescriptorSetState::default(),
-            push_constant_data: vec![],
+            vk_command_buffer: inner_command_buffer,
+            command_buffer_state: Rc::new(RefCell::new(VkCommandBufferState {
+                inner_command_buffer,
+                has_recorded_anything: false,
+                has_been_submitted: false,
+                target_queue: target_queue.get_vk_queue(gpu),
+                descriptor_state: DescriptorSetState::default(),
+                push_constant_data: vec![],
+            })),
         })
     }
 
-    pub fn begin_render_pass<'p>(
-        &'p mut self,
-        info: &BeginRenderPassInfo,
-    ) -> VkRenderPassCommand<'p> {
-        VkRenderPassCommand::<'p>::new(self, info)
+    pub fn begin_render_pass(&mut self, info: &BeginRenderPassInfo) -> VkRenderPassCommand {
+        VkRenderPassCommand::new(self, info)
     }
 
-    pub fn begin_compute_pass<'p>(&'p mut self) -> VkComputePassCommand<'p> {
-        VkComputePassCommand::<'p>::new(self)
-    }
-
-    pub fn inner(&self) -> vk::CommandBuffer {
-        self.inner_command_buffer
+    pub fn begin_compute_pass(&mut self) -> VkComputePassCommand {
+        VkComputePassCommand::new(self)
     }
 
     pub fn copy_buffer(
@@ -351,10 +357,10 @@ impl VkCommandBuffer {
         dst_offset: u64,
         size: usize,
     ) -> VkResult<()> {
-        self.has_recorded_anything = true;
+        self.command_buffer_state.borrow_mut().has_recorded_anything = true;
         unsafe {
             self.state.logical_device.cmd_copy_buffer(
-                self.inner(),
+                self.command_buffer_state.borrow().inner_command_buffer,
                 src_buffer.inner,
                 dst_buffer.inner,
                 &[vk::BufferCopy {
@@ -369,12 +375,12 @@ impl VkCommandBuffer {
     }
 
     pub fn copy_buffer_to_image(&mut self, info: &BufferImageCopyInfo) -> VkResult<()> {
-        self.has_recorded_anything = true;
+        self.command_buffer_state.borrow_mut().has_recorded_anything = true;
         let source = self.state.resolve_resource::<VkBuffer>(&info.source).inner;
         let image = self.state.resolve_resource::<VkImage>(&info.dest).inner;
         unsafe {
             self.state.logical_device.cmd_copy_buffer_to_image(
-                self.inner(),
+                self.command_buffer_state.borrow().inner_command_buffer,
                 source,
                 image,
                 info.dest_layout.to_vk(),
@@ -397,19 +403,6 @@ impl VkCommandBuffer {
         }
     }
 
-    fn find_matching_pipeline_layout(
-        &self,
-        descriptor_state: &DescriptorSetState,
-    ) -> vk::PipelineLayout {
-        self.state.get_pipeline_layout(descriptor_state)
-    }
-
-    fn find_matching_descriptor_sets(
-        &self,
-        descriptor_state: &DescriptorSetState,
-    ) -> Vec<vk::DescriptorSet> {
-        self.state.get_descriptor_sets(descriptor_state)
-    }
     pub fn push_constants(
         &mut self,
         index: u32,
@@ -418,16 +411,18 @@ impl VkCommandBuffer {
         shader_stage: ShaderStage,
     ) {
         // Ensure enough push constant range descriptions are allocated
-        if self.descriptor_state.push_constant_range.len() <= (index as _) {
-            self.descriptor_state
+        let mut state = self.command_buffer_state.borrow_mut();
+        if state.descriptor_state.push_constant_range.len() <= (index as _) {
+            state
+                .descriptor_state
                 .push_constant_range
                 .resize(index as usize + 1, PushConstantRange::default());
-            self.push_constant_data.resize(index as usize + 1, vec![]);
+            state.push_constant_data.resize(index as usize + 1, vec![]);
         }
 
-        self.push_constant_data[index as usize] = data.to_vec();
+        state.push_constant_data[index as usize] = data.to_vec();
 
-        self.descriptor_state.push_constant_range[index as usize] = PushConstantRange {
+        state.descriptor_state.push_constant_range[index as usize] = PushConstantRange {
             stage_flags: shader_stage,
             offset,
             size: std::mem::size_of_val(data) as _,
@@ -435,17 +430,19 @@ impl VkCommandBuffer {
     }
 
     pub fn bind_resources(&mut self, set: u32, bindings: &[Binding]) {
-        if self.descriptor_state.sets.len() <= (set as _) {
-            self.descriptor_state
+        let mut state = self.command_buffer_state.borrow_mut();
+        if state.descriptor_state.sets.len() <= (set as _) {
+            state
+                .descriptor_state
                 .sets
                 .resize(set as usize + 1, DescriptorSetInfo2::default());
         }
 
-        self.descriptor_state.sets[set as usize].bindings = bindings.to_vec();
+        state.descriptor_state.sets[set as usize].bindings = bindings.to_vec();
     }
 
     pub fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo) {
-        self.has_recorded_anything = true;
+        self.command_buffer_state.borrow_mut().has_recorded_anything = true;
         let device = &self.state.logical_device;
         let memory_barriers: Vec<_> = barrier_info
             .memory_barriers
@@ -491,7 +488,7 @@ impl VkCommandBuffer {
             .collect();
         unsafe {
             device.cmd_pipeline_barrier(
-                self.inner_command_buffer,
+                self.command_buffer_state.borrow().inner_command_buffer,
                 barrier_info.src_stage_mask.to_vk(),
                 barrier_info.dst_stage_mask.to_vk(),
                 DependencyFlags::empty(),
@@ -503,17 +500,18 @@ impl VkCommandBuffer {
     }
 
     pub fn submit(&mut self, submit_info: &CommandBufferSubmitInfo) -> VkResult<()> {
-        self.has_been_submitted = true;
-        if !self.has_recorded_anything {
+        let mut state = self.command_buffer_state.borrow_mut();
+        state.has_been_submitted = true;
+        if !state.has_recorded_anything {
             return Ok(());
         }
 
         let device = &self.state.logical_device;
         unsafe {
             device
-                .end_command_buffer(self.inner())
+                .end_command_buffer(state.inner_command_buffer)
                 .expect("Failed to end inner command buffer");
-            let target_queue = self.target_queue;
+            let target_queue = state.target_queue;
 
             let wait_semaphores: Vec<_> = submit_info
                 .wait_semaphores
@@ -538,7 +536,7 @@ impl VkCommandBuffer {
                     p_wait_semaphores: wait_semaphores.as_ptr(),
                     p_wait_dst_stage_mask: stage_masks.as_ptr(),
                     command_buffer_count: 1,
-                    p_command_buffers: [self.inner_command_buffer].as_ptr(),
+                    p_command_buffers: [state.inner_command_buffer].as_ptr(),
                     signal_semaphore_count: signal_semaphores.len() as _,
                     p_signal_semaphores: signal_semaphores.as_ptr(),
                 }],
@@ -551,21 +549,40 @@ impl VkCommandBuffer {
             Ok(())
         }
     }
+
+    pub fn vk_command_buffer(&self) -> vk::CommandBuffer {
+        self.vk_command_buffer
+    }
+}
+
+impl CommandBufferPassBegin for VkCommandBuffer {
+    fn create_render_pass_impl(
+        &mut self,
+        info: &BeginRenderPassInfo,
+    ) -> Box<dyn render_pass::Impl> {
+        Box::new(self.begin_render_pass(info))
+    }
+
+    fn create_compute_pass_impl(&mut self) -> Box<dyn compute_pass::Impl> {
+        Box::new(self.begin_compute_pass())
+    }
 }
 
 impl command_buffer_2::Impl for VkCommandBuffer {
     fn push_constants(&mut self, index: u32, offset: u32, data: &[u8], shader_stage: ShaderStage) {
+        let mut state = self.command_buffer_state.borrow_mut();
         // Ensure enough push constant range descriptions are allocated
-        if self.descriptor_state.push_constant_range.len() <= (index as _) {
-            self.descriptor_state
+        if state.descriptor_state.push_constant_range.len() <= (index as _) {
+            state
+                .descriptor_state
                 .push_constant_range
                 .resize(index as usize + 1, PushConstantRange::default());
-            self.push_constant_data.resize(index as usize + 1, vec![]);
+            state.push_constant_data.resize(index as usize + 1, vec![]);
         }
 
-        self.push_constant_data[index as usize] = data.to_vec();
+        state.push_constant_data[index as usize] = data.to_vec();
 
-        self.descriptor_state.push_constant_range[index as usize] = PushConstantRange {
+        state.descriptor_state.push_constant_range[index as usize] = PushConstantRange {
             stage_flags: shader_stage,
             offset,
             size: std::mem::size_of_val(data) as _,
@@ -573,17 +590,20 @@ impl command_buffer_2::Impl for VkCommandBuffer {
     }
 
     fn bind_resources(&mut self, set: u32, bindings: &[Binding]) {
-        if self.descriptor_state.sets.len() <= (set as _) {
-            self.descriptor_state
+        let mut state = self.command_buffer_state.borrow_mut();
+        if state.descriptor_state.sets.len() <= (set as _) {
+            state
+                .descriptor_state
                 .sets
                 .resize(set as usize + 1, DescriptorSetInfo2::default());
         }
 
-        self.descriptor_state.sets[set as usize].bindings = bindings.to_vec();
+        state.descriptor_state.sets[set as usize].bindings = bindings.to_vec();
     }
 
     fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo) {
-        self.has_recorded_anything = true;
+        let mut state = self.command_buffer_state.borrow_mut();
+        state.has_recorded_anything = true;
         let device = &self.state.logical_device;
         let memory_barriers: Vec<_> = barrier_info
             .memory_barriers
@@ -629,7 +649,7 @@ impl command_buffer_2::Impl for VkCommandBuffer {
             .collect();
         unsafe {
             device.cmd_pipeline_barrier(
-                self.inner_command_buffer,
+                state.inner_command_buffer,
                 barrier_info.src_stage_mask.to_vk(),
                 barrier_info.dst_stage_mask.to_vk(),
                 DependencyFlags::empty(),
@@ -641,17 +661,18 @@ impl command_buffer_2::Impl for VkCommandBuffer {
     }
 
     fn submit(&mut self, submit_info: &CommandBufferSubmitInfo) -> anyhow::Result<()> {
-        self.has_been_submitted = true;
-        if !self.has_recorded_anything {
+        let mut state = self.command_buffer_state.borrow_mut();
+        state.has_been_submitted = true;
+        if !state.has_recorded_anything {
             return Ok(());
         }
 
         let device = &self.state.logical_device;
         unsafe {
             device
-                .end_command_buffer(self.inner())
+                .end_command_buffer(state.inner_command_buffer)
                 .expect("Failed to end inner command buffer");
-            let target_queue = self.target_queue;
+            let target_queue = state.target_queue;
 
             let wait_semaphores: Vec<_> = submit_info
                 .wait_semaphores
@@ -676,7 +697,7 @@ impl command_buffer_2::Impl for VkCommandBuffer {
                     p_wait_semaphores: wait_semaphores.as_ptr(),
                     p_wait_dst_stage_mask: stage_masks.as_ptr(),
                     command_buffer_count: 1,
-                    p_command_buffers: [self.inner_command_buffer].as_ptr(),
+                    p_command_buffers: [state.inner_command_buffer].as_ptr(),
                     signal_semaphore_count: signal_semaphores.len() as _,
                     p_signal_semaphores: signal_semaphores.as_ptr(),
                 }],
@@ -687,6 +708,23 @@ impl command_buffer_2::Impl for VkCommandBuffer {
                 },
             )?;
             Ok(())
+        }
+    }
+
+    fn insert_debug_label(&self, label: &str, color: [f32; 4]) {
+        if let Some(debug_utils) = &self.state.debug_utilities {
+            unsafe {
+                let c_label = CString::new(label).unwrap();
+                debug_utils.cmd_insert_debug_utils_label(
+                    self.command_buffer_state.borrow().inner_command_buffer,
+                    &DebugUtilsLabelEXT {
+                        s_type: StructureType::DEBUG_UTILS_LABEL_EXT,
+                        p_next: std::ptr::null(),
+                        p_label_name: c_label.as_ptr(),
+                        color,
+                    },
+                );
+            }
         }
     }
 }
@@ -758,43 +796,28 @@ impl VkCommandBuffer {
     pub fn begin_debug_region(&self, label: &str, color: [f32; 4]) -> ScopedDebugLabel {
         ScopedDebugLabel {
             inner: self.state.debug_utilities.as_ref().map(|debug_utils| {
-                ScopedDebugLabelInner::new(label, color, debug_utils.clone(), self.inner())
+                ScopedDebugLabelInner::new(
+                    label,
+                    color,
+                    debug_utils.clone(),
+                    self.command_buffer_state.borrow().inner_command_buffer,
+                )
             }),
-        }
-    }
-
-    pub fn insert_debug_label(&self, label: &str, color: [f32; 4]) {
-        if let Some(debug_utils) = &self.state.debug_utilities {
-            unsafe {
-                let c_label = CString::new(label).unwrap();
-                debug_utils.cmd_insert_debug_utils_label(
-                    self.inner(),
-                    &DebugUtilsLabelEXT {
-                        s_type: StructureType::DEBUG_UTILS_LABEL_EXT,
-                        p_next: std::ptr::null(),
-                        p_label_name: c_label.as_ptr(),
-                        color,
-                    },
-                );
-            }
         }
     }
 }
 
 impl Drop for VkCommandBuffer {
     fn drop(&mut self) {
-        if !self.has_been_submitted {
+        if !self.command_buffer_state.borrow().has_been_submitted {
             warn!("CommandBuffer::submit has not been called!");
             return;
         }
     }
 }
 
-impl<'c> VkRenderPassCommand<'c> {
-    fn new(
-        command_buffer: &'c mut VkCommandBuffer,
-        render_pass_info: &BeginRenderPassInfo,
-    ) -> Self {
+impl VkRenderPassCommand {
+    fn new(command_buffer: &mut VkCommandBuffer, render_pass_info: &BeginRenderPassInfo) -> Self {
         assert!(render_pass_info.subpasses.len() > 0);
         let render_pass = command_buffer.state.get_render_pass(
             &Self::get_attachments(&command_buffer.state, render_pass_info),
@@ -840,7 +863,10 @@ impl<'c> VkRenderPassCommand<'c> {
 
         unsafe {
             command_buffer.state.logical_device.cmd_begin_render_pass(
-                command_buffer.inner(),
+                command_buffer
+                    .command_buffer_state
+                    .borrow()
+                    .inner_command_buffer,
                 &begin_render_pass_info,
                 vk::SubpassContents::default(),
             );
@@ -858,7 +884,11 @@ impl<'c> VkRenderPassCommand<'c> {
 
         let state = command_buffer.state.clone();
         Self {
-            command_buffer,
+            command_buffer: command_buffer
+                .command_buffer_state
+                .borrow()
+                .inner_command_buffer,
+            command_buffer_state: command_buffer.command_buffer_state.clone(),
             state,
             has_draw_command: false,
             viewport_area: None,
@@ -871,103 +901,31 @@ impl<'c> VkRenderPassCommand<'c> {
         }
     }
 
-    pub fn set_primitive_topology(&mut self, new_topology: PrimitiveTopology) {
-        self.pipeline_state.primitive_topology = new_topology;
-    }
-
-    pub fn set_vertex_shader(&mut self, vertex_shader: ShaderModuleHandle) {
-        self.pipeline_state.vertex_shader = vertex_shader;
-    }
-
-    pub fn set_fragment_shader(&mut self, fragment_shader: ShaderModuleHandle) {
-        self.pipeline_state.fragment_shader = fragment_shader;
-    }
-
-    pub fn set_vertex_buffers(&mut self, bindings: &[VertexBindingInfo]) {
-        self.pipeline_state.vertex_inputs = bindings.to_vec();
-    }
-
-    pub fn set_color_output_enabled(&mut self, color_output_enabled: bool) {
-        self.pipeline_state.color_output_enabled = color_output_enabled;
-    }
-
-    pub fn set_viewport(&mut self, viewport: Viewport) {
-        self.viewport_area = Some(viewport);
-    }
-
-    pub fn set_depth_bias(&mut self, constant: f32, clamp: f32, slope: f32) {
-        self.depth_bias_setup = Some((constant, clamp, slope));
-    }
-
-    pub fn set_front_face(&mut self, front_face: FrontFace) {
-        self.pipeline_state.front_face = front_face;
-    }
-
-    pub fn set_polygon_mode(&mut self, polygon_mode: PolygonMode) {
-        self.pipeline_state.polygon_mode = polygon_mode;
-    }
-
-    pub fn set_cull_mode(&mut self, cull_mode: CullMode) {
-        self.pipeline_state.cull_mode = cull_mode;
-    }
-
-    pub fn set_enable_depth_test(&mut self, enable_depth_test: bool) {
-        self.pipeline_state.enable_depth_test = enable_depth_test;
-    }
-
-    pub fn set_depth_write_enabled(&mut self, depth_write_enabled: bool) {
-        self.pipeline_state.depth_write_enabled = depth_write_enabled;
-    }
-
-    pub fn set_depth_compare_op(&mut self, depth_compare_op: CompareOp) {
-        self.pipeline_state.depth_compare_op = depth_compare_op;
-    }
-
-    pub fn advance_to_next_subpass(&mut self) {
-        self.pipeline_state.current_subpass += 1;
-        if self.pipeline_state.current_subpass as usize == self.subpasses.len() {
-            return;
-        }
-        if self.pipeline_state.current_subpass as usize > self.subpasses.len() {
-            panic!(
-                "Tried to start subpass {} but there are {} subpasses!",
-                self.pipeline_state.current_subpass,
-                self.subpasses.len(),
-            );
-        }
-        self.subpass_label.take();
-        if let Some(ref label) = self.subpasses[self.pipeline_state.current_subpass as usize].label
-        {
-            self.subpass_label = Some(self.begin_debug_region(&label, SUBPASS_LABEL_COLOR));
-        }
-        unsafe {
-            self.state
-                .logical_device
-                .cmd_next_subpass(self.inner(), vk::SubpassContents::default());
-        }
-    }
-
     fn prepare_draw(&mut self) -> anyhow::Result<()> {
         #[cfg(debug_assertions)]
         self.validate_state()?;
 
+        let mut state = self.command_buffer_state.borrow_mut();
         self.has_draw_command = true;
-        self.command_buffer.has_recorded_anything = true;
+        state.has_recorded_anything = true;
 
-        let layout = self.find_matching_pipeline_layout(&self.descriptor_state);
+        let layout = self.find_matching_pipeline_layout(&state.descriptor_state);
         let pipeline = self.find_matching_graphics_pipeline(layout, self.render_pass);
         let device = &self.state.logical_device;
         {
             unsafe {
-                for (idx, constant_range) in
-                    self.descriptor_state.push_constant_range.iter().enumerate()
+                for (idx, constant_range) in state
+                    .descriptor_state
+                    .push_constant_range
+                    .iter()
+                    .enumerate()
                 {
                     device.cmd_push_constants(
-                        self.inner(),
+                        self.command_buffer,
                         layout,
                         constant_range.stage_flags.to_vk(),
                         constant_range.offset,
-                        &self.push_constant_data[idx],
+                        &state.push_constant_data[idx],
                     );
                 }
                 if self.pipeline_state.vertex_inputs.len() > 0 {
@@ -988,16 +946,16 @@ impl<'c> VkRenderPassCommand<'c> {
                         .iter()
                         .map(|_| 0)
                         .collect::<Vec<_>>();
-                    device.cmd_bind_vertex_buffers(self.inner(), 0, &buffers, &offsets);
+                    device.cmd_bind_vertex_buffers(self.command_buffer, 0, &buffers, &offsets);
                 }
             }
         }
 
-        if self.descriptor_state.sets.len() > 0 {
-            let descriptors = self.find_matching_descriptor_sets(&self.descriptor_state);
+        if state.descriptor_state.sets.len() > 0 {
+            let descriptors = self.find_matching_descriptor_sets(&state.descriptor_state);
             unsafe {
                 device.cmd_bind_descriptor_sets(
-                    self.inner(),
+                    self.command_buffer,
                     PipelineBindPoint::GRAPHICS,
                     layout,
                     0,
@@ -1008,7 +966,7 @@ impl<'c> VkRenderPassCommand<'c> {
         }
 
         unsafe {
-            device.cmd_bind_pipeline(self.inner(), PipelineBindPoint::GRAPHICS, pipeline);
+            device.cmd_bind_pipeline(self.command_buffer, PipelineBindPoint::GRAPHICS, pipeline);
         }
         // Negate height because of Khronos brain farts
         let height = self.pipeline_state.render_area.extent.height as f32;
@@ -1037,124 +995,40 @@ impl<'c> VkRenderPassCommand<'c> {
             _ => (0.0, 0.0, 0.0),
         };
         unsafe {
-            device.cmd_set_depth_bias_enable(self.command_buffer.inner(), true);
+            device.cmd_set_depth_bias_enable(self.command_buffer, true);
             device.cmd_set_depth_bias(
-                self.command_buffer.inner(),
+                self.command_buffer,
                 depth_constant,
                 depth_clamp,
                 depth_slope,
             );
-            device.cmd_set_viewport(self.command_buffer.inner(), 0, &[viewport.to_vk()]);
-            device.cmd_set_scissor(self.command_buffer.inner(), 0, &[scissor.to_vk()]);
+            device.cmd_set_viewport(self.command_buffer, 0, &[viewport.to_vk()]);
+            device.cmd_set_scissor(self.command_buffer, 0, &[scissor.to_vk()]);
             device.cmd_set_depth_test_enable(
-                self.command_buffer.inner(),
+                self.command_buffer,
                 self.pipeline_state.enable_depth_test,
             );
         }
         Ok(())
     }
 
-    pub fn bind_index_buffer(&self, buffer: &VkBuffer, offset: u64, index_type: IndexType) {
-        let device = &self.state.logical_device;
-        let index_buffer = buffer.inner;
-        unsafe {
-            device.cmd_bind_index_buffer(
-                self.command_buffer.inner_command_buffer,
-                index_buffer,
-                offset,
-                index_type.to_vk(),
-            );
+    #[cfg(debug_assertions)]
+    fn validate_state(&self) -> anyhow::Result<()> {
+        use anyhow::anyhow;
+        macro_rules! validate {
+            ($cond:expr, $err:expr) => {
+                if !($cond) {
+                    return Err(anyhow!($err));
+                }
+            };
         }
-    }
-    pub fn bind_vertex_buffer(&self, first_binding: u32, buffers: &[&VkBuffer], offsets: &[u64]) {
-        assert!(buffers.len() == offsets.len());
-        let device = &self.state.logical_device;
-        let vertex_buffers: Vec<_> = buffers.iter().map(|b| b.inner).collect();
-        unsafe {
-            device.cmd_bind_vertex_buffers(
-                self.command_buffer.inner_command_buffer,
-                first_binding,
-                &vertex_buffers,
-                offsets,
-            );
-        }
-    }
-
-    pub fn draw_indexed(
-        &mut self,
-        num_indices: u32,
-        instances: u32,
-        first_index: u32,
-        vertex_offset: i32,
-        first_instance: u32,
-    ) -> anyhow::Result<()> {
-        self.prepare_draw()?;
-        unsafe {
-            self.state.logical_device.cmd_draw_indexed(
-                self.inner(),
-                num_indices,
-                instances,
-                first_index,
-                vertex_offset,
-                first_instance,
-            );
-        }
+        validate!(
+            !self.pipeline_state.early_discard_enabled
+                || (self.pipeline_state.early_discard_enabled
+                    && self.pipeline_state.fragment_shader.is_valid()),
+            "Primitive early discard is enabled, but no valid fragment shader has been set"
+        );
         Ok(())
-    }
-
-    pub fn draw(
-        &mut self,
-        num_vertices: u32,
-        instances: u32,
-        first_vertex: u32,
-        first_instance: u32,
-    ) -> anyhow::Result<()> {
-        self.prepare_draw()?;
-        unsafe {
-            self.state.logical_device.cmd_draw(
-                self.inner(),
-                num_vertices,
-                instances,
-                first_vertex,
-                first_instance,
-            );
-        }
-        Ok(())
-    }
-
-    fn find_matching_graphics_pipeline(
-        &mut self,
-        layout: vk::PipelineLayout,
-        render_pass: vk::RenderPass,
-    ) -> vk::Pipeline {
-        self.state.get_graphics_pipeline(
-            &self.pipeline_state,
-            layout,
-            render_pass,
-            &self.subpasses[self.pipeline_state.current_subpass as usize],
-        )
-    }
-
-    pub fn set_index_buffer(
-        &self,
-        index_buffer: BufferHandle,
-        index_type: IndexType,
-        offset: usize,
-    ) {
-        assert!(!index_buffer.is_null());
-        let index_buffer = self
-            .state
-            .allocated_resources()
-            .resolve::<VkBuffer>(&index_buffer);
-        let device = &self.state.logical_device;
-        unsafe {
-            device.cmd_bind_index_buffer(
-                self.inner(),
-                index_buffer.inner,
-                offset as _,
-                index_type.to_vk(),
-            );
-        }
     }
 
     fn get_attachments(
@@ -1225,84 +1099,251 @@ impl<'c> VkRenderPassCommand<'c> {
         attachments.dependencies = render_pass_info.dependencies.to_vec();
         attachments
     }
+    fn find_matching_graphics_pipeline(
+        &self,
+        layout: vk::PipelineLayout,
+        render_pass: vk::RenderPass,
+    ) -> vk::Pipeline {
+        self.state.get_graphics_pipeline(
+            &self.pipeline_state,
+            layout,
+            render_pass,
+            &self.subpasses[self.pipeline_state.current_subpass as usize],
+        )
+    }
+
+    fn find_matching_pipeline_layout(
+        &self,
+        descriptor_state: &DescriptorSetState,
+    ) -> vk::PipelineLayout {
+        self.state.get_pipeline_layout(descriptor_state)
+    }
+
+    fn find_matching_descriptor_sets(
+        &self,
+        descriptor_state: &DescriptorSetState,
+    ) -> Vec<vk::DescriptorSet> {
+        self.state.get_descriptor_sets(descriptor_state)
+    }
+
+    pub fn begin_debug_region(&self, label: &str, color: [f32; 4]) -> ScopedDebugLabel {
+        ScopedDebugLabel {
+            inner: self.state.debug_utilities.as_ref().map(|debug_utils| {
+                ScopedDebugLabelInner::new(label, color, debug_utils.clone(), self.command_buffer)
+            }),
+        }
+    }
+}
+
+impl render_pass::Impl for VkRenderPassCommand {
+    fn set_primitive_topology(&mut self, new_topology: PrimitiveTopology) {
+        self.pipeline_state.primitive_topology = new_topology;
+    }
+
+    fn set_vertex_shader(&mut self, vertex_shader: ShaderModuleHandle) {
+        self.pipeline_state.vertex_shader = vertex_shader;
+    }
+
+    fn set_fragment_shader(&mut self, fragment_shader: ShaderModuleHandle) {
+        self.pipeline_state.fragment_shader = fragment_shader;
+    }
+
+    fn set_vertex_buffers(&mut self, bindings: &[VertexBindingInfo]) {
+        self.pipeline_state.vertex_inputs = bindings.to_vec();
+    }
+
+    fn set_color_output_enabled(&mut self, color_output_enabled: bool) {
+        self.pipeline_state.color_output_enabled = color_output_enabled;
+    }
+
+    fn set_viewport(&mut self, viewport: Viewport) {
+        self.viewport_area = Some(viewport);
+    }
+
+    fn set_depth_bias(&mut self, constant: f32, clamp: f32, slope: f32) {
+        self.depth_bias_setup = Some((constant, clamp, slope));
+    }
+
+    fn set_front_face(&mut self, front_face: FrontFace) {
+        self.pipeline_state.front_face = front_face;
+    }
+
+    fn set_polygon_mode(&mut self, polygon_mode: PolygonMode) {
+        self.pipeline_state.polygon_mode = polygon_mode;
+    }
+
+    fn set_cull_mode(&mut self, cull_mode: CullMode) {
+        self.pipeline_state.cull_mode = cull_mode;
+    }
+
+    fn set_enable_depth_test(&mut self, enable_depth_test: bool) {
+        self.pipeline_state.enable_depth_test = enable_depth_test;
+    }
+
+    fn set_depth_write_enabled(&mut self, depth_write_enabled: bool) {
+        self.pipeline_state.depth_write_enabled = depth_write_enabled;
+    }
+
+    fn set_depth_compare_op(&mut self, depth_compare_op: CompareOp) {
+        self.pipeline_state.depth_compare_op = depth_compare_op;
+    }
+
+    fn advance_to_next_subpass(&mut self) {
+        self.pipeline_state.current_subpass += 1;
+        if self.pipeline_state.current_subpass as usize == self.subpasses.len() {
+            return;
+        }
+        if self.pipeline_state.current_subpass as usize > self.subpasses.len() {
+            panic!(
+                "Tried to start subpass {} but there are {} subpasses!",
+                self.pipeline_state.current_subpass,
+                self.subpasses.len(),
+            );
+        }
+        self.subpass_label.take();
+        if let Some(ref label) = self.subpasses[self.pipeline_state.current_subpass as usize].label
+        {
+            self.subpass_label = Some(self.begin_debug_region(&label, SUBPASS_LABEL_COLOR));
+        }
+        unsafe {
+            self.state
+                .logical_device
+                .cmd_next_subpass(self.command_buffer, vk::SubpassContents::default());
+        }
+    }
+
+    fn draw_indexed(
+        &mut self,
+        num_indices: u32,
+        instances: u32,
+        first_index: u32,
+        vertex_offset: i32,
+        first_instance: u32,
+    ) -> anyhow::Result<()> {
+        self.prepare_draw()?;
+        unsafe {
+            self.state.logical_device.cmd_draw_indexed(
+                self.command_buffer,
+                num_indices,
+                instances,
+                first_index,
+                vertex_offset,
+                first_instance,
+            );
+        }
+        Ok(())
+    }
+
+    fn draw(
+        &mut self,
+        num_vertices: u32,
+        instances: u32,
+        first_vertex: u32,
+        first_instance: u32,
+    ) -> anyhow::Result<()> {
+        self.prepare_draw()?;
+        unsafe {
+            self.state.logical_device.cmd_draw(
+                self.command_buffer,
+                num_vertices,
+                instances,
+                first_vertex,
+                first_instance,
+            );
+        }
+        Ok(())
+    }
+
+    fn set_index_buffer(&self, index_buffer: BufferHandle, index_type: IndexType, offset: usize) {
+        assert!(!index_buffer.is_null());
+        let index_buffer = self
+            .state
+            .allocated_resources()
+            .resolve::<VkBuffer>(&index_buffer);
+        let device = &self.state.logical_device;
+        unsafe {
+            device.cmd_bind_index_buffer(
+                self.command_buffer,
+                index_buffer.inner,
+                offset as _,
+                index_type.to_vk(),
+            );
+        }
+    }
 
     /* If enabled, fragments may be discarded after the vertex shader stage,
     before any fragment shader is executed.
     When enabled, a valid fragment shader must be set */
-    pub fn set_early_discard_enabled(&mut self, allow_early_discard: bool) {
+    fn set_early_discard_enabled(&mut self, allow_early_discard: bool) {
         self.pipeline_state.early_discard_enabled = allow_early_discard;
     }
-
-    #[cfg(debug_assertions)]
-    fn validate_state(&self) -> anyhow::Result<()> {
-        use anyhow::anyhow;
-        macro_rules! validate {
-            ($cond:expr, $err:expr) => {
-                if !($cond) {
-                    return Err(anyhow!($err));
-                }
-            };
-        }
-        validate!(
-            !self.pipeline_state.early_discard_enabled
-                || (self.pipeline_state.early_discard_enabled
-                    && self.pipeline_state.fragment_shader.is_valid()),
-            "Primitive early discard is enabled, but no valid fragment shader has been set"
-        );
-        Ok(())
-    }
 }
 
-impl<'c> AsRef<VkCommandBuffer> for VkRenderPassCommand<'c> {
-    fn as_ref(&self) -> &VkCommandBuffer {
-        self.command_buffer
-    }
-}
-
-impl<'c> Deref for VkRenderPassCommand<'c> {
-    type Target = VkCommandBuffer;
-
-    fn deref(&self) -> &Self::Target {
-        self.command_buffer
-    }
-}
-
-impl<'c> Drop for VkRenderPassCommand<'c> {
+impl Drop for VkRenderPassCommand {
     fn drop(&mut self) {
         self.subpass_label.take();
         self.render_pass_label.end_from_render_pass();
         unsafe {
-            self.command_buffer
-                .state
+            self.state
                 .logical_device
-                .cmd_end_render_pass(self.command_buffer.inner());
+                .cmd_end_render_pass(self.command_buffer);
         }
     }
 }
 
-impl<'c> VkComputePassCommand<'c> {
-    fn new(command_buffer: &'c mut VkCommandBuffer) -> Self {
+impl VkComputePassCommand {
+    fn new(command_buffer: &mut VkCommandBuffer) -> Self {
         Self {
-            command_buffer,
+            command_buffer: command_buffer
+                .command_buffer_state
+                .borrow()
+                .inner_command_buffer,
+            state: command_buffer.state.clone(),
+            command_buffer_state: command_buffer.command_buffer_state.clone(),
             pipeline_state: ComputePipelineState::new(),
         }
     }
 
-    pub fn set_compute_shader(&mut self, compute_shader: ShaderModuleHandle) {
+    fn find_matching_compute_pipeline(&mut self, layout: vk::PipelineLayout) -> vk::Pipeline {
+        self.state
+            .get_compute_pipeline(&self.pipeline_state, layout)
+    }
+
+    fn find_matching_pipeline_layout(
+        &self,
+        descriptor_state: &DescriptorSetState,
+    ) -> vk::PipelineLayout {
+        self.state.get_pipeline_layout(descriptor_state)
+    }
+
+    fn find_matching_descriptor_sets(
+        &self,
+        descriptor_state: &DescriptorSetState,
+    ) -> Vec<vk::DescriptorSet> {
+        self.state.get_descriptor_sets(descriptor_state)
+    }
+}
+
+impl compute_pass::Impl for VkComputePassCommand {
+    fn set_compute_shader(&mut self, compute_shader: ShaderModuleHandle) {
         self.pipeline_state.shader = compute_shader;
     }
 
-    pub fn dispatch(&mut self, group_size_x: u32, group_size_y: u32, group_size_z: u32) {
+    fn dispatch(&mut self, group_size_x: u32, group_size_y: u32, group_size_z: u32) {
         assert!(self.pipeline_state.shader.is_valid());
-        let pipeline_layout = self.find_matching_pipeline_layout(&self.descriptor_state);
+        let pipeline_layout = {
+            let state = self.command_buffer_state.borrow();
+            self.find_matching_pipeline_layout(&state.descriptor_state)
+        };
         let pipeline = self.find_matching_compute_pipeline(pipeline_layout);
-        let device = &self.command_buffer.state.logical_device;
+        let mut state = self.command_buffer_state.borrow_mut();
+        let device = &self.state.logical_device;
         unsafe {
-            device.cmd_bind_pipeline(self.inner(), PipelineBindPoint::COMPUTE, pipeline);
+            device.cmd_bind_pipeline(self.command_buffer, PipelineBindPoint::COMPUTE, pipeline);
 
-            let sets = self.find_matching_descriptor_sets(&self.descriptor_state);
+            let sets = self.find_matching_descriptor_sets(&state.descriptor_state);
             device.cmd_bind_descriptor_sets(
-                self.inner(),
+                self.command_buffer,
                 PipelineBindPoint::COMPUTE,
                 pipeline_layout,
                 0,
@@ -1310,42 +1351,12 @@ impl<'c> VkComputePassCommand<'c> {
                 &[],
             );
             device.cmd_dispatch(
-                self.command_buffer.inner_command_buffer,
+                self.command_buffer,
                 group_size_x,
                 group_size_y,
                 group_size_z,
             );
         }
-        self.command_buffer.has_recorded_anything = true;
-    }
-
-    fn find_matching_compute_pipeline(&mut self, layout: vk::PipelineLayout) -> vk::Pipeline {
-        self.state
-            .get_compute_pipeline(&self.pipeline_state, layout)
-    }
-}
-
-impl<'c> AsRef<VkCommandBuffer> for VkComputePassCommand<'c> {
-    fn as_ref(&self) -> &VkCommandBuffer {
-        self.command_buffer
-    }
-}
-
-impl<'c> Deref for VkComputePassCommand<'c> {
-    type Target = VkCommandBuffer;
-
-    fn deref(&self) -> &Self::Target {
-        self.command_buffer
-    }
-}
-
-impl<'c> DerefMut for VkRenderPassCommand<'c> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.command_buffer
-    }
-}
-impl<'c> DerefMut for VkComputePassCommand<'c> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.command_buffer
+        state.has_recorded_anything = true;
     }
 }

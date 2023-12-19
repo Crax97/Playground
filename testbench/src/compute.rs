@@ -71,9 +71,9 @@ fn main() -> anyhow::Result<()> {
     )?;
     gpu.write_buffer(&input_buffer, 0, bytemuck::cast_slice(&inputs))?;
 
-    let mut command_buffer = gpu.create_command_buffer(QueueType::Graphics)?;
+    let mut command_buffer = gpu.start_command_buffer(QueueType::Graphics)?;
     {
-        let mut compute_pass = command_buffer.begin_compute_pass();
+        let mut compute_pass = command_buffer.start_compute_pass();
         compute_pass.set_compute_shader(compute_module);
         compute_pass.bind_resources(
             0,
