@@ -340,6 +340,76 @@ impl VkCommandBuffer {
         VkComputePassCommand::<'p>::new(self)
     }
 
+    pub fn inner(&self) -> vk::CommandBuffer {
+        self.inner_command_buffer
+    }
+
+    pub fn copy_buffer(
+        &mut self,
+        src_buffer: &VkBuffer,
+        dst_buffer: &VkBuffer,
+        dst_offset: u64,
+        size: usize,
+    ) -> VkResult<()> {
+        self.has_recorded_anything = true;
+        unsafe {
+            self.state.logical_device.cmd_copy_buffer(
+                self.inner(),
+                src_buffer.inner,
+                dst_buffer.inner,
+                &[vk::BufferCopy {
+                    src_offset: 0,
+                    dst_offset: dst_offset as _,
+                    size: size as _,
+                }],
+            );
+
+            Ok(())
+        }
+    }
+
+    pub fn copy_buffer_to_image(&mut self, info: &BufferImageCopyInfo) -> VkResult<()> {
+        self.has_recorded_anything = true;
+        let source = self.state.resolve_resource::<VkBuffer>(&info.source).inner;
+        let image = self.state.resolve_resource::<VkImage>(&info.dest).inner;
+        unsafe {
+            self.state.logical_device.cmd_copy_buffer_to_image(
+                self.inner(),
+                source,
+                image,
+                info.dest_layout.to_vk(),
+                &[vk::BufferImageCopy {
+                    buffer_offset: info.buffer_offset,
+                    buffer_row_length: info.buffer_row_length,
+                    buffer_image_height: info.buffer_image_height,
+                    image_subresource: vk::ImageSubresourceLayers {
+                        aspect_mask: ImageAspectFlags::COLOR.to_vk(),
+                        mip_level: info.mip_level,
+                        layer_count: info.num_layers,
+                        base_array_layer: info.base_layer,
+                    },
+                    image_offset: info.image_offset.to_vk(),
+                    image_extent: info.image_extent.to_vk(),
+                }],
+            );
+
+            Ok(())
+        }
+    }
+
+    fn find_matching_pipeline_layout(
+        &self,
+        descriptor_state: &DescriptorSetState,
+    ) -> vk::PipelineLayout {
+        self.state.get_pipeline_layout(descriptor_state)
+    }
+
+    fn find_matching_descriptor_sets(
+        &self,
+        descriptor_state: &DescriptorSetState,
+    ) -> Vec<vk::DescriptorSet> {
+        self.state.get_descriptor_sets(descriptor_state)
+    }
     pub fn push_constants(
         &mut self,
         index: u32,
@@ -432,7 +502,7 @@ impl VkCommandBuffer {
         };
     }
 
-    pub fn submit(mut self, submit_info: &CommandBufferSubmitInfo) -> VkResult<()> {
+    pub fn submit(&mut self, submit_info: &CommandBufferSubmitInfo) -> VkResult<()> {
         self.has_been_submitted = true;
         if !self.has_recorded_anything {
             return Ok(());
@@ -477,82 +547,149 @@ impl VkCommandBuffer {
                 } else {
                     vk::Fence::null()
                 },
-            )
-        }
-    }
-
-    pub fn inner(&self) -> vk::CommandBuffer {
-        self.inner_command_buffer
-    }
-
-    pub fn copy_buffer(
-        &mut self,
-        src_buffer: &VkBuffer,
-        dst_buffer: &VkBuffer,
-        dst_offset: u64,
-        size: usize,
-    ) -> VkResult<()> {
-        self.has_recorded_anything = true;
-        unsafe {
-            self.state.logical_device.cmd_copy_buffer(
-                self.inner(),
-                src_buffer.inner,
-                dst_buffer.inner,
-                &[vk::BufferCopy {
-                    src_offset: 0,
-                    dst_offset: dst_offset as _,
-                    size: size as _,
-                }],
-            );
-
+            )?;
             Ok(())
         }
-    }
-
-    pub fn copy_buffer_to_image(&mut self, info: &BufferImageCopyInfo) -> VkResult<()> {
-        self.has_recorded_anything = true;
-        let source = self.state.resolve_resource::<VkBuffer>(&info.source).inner;
-        let image = self.state.resolve_resource::<VkImage>(&info.dest).inner;
-        unsafe {
-            self.state.logical_device.cmd_copy_buffer_to_image(
-                self.inner(),
-                source,
-                image,
-                info.dest_layout.to_vk(),
-                &[vk::BufferImageCopy {
-                    buffer_offset: info.buffer_offset,
-                    buffer_row_length: info.buffer_row_length,
-                    buffer_image_height: info.buffer_image_height,
-                    image_subresource: vk::ImageSubresourceLayers {
-                        aspect_mask: ImageAspectFlags::COLOR.to_vk(),
-                        mip_level: info.mip_level,
-                        layer_count: info.num_layers,
-                        base_array_layer: info.base_layer,
-                    },
-                    image_offset: info.image_offset.to_vk(),
-                    image_extent: info.image_extent.to_vk(),
-                }],
-            );
-
-            Ok(())
-        }
-    }
-
-    fn find_matching_pipeline_layout(
-        &self,
-        descriptor_state: &DescriptorSetState,
-    ) -> vk::PipelineLayout {
-        self.state.get_pipeline_layout(descriptor_state)
-    }
-
-    fn find_matching_descriptor_sets(
-        &self,
-        descriptor_state: &DescriptorSetState,
-    ) -> Vec<vk::DescriptorSet> {
-        self.state.get_descriptor_sets(descriptor_state)
     }
 }
 
+impl command_buffer_2::Impl for VkCommandBuffer {
+    fn push_constants(&mut self, index: u32, offset: u32, data: &[u8], shader_stage: ShaderStage) {
+        // Ensure enough push constant range descriptions are allocated
+        if self.descriptor_state.push_constant_range.len() <= (index as _) {
+            self.descriptor_state
+                .push_constant_range
+                .resize(index as usize + 1, PushConstantRange::default());
+            self.push_constant_data.resize(index as usize + 1, vec![]);
+        }
+
+        self.push_constant_data[index as usize] = data.to_vec();
+
+        self.descriptor_state.push_constant_range[index as usize] = PushConstantRange {
+            stage_flags: shader_stage,
+            offset,
+            size: std::mem::size_of_val(data) as _,
+        }
+    }
+
+    fn bind_resources(&mut self, set: u32, bindings: &[Binding]) {
+        if self.descriptor_state.sets.len() <= (set as _) {
+            self.descriptor_state
+                .sets
+                .resize(set as usize + 1, DescriptorSetInfo2::default());
+        }
+
+        self.descriptor_state.sets[set as usize].bindings = bindings.to_vec();
+    }
+
+    fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo) {
+        self.has_recorded_anything = true;
+        let device = &self.state.logical_device;
+        let memory_barriers: Vec<_> = barrier_info
+            .memory_barriers
+            .iter()
+            .map(|b| b.to_vk())
+            .collect();
+        let buffer_memory_barriers: Vec<_> = barrier_info
+            .buffer_memory_barriers
+            .iter()
+            .map(|b| vk::BufferMemoryBarrier {
+                s_type: StructureType::BUFFER_MEMORY_BARRIER,
+                p_next: std::ptr::null(),
+                src_access_mask: b.src_access_mask.to_vk(),
+                dst_access_mask: b.dst_access_mask.to_vk(),
+                src_queue_family_index: b.src_queue_family_index,
+                dst_queue_family_index: b.dst_queue_family_index,
+                buffer: self
+                    .state
+                    .allocated_resources
+                    .read()
+                    .unwrap()
+                    .resolve::<VkBuffer>(&b.buffer)
+                    .inner,
+                offset: b.offset,
+                size: b.size,
+            })
+            .collect();
+        let image_memory_barriers: Vec<_> = barrier_info
+            .image_memory_barriers
+            .iter()
+            .map(|b| vk::ImageMemoryBarrier {
+                s_type: StructureType::IMAGE_MEMORY_BARRIER,
+                p_next: std::ptr::null(),
+                src_access_mask: b.src_access_mask.to_vk(),
+                dst_access_mask: b.dst_access_mask.to_vk(),
+                src_queue_family_index: b.src_queue_family_index,
+                dst_queue_family_index: b.dst_queue_family_index,
+                old_layout: b.old_layout.to_vk(),
+                new_layout: b.new_layout.to_vk(),
+                image: self.state.resolve_resource::<VkImage>(&b.image).inner,
+                subresource_range: b.subresource_range.to_vk(),
+            })
+            .collect();
+        unsafe {
+            device.cmd_pipeline_barrier(
+                self.inner_command_buffer,
+                barrier_info.src_stage_mask.to_vk(),
+                barrier_info.dst_stage_mask.to_vk(),
+                DependencyFlags::empty(),
+                &memory_barriers,
+                &buffer_memory_barriers,
+                &image_memory_barriers,
+            )
+        };
+    }
+
+    fn submit(&mut self, submit_info: &CommandBufferSubmitInfo) -> anyhow::Result<()> {
+        self.has_been_submitted = true;
+        if !self.has_recorded_anything {
+            return Ok(());
+        }
+
+        let device = &self.state.logical_device;
+        unsafe {
+            device
+                .end_command_buffer(self.inner())
+                .expect("Failed to end inner command buffer");
+            let target_queue = self.target_queue;
+
+            let wait_semaphores: Vec<_> = submit_info
+                .wait_semaphores
+                .iter()
+                .map(|s| s.inner)
+                .collect();
+
+            let signal_semaphores: Vec<_> = submit_info
+                .signal_semaphores
+                .iter()
+                .map(|s| s.inner)
+                .collect();
+
+            let stage_masks: Vec<_> = submit_info.wait_stages.iter().map(|v| v.to_vk()).collect();
+
+            device.queue_submit(
+                target_queue,
+                &[SubmitInfo {
+                    s_type: StructureType::SUBMIT_INFO,
+                    p_next: std::ptr::null(),
+                    wait_semaphore_count: wait_semaphores.len() as _,
+                    p_wait_semaphores: wait_semaphores.as_ptr(),
+                    p_wait_dst_stage_mask: stage_masks.as_ptr(),
+                    command_buffer_count: 1,
+                    p_command_buffers: [self.inner_command_buffer].as_ptr(),
+                    signal_semaphore_count: signal_semaphores.len() as _,
+                    p_signal_semaphores: signal_semaphores.as_ptr(),
+                }],
+                if let Some(fence) = &submit_info.fence {
+                    fence.inner
+                } else {
+                    vk::Fence::null()
+                },
+            )?;
+            Ok(())
+        }
+    }
+}
 // Debug utilities
 
 pub struct ScopedDebugLabelInner {

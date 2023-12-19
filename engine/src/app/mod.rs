@@ -134,7 +134,7 @@ fn draw_app(app_state_mut: &mut AppState, app: &mut dyn App) -> Result<(), anyho
         image: swapchain_image,
         image_view: swapchain_image_view,
     };
-    let command_buffer = app.draw(self::app_state_mut(), &backbuffer)?;
+    let mut command_buffer = app.draw(self::app_state_mut(), &backbuffer)?;
     let frame = app_state_mut.swapchain_mut().get_current_swapchain_frame();
     command_buffer.submit(&CommandBufferSubmitInfo {
         wait_semaphores: &[&frame.image_available_semaphore],

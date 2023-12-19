@@ -15,6 +15,7 @@ pub use handle::*;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
+use std::ops::{Deref, DerefMut};
 pub use swapchain::VkSwapchain;
 pub use types::*;
 use winit::window::Window;
@@ -80,6 +81,125 @@ pub trait Gpu: Send + Sync + 'static {
     fn save_pipeline_cache(&self, path: &str) -> anyhow::Result<()>;
 }
 
+macro_rules! expand_impl {
+    () => {};
+    (fn $fn_name:ident(&self $(, $arg:ident:$arg_ty:ty)*); $($rest:tt)*) => {
+        fn $fn_name(&self, $($arg:$arg_ty,)*);
+        expand_impl!($($rest)*);
+    };
+    (fn $fn_name:ident(&mut self $(, $arg:ident:$arg_ty:ty)*); $($rest:tt)*) => {
+        fn $fn_name(&mut self, $($arg:$arg_ty,)*);
+        expand_impl!($($rest)*);
+    };
+    (fn $fn_name:ident(&self $(, $arg:ident:$arg_ty:ty)*) -> $ret:ty ; $($rest:tt)*) => {
+        fn $fn_name(&self, $($arg:$arg_ty,)*) -> $ret;
+        expand_impl!($($rest)*);
+    };
+    (fn $fn_name:ident(&mut self $(, $arg:ident:$arg_ty:ty)*) -> $ret:ty ; $($rest:tt)*)=> {
+        fn $fn_name(&mut self, $($arg:$arg_ty,)*) -> $ret;
+        expand_impl!($($rest)*);
+    };
+}
+
+macro_rules! expand_pimpl {
+    () => {};
+    (fn $fn_name:ident(&self $(, $arg:ident:$arg_ty:ty)*); $($rest:tt)*) => {
+        pub fn $fn_name(&self, $($arg:$arg_ty,)*) {
+            self.pimpl.$fn_name($($arg,)*)
+        }
+        expand_pimpl!($($rest)*);
+    };
+    (fn $fn_name:ident(&mut self $(, $arg:ident:$arg_ty:ty)*); $($rest:tt)*) => {
+        pub fn $fn_name(&mut self, $($arg:$arg_ty,)*) {
+            self.pimpl.$fn_name($($arg,)*)
+        }
+        expand_pimpl!($($rest)*);
+    };
+   (fn $fn_name:ident(&self $(, $arg:ident:$arg_ty:ty)*) -> $ret:ty ; $($rest:tt)*) => {
+        pub fn $fn_name(&self, $($arg:$arg_ty,)*) -> $ret  {
+            self.pimpl.$fn_name($($arg,)*)
+        }
+        expand_pimpl!($($rest)*);
+    };
+    (fn $fn_name:ident(&mut self $(, $arg:ident:$arg_ty:ty)*) -> $ret:ty ; $($rest:tt)*)=> {
+        pub fn $fn_name(&mut self, $($arg:$arg_ty,)*) -> $ret {
+            self.pimpl.$fn_name($($arg,)*)
+        }
+        expand_pimpl!($($rest)*);
+    };
+}
+macro_rules! define_command_buffer_type {
+    ( $stru_name:ident {
+        $($inner:tt)*
+    }) => {
+        pub trait Impl {
+            expand_impl!($($inner)*);
+        }
+
+        pub struct $stru_name {
+            pimpl: Box<dyn Impl>,
+        }
+
+        impl $stru_name {
+            expand_pimpl!($($inner)*);
+        }
+    };
+}
+
+macro_rules! define_pass_type {
+    ( $stru_name:ident {
+        $($inner:tt)*
+    }) => {
+        pub trait Impl {
+            expand_impl!($($inner)*);
+        }
+
+        pub struct $stru_name<'c> {
+            pimpl: Box<dyn Impl>,
+            parent: &'c mut super::command_buffer_2::CommandBuffer
+        }
+
+        impl<'c> $stru_name<'c> {
+            expand_pimpl!($($inner)*);
+        }
+
+        impl<'c> std::ops::Deref for $stru_name<'c> {
+            type Target = super::command_buffer_2::CommandBuffer;
+            fn deref(&self) -> &Self::Target {
+                &self.parent
+            }
+        }
+        impl<'c> std::ops::DerefMut for $stru_name<'c> {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.parent
+            }
+        }
+    };
+}
+
+mod pippo {
+    define_command_buffer_type!(Pippo {
+        fn pippa(&self, how_much: u32, again: bool);
+        fn pippa_mut(&mut self, how_much: u32);
+    });
+}
+
+pub mod command_buffer_2 {
+    use crate::{Binding, CommandBufferSubmitInfo, PipelineBarrierInfo, ShaderStage};
+
+    define_command_buffer_type!(CommandBuffer {
+        fn push_constants(&mut self, index: u32, offset: u32, data: &[u8], shader_stage: ShaderStage);
+        fn bind_resources(&mut self, set: u32, bindings: &[Binding]);
+        fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo);
+        fn submit(&mut self, submit_info: &CommandBufferSubmitInfo) -> anyhow::Result<()>;
+    });
+}
+pub mod render_pass {
+    define_pass_type!(RenderPass {});
+}
+pub mod compute_pass {
+    define_pass_type!(ComputePass {});
+}
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub struct FenceCreateFlags : u32 {
