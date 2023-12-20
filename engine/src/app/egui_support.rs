@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use egui::{Context, FontDefinitions, FullOutput};
 use egui_winit::EventResponse;
 use egui_winit_ash_integration::Integration;
-use gpu::{CommandBuffer, Gpu, VkCommandBuffer, VkGpu, VkSwapchain};
+use gpu::{CommandBuffer, Gpu, Swapchain, VkCommandBuffer, VkGpu, VkSwapchain};
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 use winit::{event::WindowEvent, window::Window};
 
@@ -14,14 +14,17 @@ pub struct EguiSupport {
 }
 
 impl EguiSupport {
-    pub fn new(
-        window: &Window,
-        gpu: &Arc<dyn Gpu>,
-        swapchain: &VkSwapchain,
-    ) -> anyhow::Result<Self> {
+    pub fn new(window: &Window, gpu: &Arc<dyn Gpu>, swapchain: &Swapchain) -> anyhow::Result<Self> {
         let gpu = gpu.clone().as_any_arc();
         let gpu = gpu.downcast_ref::<VkGpu>().unwrap();
         let device = gpu.vk_logical_device();
+
+        let swapchain = swapchain
+            .pimpl
+            .as_any()
+            .downcast_ref::<VkSwapchain>()
+            .unwrap();
+
         let allocator = Allocator::new(&AllocatorCreateDesc {
             instance: gpu.instance().clone(),
             device,
@@ -54,7 +57,12 @@ impl EguiSupport {
         self.integration.handle_event(winit_event)
     }
 
-    pub fn swapchain_updated(&mut self, swapchain: &VkSwapchain) {
+    pub fn swapchain_updated(&mut self, swapchain: &Swapchain) {
+        let swapchain = swapchain
+            .pimpl
+            .as_any()
+            .downcast_ref::<VkSwapchain>()
+            .unwrap();
         self.integration.update_swapchain(
             swapchain.extents().width,
             swapchain.extents().height,
@@ -74,9 +82,14 @@ impl EguiSupport {
     pub fn paint_frame(
         &mut self,
         output: FullOutput,
-        swapchain: &VkSwapchain,
+        swapchain: &Swapchain,
         command_buffer: &CommandBuffer,
     ) {
+        let swapchain = swapchain
+            .pimpl
+            .as_any()
+            .downcast_ref::<VkSwapchain>()
+            .unwrap();
         let clipped = self.integration.context().tessellate(output.shapes);
         let image_index = swapchain.current_swapchain_index.get().try_into().unwrap();
         let command_buffer = command_buffer.pimpl();

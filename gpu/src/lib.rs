@@ -103,11 +103,28 @@ macro_rules! expand_pimpl {
         expand_pimpl!($($rest)*);
     };
 }
-macro_rules! define_command_buffer_type {
+macro_rules! define_pimpl_type {
+    ( $stru_name:ident : $base_type:ident {
+        $($inner:tt)*
+    }) => {
+        pub trait Impl : $base_type + 'static {
+            expand_impl!($($inner)*);
+
+            fn as_any(&self) -> &dyn std::any::Any;
+        }
+
+        pub struct $stru_name {
+            pub pimpl: Box<dyn Impl>,
+        }
+
+        impl $stru_name {
+            expand_pimpl!($($inner)*);
+        }
+    };
     ( $stru_name:ident {
         $($inner:tt)*
     }) => {
-        pub trait Impl : crate::CommandBufferPassBegin + 'static {
+        pub trait Impl : 'static {
             expand_impl!($($inner)*);
 
             fn as_any(&self) -> &dyn std::any::Any;
@@ -157,10 +174,10 @@ macro_rules! define_pass_type {
 pub mod command_buffer_2 {
     use crate::{
         compute_pass::ComputePass, render_pass::RenderPass, BeginRenderPassInfo, Binding,
-        CommandBufferSubmitInfo, PipelineBarrierInfo, ShaderStage,
+        CommandBufferPassBegin, CommandBufferSubmitInfo, PipelineBarrierInfo, ShaderStage,
     };
 
-    define_command_buffer_type!(CommandBuffer {
+    define_pimpl_type!(CommandBuffer : CommandBufferPassBegin {
         fn push_constants(&mut self, index: u32, offset: u32, data: &[u8], shader_stage: ShaderStage);
         fn bind_resources(&mut self, set: u32, bindings: &[Binding]);
         fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo);
@@ -250,8 +267,31 @@ pub mod compute_pass {
     });
 }
 
+pub(crate) mod swapchain_2 {
+    use crate::{
+        Extent2D, GPUFence, GPUSemaphore, ImageFormat, ImageHandle, ImageViewHandle, PresentMode,
+    };
+    pub struct SwapchainFrame {
+        pub in_flight_fence: GPUFence,
+        pub render_finished_semaphore: GPUSemaphore,
+        pub image_available_semaphore: GPUSemaphore,
+    }
+    define_pimpl_type!(Swapchain {
+        fn acquire_next_image(&mut self) -> anyhow::Result<(ImageHandle, ImageViewHandle)>;
+        fn present(&self) -> anyhow::Result<bool>;
+        fn recreate_swapchain(&mut self) -> anyhow::Result<()>;
+        fn select_present_mode(&mut self, present_mode: PresentMode) -> anyhow::Result<()>;
+        fn extents(&self) -> Extent2D;
+        fn present_format(&self) -> ImageFormat;
+        fn get_current_swapchain_frame(&self) -> &SwapchainFrame;
+    });
+}
+
 pub use self::{
-    command_buffer_2::CommandBuffer, compute_pass::ComputePass, render_pass::RenderPass,
+    command_buffer_2::CommandBuffer,
+    compute_pass::ComputePass,
+    render_pass::RenderPass,
+    swapchain_2::{Swapchain, SwapchainFrame},
 };
 
 pub trait Gpu: Send + Sync + AsAnyArc + 'static {
@@ -305,6 +345,8 @@ pub trait Gpu: Send + Sync + AsAnyArc + 'static {
     fn save_pipeline_cache(&self, path: &str) -> anyhow::Result<()>;
 
     fn start_command_buffer(&self, queue_type: QueueType) -> anyhow::Result<CommandBuffer>;
+
+    fn create_swapchain(&self, window: &Window) -> anyhow::Result<Swapchain>;
 }
 
 bitflags! {

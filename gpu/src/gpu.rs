@@ -33,6 +33,7 @@ use crossbeam::channel::{Receiver, Sender};
 use log::{debug, error, info, trace, warn};
 use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
+use winit::window::Window;
 
 use crate::{
     command_buffer_2::CommandBuffer, get_allocation_callbacks, lifetime_cache_constants,
@@ -45,8 +46,8 @@ use crate::{
     ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
     PushConstantBlockDescription, QueueType, Rect2D, RenderPassAttachments, SampleCount,
     SamplerCreateInfo, SamplerHandle, ShaderAttribute, ShaderModuleCreateInfo, ShaderModuleHandle,
-    SubpassDescription, ToVk, TransitionInfo, UniformVariableDescription, VkCommandBuffer,
-    VkCommandPool, VkImageView, VkShaderModule,
+    SubpassDescription, Swapchain, ToVk, TransitionInfo, UniformVariableDescription,
+    VkCommandBuffer, VkCommandPool, VkImageView, VkShaderModule, VkSwapchain,
 };
 use crate::{
     gpu_resource_manager::{
@@ -2960,5 +2961,10 @@ impl Gpu for VkGpu {
         Ok(CommandBuffer {
             pimpl: Box::new(command_buffer),
         })
+    }
+
+    fn create_swapchain(&self, window: &Window) -> anyhow::Result<Swapchain> {
+        let pimpl = Box::new(VkSwapchain::new(self, window)?);
+        Ok(Swapchain { pimpl })
     }
 }
