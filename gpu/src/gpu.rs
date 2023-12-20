@@ -40,14 +40,15 @@ use crate::{
     quick_hash, BeginRenderPassInfo, BufferCreateInfo, BufferHandle, BufferImageCopyInfo,
     CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineState,
     Context, DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2,
-    DescriptorSetState, Extent2D, GPUFence, Gpu, GpuConfiguration, GpuResourceMap,
+    DescriptorSetState, Extent2D, FenceHandle, Gpu, GpuConfiguration, GpuResourceMap,
     GraphicsPipelineState, Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat,
     ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
     ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
     PushConstantBlockDescription, QueueType, Rect2D, RenderPassAttachments, SampleCount,
-    SamplerCreateInfo, SamplerHandle, ShaderAttribute, ShaderModuleCreateInfo, ShaderModuleHandle,
-    SubpassDescription, Swapchain, ToVk, TransitionInfo, UniformVariableDescription,
-    VkCommandBuffer, VkCommandPool, VkImageView, VkShaderModule, VkSwapchain,
+    SamplerCreateInfo, SamplerHandle, SemaphoreHandle, ShaderAttribute, ShaderModuleCreateInfo,
+    ShaderModuleHandle, SubpassDescription, Swapchain, ToVk, TransitionInfo,
+    UniformVariableDescription, VkCommandBuffer, VkCommandPool, VkFence, VkImageView, VkSemaphore,
+    VkShaderModule, VkSwapchain,
 };
 use crate::{
     gpu_resource_manager::{
@@ -68,6 +69,8 @@ associate_to_handle!(VkImage, ImageHandle);
 associate_to_handle!(VkImageView, ImageViewHandle);
 associate_to_handle!(VkSampler, SamplerHandle);
 associate_to_handle!(VkShaderModule, ShaderModuleHandle);
+associate_to_handle!(VkSemaphore, SemaphoreHandle);
+associate_to_handle!(VkFence, FenceHandle);
 
 pub struct GpuDescription {
     name: String,
@@ -996,6 +999,18 @@ impl GpuThreadSharedState {
                 .unwrap()
                 .get_map_mut::<VkSampler>()
                 .increment_resource_count(id),
+            crate::HandleType::Semaphore => self
+                .allocated_resources
+                .read()
+                .unwrap()
+                .get_map_mut::<VkSemaphore>()
+                .increment_resource_count(id),
+            crate::HandleType::Fence => self
+                .allocated_resources
+                .read()
+                .unwrap()
+                .get_map_mut::<VkFence>()
+                .increment_resource_count(id),
         }
     }
 
@@ -1030,6 +1045,18 @@ impl GpuThreadSharedState {
                 .read()
                 .unwrap()
                 .get_map_mut::<VkSampler>()
+                .decrement_resource_count(id),
+            crate::HandleType::Semaphore => self
+                .allocated_resources
+                .read()
+                .unwrap()
+                .get_map_mut::<VkSemaphore>()
+                .decrement_resource_count(id),
+            crate::HandleType::Fence => self
+                .allocated_resources
+                .read()
+                .unwrap()
+                .get_map_mut::<VkFence>()
                 .decrement_resource_count(id),
         }
     }
@@ -2318,7 +2345,7 @@ impl VkGpu {
 
     pub fn wait_for_fences(
         &self,
-        fences: &[&GPUFence],
+        fences: &[&VkFence],
         wait_all: bool,
         timeout_ns: u64,
     ) -> VkResult<()> {
@@ -2329,7 +2356,7 @@ impl VkGpu {
         }
     }
 
-    pub fn reset_fences(&self, fences: &[&GPUFence]) -> VkResult<()> {
+    pub fn reset_fences(&self, fences: &[&VkFence]) -> VkResult<()> {
         let fences: Vec<_> = fences.iter().map(|f| f.inner).collect();
         unsafe { self.vk_logical_device().reset_fences(&fences) }
     }
@@ -2596,6 +2623,31 @@ impl Gpu for VkGpu {
                 }
             },
         );
+    }
+
+    fn make_semaphore(
+        &self,
+        create_info: &crate::SemaphoreCreateInfo,
+    ) -> anyhow::Result<SemaphoreHandle> {
+        let semaphore = VkSemaphore::new(self, &create_info.to_vk())?;
+        let handle = SemaphoreHandle::new(self.state.context.clone());
+        self.state
+            .allocated_resources
+            .write()
+            .unwrap()
+            .insert(&handle, semaphore);
+        Ok(handle)
+    }
+
+    fn make_fence(&self, create_info: &crate::FenceCreateInfo) -> anyhow::Result<FenceHandle> {
+        let fence = VkFence::new(self, &create_info.to_vk())?;
+        let handle = FenceHandle::new(self.state.context.clone());
+        self.state
+            .allocated_resources
+            .write()
+            .unwrap()
+            .insert(&handle, fence);
+        Ok(handle)
     }
 
     fn make_shader_module(

@@ -13,6 +13,8 @@ pub enum HandleType {
     Image,
     ImageView,
     Sampler,
+    Semaphore,
+    Fence,
 }
 
 pub trait Handle: std::fmt::Debug + Send + Sync + 'static {
@@ -122,3 +124,5 @@ define_handle!(ShaderModuleHandle, HandleType::ShaderModule);
 define_handle!(ImageHandle, HandleType::Image);
 define_handle!(ImageViewHandle, HandleType::ImageView);
 define_handle!(SamplerHandle, HandleType::Sampler);
+define_handle!(SemaphoreHandle, HandleType::Semaphore);
+define_handle!(FenceHandle, HandleType::Fence);

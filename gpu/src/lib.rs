@@ -269,12 +269,12 @@ pub mod compute_pass {
 
 pub(crate) mod swapchain_2 {
     use crate::{
-        Extent2D, GPUFence, GPUSemaphore, ImageFormat, ImageHandle, ImageViewHandle, PresentMode,
+        Extent2D, ImageFormat, ImageHandle, ImageViewHandle, PresentMode, VkFence, VkSemaphore,
     };
     pub struct SwapchainFrame {
-        pub in_flight_fence: GPUFence,
-        pub render_finished_semaphore: GPUSemaphore,
-        pub image_available_semaphore: GPUSemaphore,
+        pub in_flight_fence: VkFence,
+        pub render_finished_semaphore: VkSemaphore,
+        pub image_available_semaphore: VkSemaphore,
     }
     define_pimpl_type!(Swapchain {
         fn acquire_next_image(&mut self) -> anyhow::Result<(ImageHandle, ImageViewHandle)>;
@@ -296,6 +296,9 @@ pub use self::{
 
 pub trait Gpu: Send + Sync + AsAnyArc + 'static {
     fn update(&self);
+
+    fn make_semaphore(&self, create_info: &SemaphoreCreateInfo) -> anyhow::Result<SemaphoreHandle>;
+    fn make_fence(&self, create_info: &FenceCreateInfo) -> anyhow::Result<FenceHandle>;
 
     fn make_buffer(
         &self,
@@ -350,10 +353,28 @@ pub trait Gpu: Send + Sync + AsAnyArc + 'static {
 }
 
 bitflags! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug, Default)]
     pub struct FenceCreateFlags : u32 {
         const SIGNALED = 0b00000001;
     }
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug, Default)]
+    pub struct SemaphoreFlags : u32 {
+    }
+}
+
+#[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug, Default)]
+pub struct SemaphoreCreateInfo<'a> {
+    pub label: Option<&'a str>,
+    pub flags: SemaphoreFlags,
+}
+
+#[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug, Default)]
+pub struct FenceCreateInfo<'a> {
+    pub label: Option<&'a str>,
+    pub flags: FenceCreateFlags,
 }
 
 #[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug, Default)]
@@ -1296,10 +1317,10 @@ pub struct CommandPoolCreateInfo {
 
 #[derive(Default)]
 pub struct CommandBufferSubmitInfo<'a> {
-    pub wait_semaphores: &'a [&'a GPUSemaphore],
+    pub wait_semaphores: &'a [&'a VkSemaphore],
     pub wait_stages: &'a [PipelineStageFlags],
-    pub signal_semaphores: &'a [&'a GPUSemaphore],
-    pub fence: Option<&'a GPUFence>,
+    pub signal_semaphores: &'a [&'a VkSemaphore],
+    pub fence: Option<&'a VkFence>,
 }
 
 pub struct BufferMemoryBarrier {

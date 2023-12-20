@@ -7,9 +7,9 @@ use ash::{
     prelude::VkResult,
     vk::{
         self, ComponentMapping, ComponentSwizzle, CompositeAlphaFlagsKHR, Format, ImageUsageFlags,
-        ImageViewCreateFlags, ImageViewType, PresentInfoKHR, PresentModeKHR, SemaphoreCreateFlags,
-        SemaphoreCreateInfo, SharingMode, StructureType, SurfaceCapabilitiesKHR, SurfaceFormatKHR,
-        SurfaceKHR, SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
+        ImageViewCreateFlags, ImageViewType, PresentInfoKHR, PresentModeKHR, SharingMode,
+        StructureType, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR,
+        SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
     },
     Device,
 };
@@ -22,11 +22,11 @@ use winit::window::Window;
 use crate::swapchain_2::Impl;
 use crate::{
     swapchain_2, Extent2D, FenceCreateFlags, FenceCreateInfo, ImageAspectFlags, ImageFormat,
-    ImageHandle, ImageSubresourceRange, ImageViewHandle, PresentMode, SwapchainFrame, ToVk, VkGpu,
-    VkImage, VkImageView,
+    ImageHandle, ImageSubresourceRange, ImageViewHandle, PresentMode, SemaphoreCreateInfo,
+    SwapchainFrame, ToVk, VkGpu, VkImage, VkImageView,
 };
 
-use super::{GPUFence, GPUSemaphore, GpuThreadSharedState};
+use super::{GpuThreadSharedState, VkFence, VkSemaphore};
 
 mod util {
     use ash::vk::{PresentModeKHR, SurfaceFormatKHR};
@@ -53,32 +53,26 @@ mod util {
 
 impl SwapchainFrame {
     fn new(device: Device) -> anyhow::Result<Self> {
-        let in_flight_fence = GPUFence::create(
+        let in_flight_fence = VkFence::create(
             device.clone(),
             Some("In Flight Fence"),
             &FenceCreateInfo {
                 flags: FenceCreateFlags::SIGNALED,
-            },
+                label: Some("In Flight Fence"),
+            }
+            .to_vk(),
         )?;
 
-        let render_finished_semaphore = GPUSemaphore::create(
+        let render_finished_semaphore = VkSemaphore::create(
             device.clone(),
             Some("Render finished semaphore"),
-            &SemaphoreCreateInfo {
-                s_type: StructureType::SEMAPHORE_CREATE_INFO,
-                p_next: std::ptr::null(),
-                flags: SemaphoreCreateFlags::empty(),
-            },
+            &SemaphoreCreateInfo::default().to_vk(),
         )?;
 
-        let image_available_semaphore = GPUSemaphore::create(
+        let image_available_semaphore = VkSemaphore::create(
             device,
             Some("Image available semaphore"),
-            &SemaphoreCreateInfo {
-                s_type: StructureType::SEMAPHORE_CREATE_INFO,
-                p_next: std::ptr::null(),
-                flags: SemaphoreCreateFlags::empty(),
-            },
+            &SemaphoreCreateInfo::default().to_vk(),
         )?;
         Ok(Self {
             in_flight_fence,
@@ -107,7 +101,7 @@ pub struct VkSwapchain {
     pub current_swapchain_index: Cell<u32>,
     state: Arc<GpuThreadSharedState>,
     pub current_frame: Cell<usize>,
-    pub next_image_fence: GPUFence,
+    pub next_image_fence: VkFence,
 
     display_handle: RawDisplayHandle,
     window_handle: RawWindowHandle,
@@ -122,12 +116,14 @@ impl VkSwapchain {
         let swapchain_extension =
             ash::extensions::khr::Swapchain::new(&state.instance, &state.logical_device);
 
-        let next_image_fence = GPUFence::create(
+        let next_image_fence = VkFence::create(
             state.logical_device.clone(),
             Some("Next image fence"),
             &FenceCreateInfo {
+                label: Some("Next image fence"),
                 flags: FenceCreateFlags::empty(),
-            },
+            }
+            .to_vk(),
         )?;
 
         let present_extent = Extent2D {

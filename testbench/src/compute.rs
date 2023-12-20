@@ -1,8 +1,8 @@
 use engine_macros::*;
 use gpu::{
-    Binding, BufferCreateInfo, BufferUsageFlags, CommandBufferSubmitInfo, GPUFence, Gpu,
-    GpuConfiguration, MemoryDomain, PipelineStageFlags, QueueType, ShaderModuleCreateInfo,
-    ShaderStage, VkGpu,
+    Binding, BufferCreateInfo, BufferUsageFlags, CommandBufferSubmitInfo, Gpu, GpuConfiguration,
+    MemoryDomain, PipelineStageFlags, QueueType, ShaderModuleCreateInfo, ShaderStage, ToVk,
+    VkFence, VkGpu,
 };
 use std::mem::{size_of, size_of_val};
 
@@ -44,11 +44,13 @@ fn main() -> anyhow::Result<()> {
         code: bytemuck::cast_slice(COMPUTE_SUM),
     })?;
 
-    let wait_fence = GPUFence::new(
+    let wait_fence = VkFence::new(
         &gpu,
         &gpu::FenceCreateInfo {
             flags: gpu::FenceCreateFlags::empty(),
-        },
+            label: Some("wait fence"),
+        }
+        .to_vk(),
     )?;
 
     let output_buffer = gpu.make_buffer(

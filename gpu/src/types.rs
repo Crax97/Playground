@@ -10,10 +10,7 @@ use ash::vk::{
 };
 use ash::{
     prelude::*,
-    vk::{
-        self, AllocationCallbacks, Buffer, FenceCreateInfo as VkFenceCreateInfo,
-        SemaphoreCreateInfo, ShaderModuleCreateInfo,
-    },
+    vk::{self, AllocationCallbacks, Buffer, ShaderModuleCreateInfo},
 };
 
 use super::{MemoryAllocation, MemoryDomain};
@@ -544,20 +541,20 @@ impl ToVk for BufferUsageFlags {
 }
 
 #[derive(Clone)]
-pub struct GPUSemaphore {
+pub struct VkSemaphore {
     pub(super) inner: vk::Semaphore,
     pub(super) label: Option<String>,
 }
-impl std::fmt::Debug for GPUSemaphore {
+impl std::fmt::Debug for VkSemaphore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{:?}", &self.label))
     }
 }
-impl GPUSemaphore {
+impl VkSemaphore {
     pub(super) fn create(
         device: ash::Device,
         label: Option<&str>,
-        create_info: &SemaphoreCreateInfo,
+        create_info: &vk::SemaphoreCreateInfo,
     ) -> VkResult<Self> {
         let inner = {
             |device: &ash::Device| unsafe {
@@ -570,14 +567,14 @@ impl GPUSemaphore {
         })
     }
 }
-impl Deref for GPUSemaphore {
+impl Deref for VkSemaphore {
     type Target = vk::Semaphore;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl ToVk for GPUSemaphore {
+impl ToVk for VkSemaphore {
     type Inner = vk::Semaphore;
     fn to_vk(&self) -> Self::Inner {
         self.inner
@@ -597,34 +594,25 @@ impl ToVk for FenceCreateFlags {
     }
 }
 
-pub struct FenceCreateInfo {
-    pub flags: FenceCreateFlags,
-}
-
 #[derive(Clone)]
-pub struct GPUFence {
+pub struct VkFence {
     pub(super) inner: vk::Fence,
     pub(super) label: Option<String>,
 }
-impl std::fmt::Debug for GPUFence {
+impl std::fmt::Debug for VkFence {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{:?}", &self.label))
     }
 }
-impl GPUFence {
+impl VkFence {
     pub(super) fn create(
         device: ash::Device,
         label: Option<&str>,
-        create_info: &FenceCreateInfo,
+        create_info: &vk::FenceCreateInfo,
     ) -> VkResult<Self> {
         let inner = {
-            |device: &ash::Device| {
-                let vk_fence_create_info = VkFenceCreateInfo {
-                    s_type: StructureType::FENCE_CREATE_INFO,
-                    p_next: std::ptr::null(),
-                    flags: create_info.flags.to_vk(),
-                };
-                unsafe { device.create_fence(&vk_fence_create_info, get_allocation_callbacks()) }
+            |device: &ash::Device| unsafe {
+                device.create_fence(create_info, get_allocation_callbacks())
             }
         }(&device)?;
         Ok(Self {
@@ -633,28 +621,28 @@ impl GPUFence {
         })
     }
 }
-impl Deref for GPUFence {
+impl Deref for VkFence {
     type Target = vk::Fence;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl ToVk for GPUFence {
+impl ToVk for VkFence {
     type Inner = vk::Fence;
     fn to_vk(&self) -> Self::Inner {
         self.inner
     }
 }
 
-impl GPUFence {
-    pub fn new(gpu: &VkGpu, create_info: &FenceCreateInfo) -> VkResult<Self> {
+impl VkFence {
+    pub fn new(gpu: &VkGpu, create_info: &vk::FenceCreateInfo) -> VkResult<Self> {
         Self::create(gpu.vk_logical_device(), None, create_info)
     }
 }
 
-impl GPUSemaphore {
-    pub fn new(gpu: &VkGpu, create_info: &SemaphoreCreateInfo) -> VkResult<Self> {
+impl VkSemaphore {
+    pub fn new(gpu: &VkGpu, create_info: &vk::SemaphoreCreateInfo) -> VkResult<Self> {
         Self::create(gpu.vk_logical_device(), None, create_info)
     }
 }
@@ -1416,6 +1404,40 @@ impl ToVk for SubpassDependency {
             src_access_mask: self.src_access_mask.to_vk(),
             dst_access_mask: self.dst_access_mask.to_vk(),
             dependency_flags: vk::DependencyFlags::BY_REGION,
+        }
+    }
+}
+
+impl ToVk for SemaphoreFlags {
+    type Inner = vk::SemaphoreCreateFlags;
+
+    fn to_vk(&self) -> Self::Inner {
+        let inner = vk::SemaphoreCreateFlags::default();
+
+        inner
+    }
+}
+
+impl<'a> ToVk for SemaphoreCreateInfo<'a> {
+    type Inner = vk::SemaphoreCreateInfo;
+
+    fn to_vk(&self) -> Self::Inner {
+        vk::SemaphoreCreateInfo {
+            s_type: StructureType::SEMAPHORE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: self.flags.to_vk(),
+        }
+    }
+}
+
+impl<'a> ToVk for FenceCreateInfo<'a> {
+    type Inner = vk::FenceCreateInfo;
+
+    fn to_vk(&self) -> Self::Inner {
+        Self::Inner {
+            s_type: StructureType::FENCE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: self.flags.to_vk(),
         }
     }
 }
