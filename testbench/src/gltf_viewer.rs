@@ -4,7 +4,7 @@ mod utils;
 
 use std::collections::HashMap;
 
-use engine::app::{app_state::*, bootstrap, App, ImguiConsole};
+use engine::app::{app_state::*, bootstrap, App, Console};
 use engine::Time;
 
 use engine::input::InputState;
@@ -53,7 +53,7 @@ pub struct GLTFViewer {
     camera_light: Option<LightHandle>,
 
     input: InputState,
-    console: ImguiConsole,
+    console: Console,
     cvar_manager: CvarManager,
     resource_map: ResourceMap,
     time: Time,
@@ -224,7 +224,7 @@ impl App for GLTFViewer {
         Self: Sized,
     {
         let input = InputState::new();
-        let console = ImguiConsole::new();
+        let console = Console::new();
         let mut cvar_manager = CvarManager::new();
         let args = GltfViewerArgs::parse();
         let time = Time::new();

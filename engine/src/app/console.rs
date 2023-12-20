@@ -11,7 +11,7 @@ pub struct Message {
     content: String,
 }
 
-pub struct ImguiConsole {
+pub struct Console {
     show: bool,
     messages: Vec<String>,
     max_messages: usize,
@@ -24,7 +24,7 @@ pub struct ConsoleWriter {
     message_sender: Sender<Message>,
 }
 
-impl ImguiConsole {
+impl Console {
     pub fn new() -> Self {
         Self::new_with_writer().0
     }
