@@ -1,6 +1,6 @@
 use std::{sync::Arc, thread::ThreadId};
 
-use gpu::{Gpu, GpuConfiguration, Swapchain, VkGpu};
+use gpu::{Gpu, GpuConfiguration, Swapchain};
 use once_cell::unsync::OnceCell;
 use winit::{dpi::PhysicalSize, window::Window};
 
@@ -12,12 +12,12 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(gpu: VkGpu, window: &Window) -> Self {
+    pub fn new(gpu: Arc<dyn Gpu>, window: &Window) -> Self {
         let swapchain = gpu
             .create_swapchain(window)
             .expect("Failed to create swapchain");
         Self {
-            gpu: Arc::new(gpu),
+            gpu,
             swapchain,
             needs_new_swapchain: false,
             current_window_size: window.inner_size(),
@@ -80,7 +80,7 @@ pub fn init(app_name: &str, window: &winit::window::Window) -> anyhow::Result<()
             std::env::var("ENABLE_DEBUG_UTILITIES").is_ok()
         };
 
-        let gpu = VkGpu::new(GpuConfiguration {
+        let gpu = gpu::make_gpu(GpuConfiguration {
             app_name,
             enable_debug_utilities,
             pipeline_cache_path: Some("pipeline_cache.pso"),

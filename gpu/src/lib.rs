@@ -376,6 +376,10 @@ pub trait Gpu: Send + Sync + AsAnyArc + 'static {
     fn create_swapchain(&self, window: &Window) -> anyhow::Result<Swapchain>;
 }
 
+pub fn make_gpu(config: GpuConfiguration) -> anyhow::Result<Arc<dyn Gpu>> {
+    Ok(Arc::new(VkGpu::new(config)?))
+}
+
 bitflags! {
 #[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug, Default)]
     pub struct FenceCreateFlags : u32 {
