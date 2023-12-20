@@ -269,12 +269,36 @@ pub mod compute_pass {
 
 pub(crate) mod swapchain_2 {
     use crate::{
-        Extent2D, ImageFormat, ImageHandle, ImageViewHandle, PresentMode, VkFence, VkSemaphore,
+        Extent2D, FenceCreateFlags, FenceCreateInfo, FenceHandle, Gpu, ImageFormat, ImageHandle,
+        ImageViewHandle, PresentMode, SemaphoreCreateInfo, SemaphoreHandle,
     };
     pub struct SwapchainFrame {
-        pub in_flight_fence: VkFence,
-        pub render_finished_semaphore: VkSemaphore,
-        pub image_available_semaphore: VkSemaphore,
+        pub in_flight_fence: FenceHandle,
+        pub render_finished_semaphore: SemaphoreHandle,
+        pub image_available_semaphore: SemaphoreHandle,
+    }
+    impl SwapchainFrame {
+        pub fn new(gpu: &dyn Gpu) -> anyhow::Result<Self> {
+            let in_flight_fence = gpu.make_fence(&FenceCreateInfo {
+                flags: FenceCreateFlags::SIGNALED,
+                label: Some("In Flight Fence"),
+            })?;
+
+            let render_finished_semaphore = gpu.make_semaphore(&SemaphoreCreateInfo {
+                label: Some("render finished semaphore"),
+                ..Default::default()
+            })?;
+
+            let image_available_semaphore = gpu.make_semaphore(&SemaphoreCreateInfo {
+                label: Some("image finished semaphore"),
+                ..Default::default()
+            })?;
+            Ok(Self {
+                in_flight_fence,
+                render_finished_semaphore,
+                image_available_semaphore,
+            })
+        }
     }
     define_pimpl_type!(Swapchain {
         fn acquire_next_image(&mut self) -> anyhow::Result<(ImageHandle, ImageViewHandle)>;
@@ -1317,10 +1341,10 @@ pub struct CommandPoolCreateInfo {
 
 #[derive(Default)]
 pub struct CommandBufferSubmitInfo<'a> {
-    pub wait_semaphores: &'a [&'a VkSemaphore],
+    pub wait_semaphores: &'a [&'a SemaphoreHandle],
     pub wait_stages: &'a [PipelineStageFlags],
-    pub signal_semaphores: &'a [&'a VkSemaphore],
-    pub fence: Option<&'a VkFence>,
+    pub signal_semaphores: &'a [&'a SemaphoreHandle],
+    pub fence: Option<&'a FenceHandle>,
 }
 
 pub struct BufferMemoryBarrier {

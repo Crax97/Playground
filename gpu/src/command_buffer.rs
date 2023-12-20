@@ -516,13 +516,13 @@ impl VkCommandBuffer {
             let wait_semaphores: Vec<_> = submit_info
                 .wait_semaphores
                 .iter()
-                .map(|s| s.inner)
+                .map(|s| self.state.resolve_resource::<VkSemaphore>(s).inner)
                 .collect();
 
             let signal_semaphores: Vec<_> = submit_info
                 .signal_semaphores
                 .iter()
-                .map(|s| s.inner)
+                .map(|s| self.state.resolve_resource::<VkSemaphore>(&s).inner)
                 .collect();
 
             let stage_masks: Vec<_> = submit_info.wait_stages.iter().map(|v| v.to_vk()).collect();
@@ -541,7 +541,7 @@ impl VkCommandBuffer {
                     p_signal_semaphores: signal_semaphores.as_ptr(),
                 }],
                 if let Some(fence) = &submit_info.fence {
-                    fence.inner
+                    self.state.resolve_resource::<VkFence>(&fence).inner
                 } else {
                     vk::Fence::null()
                 },
@@ -677,13 +677,13 @@ impl command_buffer_2::Impl for VkCommandBuffer {
             let wait_semaphores: Vec<_> = submit_info
                 .wait_semaphores
                 .iter()
-                .map(|s| s.inner)
+                .map(|s| self.state.resolve_resource::<VkSemaphore>(s).inner)
                 .collect();
 
             let signal_semaphores: Vec<_> = submit_info
                 .signal_semaphores
                 .iter()
-                .map(|s| s.inner)
+                .map(|s| self.state.resolve_resource::<VkSemaphore>(&s).inner)
                 .collect();
 
             let stage_masks: Vec<_> = submit_info.wait_stages.iter().map(|v| v.to_vk()).collect();
@@ -702,7 +702,7 @@ impl command_buffer_2::Impl for VkCommandBuffer {
                     p_signal_semaphores: signal_semaphores.as_ptr(),
                 }],
                 if let Some(fence) = &submit_info.fence {
-                    fence.inner
+                    self.state.resolve_resource::<VkFence>(&fence).inner
                 } else {
                     vk::Fence::null()
                 },

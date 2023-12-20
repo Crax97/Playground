@@ -137,6 +137,8 @@ pub struct DestroyedResources {
     destroyed_images: RwLock<Vec<DestroyedResource<VkImage>>>,
     destroyed_image_views: RwLock<Vec<DestroyedResource<VkImageView>>>,
     destroyed_samplers: RwLock<Vec<DestroyedResource<VkSampler>>>,
+    destroyed_semaphores: RwLock<Vec<DestroyedResource<VkSemaphore>>>,
+    destroyed_fences: RwLock<Vec<DestroyedResource<VkFence>>>,
 }
 
 /*
@@ -2345,19 +2347,25 @@ impl VkGpu {
 
     pub fn wait_for_fences(
         &self,
-        fences: &[&VkFence],
+        fences: &[&FenceHandle],
         wait_all: bool,
         timeout_ns: u64,
     ) -> VkResult<()> {
-        let fences: Vec<_> = fences.iter().map(|f| f.inner).collect();
+        let fences: Vec<_> = fences
+            .iter()
+            .map(|f| self.resolve_resource::<VkFence>(f).inner)
+            .collect();
         unsafe {
             self.vk_logical_device()
                 .wait_for_fences(&fences, wait_all, timeout_ns)
         }
     }
 
-    pub fn reset_fences(&self, fences: &[&VkFence]) -> VkResult<()> {
-        let fences: Vec<_> = fences.iter().map(|f| f.inner).collect();
+    pub fn reset_fences(&self, fences: &[&FenceHandle]) -> VkResult<()> {
+        let fences: Vec<_> = fences
+            .iter()
+            .map(|f| self.resolve_resource::<VkFence>(f).inner)
+            .collect();
         unsafe { self.vk_logical_device().reset_fences(&fences) }
     }
 
@@ -2484,6 +2492,34 @@ impl Gpu for VkGpu {
                 .allocated_resources
                 .write()
                 .unwrap()
+                .get_map_mut::<VkSemaphore>(),
+            &mut self
+                .state
+                .destroyed_resources
+                .destroyed_semaphores
+                .write()
+                .unwrap(),
+        );
+        self.drain_dead_resources(
+            &mut self
+                .state
+                .allocated_resources
+                .write()
+                .unwrap()
+                .get_map_mut::<VkFence>(),
+            &mut self
+                .state
+                .destroyed_resources
+                .destroyed_fences
+                .write()
+                .unwrap(),
+        );
+        self.drain_dead_resources(
+            &mut self
+                .state
+                .allocated_resources
+                .write()
+                .unwrap()
                 .get_map_mut::<VkImageView>(),
             &mut self
                 .state
@@ -2547,6 +2583,30 @@ impl Gpu for VkGpu {
                 .destroyed_images
                 .write()
                 .unwrap(),
+        );
+        self.update_cycle_for_deleted_resources(
+            &mut self
+                .state
+                .destroyed_resources
+                .destroyed_semaphores
+                .write()
+                .unwrap(),
+            |sm| unsafe {
+                self.vk_logical_device()
+                    .destroy_semaphore(sm.inner, get_allocation_callbacks())
+            },
+        );
+        self.update_cycle_for_deleted_resources(
+            &mut self
+                .state
+                .destroyed_resources
+                .destroyed_fences
+                .write()
+                .unwrap(),
+            |sm| unsafe {
+                self.vk_logical_device()
+                    .destroy_fence(sm.inner, get_allocation_callbacks())
+            },
         );
         self.update_cycle_for_deleted_resources(
             &mut self

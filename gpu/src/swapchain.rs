@@ -11,7 +11,6 @@ use ash::{
         StructureType, SurfaceCapabilitiesKHR, SurfaceFormatKHR, SurfaceKHR,
         SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
     },
-    Device,
 };
 use log::{info, trace, warn};
 use raw_window_handle::{
@@ -21,9 +20,9 @@ use winit::window::Window;
 
 use crate::swapchain_2::Impl;
 use crate::{
-    swapchain_2, Extent2D, FenceCreateFlags, FenceCreateInfo, ImageAspectFlags, ImageFormat,
-    ImageHandle, ImageSubresourceRange, ImageViewHandle, PresentMode, SemaphoreCreateInfo,
-    SwapchainFrame, ToVk, VkGpu, VkImage, VkImageView,
+    swapchain_2, Extent2D, FenceCreateFlags, FenceCreateInfo, FenceHandle, Gpu, ImageAspectFlags,
+    ImageFormat, ImageHandle, ImageSubresourceRange, ImageViewHandle, PresentMode, SwapchainFrame,
+    ToVk, VkGpu, VkImage, VkImageView,
 };
 
 use super::{GpuThreadSharedState, VkFence, VkSemaphore};
@@ -51,37 +50,6 @@ mod util {
     }
 }
 
-impl SwapchainFrame {
-    fn new(device: Device) -> anyhow::Result<Self> {
-        let in_flight_fence = VkFence::create(
-            device.clone(),
-            Some("In Flight Fence"),
-            &FenceCreateInfo {
-                flags: FenceCreateFlags::SIGNALED,
-                label: Some("In Flight Fence"),
-            }
-            .to_vk(),
-        )?;
-
-        let render_finished_semaphore = VkSemaphore::create(
-            device.clone(),
-            Some("Render finished semaphore"),
-            &SemaphoreCreateInfo::default().to_vk(),
-        )?;
-
-        let image_available_semaphore = VkSemaphore::create(
-            device,
-            Some("Image available semaphore"),
-            &SemaphoreCreateInfo::default().to_vk(),
-        )?;
-        Ok(Self {
-            in_flight_fence,
-            render_finished_semaphore,
-            image_available_semaphore,
-        })
-    }
-}
-
 pub struct VkSwapchain {
     pub(super) surface_extension: Surface,
     pub swapchain_extension: ash::extensions::khr::Swapchain,
@@ -101,7 +69,7 @@ pub struct VkSwapchain {
     pub current_swapchain_index: Cell<u32>,
     state: Arc<GpuThreadSharedState>,
     pub current_frame: Cell<usize>,
-    pub next_image_fence: VkFence,
+    pub next_image_fence: FenceHandle,
 
     display_handle: RawDisplayHandle,
     window_handle: RawWindowHandle,
@@ -116,15 +84,10 @@ impl VkSwapchain {
         let swapchain_extension =
             ash::extensions::khr::Swapchain::new(&state.instance, &state.logical_device);
 
-        let next_image_fence = VkFence::create(
-            state.logical_device.clone(),
-            Some("Next image fence"),
-            &FenceCreateInfo {
-                label: Some("Next image fence"),
-                flags: FenceCreateFlags::empty(),
-            }
-            .to_vk(),
-        )?;
+        let next_image_fence = gpu.make_fence(&FenceCreateInfo {
+            label: Some("Next image fence"),
+            flags: FenceCreateFlags::empty(),
+        })?;
 
         let present_extent = Extent2D {
             width: window.inner_size().width,
@@ -133,7 +96,7 @@ impl VkSwapchain {
 
         let mut frames_in_flight = vec![];
         for _ in 0..Self::MAX_FRAMES_IN_FLIGHT {
-            let swapchain_frame = SwapchainFrame::new(state.logical_device.clone())?;
+            let swapchain_frame = SwapchainFrame::new(gpu)?;
             frames_in_flight.push(swapchain_frame);
         }
 
@@ -166,19 +129,35 @@ impl VkSwapchain {
 
     pub fn acquire_next_image(&mut self) -> anyhow::Result<(ImageHandle, ImageViewHandle)> {
         let current_frame = &self.frames_in_flight[self.current_frame.get()];
-        let wait_semaphore = current_frame.image_available_semaphore.inner;
+        let wait_semaphore = self
+            .state
+            .resolve_resource::<VkSemaphore>(&current_frame.image_available_semaphore)
+            .inner;
 
         unsafe {
             self.state
                 .logical_device
-                .wait_for_fences(&[current_frame.in_flight_fence.inner], true, u64::MAX)
+                .wait_for_fences(
+                    &[self
+                        .state
+                        .resolve_resource::<VkFence>(&current_frame.in_flight_fence)
+                        .inner],
+                    true,
+                    u64::MAX,
+                )
                 .unwrap();
             self.state
                 .logical_device
-                .reset_fences(&[current_frame.in_flight_fence.inner])
+                .reset_fences(&[self
+                    .state
+                    .resolve_resource::<VkFence>(&current_frame.in_flight_fence)
+                    .inner])
                 .unwrap();
         }
-        let next_image_fence = self.next_image_fence.inner;
+        let next_image_fence = self
+            .state
+            .resolve_resource::<VkFence>(&self.next_image_fence)
+            .inner;
         loop {
             let (next_image, suboptimal) = unsafe {
                 self.swapchain_extension.acquire_next_image(
@@ -216,7 +195,10 @@ impl VkSwapchain {
     pub fn present(&self) -> anyhow::Result<bool> {
         unsafe {
             let current_frame = self.get_current_swapchain_frame();
-            let wait_semaphore = current_frame.render_finished_semaphore.inner;
+            let wait_semaphore = self
+                .state
+                .resolve_resource::<VkSemaphore>(&current_frame.render_finished_semaphore)
+                .inner;
             let result = self.swapchain_extension.queue_present(
                 self.state.graphics_queue,
                 &PresentInfoKHR {
@@ -542,19 +524,35 @@ impl VkSwapchain {
 impl swapchain_2::Impl for VkSwapchain {
     fn acquire_next_image(&mut self) -> anyhow::Result<(ImageHandle, ImageViewHandle)> {
         let current_frame = &self.frames_in_flight[self.current_frame.get()];
-        let wait_semaphore = current_frame.image_available_semaphore.inner;
+        let wait_semaphore = self
+            .state
+            .resolve_resource::<VkSemaphore>(&current_frame.image_available_semaphore)
+            .inner;
 
         unsafe {
             self.state
                 .logical_device
-                .wait_for_fences(&[current_frame.in_flight_fence.inner], true, u64::MAX)
+                .wait_for_fences(
+                    &[self
+                        .state
+                        .resolve_resource::<VkFence>(&current_frame.in_flight_fence)
+                        .inner],
+                    true,
+                    u64::MAX,
+                )
                 .unwrap();
             self.state
                 .logical_device
-                .reset_fences(&[current_frame.in_flight_fence.inner])
+                .reset_fences(&[self
+                    .state
+                    .resolve_resource::<VkFence>(&current_frame.in_flight_fence)
+                    .inner])
                 .unwrap();
         }
-        let next_image_fence = self.next_image_fence.inner;
+        let next_image_fence = self
+            .state
+            .resolve_resource::<VkFence>(&self.next_image_fence)
+            .inner;
         loop {
             let (next_image, suboptimal) = unsafe {
                 self.swapchain_extension.acquire_next_image(
@@ -687,7 +685,10 @@ impl swapchain_2::Impl for VkSwapchain {
     fn present(&self) -> anyhow::Result<bool> {
         unsafe {
             let current_frame = self.get_current_swapchain_frame();
-            let wait_semaphore = current_frame.render_finished_semaphore.inner;
+            let wait_semaphore = self
+                .state
+                .resolve_resource::<VkSemaphore>(&current_frame.render_finished_semaphore)
+                .inner;
             let result = self.swapchain_extension.queue_present(
                 self.state.graphics_queue,
                 &PresentInfoKHR {

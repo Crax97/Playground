@@ -541,7 +541,7 @@ impl ToVk for BufferUsageFlags {
 }
 
 #[derive(Clone)]
-pub struct VkSemaphore {
+pub(crate) struct VkSemaphore {
     pub(super) inner: vk::Semaphore,
     pub(super) label: Option<String>,
 }
@@ -595,7 +595,7 @@ impl ToVk for FenceCreateFlags {
 }
 
 #[derive(Clone)]
-pub struct VkFence {
+pub(crate) struct VkFence {
     pub(super) inner: vk::Fence,
     pub(super) label: Option<String>,
 }
