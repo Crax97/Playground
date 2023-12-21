@@ -32,6 +32,8 @@ pub use texture::*;
 pub use time::*;
 pub use utils::*;
 
+pub use egui;
+
 /*
  * Conventions used
  * Coordinates: +Y is up, +Z is forward, -X is right (same as glTF)

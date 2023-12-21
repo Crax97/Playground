@@ -4,8 +4,10 @@ mod utils;
 
 use std::collections::HashMap;
 
+use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App, Console};
-use engine::Time;
+use engine::editor::ui_extension::UiExtension;
+use engine::{egui, Time};
 
 use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
@@ -58,6 +60,7 @@ pub struct GLTFViewer {
     resource_map: ResourceMap,
     time: Time,
     window: Window,
+    egui_support: EguiSupport,
 }
 
 impl GLTFViewer {
@@ -316,6 +319,8 @@ impl App for GLTFViewer {
             .swapchain_mut()
             .select_present_mode(PresentMode::Immediate)?;
 
+        let egui_support = EguiSupport::new(&window, &app_state.gpu, &app_state.swapchain)?;
+
         Ok(Self {
             scene_renderer,
             gltf_loader,
@@ -327,6 +332,7 @@ impl App for GLTFViewer {
             resource_map,
             time,
             window,
+            egui_support,
         })
     }
 
@@ -344,76 +350,93 @@ impl App for GLTFViewer {
         _app_state: &AppState,
     ) -> anyhow::Result<()> {
         self.input.update(event);
+        match event {
+            winit::event::Event::WindowEvent { event, .. } => {
+                let _ = self.egui_support.handle_event(event);
+            }
+            _ => {}
+        }
         Ok(())
+    }
+
+    fn on_resized(&mut self, app_state: &AppState, _size: winit::dpi::PhysicalSize<u32>) {
+        self.egui_support.swapchain_updated(&app_state.swapchain);
     }
 
     fn begin_frame(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
         self.time.begin_frame();
+        self.egui_support.begin_frame(&self.window);
         Ok(())
     }
 
     fn update(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
-        // self.console.update(&self.input);
-        // self.console.imgui_update(ui, &mut self.cvar_manager);
+        self.console.update(&self.input);
+        self.egui_support.paint_console(&mut self.console);
 
-        // ui.text("Hiii");
+        let context = self.egui_support.create_context();
+        let mut early_return = false;
+        egui::Window::new("GLTF Viewer").show(&context, |ui| {
+            ui.label("Hiii");
 
-        // ui.slider(
-        //     "FXAA iterations",
-        //     0,
-        //     12,
-        //     self.cvar_manager
-        //         .get_named_ref_mut::<i32>(FxaaPass::FXAA_ITERATIONS_CVAR_NAME)
-        //         .unwrap(),
-        // );
-        // ui.slider(
-        //     "FXAA subpix",
-        //     0.0,
-        //     1.0,
-        //     self.cvar_manager
-        //         .get_named_ref_mut::<f32>(FxaaPass::FXAA_SUBPIX_CVAR_NAME)
-        //         .unwrap(),
-        // );
-        // ui.slider(
-        //     "FXAA Edge Threshold",
-        //     0.0,
-        //     1.0,
-        //     self.cvar_manager
-        //         .get_named_ref_mut::<f32>(FxaaPass::FXAA_EDGE_THRESHOLD_CVAR_NAME)
-        //         .unwrap(),
-        // );
-        // ui.slider(
-        //     "FXAA Edge Threshold min",
-        //     0.0,
-        //     1.0,
-        //     self.cvar_manager
-        //         .get_named_ref_mut::<f32>(FxaaPass::FXAA_EDGE_THRESHOLD_MIN_CVAR_NAME)
-        //         .unwrap(),
-        // );
+            ui.slider(
+                "FXAA iterations",
+                0,
+                12,
+                self.cvar_manager
+                    .get_named_ref_mut::<i32>(FxaaPass::FXAA_ITERATIONS_CVAR_NAME)
+                    .unwrap(),
+            );
+            ui.slider(
+                "FXAA subpix",
+                0.0,
+                1.0,
+                self.cvar_manager
+                    .get_named_ref_mut::<f32>(FxaaPass::FXAA_SUBPIX_CVAR_NAME)
+                    .unwrap(),
+            );
+            ui.slider(
+                "FXAA Edge Threshold",
+                0.0,
+                1.0,
+                self.cvar_manager
+                    .get_named_ref_mut::<f32>(FxaaPass::FXAA_EDGE_THRESHOLD_CVAR_NAME)
+                    .unwrap(),
+            );
+            ui.slider(
+                "FXAA Edge Threshold min",
+                0.0,
+                1.0,
+                self.cvar_manager
+                    .get_named_ref_mut::<f32>(FxaaPass::FXAA_EDGE_THRESHOLD_MIN_CVAR_NAME)
+                    .unwrap(),
+            );
 
-        // ui.separator();
+            ui.separator();
 
-        // if ui.collapsing_header("Shadow settings", TreeNodeFlags::DEFAULT_OPEN) {
-        //     ui.slider(
-        //         "Depth Bias constant",
-        //         -10.0,
-        //         10.0,
-        //         &mut self.scene_renderer.depth_bias_constant,
-        //     );
-        //     ui.slider(
-        //         "Depth Bias slope",
-        //         -10.0,
-        //         10.0,
-        //         &mut self.scene_renderer.depth_bias_slope,
-        //     );
-        // }
+            ui.collapsing("Shadow settings", |ui| {
+                ui.slider(
+                    "Depth Bias constant",
+                    -10.0,
+                    10.0,
+                    &mut self.scene_renderer.depth_bias_constant,
+                );
+                ui.slider(
+                    "Depth Bias slope",
+                    -10.0,
+                    10.0,
+                    &mut self.scene_renderer.depth_bias_slope,
+                );
+            });
 
-        // self.lights_ui(ui);
+            if ui.ui_contains_pointer() {
+                early_return = true;
+            }
+            // self.lights_ui(ui);
+        });
 
-        // if ui.io().want_capture_keyboard || ui.io().want_capture_mouse {
-        //     return Ok(());
-        // }
-
+        if early_return {
+            return Ok(());
+        }
         if self.input.is_key_just_pressed(Key::P) {
             self.print_lights();
         }
@@ -470,7 +493,7 @@ impl App for GLTFViewer {
         app_state: &'a AppState,
         backbuffer: &Backbuffer,
     ) -> anyhow::Result<CommandBuffer> {
-        let mut command_buffer = self.scene_renderer.render(
+        let command_buffer = self.scene_renderer.render(
             app_state.gpu(),
             &self.camera.camera(),
             self.gltf_loader.scene(),
@@ -478,29 +501,10 @@ impl App for GLTFViewer {
             &self.resource_map,
             &self.cvar_manager,
         )?;
+        let output = self.egui_support.end_frame(&self.window);
+        self.egui_support
+            .paint_frame(output, &app_state.swapchain, &command_buffer);
 
-        command_buffer.pipeline_barrier(&PipelineBarrierInfo {
-            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            memory_barriers: &[],
-            buffer_memory_barriers: &[],
-            image_memory_barriers: &[ImageMemoryBarrier {
-                src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                dst_access_mask: AccessFlags::COLOR_ATTACHMENT_READ,
-                old_layout: ImageLayout::ColorAttachment,
-                new_layout: ImageLayout::PresentSrc,
-                src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-                dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-                image: backbuffer.image.clone(),
-                subresource_range: ImageSubresourceRange {
-                    aspect_mask: ImageAspectFlags::COLOR,
-                    base_mip_level: 0,
-                    level_count: 1,
-                    base_array_layer: 0,
-                    layer_count: 1,
-                },
-            }],
-        });
         Ok(command_buffer)
     }
 }

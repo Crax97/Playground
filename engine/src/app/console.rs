@@ -12,11 +12,11 @@ pub struct Message {
 }
 
 pub struct Console {
-    show: bool,
-    messages: Vec<String>,
-    max_messages: usize,
-    pending_input: String,
-    message_receiver: Receiver<Message>,
+    pub(crate) show: bool,
+    pub(crate) messages: Vec<String>,
+    pub(crate) max_messages: usize,
+    pub(crate) pending_input: String,
+    pub(crate) message_receiver: Receiver<Message>,
 }
 
 #[derive(Resource)]

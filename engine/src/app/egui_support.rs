@@ -1,11 +1,15 @@
 use std::sync::{Arc, Mutex};
 
-use egui::{Context, FontDefinitions, FullOutput};
+use egui::{pos2, vec2, Context, FontDefinitions, FullOutput, Rect};
 use egui_winit::EventResponse;
 use egui_winit_ash_integration::Integration;
 use gpu::{CommandBuffer, Gpu, Swapchain, VkCommandBuffer, VkGpu, VkSwapchain};
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 use winit::{event::WindowEvent, window::Window};
+
+use crate::{editor::ui_extension::UiExtension, scene};
+
+use super::Console;
 
 type EguiAllocator = Arc<Mutex<Allocator>>;
 
@@ -51,6 +55,36 @@ impl EguiSupport {
             swapchain.present_format,
         );
         Ok(Self { integration })
+    }
+
+    pub fn paint_console(&mut self, console: &mut Console) {
+        if console.show {
+            let ctx = self.create_context();
+            let screen_size = ctx.screen_rect();
+            egui::Window::new("Console Window")
+                .resizable(false)
+                .fixed_rect(Rect {
+                    min: pos2(0.0, 0.0),
+                    max: pos2(screen_size.width(), screen_size.height() * 0.33),
+                })
+                .collapsible(false)
+                .show(&ctx, |ui| {
+                    ui.fill_width();
+
+                    egui::ScrollArea::new([false, true]).show(ui, |ui| {
+                        for msg in &console.messages {
+                            ui.label(msg);
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        let resp = ui.text_edit_singleline(&mut console.pending_input);
+                        if resp.lost_focus() && ui.ctx().input(|i| i.key_down(egui::Key::Enter)) {
+                            let message = std::mem::take(&mut console.pending_input);
+                            console.add_message(message);
+                        }
+                    })
+                });
+        }
     }
 
     pub fn handle_event(&mut self, winit_event: &WindowEvent) -> EventResponse {

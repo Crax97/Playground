@@ -1,6 +1,7 @@
 use egui::{emath::Numeric, Rect, Response, Sense, Ui, Vec2, Widget, WidgetText};
 
 pub trait UiExtension {
+    fn slider<N: Numeric>(&mut self, label: &str, min: N, max: N, current: &mut N);
     fn edit_numbers<N: Numeric>(&mut self, numbers: &mut [N]) -> bool;
     fn edit_number<N: Numeric>(&mut self, number: &mut N) -> Response;
     fn horizontal_with_label<R, F: FnOnce(&mut Ui) -> R>(
@@ -12,6 +13,12 @@ pub trait UiExtension {
 }
 
 impl UiExtension for Ui {
+    fn slider<N: Numeric>(&mut self, label: &str, min: N, max: N, current: &mut N) {
+        self.horizontal(|ui| {
+            ui.label(label);
+            ui.add(egui::DragValue::new(current).clamp_range(min..=max));
+        });
+    }
     fn horizontal_with_label<R, F: FnOnce(&mut Ui) -> R>(
         &mut self,
         label: impl Into<WidgetText>,
