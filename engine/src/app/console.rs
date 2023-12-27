@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use bevy_ecs::system::Resource;
 use crossbeam::channel::{Receiver, Sender};
 
@@ -11,9 +13,14 @@ pub struct Message {
     content: String,
 }
 
+pub(crate) struct StoredMessage {
+    pub(crate) content: String,
+    pub(crate) timestamp: SystemTime,
+}
+
 pub struct Console {
     pub(crate) show: bool,
-    pub(crate) messages: Vec<String>,
+    pub(crate) messages: Vec<StoredMessage>,
     pub(crate) max_messages: usize,
     pub(crate) pending_input: String,
     pub(crate) message_receiver: Receiver<Message>,
@@ -58,15 +65,24 @@ impl Console {
             self.messages.remove(0);
         }
     }
-    pub fn add_message<S: AsRef<str>>(&mut self, message: S) {
-        if message.as_ref().is_empty() {
+    pub fn add_message<S: Into<String>>(&mut self, message: S) {
+        let message = message.into();
+        if message.is_empty() {
             return;
         }
-        log::info!("{}", message.as_ref());
-        self.messages.push(message.as_ref().to_owned());
+        log::info!("{}", &message);
+        self.messages.push(StoredMessage {
+            content: message,
+            timestamp: std::time::SystemTime::now(),
+        });
     }
 
-    fn handle_cvar_command(&mut self, command: &str, cvar_manager: &mut CvarManager) {
+    pub(crate) fn handle_cvar_command<S: Into<String>>(
+        &mut self,
+        command: S,
+        cvar_manager: &mut CvarManager,
+    ) {
+        let command = command.into();
         let commands = command.split(" ").collect::<Vec<_>>();
         if commands.len() > 1 {
             match cvar_manager.set_named(commands[0], commands[1]) {
@@ -74,7 +90,7 @@ impl Console {
                 Err(e) => self.add_message(e.to_string()),
             }
         } else {
-            let cvar = cvar_manager.get_named::<String>(command);
+            let cvar = cvar_manager.get_named::<String>(&command);
             match cvar {
                 Ok(value) => self.add_message(format!("{}", value)),
                 Err(e) => {

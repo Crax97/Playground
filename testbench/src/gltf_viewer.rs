@@ -371,7 +371,8 @@ impl App for GLTFViewer {
 
     fn update(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
         self.console.update(&self.input);
-        self.egui_support.paint_console(&mut self.console);
+        self.egui_support
+            .paint_console(&mut self.console, &mut self.cvar_manager);
 
         let context = self.egui_support.create_context();
         let mut early_return = false;
