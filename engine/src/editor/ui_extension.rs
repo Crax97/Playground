@@ -8,8 +8,12 @@ pub trait UiExtension {
         &mut self,
         label: impl Into<WidgetText>,
         add_contents: F,
-    );
+    ) -> R;
     fn fill_width(&mut self) -> Rect;
+    fn color_edit3(&mut self, label: &str, values: &mut [f32; 3]);
+    fn color_edit4(&mut self, label: &str, values: &mut [f32; 4]);
+    fn input_float(&mut self, label: &str, value: &mut f32) -> bool;
+    fn input_floats(&mut self, label: &str, values: &mut [f32]) -> bool;
 }
 
 impl UiExtension for Ui {
@@ -23,11 +27,12 @@ impl UiExtension for Ui {
         &mut self,
         label: impl Into<WidgetText>,
         add_contents: F,
-    ) {
+    ) -> R {
         self.horizontal(|ui| {
             ui.label(label);
             add_contents(ui)
-        });
+        })
+        .inner
     }
     fn edit_numbers<N: Numeric>(&mut self, numbers: &mut [N]) -> bool {
         let mut cum = false;
@@ -50,5 +55,28 @@ impl UiExtension for Ui {
             Sense::focusable_noninteractive(),
         )
         .0
+    }
+
+    fn color_edit3(&mut self, label: &str, values: &mut [f32; 3]) {
+        self.horizontal(|ui| {
+            ui.label(label);
+            ui.color_edit_button_rgb(values);
+        });
+    }
+
+    fn color_edit4(&mut self, label: &str, values: &mut [f32; 4]) {
+        self.horizontal(|ui| {
+            ui.label(label);
+            ui.color_edit_button_rgba_unmultiplied(values);
+        });
+    }
+
+    fn input_float(&mut self, label: &str, value: &mut f32) -> bool {
+        self.horizontal_with_label(label, |ui| ui.edit_number(value))
+            .changed()
+    }
+
+    fn input_floats(&mut self, label: &str, values: &mut [f32]) -> bool {
+        self.horizontal_with_label(label, |ui| ui.edit_numbers(values))
     }
 }
