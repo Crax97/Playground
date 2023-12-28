@@ -14,14 +14,14 @@ use crate::{
 use crate::resource_map::{ResourceHandle, ResourceMap};
 use gpu::{
     AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, Binding,
-    BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorLoadOp, CommandBuffer, Extent2D,
-    FragmentStageInfo, FramebufferColorAttachment, FramebufferDepthAttachment, Gpu,
-    ImageAspectFlags, ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier,
-    ImageSubresourceRange, ImageUsageFlags, ImageViewHandle, ImageViewType, IndexType, InputRate,
-    LifetimedCache, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags, Rect2D,
-    RenderPass, SampleCount, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle,
-    ShaderStage, SubpassDependency, SubpassDescription, VertexBindingInfo, VertexStageInfo,
-    VkSwapchain,
+    BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorLoadOp, CommandBuffer,
+    CommandBufferSubmitInfo, Extent2D, FragmentStageInfo, FramebufferColorAttachment,
+    FramebufferDepthAttachment, Gpu, ImageAspectFlags, ImageFormat, ImageHandle, ImageLayout,
+    ImageMemoryBarrier, ImageSubresourceRange, ImageUsageFlags, ImageViewHandle, ImageViewType,
+    IndexType, InputRate, LifetimedCache, MemoryDomain, Offset2D, PipelineBarrierInfo,
+    PipelineStageFlags, Rect2D, RenderPass, SampleCount, SamplerHandle, ShaderModuleCreateInfo,
+    ShaderModuleHandle, ShaderStage, SubpassDependency, SubpassDescription, VertexBindingInfo,
+    VertexStageInfo, VkSwapchain,
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 
@@ -90,6 +90,7 @@ pub struct DeferredRenderingPipeline {
     shadow_atlas_sampler: SamplerHandle,
     screen_quad_flipped: ShaderModuleHandle,
     early_z_pass_enabled: bool,
+    view_size: Extent2D,
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
@@ -443,6 +444,10 @@ impl DeferredRenderingPipeline {
             gbuffer_nearest_sampler,
             shadow_atlas_sampler,
             early_z_pass_enabled: true,
+            view_size: Extent2D {
+                width: 1920,
+                height: 1080,
+            },
         })
     }
 
@@ -1242,18 +1247,19 @@ impl DeferredRenderingPipeline {
         Ok(())
     }
 
-    fn copy_to_backbuffer_pass(
+    pub fn draw_textured_quad(
         &self,
         graphics_command_buffer: &mut CommandBuffer,
-        color_output: RenderImage,
-        backbuffer: &Backbuffer,
+        destination: &ImageViewHandle,
+        source: &ImageViewHandle,
+        viewport: Rect2D,
         flip_render_target: bool,
     ) -> anyhow::Result<()> {
         let mut present_render_pass =
             graphics_command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
                 label: Some("Copy to backbuffer"),
                 color_attachments: &[FramebufferColorAttachment {
-                    image_view: backbuffer.image_view.clone(),
+                    image_view: destination.clone(),
                     load_op: ColorLoadOp::DontCare,
                     store_op: AttachmentStoreOp::Store,
                     initial_layout: ImageLayout::Undefined,
@@ -1261,10 +1267,7 @@ impl DeferredRenderingPipeline {
                 }],
                 depth_attachment: None,
                 stencil_attachment: None,
-                render_area: gpu::Rect2D {
-                    offset: gpu::Offset2D::default(),
-                    extent: backbuffer.size,
-                },
+                render_area: viewport,
                 subpasses: &[SubpassDescription {
                     label: None,
                     input_attachments: vec![],
@@ -1282,7 +1285,7 @@ impl DeferredRenderingPipeline {
             0,
             &[Binding {
                 ty: gpu::DescriptorBindingType::ImageView {
-                    image_view_handle: color_output.view,
+                    image_view_handle: source.clone(),
                     sampler_handle: self.gbuffer_nearest_sampler.clone(),
                     layout: gpu::ImageLayout::ShaderReadOnly,
                 },
@@ -1612,10 +1615,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         gpu: &dyn Gpu,
         pov: &Camera,
         scene: &Scene,
-        backbuffer: &Backbuffer,
         resource_map: &ResourceMap,
         cvar_manager: &CvarManager,
-    ) -> anyhow::Result<CommandBuffer> {
+    ) -> anyhow::Result<ImageViewHandle> {
         let projection = pov.projection();
 
         if self.light_iteration != scene.lights_iteration() {
@@ -1634,8 +1636,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             viewport_size_offset: vector![
                 0.0,
                 0.0,
-                backbuffer.size.width as f32,
-                backbuffer.size.height as f32
+                self.view_size.width as f32,
+                self.view_size.height as f32
             ],
         }];
 
@@ -1690,8 +1692,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let color_desc = RenderImageDescription {
             format: ImageFormat::Rgba8,
             samples: SampleCount::Sample1,
-            width: backbuffer.size.width,
-            height: backbuffer.size.height,
+            width: self.view_size.width,
+            height: self.view_size.height,
             view_type: ImageViewType::Type2D,
         };
 
@@ -1723,7 +1725,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             &color_output,
             &shadow_atlas_component,
             draw_hashmap,
-            backbuffer.size,
+            self.view_size,
             current_buffers,
             pov,
             scene,
@@ -1736,20 +1738,49 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 &mut graphics_command_buffer,
                 color_output,
                 color_desc,
-                backbuffer.size,
+                self.view_size,
                 cvar_manager,
             )
             .context("Post process pass")?;
 
-        self.copy_to_backbuffer_pass(
-            &mut graphics_command_buffer,
-            final_color_output,
-            backbuffer,
-            self.post_process_stack.len() % 2 == 0,
-        )
-        .context("During copy to backbuffer")?;
+        // graphics_command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+        //     src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+        //     dst_stage_mask: PipelineStageFlags::ALL_GRAPHICS,
+        //     memory_barriers: &[],
+        //     buffer_memory_barriers: &[],
+        //     image_memory_barriers: &[ImageMemoryBarrier {
+        //         src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+        //         dst_access_mask: AccessFlags::SHADER_READ,
+        //         old_layout: ImageLayout::ColorAttachment,
+        //         new_layout: ImageLayout::ShaderReadOnly,
+        //         src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+        //         dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+        //         image: final_color_output.image.clone(),
+        //         subresource_range: ImageSubresourceRange {
+        //             aspect_mask: ImageAspectFlags::COLOR,
+        //             base_mip_level: 0,
+        //             level_count: 1,
+        //             base_array_layer: 0,
+        //             layer_count: 1,
+        //         },
+        //     }],
+        // });
 
-        Ok(graphics_command_buffer)
+        graphics_command_buffer.submit(&CommandBufferSubmitInfo {
+            wait_semaphores: &[],
+            wait_stages: &[],
+            signal_semaphores: &[],
+            fence: None,
+        })?;
+        // self.copy_to_backbuffer_pass(
+        //     &mut graphics_command_buffer,
+        //     final_color_output,
+        //     backbuffer,
+        //     self.post_process_stack.len() % 2 == 0,
+        // )
+        // .context("During copy to backbuffer")?;
+
+        Ok(final_color_output.view)
     }
 
     fn create_material(
@@ -1777,5 +1808,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         };
 
         MasterMaterial::new(&master_description)
+    }
+
+    fn on_resolution_changed(&mut self, new_resolution: Extent2D) {
+        self.view_size = new_resolution;
     }
 }

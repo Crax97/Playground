@@ -11,7 +11,7 @@ use bevy_ecs::{
 use bevy_reflect::{GetTypeRegistration, TypeRegistry};
 use egui::mutex::RwLock;
 use engine_macros::glsl;
-use gpu::{CommandBuffer, Gpu, ShaderModuleCreateInfo, ShaderStage};
+use gpu::{CommandBuffer, Gpu, Offset2D, Rect2D, ShaderModuleCreateInfo, ShaderStage};
 use nalgebra::vector;
 use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop, window::Window};
 
@@ -524,13 +524,26 @@ impl App for BevyEcsApp {
         } else {
             Camera::default()
         };
-        let mut command_buffer = self.renderer.render(
+        let render_final_color = self.renderer.render(
             app_state.gpu.as_ref(),
             &pov,
             scene,
-            backbuffer,
             resource_map,
             cvar_manager,
+        )?;
+
+        let mut command_buffer = app_state
+            .gpu
+            .start_command_buffer(gpu::QueueType::Graphics)?;
+        self.renderer.draw_textured_quad(
+            &mut command_buffer,
+            &backbuffer.image_view,
+            &render_final_color,
+            Rect2D {
+                offset: Offset2D::default(),
+                extent: backbuffer.size,
+            },
+            true,
         )?;
 
         for plugin in &mut self.plugins {

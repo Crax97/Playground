@@ -15,8 +15,8 @@ use engine::post_process_pass::TonemapPass;
 use fps_camera::FpsCamera;
 use gpu::{
     AccessFlags, CommandBuffer, Extent2D, ImageAspectFlags, ImageFormat, ImageLayout,
-    ImageMemoryBarrier, ImageSubresourceRange, PipelineBarrierInfo, PipelineStageFlags,
-    PresentMode, ShaderStage,
+    ImageMemoryBarrier, ImageSubresourceRange, Offset2D, PipelineBarrierInfo, PipelineStageFlags,
+    PresentMode, Rect2D, ShaderStage,
 };
 use winit::{
     dpi::{PhysicalPosition, Position},
@@ -365,8 +365,12 @@ impl App for GLTFViewer {
         Ok(())
     }
 
-    fn on_resized(&mut self, app_state: &AppState, _size: winit::dpi::PhysicalSize<u32>) {
+    fn on_resized(&mut self, app_state: &AppState, size: winit::dpi::PhysicalSize<u32>) {
         self.egui_support.swapchain_updated(&app_state.swapchain);
+        self.scene_renderer.on_resolution_changed(Extent2D {
+            width: size.width,
+            height: size.height,
+        })
     }
 
     fn begin_frame(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
@@ -500,15 +504,29 @@ impl App for GLTFViewer {
         app_state: &'a AppState,
         backbuffer: &Backbuffer,
     ) -> anyhow::Result<CommandBuffer> {
-        let command_buffer = self.scene_renderer.render(
+        let final_render = self.scene_renderer.render(
             app_state.gpu(),
             &self.camera.camera(),
             self.gltf_loader.scene(),
-            backbuffer,
             &self.resource_map,
             &self.cvar_manager,
         )?;
+        // write_image_to_swapchain(backbuffer);
         let output = self.egui_support.end_frame(&self.window);
+        let mut command_buffer = app_state
+            .gpu
+            .start_command_buffer(gpu::QueueType::Graphics)?;
+
+        self.scene_renderer.draw_textured_quad(
+            &mut command_buffer,
+            &backbuffer.image_view,
+            &final_render,
+            Rect2D {
+                offset: Offset2D::default(),
+                extent: backbuffer.size,
+            },
+            true,
+        )?;
         self.egui_support
             .paint_frame(output, &app_state.swapchain, &command_buffer);
 

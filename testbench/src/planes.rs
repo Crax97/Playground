@@ -250,14 +250,17 @@ impl App for PlanesApp {
         backbuffer: &Backbuffer,
     ) -> anyhow::Result<CommandBuffer> {
         // self.egui_integration.begin_frame(&self.window);
-        let mut cb = self.scene_renderer.render(
+
+        let mut render = self.scene_renderer.render(
             app_state.gpu(),
             &self.camera,
             &self.scene,
-            backbuffer,
             &self.resource_map,
             &self.cvar_manager,
         )?;
+        let mut cb = app_state
+            .gpu
+            .start_command_buffer(gpu::QueueType::Graphics)?;
         cb.pipeline_barrier(&PipelineBarrierInfo {
             src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
             dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,

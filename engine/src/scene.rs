@@ -272,10 +272,11 @@ pub trait RenderingPipeline {
         gpu: &dyn Gpu,
         pov: &Camera,
         scene: &Scene,
-        backbuffer: &Backbuffer,
         resource_map: &ResourceMap,
         cvar_manager: &CvarManager,
-    ) -> anyhow::Result<CommandBuffer>;
+    ) -> anyhow::Result<ImageViewHandle>;
+
+    fn on_resolution_changed(&mut self, new_resolution: Extent2D);
 
     fn create_material(
         &mut self,
