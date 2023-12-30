@@ -101,10 +101,10 @@ const FXAA_VS: &[u32] = glsl!(
 );
 
 impl FxaaPass {
-    pub const FXAA_ITERATIONS_CVAR_NAME: &str = "fxaa.iterations";
-    pub const FXAA_SUBPIX_CVAR_NAME: &str = "fxaa.subpix";
-    pub const FXAA_EDGE_THRESHOLD_CVAR_NAME: &str = "fxaa.edge_threshold";
-    pub const FXAA_EDGE_THRESHOLD_MIN_CVAR_NAME: &str = "fxaa.edge_threshold_min";
+    pub const FXAA_ITERATIONS_CVAR_NAME: &'static str = "fxaa.iterations";
+    pub const FXAA_SUBPIX_CVAR_NAME: &'static str = "fxaa.subpix";
+    pub const FXAA_EDGE_THRESHOLD_CVAR_NAME: &'static str = "fxaa.edge_threshold";
+    pub const FXAA_EDGE_THRESHOLD_MIN_CVAR_NAME: &'static str = "fxaa.edge_threshold_min";
 
     pub fn new(gpu: &dyn Gpu, cvar_manager: &mut CvarManager) -> anyhow::Result<Self> {
         cvar_manager.register_cvar(Self::FXAA_ITERATIONS_CVAR_NAME, 12, CvarFlags::empty());

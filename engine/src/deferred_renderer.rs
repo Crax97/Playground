@@ -7,8 +7,8 @@ use crate::{
     camera::Camera,
     material::{MasterMaterial, MasterMaterialDescription},
     post_process_pass::{PostProcessPass, PostProcessResources},
-    Backbuffer, CvarManager, Light, LightType, MaterialDescription, MaterialInstance, Mesh,
-    MeshPrimitive, PipelineTarget, RenderingPipeline, Scene, Texture, TextureSamplerSettings,
+    CvarManager, Light, LightType, MaterialDescription, MaterialInstance, Mesh, MeshPrimitive,
+    PipelineTarget, RenderingPipeline, Scene, Texture, TextureSamplerSettings,
 };
 
 use crate::resource_map::{ResourceHandle, ResourceMap};

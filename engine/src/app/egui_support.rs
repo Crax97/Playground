@@ -1,17 +1,16 @@
 use std::{
     sync::{Arc, Mutex},
     time::SystemTime,
-    vec,
 };
 
-use egui::{pos2, vec2, Context, FontDefinitions, FullOutput, Rect, Response, Sense, Ui};
+use egui::{pos2, vec2, Context, FontDefinitions, FullOutput, Rect, Sense, Ui};
 use egui_winit::EventResponse;
 use egui_winit_ash_integration::Integration;
 use gpu::{CommandBuffer, Gpu, Swapchain, VkCommandBuffer, VkGpu, VkSwapchain};
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 use winit::{event::WindowEvent, window::Window};
 
-use crate::{editor::ui_extension::UiExtension, scene, CvarManager};
+use crate::CvarManager;
 
 use super::Console;
 

@@ -2,6 +2,7 @@ mod fps_camera;
 mod gltf_loader;
 mod utils;
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 
@@ -14,8 +15,7 @@ use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
 use fps_camera::FpsCamera;
 use gpu::{
-    AccessFlags, CommandBuffer, Extent2D, ImageAspectFlags, ImageFormat, ImageLayout,
-    ImageMemoryBarrier, ImageSubresourceRange, Offset2D, PipelineBarrierInfo, PipelineStageFlags,
+    CommandBuffer, Extent2D, ImageFormat, Offset2D, PipelineBarrierInfo, PipelineStageFlags,
     PresentMode, Rect2D, ShaderStage,
 };
 use winit::{
@@ -220,8 +220,11 @@ impl GLTFViewer {
 }
 
 impl App for GLTFViewer {
-    fn window_name(&self, app_state: &AppState) -> String {
-        format!("GLTF Viewer")
+    fn window_name(&self, _app_state: &AppState) -> Cow<str> {
+        Cow::Owned(format!(
+            "GLTF Viewer : {} FPS",
+            1.0 / self.time.delta_frame()
+        ))
     }
 
     fn create(
@@ -380,6 +383,9 @@ impl App for GLTFViewer {
     }
 
     fn update(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
+        let fps = 1.0 / self.time.delta_frame();
+        let win_name = format!("GLTF Viewer : {} FPS", fps);
+        self.window.set_title(&win_name);
         self.console.update(&self.input);
         self.egui_support
             .paint_console(&mut self.console, &mut self.cvar_manager);
@@ -387,7 +393,10 @@ impl App for GLTFViewer {
         let context = self.egui_support.create_context();
         let mut early_return = false;
         egui::Window::new("GLTF Viewer").show(&context, |ui| {
-            ui.label("Hiii");
+            ui.label("Stats");
+            ui.label(format!("FPS {}", fps));
+            ui.label(format!("Delta time {}", self.time.delta_frame()));
+            ui.separator();
 
             ui.slider(
                 "FXAA iterations",
@@ -516,6 +525,12 @@ impl App for GLTFViewer {
         let mut command_buffer = app_state
             .gpu
             .start_command_buffer(gpu::QueueType::Graphics)?;
+
+        command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
+            ..Default::default()
+        });
 
         self.scene_renderer.draw_textured_quad(
             &mut command_buffer,

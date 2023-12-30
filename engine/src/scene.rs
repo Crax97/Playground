@@ -3,7 +3,7 @@ use crate::{
     CvarManager,
 };
 use bevy_ecs::system::Resource;
-use gpu::{CommandBuffer, Extent2D, Gpu, ImageFormat, ImageHandle, ImageViewHandle};
+use gpu::{Extent2D, Gpu, ImageFormat, ImageHandle, ImageViewHandle};
 use nalgebra::{vector, Matrix4, Point3, Vector2, Vector3};
 use std::num::NonZeroU32;
 

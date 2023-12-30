@@ -1,5 +1,7 @@
 mod utils;
 
+use std::borrow::Cow;
+
 use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App};
 
@@ -44,8 +46,8 @@ pub struct PlanesApp {
 }
 
 impl App for PlanesApp {
-    fn window_name(&self, _app_state: &AppState) -> String {
-        "planes".to_owned()
+    fn window_name(&self, _app_state: &AppState) -> Cow<str> {
+        Cow::Borrowed("planes")
     }
 
     fn create(

@@ -1,5 +1,6 @@
 mod utils;
 
+use std::borrow::Cow;
 use std::io::BufReader;
 
 use engine::app::{app_state::*, bootstrap, App};
@@ -80,8 +81,8 @@ pub struct TriangleApp {
 }
 
 impl App for TriangleApp {
-    fn window_name(&self, _app_state: &AppState) -> String {
-        "planes".to_owned()
+    fn window_name(&self, _app_state: &AppState) -> Cow<str> {
+        Cow::Borrowed("triangle")
     }
 
     fn create(

@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     ops::{Deref, DerefMut},
     sync::Arc,
 };
@@ -379,8 +380,8 @@ impl BevyEcsApp {
 }
 
 impl App for BevyEcsApp {
-    fn window_name(&self, _app_state: &crate::app::app_state::AppState) -> String {
-        "Bevy ECS app".to_owned()
+    fn window_name(&self, _app_state: &crate::app::app_state::AppState) -> Cow<str> {
+        Cow::Borrowed("Bevy ECS app")
     }
 
     fn create(

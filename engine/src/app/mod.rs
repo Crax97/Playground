@@ -3,6 +3,8 @@ pub mod egui_support;
 
 mod console;
 
+use std::borrow::Cow;
+
 use crate::Backbuffer;
 pub use console::*;
 use gpu::{CommandBuffer, CommandBufferSubmitInfo, PipelineStageFlags};
@@ -17,7 +19,7 @@ use winit::{
 
 use app_state::{app_state_mut, AppState};
 pub trait App {
-    fn window_name(&self, app_state: &AppState) -> String;
+    fn window_name(&self, app_state: &AppState) -> Cow<str>;
 
     fn create(
         app_state: &mut AppState,
