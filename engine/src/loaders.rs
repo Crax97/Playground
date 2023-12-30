@@ -32,16 +32,16 @@ impl ResourceLoader for FileSystemTextureLoader {
             f => return Err(anyhow::format_err!("Unsupported texture format: {:?}", f)),
         };
 
-        Ok(Texture::new_with_data(
+        Texture::new_with_data(
             self.gpu.as_ref(),
             cpu_image.width(),
             cpu_image.height(),
             cpu_image.as_bytes(),
             path.file_name()
-                .unwrap_or(&OsStr::new("Loaded texture"))
+                .unwrap_or(OsStr::new("Loaded texture"))
                 .to_str(),
             format,
             ImageViewType::Type2D,
-        )?)
+        )
     }
 }

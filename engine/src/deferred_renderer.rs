@@ -7,8 +7,8 @@ use crate::{
     camera::Camera,
     material::{MasterMaterial, MasterMaterialDescription},
     post_process_pass::{PostProcessPass, PostProcessResources},
-    CvarManager, Light, LightType, MaterialDescription, MaterialInstance, Mesh, MeshPrimitive,
-    PipelineTarget, RenderingPipeline, Scene, Texture, TextureSamplerSettings,
+    CvarManager, Frustum, Light, LightType, MaterialDescription, MaterialInstance, Mesh,
+    MeshPrimitive, PipelineTarget, RenderingPipeline, Scene, Texture, TextureSamplerSettings,
 };
 
 use crate::resource_map::{ResourceHandle, ResourceMap};
@@ -86,6 +86,10 @@ pub struct DeferredRenderingPipeline {
     pub ambient_color: Vector3<f32>,
     pub ambient_intensity: f32,
 
+    pub update_frustum: bool,
+    pub drawcalls_last_frame: u64,
+
+    frustum: Frustum,
     gbuffer_nearest_sampler: SamplerHandle,
     shadow_atlas_sampler: SamplerHandle,
     screen_quad_flipped: ShaderModuleHandle,
@@ -121,23 +125,20 @@ pub struct SamplerAllocator {
 impl SamplerAllocator {
     fn get(&self, gpu: &dyn Gpu, desc: &TextureSamplerSettings) -> SamplerHandle {
         self.sampler_allocator.get_clone(desc, || {
-            let sampler = gpu
-                .make_sampler(&gpu::SamplerCreateInfo {
-                    mag_filter: desc.mag_filter,
-                    min_filter: desc.min_filter,
-                    address_u: desc.address_u,
-                    address_v: desc.address_v,
-                    address_w: desc.address_w,
-                    // TODO: Have a global lod bias
-                    mip_lod_bias: 0.0,
-                    compare_function: None,
-                    min_lod: 0.0,
-                    max_lod: 1.0,
-                    border_color: [0.0; 4],
-                })
-                .expect("failed to create sampler");
-
-            sampler
+            gpu.make_sampler(&gpu::SamplerCreateInfo {
+                mag_filter: desc.mag_filter,
+                min_filter: desc.min_filter,
+                address_u: desc.address_u,
+                address_v: desc.address_v,
+                address_w: desc.address_w,
+                // TODO: Have a global lod bias
+                mip_lod_bias: 0.0,
+                compare_function: None,
+                min_lod: 0.0,
+                max_lod: 1.0,
+                border_color: [0.0; 4],
+            })
+            .expect("failed to create sampler")
         })
     }
 
@@ -448,6 +449,10 @@ impl DeferredRenderingPipeline {
                 width: 1920,
                 height: 1080,
             },
+
+            update_frustum: true,
+            frustum: Frustum::default(),
+            drawcalls_last_frame: 0,
         })
     }
 
@@ -498,7 +503,7 @@ impl DeferredRenderingPipeline {
                         render_pass,
                         material,
                         master,
-                        &draw_call.prim,
+                        draw_call.prim,
                         draw_call.transform,
                         resource_map,
                         sampler_allocator,
@@ -517,17 +522,25 @@ impl DeferredRenderingPipeline {
     }
 
     fn generate_draw_calls<'r, 's>(
+        frustum: &Frustum,
         resource_map: &'r ResourceMap,
         scene: &'s Scene,
-    ) -> HashMap<&'s MasterMaterial, Vec<DrawCall<'s>>>
+    ) -> (HashMap<&'s MasterMaterial, Vec<DrawCall<'s>>>, u64)
     where
         'r: 's,
     {
+        let mut drawcalls = 0;
         let mut draw_hashmap: HashMap<&MasterMaterial, Vec<DrawCall>> = HashMap::new();
 
         for primitive in scene.primitives.iter() {
             let mesh = resource_map.get(&primitive.mesh);
             for (idx, mesh_prim) in mesh.primitives.iter().enumerate() {
+                let shape = mesh_prim
+                    .bounding_shape
+                    .translated(primitive.transform.column(3).xyz());
+                if !frustum.contains_shape(&shape) {
+                    continue;
+                }
                 let material = primitive.materials[idx].clone();
                 let master = resource_map.get(&material.owner);
                 draw_hashmap.entry(master).or_default().push(DrawCall {
@@ -535,9 +548,10 @@ impl DeferredRenderingPipeline {
                     transform: primitive.transform,
                     material,
                 });
+                drawcalls += 1;
             }
         }
-        draw_hashmap
+        (draw_hashmap, drawcalls)
     }
 
     fn update_lights(&mut self, scene: &Scene) {
@@ -1050,14 +1064,14 @@ impl DeferredRenderingPipeline {
                         extent: render_size,
                     },
                     subpasses: if self.early_z_pass_enabled {
-                        &early_z_enabled_descriptions
+                        early_z_enabled_descriptions
                     } else {
-                        &early_z_disabled_descriptions
+                        early_z_disabled_descriptions
                     },
                     dependencies: if self.early_z_pass_enabled {
-                        &early_z_enabled_dependencies
+                        early_z_enabled_dependencies
                     } else {
-                        &early_z_disabled_dependencies
+                        early_z_disabled_dependencies
                     },
                 });
 
@@ -1075,7 +1089,7 @@ impl DeferredRenderingPipeline {
                     &draw_hashmap,
                     &mut gbuffer_render_pass,
                     0,
-                    &current_buffers,
+                    current_buffers,
                     &self.sampler_allocator,
                 )
                 .context("Early Z Pass")?;
@@ -1090,7 +1104,7 @@ impl DeferredRenderingPipeline {
                     skybox_master,
                     PipelineTarget::ColorAndDepth,
                     &mut gbuffer_render_pass,
-                    &current_buffers,
+                    current_buffers,
                 );
                 Self::draw_skybox(
                     gpu,
@@ -1121,7 +1135,7 @@ impl DeferredRenderingPipeline {
                 &draw_hashmap,
                 &mut gbuffer_render_pass,
                 0,
-                &current_buffers,
+                current_buffers,
                 &self.sampler_allocator,
             )
             .context("Gbuffer output pass")?;
@@ -1425,13 +1439,11 @@ impl DeferredRenderingPipeline {
                     post_process_pass.advance_to_next_subpass();
                 }
 
-                let final_target = if current_postprocess == 0 {
+                if current_postprocess == 0 {
                     post_process_backbuffer_1
                 } else {
                     post_process_backbuffer_2
-                };
-
-                final_target
+                }
             };
             graphics_command_buffer.pipeline_barrier(&PipelineBarrierInfo {
                 src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
@@ -1531,7 +1543,7 @@ fn draw_mesh_primitive(
                 Binding {
                     ty: gpu::DescriptorBindingType::ImageView {
                         image_view_handle: tex.view.clone(),
-                        sampler_handle: sampler_handle,
+                        sampler_handle,
                         layout: gpu::ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: tex_info.shader_stage,
@@ -1618,6 +1630,10 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         resource_map: &ResourceMap,
         cvar_manager: &CvarManager,
     ) -> anyhow::Result<ImageViewHandle> {
+        if self.update_frustum {
+            self.frustum = pov.frustum();
+        }
+
         let projection = pov.projection();
 
         if self.light_iteration != scene.lights_iteration() {
@@ -1679,7 +1695,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             bytemuck::cast_slice(&self.active_lights),
         )?;
 
-        let draw_hashmap = Self::generate_draw_calls(resource_map, scene);
+        let (draw_hashmap, drawcall_count) =
+            Self::generate_draw_calls(&self.frustum, resource_map, scene);
+        self.drawcalls_last_frame = drawcall_count;
 
         let shadow_atlas_desc = RenderImageDescription {
             format: ImageFormat::Depth,

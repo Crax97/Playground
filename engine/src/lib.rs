@@ -4,6 +4,7 @@ pub mod deferred_renderer;
 pub mod editor;
 pub mod input;
 pub mod loaders;
+pub mod math;
 pub mod physics;
 pub mod post_process_pass;
 pub mod resource_map;

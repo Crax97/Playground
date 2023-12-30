@@ -20,7 +20,7 @@ use gpu::Filter;
 use nalgebra::{point, vector};
 
 use crate::{
-    bitmap_level::{self, BitmapLevel, Entity, EntityType},
+    bitmap_level::{self, BitmapLevel, Entity},
     character::KinematicCharacter,
     Enemy, Player,
 };
@@ -55,7 +55,7 @@ pub fn load_level_system(
 
     for entity in &level.entities {
         let entity_spawned = commands.spawn((Transform2D {
-            position: point![entity.x as f32, entity.y as f32],
+            position: point![entity.x, entity.y],
             layer: 0,
             rotation: 0.0,
             scale: vector![1.0, 1.0],
@@ -86,13 +86,9 @@ pub fn load_level_system(
                 entity_spawned,
                 &mut physics_context,
             ),
-            bitmap_level::EntityType::Grass => spawn_grass(
-                entity,
-                &common_resources,
-                entities.clone(),
-                entity_spawned,
-                &mut physics_context,
-            ),
+            bitmap_level::EntityType::Grass => {
+                spawn_grass(&common_resources, entities.clone(), entity_spawned)
+            }
             bitmap_level::EntityType::Star => spawn_star(
                 entity,
                 &common_resources,
@@ -108,94 +104,6 @@ pub fn load_level_system(
                 &mut physics_context,
             ),
         };
-    }
-}
-
-fn test_spawn_entities(
-    commands: &mut Commands<'_, '_>,
-    common_resources: &Res<'_, CommonResources>,
-    entities: &engine::ResourceHandle<Texture>,
-    physics_context: &mut ResMut<'_, PhysicsContext2D>,
-) {
-    {
-        let entity = Entity {
-            x: 0.0,
-            y: 0.0,
-            ty: EntityType::Player,
-        };
-        let entity_spawned = commands.spawn((Transform2D {
-            position: point![entity.x as f32, entity.y as f32],
-            layer: 0,
-            rotation: 0.0,
-            scale: vector![1.0, 1.0],
-        },));
-        spawn_player(
-            &entity,
-            common_resources,
-            entities.clone(),
-            entity_spawned,
-            physics_context,
-        );
-    }
-    {
-        let entity = Entity {
-            x: 0.0,
-            y: -10.0,
-            ty: EntityType::Player,
-        };
-        let entity_spawned = commands.spawn((Transform2D {
-            position: point![entity.x as f32, entity.y as f32],
-            layer: 0,
-            rotation: 0.0,
-            scale: vector![1.0, 1.0],
-        },));
-        spawn_terrain(
-            &entity,
-            common_resources,
-            entities.clone(),
-            entity_spawned,
-            physics_context,
-        );
-    }
-    {
-        let entity = Entity {
-            x: SPRITE_SIZE as f32,
-            y: -10.0,
-            ty: EntityType::Player,
-        };
-        let entity_spawned = commands.spawn((Transform2D {
-            position: point![entity.x as f32, entity.y as f32],
-            layer: 0,
-            rotation: 0.0,
-            scale: vector![1.0, 1.0],
-        },));
-        spawn_terrain(
-            &entity,
-            common_resources,
-            entities.clone(),
-            entity_spawned,
-            physics_context,
-        );
-    }
-    {
-        let entity = Entity {
-            x: -(SPRITE_SIZE as f32),
-            y: -10.0,
-            ty: EntityType::Player,
-        };
-        let entity_spawned = commands.spawn((Transform2D {
-            position: point![entity.x as f32, entity.y as f32],
-            layer: 0,
-            rotation: 0.0,
-            scale: vector![1.0, 1.0],
-        },));
-        spawn_terrain(
-            &entity,
-            common_resources,
-            entities.clone(),
-            entity_spawned,
-            physics_context,
-        );
     }
 }
 
@@ -279,14 +187,14 @@ fn spawn_terrain(
     physics_context: &mut PhysicsContext2D,
 ) {
     let collider = make_collider()
-        .position(Isometry::translation(entity.x as f32, entity.y as f32))
+        .position(Isometry::translation(entity.x, entity.y))
         .build();
     let collider = physics_context.add_collider(collider);
     entity_spawned.insert((
         SpriteComponent::new(SpriteComponentDescription {
             texture: entities_texture,
             material: common_resources.default_sprite_material.clone(),
-            atlas_offset: [SPRITE_SIZE * 0, 0].into(),
+            atlas_offset: [0, 0].into(),
             atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
             sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
             z_layer: 0,
@@ -296,16 +204,14 @@ fn spawn_terrain(
 }
 
 fn spawn_grass(
-    entity: &Entity,
     common_resources: &CommonResources,
     entities_texture: engine::ResourceHandle<Texture>,
     mut entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
-    physics_context: &mut PhysicsContext2D,
 ) {
     entity_spawned.insert((SpriteComponent::new(SpriteComponentDescription {
         texture: entities_texture,
         material: common_resources.default_sprite_material.clone(),
-        atlas_offset: [SPRITE_SIZE * 1, 0].into(),
+        atlas_offset: [SPRITE_SIZE, 0].into(),
         atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
         sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
         z_layer: 0,
@@ -320,7 +226,7 @@ fn spawn_star(
     physics_context: &mut PhysicsContext2D,
 ) {
     let collider = make_collider()
-        .position(Isometry::translation(entity.x as f32, entity.y as f32))
+        .position(Isometry::translation(entity.x, entity.y))
         .sensor(true)
         .active_events(ActiveEvents::COLLISION_EVENTS)
         .build();
@@ -348,7 +254,7 @@ fn spawn_platform(
     physics_context: &mut PhysicsContext2D,
 ) {
     let collider = make_collider()
-        .position(Isometry::translation(entity.x as f32, entity.y as f32))
+        .position(Isometry::translation(entity.x, entity.y))
         .build();
     let collider = physics_context.add_collider(collider);
     entity_spawned.insert((

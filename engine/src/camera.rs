@@ -1,19 +1,35 @@
 use bevy_ecs::system::Resource;
-use nalgebra::{vector, Matrix4, Point3, Vector3};
+use nalgebra::{point, vector, Matrix4, Point3, Vector3};
 
-/*
-view: nalgebra::Matrix4::look_at_rh(
-    &point![2.0, 2.0, 2.0],
-    &point![0.0, 0.0, 0.0],
-    &vector![0.0, 0.0, -1.0],
-),
-projection: nalgebra::Matrix4::new_perspective(
-    1240.0 / 720.0,
-    45.0,
-    0.1,
-    10.0,
-),
-*/
+use crate::math::{plane::Plane, shape::Shape};
+
+#[derive(Clone, Copy, Debug)]
+pub enum FrustumTestResult {
+    Inside,
+    Outside,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Frustum {
+    pub(crate) top: Plane,
+    pub(crate) bottom: Plane,
+    pub(crate) right: Plane,
+    pub(crate) left: Plane,
+    pub(crate) far: Plane,
+    pub(crate) near: Plane,
+    pub(crate) view_projection_matrix: Matrix4<f32>,
+}
+
+impl Frustum {
+    pub fn contains_shape(&self, shape: &Shape) -> bool {
+        self.top.is_shape_behind_plane(shape)
+            && self.bottom.is_shape_behind_plane(shape)
+            && self.left.is_shape_behind_plane(shape)
+            && self.right.is_shape_behind_plane(shape)
+            && self.near.is_shape_behind_plane(shape)
+            && self.far.is_shape_behind_plane(shape)
+    }
+}
 
 #[derive(Clone, Copy)]
 pub enum CameraMode {
@@ -91,5 +107,39 @@ impl Camera {
                 self.far,
             ),
         }
+    }
+
+    pub fn frustum(&self) -> Frustum {
+        let view_projection_matrix = self.projection() * self.view();
+        let left = -(view_projection_matrix.row(3) + view_projection_matrix.row(0));
+        let right = -(view_projection_matrix.row(3) - view_projection_matrix.row(0));
+        let bottom = -(view_projection_matrix.row(3) + view_projection_matrix.row(1));
+        let top = -(view_projection_matrix.row(3) - view_projection_matrix.row(1));
+        let near = -(view_projection_matrix.row(3) + view_projection_matrix.row(2));
+        let far = -(view_projection_matrix.row(3) - view_projection_matrix.row(2));
+        Frustum {
+            left: Plane::from_slice(left.as_slice()),
+            right: Plane::from_slice(right.as_slice()),
+            bottom: Plane::from_slice(bottom.as_slice()),
+            top: Plane::from_slice(top.as_slice()),
+            near: Plane::from_slice(near.as_slice()),
+            far: Plane::from_slice(far.as_slice()),
+
+            view_projection_matrix,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Camera;
+
+    #[test]
+    fn frustum() {
+        let camera = Camera::new_perspective(90.0, 1.0, 1.0, 0.01, 1000.0);
+
+        let frustum = camera.frustum();
+
+        println!("{frustum:?}");
     }
 }

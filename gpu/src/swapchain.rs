@@ -76,7 +76,7 @@ pub struct VkSwapchain {
 }
 
 impl VkSwapchain {
-    pub const MAX_FRAMES_IN_FLIGHT: usize = 1;
+    pub const MAX_FRAMES_IN_FLIGHT: usize = 3;
 
     pub(crate) fn new(gpu: &VkGpu, window: &Window) -> anyhow::Result<Self> {
         let state = gpu.state.clone();
@@ -222,8 +222,9 @@ impl VkSwapchain {
             }
         }
 
+        let next_frame = self.current_frame.get() + 1;
         self.current_frame
-            .replace((self.current_frame.get() + 1) % Self::MAX_FRAMES_IN_FLIGHT);
+            .replace(next_frame % Self::MAX_FRAMES_IN_FLIGHT);
         Ok(true)
     }
 
@@ -424,7 +425,7 @@ impl VkSwapchain {
                 .allocated_resources
                 .write()
                 .unwrap()
-                .resolve::<VkImage>(&image)
+                .resolve::<VkImage>(image)
                 .inner;
             let view_info = ash::vk::ImageViewCreateInfo {
                 s_type: StructureType::IMAGE_VIEW_CREATE_INFO,

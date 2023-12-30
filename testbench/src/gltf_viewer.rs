@@ -9,7 +9,7 @@ use std::num::NonZeroU32;
 use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App, Console};
 use engine::editor::ui_extension::UiExtension;
-use engine::{egui, Light, LightType, ShadowSetup, Time};
+use engine::{egui, Camera, Light, LightType, ShadowSetup, Time};
 
 use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
@@ -359,11 +359,8 @@ impl App for GLTFViewer {
         _app_state: &AppState,
     ) -> anyhow::Result<()> {
         self.input.update(event);
-        match event {
-            winit::event::Event::WindowEvent { event, .. } => {
-                let _ = self.egui_support.handle_event(event);
-            }
-            _ => {}
+        if let winit::event::Event::WindowEvent { event, .. } = event {
+            let _ = self.egui_support.handle_event(event);
         }
         Ok(())
     }
@@ -393,9 +390,42 @@ impl App for GLTFViewer {
         let context = self.egui_support.create_context();
         let mut early_return = false;
         egui::Window::new("GLTF Viewer").show(&context, |ui| {
-            ui.label("Stats");
-            ui.label(format!("FPS {}", fps));
-            ui.label(format!("Delta time {}", self.time.delta_frame()));
+            ui.group(|ui| {
+                ui.heading("Stats");
+                ui.label(format!("FPS {}", fps));
+                ui.label(format!("Delta time {}", self.time.delta_frame()));
+                ui.label(format!(
+                    "Primitives drawn last frame: {}",
+                    self.scene_renderer.drawcalls_last_frame,
+                ));
+            });
+
+            ui.group(|ui| {
+                ui.heading("Camera");
+                ui.input_floats(
+                    "Camera location",
+                    self.camera.location.coords.as_mut_slice(),
+                );
+                let (rx, ry, rz) = self.camera.rotation.euler_angles();
+                let mut rotation = vec![rx.to_degrees(), ry.to_degrees(), rz.to_degrees()];
+                if ui.input_floats("Camera rotation", &mut rotation) {
+                    let (roll, pitch, yaw) = (rotation[0], rotation[1], rotation[2]);
+                    let rotation = Rotation3::from_euler_angles(
+                        roll.to_radians(),
+                        pitch.to_radians(),
+                        yaw.to_radians(),
+                    );
+                    self.camera.rotation = rotation;
+                }
+
+                if ui.button("Reset camera").clicked() {
+                    self.camera.location = Default::default();
+                    self.camera.rotation = Default::default();
+                }
+
+                ui.checkbox(&mut self.scene_renderer.update_frustum, "Update frustum");
+            });
+
             ui.separator();
 
             ui.slider(

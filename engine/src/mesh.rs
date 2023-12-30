@@ -1,6 +1,6 @@
 use nalgebra::{Vector2, Vector3};
 
-use crate::resource_map::Resource;
+use crate::{math::shape::Shape, resource_map::Resource};
 use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
 
 use crate::utils::to_u8_slice;
@@ -29,6 +29,8 @@ pub struct MeshPrimitive {
     pub uv_component: BufferHandle,
 
     pub index_count: u32,
+
+    pub bounding_shape: Shape,
 }
 
 #[derive(Clone)]
@@ -76,7 +78,7 @@ impl Mesh {
                     },
                     MemoryDomain::DeviceLocal,
                 )?;
-                gpu.write_buffer(&color_component, 0, to_u8_slice(&&create_info.colors))?;
+                gpu.write_buffer(&color_component, 0, to_u8_slice(&create_info.colors))?;
                 let normal_component = gpu.make_buffer(
                     &BufferCreateInfo {
                         label: Some(&(label.clone() + ": Normal buffer")),
@@ -86,7 +88,7 @@ impl Mesh {
                     },
                     MemoryDomain::DeviceLocal,
                 )?;
-                gpu.write_buffer(&normal_component, 0, to_u8_slice(&&create_info.normals))?;
+                gpu.write_buffer(&normal_component, 0, to_u8_slice(&create_info.normals))?;
                 let tangent_component = gpu.make_buffer(
                     &BufferCreateInfo {
                         label: Some(&(label.clone() + ": Tangent buffer")),
@@ -96,7 +98,7 @@ impl Mesh {
                     },
                     MemoryDomain::DeviceLocal,
                 )?;
-                gpu.write_buffer(&tangent_component, 0, to_u8_slice(&&create_info.tangents))?;
+                gpu.write_buffer(&tangent_component, 0, to_u8_slice(&create_info.tangents))?;
                 let uv_component = gpu.make_buffer(
                     &BufferCreateInfo {
                         label: Some(&(label + ": TexCoord[0] buffer")),
@@ -106,6 +108,12 @@ impl Mesh {
                     MemoryDomain::DeviceLocal,
                 )?;
                 gpu.write_buffer(&uv_component, 0, to_u8_slice(&create_info.uvs))?;
+                let bounding_radius = create_info
+                    .positions
+                    .iter()
+                    .max_by(|point_a, point_b| point_a.magnitude().total_cmp(&point_b.magnitude()))
+                    .map(|v| v.magnitude())
+                    .unwrap_or_default();
                 Ok(MeshPrimitive {
                     index_buffer,
                     position_component,
@@ -114,6 +122,10 @@ impl Mesh {
                     tangent_component,
                     uv_component,
                     index_count: create_info.indices.len() as _,
+                    bounding_shape: Shape::Sphere {
+                        radius: bounding_radius,
+                        origin: Default::default(),
+                    },
                 })
             })
             .collect();

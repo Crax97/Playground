@@ -5,10 +5,10 @@ use engine::input::{key::Key, InputState};
 
 pub struct FpsCamera {
     pub location: Point3<f32>,
+    pub rotation: Rotation3<f32>,
     pub speed: f32,
     pub rotation_speed: f32,
 
-    rotation: Rotation3<f32>,
     roll: f32,
     pitch: f32,
 }

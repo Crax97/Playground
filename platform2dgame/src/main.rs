@@ -108,7 +108,7 @@ fn collision_checking(
         true,
         QueryFilter::new()
             .exclude_solids()
-            .exclude_collider(player_collider.as_ref().clone()),
+            .exclude_collider(*player_collider.as_ref()),
     ) {
         if let Some((entity, star_collider)) = stars.iter().find(|(_e, c)| **c == collider) {
             commands.entity(*entity).despawn();
