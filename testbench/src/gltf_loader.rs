@@ -273,6 +273,7 @@ impl GltfLoader {
                 ],
                 material_parameters: params,
                 parameter_shader_visibility: ShaderStage::FRAGMENT,
+                cull_mode: gpu::CullMode::Back,
             },
         )?;
 

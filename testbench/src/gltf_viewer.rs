@@ -296,12 +296,12 @@ impl App for GLTFViewer {
                 fragment_module: skybox_fragment,
                 vertex_module,
                 parameter_shader_visibility: ShaderStage::ALL_GRAPHICS,
+                cull_mode: gpu::CullMode::None,
             },
         )?;
         let skybox_master = resource_map.add(skybox_material);
 
-        let mut skybox_textures = vec![];
-        skybox_textures.push(david_texture);
+        let skybox_textures = vec![david_texture];
 
         let skybox_instance = MaterialInstance::create_instance(
             skybox_master,
@@ -417,6 +417,9 @@ impl App for GLTFViewer {
                     );
                     self.camera.rotation = rotation;
                 }
+
+                ui.input_float("Camera speed", &mut self.camera.speed);
+                ui.input_float("Camera rotation speed", &mut self.camera.rotation_speed);
 
                 if ui.button("Reset camera").clicked() {
                     self.camera.location = Default::default();

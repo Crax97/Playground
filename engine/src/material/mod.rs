@@ -3,7 +3,7 @@ mod material_instance;
 
 use std::collections::HashMap;
 
-use gpu::{ImageFormat, ShaderModuleHandle, ShaderStage};
+use gpu::{CullMode, ImageFormat, ShaderModuleHandle, ShaderStage};
 pub use material_instance::*;
 
 pub use master_material::*;
@@ -43,4 +43,5 @@ pub struct MaterialDescription<'a> {
     pub parameter_shader_visibility: ShaderStage,
     pub fragment_module: ShaderModuleHandle,
     pub vertex_module: ShaderModuleHandle,
+    pub cull_mode: CullMode,
 }

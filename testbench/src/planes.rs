@@ -146,6 +146,7 @@ impl App for PlanesApp {
                 }],
                 material_parameters: Default::default(),
                 parameter_shader_visibility: ShaderStage::FRAGMENT,
+                cull_mode: gpu::CullMode::Back,
             },
         )?;
 

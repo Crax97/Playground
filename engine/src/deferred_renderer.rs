@@ -498,6 +498,9 @@ impl DeferredRenderingPipeline {
 
                 for draw_call in material_draw_calls.iter() {
                     let material = &draw_call.material;
+
+                    render_pass.set_cull_mode(master.cull_mode);
+                    render_pass.set_front_face(master.front_face);
                     draw_mesh_primitive(
                         gpu,
                         render_pass,
@@ -535,9 +538,7 @@ impl DeferredRenderingPipeline {
         for primitive in scene.primitives.iter() {
             let mesh = resource_map.get(&primitive.mesh);
             for (idx, mesh_prim) in mesh.primitives.iter().enumerate() {
-                let shape = mesh_prim
-                    .bounding_shape
-                    .translated(primitive.transform.column(3).xyz());
+                let shape = mesh_prim.bounding_shape.transformed(primitive.transform);
                 if !frustum.contains_shape(&shape) {
                     continue;
                 }
@@ -1562,9 +1563,6 @@ fn draw_mesh_primitive(
             location: master.texture_inputs.len() as u32,
         });
     }
-
-    render_pass.set_cull_mode(master.cull_mode);
-    render_pass.set_front_face(master.front_face);
 
     render_pass.set_vertex_buffers(&[
         VertexBindingInfo {
