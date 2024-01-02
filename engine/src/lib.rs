@@ -1,3 +1,4 @@
+pub const SMALL_NUMBER: f32 = 0.005;
 pub mod app;
 pub mod components;
 pub mod deferred_renderer;

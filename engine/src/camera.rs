@@ -1,7 +1,7 @@
 use bevy_ecs::system::Resource;
-use nalgebra::{point, vector, Matrix4, Point3, Vector3};
+use nalgebra::{vector, Matrix4, Point3, Vector3};
 
-use crate::math::{plane::Plane, shape::Shape};
+use crate::math::{plane::Plane, shape::BoundingShape};
 
 #[derive(Clone, Copy, Debug)]
 pub enum FrustumTestResult {
@@ -17,11 +17,10 @@ pub struct Frustum {
     pub(crate) left: Plane,
     pub(crate) far: Plane,
     pub(crate) near: Plane,
-    pub(crate) view_projection_matrix: Matrix4<f32>,
 }
 
 impl Frustum {
-    pub fn contains_shape(&self, shape: &Shape) -> bool {
+    pub fn contains_shape(&self, shape: &BoundingShape) -> bool {
         self.top.is_shape_behind_plane(shape)
             && self.bottom.is_shape_behind_plane(shape)
             && self.left.is_shape_behind_plane(shape)
@@ -124,8 +123,6 @@ impl Camera {
             top: Plane::from_slice(top.as_slice()),
             near: Plane::from_slice(near.as_slice()),
             far: Plane::from_slice(far.as_slice()),
-
-            view_projection_matrix,
         }
     }
 }

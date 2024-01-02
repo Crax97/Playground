@@ -1,12 +1,12 @@
 use nalgebra::{vector, Point3, UnitVector3, Vector3};
 
-use super::shape::Shape;
+use super::shape::BoundingShape;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ClassificationResult {
-    Inside,
-    OnFrustum,
-    Outside,
+pub enum PlaneShapeClassificationResult {
+    OnPlane,
+    Behind,
+    InFront,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -79,24 +79,41 @@ impl Plane {
         self.normal().dot(&p_vec) + self.d
     }
 
-    pub fn classify_shape(&self, shape: &Shape) -> ClassificationResult {
+    pub fn classify_shape(&self, shape: &BoundingShape) -> PlaneShapeClassificationResult {
         match shape {
-            Shape::Sphere { radius, origin } => {
+            BoundingShape::Sphere { radius, origin } => {
                 let distance = self.signed_distance_to_point(origin);
                 let signed_distance = distance - *radius;
                 if signed_distance > 0.0 {
-                    ClassificationResult::Outside
+                    PlaneShapeClassificationResult::InFront
                 } else if signed_distance < 0.0 {
-                    ClassificationResult::Inside
+                    PlaneShapeClassificationResult::Behind
                 } else {
-                    ClassificationResult::OnFrustum
+                    PlaneShapeClassificationResult::OnPlane
+                }
+            }
+            BoundingShape::BoundingBox { min, max } => {
+                // Stole this algorithm  https://gdbooks.gitbooks.io/3dcollisions/content/Chapter2/static_aabb_plane.html
+                let center = (max + min.to_homogeneous().xyz()) * 0.5;
+                let extents = max - center;
+                let r =
+                    extents.x * self.a.abs() + extents.y * self.b.abs() + extents.z * self.c.abs();
+                let signed_distance = self.signed_distance_to_point(&center) - r;
+
+                if signed_distance > 0.0 {
+                    PlaneShapeClassificationResult::InFront
+                } else if signed_distance < 0.0 {
+                    PlaneShapeClassificationResult::Behind
+                } else {
+                    PlaneShapeClassificationResult::OnPlane
                 }
             }
         }
     }
 
-    pub fn is_shape_behind_plane(&self, shape: &Shape) -> bool {
-        self.classify_shape(shape) != ClassificationResult::Outside
+    pub fn is_shape_behind_plane(&self, shape: &BoundingShape) -> bool {
+        let classify = self.classify_shape(shape);
+        classify != PlaneShapeClassificationResult::InFront
     }
 }
 

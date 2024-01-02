@@ -1,6 +1,6 @@
-use nalgebra::{Vector2, Vector3};
+use nalgebra::{point, Vector2, Vector3};
 
-use crate::{math::shape::Shape, resource_map::Resource};
+use crate::{math::shape::BoundingShape, resource_map::Resource};
 use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
 
 use crate::utils::to_u8_slice;
@@ -30,7 +30,7 @@ pub struct MeshPrimitive {
 
     pub index_count: u32,
 
-    pub bounding_shape: Shape,
+    pub bounding_shape: BoundingShape,
 }
 
 #[derive(Clone)]
@@ -108,12 +108,6 @@ impl Mesh {
                     MemoryDomain::DeviceLocal,
                 )?;
                 gpu.write_buffer(&uv_component, 0, to_u8_slice(&create_info.uvs))?;
-                let bounding_radius = create_info
-                    .positions
-                    .iter()
-                    .max_by(|point_a, point_b| point_a.magnitude().total_cmp(&point_b.magnitude()))
-                    .map(|v| v.magnitude())
-                    .unwrap_or_default();
                 Ok(MeshPrimitive {
                     index_buffer,
                     position_component,
@@ -122,10 +116,9 @@ impl Mesh {
                     tangent_component,
                     uv_component,
                     index_count: create_info.indices.len() as _,
-                    bounding_shape: Shape::Sphere {
-                        radius: bounding_radius,
-                        origin: Default::default(),
-                    },
+                    bounding_shape: BoundingShape::bounding_box_from_points(
+                        create_info.positions.iter().map(|v| point![v.x, v.y, v.z]),
+                    ),
                 })
             })
             .collect();

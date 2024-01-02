@@ -2765,7 +2765,7 @@ impl Gpu for VkGpu {
                 .expect("Tried to read from a buffer without a persistent ptr!")
                 .as_ptr::<u8>()
                 .add(offset as _)
-        } as *mut u8;
+        };
         let slice = unsafe { std::slice::from_raw_parts_mut(address, size) };
 
         Ok(slice.to_vec())
@@ -2808,7 +2808,7 @@ impl Gpu for VkGpu {
         };
 
         if let Some(data) = data {
-            assert!(data.len() > 0);
+            assert!(!data.is_empty());
             if info.format == ImageFormat::Rgb8 && !self.state.features.supports_rgb_images {
                 let mut rgba_data = vec![];
                 let rgba_size = info.width * info.height * 4;

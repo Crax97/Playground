@@ -9,7 +9,7 @@ use std::num::NonZeroU32;
 use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App, Console};
 use engine::editor::ui_extension::UiExtension;
-use engine::{egui, Camera, Light, LightType, ShadowSetup, Time};
+use engine::{egui, Light, LightType, ShadowSetup, Time};
 
 use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
