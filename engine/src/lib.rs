@@ -15,6 +15,7 @@ mod camera;
 mod cvar_manager;
 mod material;
 mod mesh;
+mod render_scene;
 mod scene;
 mod texture;
 mod time;

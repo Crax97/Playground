@@ -216,6 +216,12 @@ impl PhysicsContext2D {
     }
 }
 
+impl Default for PhysicsContext2D {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn update_physics_2d_context(mut context: ResMut<PhysicsContext2D>) {
     context.update();
 }

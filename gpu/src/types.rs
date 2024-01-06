@@ -746,7 +746,7 @@ impl VkBuffer {
                 .expect("Tried to write to a buffer without a persistent ptr!")
                 .as_ptr::<I>()
                 .add(offset as _)
-        } as *mut I;
+        };
         let address = unsafe { std::slice::from_raw_parts_mut(address, data.len()) };
 
         address.copy_from_slice(data);
@@ -767,7 +767,7 @@ impl VkBuffer {
                 .expect("Tried to write to a buffer without a persistent ptr!")
                 .as_ptr::<T>()
                 .add(offset as _)
-        } as *mut T;
+        };
         let address = unsafe { std::slice::from_raw_parts_mut(address, data_length) };
 
         address[0]
