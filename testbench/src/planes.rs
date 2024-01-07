@@ -6,6 +6,7 @@ use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App};
 
 use engine::loaders::FileSystemTextureLoader;
+use engine::math::shape::BoundingShape;
 use engine::{
     Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, MaterialDescription,
     MaterialDomain, MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo,
@@ -150,8 +151,7 @@ impl App for PlanesApp {
             },
         )?;
 
-        let mut texture_inputs = Vec::new();
-        texture_inputs.push(texture);
+        let texture_inputs = vec![texture];
         let material = resource_map.add(master);
         let mat_instance = MaterialInstance::create_instance(
             material,
@@ -168,20 +168,27 @@ impl App for PlanesApp {
 
         let mut scene = Scene::new();
 
+        let bounds = BoundingShape::BoundingBox {
+            min: point![-1.0, -1.0, 0.0],
+            max: point![1.0, 1.0, 1.0],
+        };
         scene.add(ScenePrimitive {
             mesh: mesh.clone(),
             materials: vec![mat_instance.clone()],
             transform: Matrix4::identity(),
+            bounds,
         });
         scene.add(ScenePrimitive {
             mesh: mesh.clone(),
             materials: vec![mat_instance.clone()],
             transform: Matrix4::new_translation(&vector![0.0, 0.0, 1.0]),
+            bounds,
         });
         scene.add(ScenePrimitive {
             mesh,
             materials: vec![mat_instance.clone()],
             transform: Matrix4::new_translation(&vector![0.0, 0.0, -1.0]),
+            bounds,
         });
 
         scene.add(ScenePrimitive {
@@ -189,6 +196,7 @@ impl App for PlanesApp {
             materials: vec![mat_instance.clone()],
             transform: Matrix4::new_scaling(1.0)
                 * Matrix4::new_translation(&vector![1.5, 0.0, 0.0]),
+            bounds,
         });
 
         scene.add(ScenePrimitive {
@@ -196,6 +204,8 @@ impl App for PlanesApp {
             materials: vec![mat_instance],
             transform: Matrix4::new_translation(&vector![-1.5, 0.0, 0.0])
                 * Matrix4::new_scaling(-1.0),
+
+            bounds,
         });
 
         Ok(Self {

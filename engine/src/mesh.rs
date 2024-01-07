@@ -122,8 +122,7 @@ impl Mesh {
                 })
             })
             .collect();
-        let mut generated_primitives = vec![];
-        generated_primitives.reserve(primitives.len());
+        let mut generated_primitives = Vec::with_capacity(primitives.len());
         for prim in primitives {
             match prim {
                 Ok(prim) => generated_primitives.push(prim),

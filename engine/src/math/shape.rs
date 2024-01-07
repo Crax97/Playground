@@ -56,4 +56,14 @@ impl BoundingShape {
 
         BoundingShape::BoundingBox { min, max }
     }
+
+    pub fn box_extremes(&self) -> (Point3<f32>, Point3<f32>) {
+        match self {
+            BoundingShape::Sphere { radius, origin } => (
+                point![-radius + origin.x, -radius + origin.y, -radius + origin.z],
+                point![*radius + origin.x, *radius + origin.y, *radius + origin.z],
+            ),
+            BoundingShape::BoundingBox { min, max } => (*min, *max),
+        }
+    }
 }

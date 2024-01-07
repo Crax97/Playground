@@ -1,6 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
 use crate::app::app_state::app_state;
+use crate::math::shape::BoundingShape;
 use crate::{
     bevy_ecs_app::CommonResources, resource_map::ResourceHandle, LightType, Scene, ShadowSetup,
     Texture,
@@ -16,7 +17,7 @@ use bevy_reflect::Reflect;
 use bytemuck::{Pod, Zeroable};
 use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
 use nalgebra::{
-    vector, Matrix4, Point2, Point3, UnitQuaternion, UnitVector3, Vector2, Vector3, Vector4,
+    point, vector, Matrix4, Point2, Point3, UnitQuaternion, UnitVector3, Vector2, Vector3, Vector4,
 };
 use winit::window::Window;
 
@@ -105,6 +106,12 @@ impl Transform2D {
 pub struct MeshComponent {
     pub mesh: ResourceHandle<Mesh>,
     pub materials: Vec<MaterialInstance>,
+    pub bounding_shape: BoundingShape,
+}
+impl MeshComponent {
+    fn bounds(&self) -> BoundingShape {
+        self.bounding_shape
+    }
 }
 
 #[repr(C)]
@@ -223,10 +230,12 @@ pub fn rendering_system(
         scene.set_skybox_texture(setup.skybox_texture.clone());
     }
     for (mesh_component, transform) in meshes.iter() {
+        let bounds = mesh_component.bounds().transformed(transform.matrix());
         scene.add(crate::ScenePrimitive {
             mesh: mesh_component.mesh.clone(),
             materials: mesh_component.materials.clone(),
             transform: transform.matrix(),
+            bounds,
         });
     }
     for (light, transform) in lights.iter() {
@@ -272,10 +281,24 @@ pub fn rendering_system_2d(
             rotation: transform.rotation,
             scale: correct_scale,
         };
+        let bounds = BoundingShape::BoundingBox {
+            min: point![
+                -sprite_component.sprite_size.x,
+                -sprite_component.sprite_size.y,
+                0.0
+            ],
+            max: point![
+                sprite_component.sprite_size.x,
+                sprite_component.sprite_size.y,
+                0.0
+            ],
+        };
+        let bounds = bounds.transformed(transform.matrix());
         scene.add(crate::ScenePrimitive {
             mesh: common_resources.quad_mesh.clone(),
             materials: vec![material_instance],
             transform: transform.matrix(),
+            bounds,
         });
     }
 

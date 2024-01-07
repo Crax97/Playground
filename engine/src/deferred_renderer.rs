@@ -535,13 +535,11 @@ impl DeferredRenderingPipeline {
         let mut drawcalls = 0;
         let mut draw_hashmap: HashMap<&MasterMaterial, Vec<DrawCall>> = HashMap::new();
 
-        for primitive in scene.primitives.iter() {
+        let frustum_intersections = scene.intersect_frustum(frustum);
+
+        for primitive in frustum_intersections {
             let mesh = resource_map.get(&primitive.mesh);
             for (idx, mesh_prim) in mesh.primitives.iter().enumerate() {
-                let shape = mesh_prim.bounding_shape.transformed(primitive.transform);
-                if !frustum.contains_shape(&shape) {
-                    continue;
-                }
                 let material = primitive.materials[idx].clone();
                 let master = resource_map.get(&material.owner);
                 draw_hashmap.entry(master).or_default().push(DrawCall {

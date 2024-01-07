@@ -1,4 +1,5 @@
 use crate::utils;
+use engine::math::shape::BoundingShape;
 use engine::resource_map::{ResourceHandle, ResourceMap};
 use engine::{
     LightType, MasterMaterial, MaterialDescription, MaterialDomain, MaterialInstance,
@@ -13,7 +14,7 @@ use gpu::{
     ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, ImageViewType,
     MemoryDomain, SamplerAddressMode, ShaderStage,
 };
-use nalgebra::{vector, Matrix4, Point3, Quaternion, UnitQuaternion, Vector3, Vector4};
+use nalgebra::{point, vector, Matrix4, Point3, Quaternion, UnitQuaternion, Vector3, Vector4};
 use std::collections::HashMap;
 use std::mem::size_of;
 use std::num::NonZeroU32;
@@ -31,8 +32,15 @@ pub struct GltfLoader {
     engine_scene: Scene,
 }
 
-pub struct GltfLoadOptions {}
+pub struct GltfLoadOptions {
+    pub use_bvh: bool,
+}
 
+impl Default for GltfLoadOptions {
+    fn default() -> Self {
+        Self { use_bvh: true }
+    }
+}
 struct LoadedTextures {
     white: ResourceHandle<Texture>,
     black: ResourceHandle<Texture>,
@@ -45,7 +53,7 @@ impl GltfLoader {
         gpu: &dyn Gpu,
         scene_renderer: &mut R,
         resource_map: &mut ResourceMap,
-        _options: GltfLoadOptions,
+        options: GltfLoadOptions,
     ) -> anyhow::Result<Self> {
         let (document, buffers, mut images) = gltf::import(path)?;
 
@@ -57,7 +65,8 @@ impl GltfLoader {
         let allocated_materials = Self::load_materials(gpu, pbr_master, textures, &document)?;
         let meshes = Self::load_meshes(gpu, resource_map, &document, &buffers)?;
 
-        let engine_scene = Self::build_engine_scene(document, allocated_materials, meshes);
+        let mut engine_scene = Self::build_engine_scene(document, allocated_materials, meshes);
+        engine_scene.use_bvh = options.use_bvh;
 
         Ok(Self { engine_scene })
     }
@@ -65,7 +74,7 @@ impl GltfLoader {
     fn build_engine_scene(
         document: Document,
         allocated_materials: Vec<MaterialInstance>,
-        meshes: Vec<ResourceHandle<Mesh>>,
+        meshes: Vec<(ResourceHandle<Mesh>, Point3<f32>, Point3<f32>)>,
     ) -> Scene {
         let mut engine_scene = Scene::new();
         for scene in document.scenes() {
@@ -126,10 +135,15 @@ impl GltfLoader {
                         let material = allocated_materials[material_index].clone();
                         materials.push(material);
                     }
+
+                    let (mesh, min, max) = meshes[mesh.index()].clone();
+                    // TODO: consider the bounding volumes of all mesh primitives when constructing the scene primitive
+                    let bounds = BoundingShape::BoundingBox { min, max }.transformed(transform);
                     engine_scene.add(ScenePrimitive {
-                        mesh: meshes[mesh.index()].clone(),
+                        mesh,
                         materials,
                         transform,
+                        bounds,
                     });
                 }
             }
@@ -142,9 +156,11 @@ impl GltfLoader {
         resource_map: &mut ResourceMap,
         document: &Document,
         buffers: &[gltf::buffer::Data],
-    ) -> anyhow::Result<Vec<ResourceHandle<Mesh>>> {
+    ) -> anyhow::Result<Vec<(ResourceHandle<Mesh>, Point3<f32>, Point3<f32>)>> {
         let mut meshes = vec![];
         for mesh in document.meshes() {
+            let mut min = point![0.0f32, 0.0, 0.0];
+            let mut max = point![0.0f32, 0.0, 0.0];
             let mut primitive_create_infos = vec![];
 
             for prim in mesh.primitives() {
@@ -163,6 +179,12 @@ impl GltfLoader {
                 if let Some(iter) = reader.read_positions() {
                     for vert in iter {
                         positions.push(vector![vert[0], vert[1], vert[2]]);
+                        min.x = min.x.min(vert[0]);
+                        min.y = min.y.min(vert[1]);
+                        min.z = min.z.min(vert[2]);
+                        max.x = max.x.max(vert[0]);
+                        max.y = max.y.max(vert[1]);
+                        max.z = max.z.max(vert[2]);
                     }
                 }
                 if let Some(iter) = reader.read_colors(0) {
@@ -201,7 +223,7 @@ impl GltfLoader {
                 primitives: &primitive_create_infos,
             };
             let gpu_mesh = Mesh::new(gpu, &create_info)?;
-            meshes.push(resource_map.add(gpu_mesh));
+            meshes.push((resource_map.add(gpu_mesh), min, max));
         }
         Ok(meshes)
     }
@@ -466,12 +488,13 @@ impl GltfLoader {
                 white.clone()
             };
 
-            let mut textures = vec![];
-            textures.push(base_texture.clone());
-            textures.push(normal_texture.clone());
-            textures.push(occlusion_texture.clone());
-            textures.push(emissive_texture.clone());
-            textures.push(metallic_roughness.clone());
+            let textures = vec![
+                base_texture.clone(),
+                normal_texture.clone(),
+                occlusion_texture.clone(),
+                emissive_texture.clone(),
+                metallic_roughness.clone(),
+            ];
 
             let material_instance = MaterialInstance::create_instance(
                 pbr_master.clone(),

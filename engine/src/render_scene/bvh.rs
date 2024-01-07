@@ -1,4 +1,6 @@
-use nalgebra::{vector, Vector3};
+use nalgebra::{point, Point3};
+
+use crate::{math::shape::BoundingShape, Frustum};
 
 enum BvhNodeKind<T, const N: usize> {
     Leaf(T),
@@ -19,13 +21,13 @@ impl<T: std::fmt::Debug, const N: usize> std::fmt::Debug for BvhNodeKind<T, N> {
 pub struct BvhNode<T, const N: usize> {
     generation: usize,
     parent: Option<BvhNodeId>,
-    aabb_min: Vector3<f32>,
-    aabb_max: Vector3<f32>,
+    aabb_min: Point3<f32>,
+    aabb_max: Point3<f32>,
     kind: BvhNodeKind<T, N>,
 }
 
 impl<T, const N: usize> BvhNode<T, N> {
-    fn contains_bounds(&self, aabb_min: Vector3<f32>, aabb_max: Vector3<f32>) -> bool {
+    fn contains_bounds(&self, aabb_min: Point3<f32>, aabb_max: Point3<f32>) -> bool {
         self.aabb_min.x <= aabb_min.x
             && self.aabb_max.x >= aabb_max.x
             && self.aabb_min.y <= aabb_min.y
@@ -35,16 +37,16 @@ impl<T, const N: usize> BvhNode<T, N> {
     }
     fn extend_bounds(
         &self,
-        aabb_min: Vector3<f32>,
-        aabb_max: Vector3<f32>,
-    ) -> (Vector3<f32>, Vector3<f32>) {
+        aabb_min: Point3<f32>,
+        aabb_max: Point3<f32>,
+    ) -> (Point3<f32>, Point3<f32>) {
         (
-            vector![
+            point![
                 aabb_min.x.min(self.aabb_min.x),
                 aabb_min.y.min(self.aabb_min.y),
                 aabb_min.z.min(self.aabb_min.z),
             ],
-            vector![
+            point![
                 aabb_max.x.max(self.aabb_max.x),
                 aabb_max.y.max(self.aabb_max.y),
                 aabb_max.z.max(self.aabb_max.z),
@@ -107,7 +109,7 @@ impl<const N: usize, T> Bvh<N, T> {
         }
     }
 
-    pub fn add(&mut self, payload: T, aabb_min: Vector3<f32>, aabb_max: Vector3<f32>) -> BvhNodeId {
+    pub fn add(&mut self, payload: T, aabb_min: Point3<f32>, aabb_max: Point3<f32>) -> BvhNodeId {
         let node = BvhNode {
             parent: None,
             aabb_max,
@@ -168,8 +170,8 @@ impl<const N: usize, T> Bvh<N, T> {
 
     fn add_subtree(
         &mut self,
-        aabb_min: Vector3<f32>,
-        aabb_max: Vector3<f32>,
+        aabb_min: Point3<f32>,
+        aabb_max: Point3<f32>,
         new_node_idx: BvhNodeId,
         root_subtree_idx: BvhNodeId,
     ) {
@@ -246,20 +248,26 @@ impl<const N: usize, T> Bvh<N, T> {
         }
     }
 
-    pub fn visit<F: FnMut(&T)>(&self, mut f: F) {
+    pub fn visit<F: FnMut(&BvhNode<T, N>) -> bool, A: FnMut(&T)>(
+        &self,
+        mut filter: F,
+        mut apply: A,
+    ) {
         if self.nodes.is_empty() {
             return;
         }
         let mut visit_queue = vec![self.root_node_idx.unwrap()];
         while let Some(node) = visit_queue.pop() {
             let node = self.get_node(node);
-            match node.kind {
-                BvhNodeKind::Leaf(ref payload) => {
-                    f(payload);
-                }
-                BvhNodeKind::Inner { children } => {
-                    for child in children.into_iter().flatten() {
-                        visit_queue.push(child);
+            if filter(node) {
+                match node.kind {
+                    BvhNodeKind::Leaf(ref payload) => {
+                        apply(payload);
+                    }
+                    BvhNodeKind::Inner { children } => {
+                        for child in children.into_iter().flatten() {
+                            visit_queue.push(child);
+                        }
                     }
                 }
             }
@@ -267,7 +275,47 @@ impl<const N: usize, T> Bvh<N, T> {
     }
 }
 
+impl<const N: usize, T: Clone> Bvh<N, T> {
+    pub fn intersect_frustum_cloned(&self, frustum: &Frustum) -> Vec<T> {
+        if self.root_node_idx.is_none() {
+            return vec![];
+        }
+
+        let mut hits = vec![];
+        self.visit(
+            |node| {
+                let shape_bounds = BoundingShape::BoundingBox {
+                    min: node.aabb_min,
+                    max: node.aabb_max,
+                };
+                frustum.contains_shape(&shape_bounds)
+            },
+            |hit| hits.push(hit.clone()),
+        );
+        hits
+    }
+}
+
 impl<const N: usize, T: Copy> Bvh<N, T> {
+    pub fn intersect_frustum_copy(&self, frustum: &Frustum) -> Vec<T> {
+        if self.root_node_idx.is_none() {
+            return vec![];
+        }
+
+        let mut hits = vec![];
+        self.visit(
+            |node| {
+                let shape_bounds = BoundingShape::BoundingBox {
+                    min: node.aabb_min,
+                    max: node.aabb_max,
+                };
+                frustum.contains_shape(&shape_bounds)
+            },
+            |hit| hits.push(*hit),
+        );
+
+        hits
+    }
     pub fn remove(&mut self, node_id: BvhNodeId) -> T {
         let node_parent = self.get_node_mut(node_id).parent;
 
@@ -305,12 +353,12 @@ impl<const N: usize, T: Copy> Bvh<N, T> {
 }
 #[cfg(test)]
 mod tests {
-    use nalgebra::{vector, Vector3};
+    use nalgebra::{point, Point3};
 
     use super::{Bvh, BvhNodeId, BvhNodeKind};
 
-    fn random_vec3() -> Vector3<f32> {
-        vector![rand::random(), rand::random(), rand::random()]
+    fn random_point3() -> Point3<f32> {
+        point![rand::random(), rand::random(), rand::random()]
     }
 
     fn ensure_bvh_is_valid<T: Default + std::fmt::Debug, const N: usize>(
@@ -376,11 +424,11 @@ mod tests {
 
             for _ in 0..n {
                 let payload = inc();
-                let node_id = bvh.add(payload, random_vec3(), random_vec3());
+                let node_id = bvh.add(payload, random_point3(), random_point3());
                 node_ids.push((node_id, payload));
             }
             let payload = inc();
-            let node_id = bvh.add(payload, random_vec3(), random_vec3());
+            let node_id = bvh.add(payload, random_point3(), random_point3());
             node_ids.push((node_id, payload));
 
             const MAX_ITER: usize = 1000000;
@@ -388,9 +436,12 @@ mod tests {
             ensure_bvh_is_valid(&bvh, None, bvh.root_node_idx.unwrap(), 0, MAX_ITER);
 
             let mut leaves = 0;
-            bvh.visit(|_| {
-                leaves += 1;
-            });
+            bvh.visit(
+                |_| true,
+                |_| {
+                    leaves += 1;
+                },
+            );
             assert_eq!(node_ids.len(), leaves, "Addition is broken");
 
             for _ in 0..(rand::random::<usize>() % n) {
@@ -404,9 +455,12 @@ mod tests {
             if let Some(root_node) = bvh.root_node_idx {
                 ensure_bvh_is_valid(&bvh, None, root_node, 0, MAX_ITER);
                 let mut leaves = 0;
-                bvh.visit(|_| {
-                    leaves += 1;
-                });
+                bvh.visit(
+                    |_| true,
+                    |_| {
+                        leaves += 1;
+                    },
+                );
                 assert_eq!(node_ids.len(), leaves, "Removal is broken");
             } else {
                 println!("Test {test_id}): bvh was emptied, {bvh:?}");

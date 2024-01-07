@@ -39,6 +39,9 @@ use clap::Parser;
 pub struct GltfViewerArgs {
     #[arg(value_name = "FILE")]
     gltf_file: String,
+
+    #[arg(long, default_value_t = false)]
+    no_use_bvh: bool,
 }
 
 #[repr(C)]
@@ -317,7 +320,9 @@ impl App for GLTFViewer {
             app_state.gpu(),
             &mut scene_renderer,
             &mut resource_map,
-            GltfLoadOptions {},
+            GltfLoadOptions {
+                use_bvh: !args.no_use_bvh,
+            },
         )?;
 
         gltf_loader
@@ -420,6 +425,11 @@ impl App for GLTFViewer {
 
                 ui.input_float("Camera speed", &mut self.camera.speed);
                 ui.input_float("Camera rotation speed", &mut self.camera.rotation_speed);
+
+                ui.checkbox(
+                    &mut self.gltf_loader.scene_mut().use_bvh,
+                    "Use BVH for frustum culling",
+                );
 
                 if ui.button("Reset camera").clicked() {
                     self.camera.location = Default::default();

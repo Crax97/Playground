@@ -1,6 +1,8 @@
 use crate::{
+    math::shape::BoundingShape,
+    render_scene::{BinaryBvh, Bvh},
     resource_map::{ResourceHandle, ResourceMap},
-    CvarManager,
+    CvarManager, Frustum,
 };
 use bevy_ecs::system::Resource;
 use gpu::{Extent2D, Gpu, ImageFormat, ImageHandle, ImageViewHandle};
@@ -21,6 +23,7 @@ pub struct ScenePrimitive {
     pub mesh: ResourceHandle<Mesh>,
     pub materials: Vec<MaterialInstance>,
     pub transform: Matrix4<f32>,
+    pub bounds: BoundingShape,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -177,6 +180,8 @@ pub struct LightHandle(pub usize);
 
 #[derive(Resource, Default)]
 pub struct Scene {
+    pub bvh: BinaryBvh<usize>,
+    pub use_bvh: bool,
     pub primitives: Vec<ScenePrimitive>,
     pub lights: Vec<Light>,
 
@@ -202,6 +207,8 @@ impl Scene {
 impl Scene {
     pub fn new() -> Self {
         Self {
+            bvh: Bvh::new(),
+            use_bvh: true,
             primitives: vec![],
             lights: vec![],
             current_lights_iteration: 0,
@@ -212,7 +219,22 @@ impl Scene {
     }
 
     pub fn add(&mut self, primitive: ScenePrimitive) {
+        let prim_index = self.primitives.len();
+        let (aabb_min, aabb_max) = primitive.bounds.box_extremes();
         self.primitives.push(primitive);
+        self.bvh.add(prim_index, aabb_min, aabb_max);
+    }
+
+    pub fn intersect_frustum(&self, frustum: &Frustum) -> Vec<&ScenePrimitive> {
+        if self.use_bvh {
+            let indices = self.bvh.intersect_frustum_copy(frustum);
+            indices.iter().map(|id| &self.primitives[*id]).collect()
+        } else {
+            self.primitives
+                .iter()
+                .filter(|prim| frustum.contains_shape(&prim.bounds))
+                .collect()
+        }
     }
 
     pub fn add_light(&mut self, light: Light) -> LightHandle {
