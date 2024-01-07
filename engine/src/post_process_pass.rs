@@ -43,7 +43,7 @@ impl TonemapPass {
         );
         Ok(Self {
             shader_handle: gpu.make_shader_module(&gpu::ShaderModuleCreateInfo {
-                code: &bytemuck::cast_slice(TONEMAP),
+                code: bytemuck::cast_slice(TONEMAP),
             })?,
         })
     }

@@ -153,10 +153,7 @@ impl<R: Resource + 'static> ResourceHandle<R> {
                 map.increment_resource_ref_count::<R>(self.0)
             }
         }
-        Box::new(IncResourceMapOperation::<R>(
-            self.id,
-            PhantomData::default(),
-        ))
+        Box::new(IncResourceMapOperation::<R>(self.id, PhantomData))
     }
     fn dec_ref_count_operation(&self) -> Box<dyn ResourceMapOperation> {
         struct DecResourceMapOperation<R: Resource>(ResourceId, PhantomData<R>);
@@ -166,10 +163,7 @@ impl<R: Resource + 'static> ResourceHandle<R> {
                 map.decrement_resource_ref_count::<R>(self.0)
             }
         }
-        Box::new(DecResourceMapOperation::<R>(
-            self.id,
-            PhantomData::default(),
-        ))
+        Box::new(DecResourceMapOperation::<R>(self.id, PhantomData))
     }
 }
 
@@ -225,11 +219,12 @@ impl ResourceMap {
             .resource_loaders
             .insert(TypeId::of::<L::LoadedResource>(), Box::new(loader));
 
-        match old {
-            Some(old) => {
-                panic!("A resource loader for resource type {:?} has already been installed of type {:?}", TypeId::of::<L::LoadedResource>(), old.type_id())
-            }
-            _ => {}
+        if let Some(old) = old {
+            panic!(
+                "A resource loader for resource type {:?} has already been installed of type {:?}",
+                TypeId::of::<L::LoadedResource>(),
+                old.type_id()
+            )
         }
     }
 

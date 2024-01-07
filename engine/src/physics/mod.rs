@@ -142,21 +142,15 @@ impl PhysicsContext2D {
         collider_a: &Collider2DHandle,
         collider_b: &Collider2DHandle,
     ) -> bool {
-        match self
+        if let Some(true) = self
             .narrow_phase
             .intersection_pair(collider_a.0, collider_b.0)
         {
-            Some(true) => {
-                return true;
-            }
-            _ => {}
+            return true;
         }
 
-        match self.narrow_phase.contact_pair(collider_a.0, collider_b.0) {
-            Some(collision) => {
-                return collision.has_any_active_contact;
-            }
-            _ => {}
+        if let Some(collision) = self.narrow_phase.contact_pair(collider_a.0, collider_b.0) {
+            return collision.has_any_active_contact;
         }
 
         false

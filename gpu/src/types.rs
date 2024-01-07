@@ -1412,9 +1412,7 @@ impl ToVk for SemaphoreFlags {
     type Inner = vk::SemaphoreCreateFlags;
 
     fn to_vk(&self) -> Self::Inner {
-        let inner = vk::SemaphoreCreateFlags::default();
-
-        inner
+        vk::SemaphoreCreateFlags::default()
     }
 }
 

@@ -114,7 +114,7 @@ fn main() -> anyhow::Result<()> {
     let output: u32 =
         bytemuck::cast_slice(&gpu.read_buffer(&output_buffer, 0, std::mem::size_of::<u32>())?)[0];
     let buffer_data = gpu.read_buffer(&input_buffer, 0, std::mem::size_of::<[u32; 2]>())?;
-    let inputs: &[u32] = &bytemuck::cast_slice(&buffer_data);
+    let inputs: &[u32] = bytemuck::cast_slice(&buffer_data);
     println!("Output is: {output}, inputs are {inputs:?}");
     Ok(())
 }
