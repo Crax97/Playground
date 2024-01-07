@@ -4,7 +4,7 @@ use engine::resource_map::{ResourceHandle, ResourceMap};
 use engine::{
     LightType, MasterMaterial, MaterialDescription, MaterialDomain, MaterialInstance,
     MaterialInstanceDescription, MaterialParameterOffsetSize, Mesh, MeshCreateInfo,
-    MeshPrimitiveCreateInfo, RenderingPipeline, Scene, ScenePrimitive, Texture, TextureInput,
+    MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline, ScenePrimitive, Texture, TextureInput,
     TextureSamplerSettings,
 };
 use gltf::image::Data;
@@ -29,7 +29,7 @@ pub struct PbrProperties {
 }
 
 pub struct GltfLoader {
-    engine_scene: Scene,
+    engine_scene: RenderScene,
 }
 
 pub struct GltfLoadOptions {
@@ -75,8 +75,8 @@ impl GltfLoader {
         document: Document,
         allocated_materials: Vec<MaterialInstance>,
         meshes: Vec<(ResourceHandle<Mesh>, Point3<f32>, Point3<f32>)>,
-    ) -> Scene {
-        let mut engine_scene = Scene::new();
+    ) -> RenderScene {
+        let mut engine_scene = RenderScene::new();
         for scene in document.scenes() {
             for node in scene.nodes() {
                 let node_transform = node.transform();
@@ -531,11 +531,11 @@ impl GltfLoader {
         Ok(allocated_materials)
     }
 
-    pub fn scene(&self) -> &engine::Scene {
+    pub fn scene(&self) -> &engine::RenderScene {
         &self.engine_scene
     }
 
-    pub fn scene_mut(&mut self) -> &mut engine::Scene {
+    pub fn scene_mut(&mut self) -> &mut engine::RenderScene {
         &mut self.engine_scene
     }
 }

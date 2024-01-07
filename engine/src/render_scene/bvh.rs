@@ -1,6 +1,8 @@
 use nalgebra::{point, Point3};
 
-use crate::{math::shape::BoundingShape, Frustum};
+use crate::math::shape::BoundingShape;
+
+use super::camera::Frustum;
 
 enum BvhNodeKind<T, const N: usize> {
     Leaf(T),

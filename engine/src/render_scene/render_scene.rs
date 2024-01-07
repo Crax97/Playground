@@ -179,7 +179,7 @@ impl Light {
 pub struct LightHandle(pub usize);
 
 #[derive(Resource, Default)]
-pub struct Scene {
+pub struct RenderScene {
     pub bvh: BinaryBvh<usize>,
     pub use_bvh: bool,
     pub primitives: Vec<ScenePrimitive>,
@@ -190,7 +190,7 @@ pub struct Scene {
     current_lights_iteration: u64,
 }
 
-impl Scene {
+impl RenderScene {
     fn increment_light_counter(&mut self) {
         self.current_lights_iteration = self.current_lights_iteration.wrapping_add(1);
     }
@@ -204,7 +204,7 @@ impl Scene {
     }
 }
 
-impl Scene {
+impl RenderScene {
     pub fn new() -> Self {
         Self {
             bvh: Bvh::new(),
@@ -293,7 +293,7 @@ pub trait RenderingPipeline {
         &'a mut self,
         gpu: &dyn Gpu,
         pov: &Camera,
-        scene: &Scene,
+        scene: &RenderScene,
         resource_map: &ResourceMap,
         cvar_manager: &CvarManager,
     ) -> anyhow::Result<ImageViewHandle>;

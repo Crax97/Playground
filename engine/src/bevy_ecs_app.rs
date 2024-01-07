@@ -25,8 +25,9 @@ use crate::{
     input::InputState,
     loaders::FileSystemTextureLoader,
     physics::PhysicsContext2D,
-    utils, Camera, CvarManager, DeferredRenderingPipeline, MasterMaterial, Mesh, MeshCreateInfo,
-    MeshPrimitiveCreateInfo, RenderingPipeline, ResourceHandle, ResourceMap, Scene, Texture,
+    render_scene::camera::Camera,
+    utils, CvarManager, DeferredRenderingPipeline, MasterMaterial, Mesh, MeshCreateInfo,
+    MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline, ResourceHandle, ResourceMap, Texture,
     TextureInput, Time,
 };
 
@@ -516,8 +517,11 @@ impl App for BevyEcsApp {
         app_state: &'a crate::app::app_state::AppState,
         backbuffer: &crate::Backbuffer,
     ) -> anyhow::Result<gpu::CommandBuffer> {
-        let empty_scene = Scene::default();
-        let scene = self.world.get_resource::<Scene>().unwrap_or(&empty_scene);
+        let empty_scene = RenderScene::default();
+        let scene = self
+            .world
+            .get_resource::<RenderScene>()
+            .unwrap_or(&empty_scene);
         let resource_map = self.world.get_resource::<ResourceMap>().unwrap();
         let cvar_manager = self.world.get_resource::<CvarManager>().unwrap();
         let pov = if let Some(pov) = self.world.get_resource::<Camera>() {

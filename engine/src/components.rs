@@ -3,8 +3,8 @@ use std::ops::{Deref, DerefMut};
 use crate::app::app_state::app_state;
 use crate::math::shape::BoundingShape;
 use crate::{
-    bevy_ecs_app::CommonResources, resource_map::ResourceHandle, LightType, Scene, ShadowSetup,
-    Texture,
+    bevy_ecs_app::CommonResources, resource_map::ResourceHandle, LightType, RenderScene,
+    ShadowSetup, Texture,
 };
 use bevy_ecs::reflect::ReflectComponent;
 use bevy_ecs::{
@@ -224,7 +224,7 @@ pub fn rendering_system(
     world: &World,
     mut commands: Commands,
 ) {
-    let mut scene = Scene::new();
+    let mut scene = RenderScene::new();
     if let Some(setup) = world.get_resource::<SceneSetup>() {
         scene.set_skybox_material(setup.skybox_material.clone());
         scene.set_skybox_texture(setup.skybox_texture.clone());
@@ -259,7 +259,7 @@ pub fn rendering_system_2d(
     world: &World,
     mut commands: Commands,
 ) {
-    let mut scene = Scene::new();
+    let mut scene = RenderScene::new();
     if let Some(setup) = world.get_resource::<SceneSetup>() {
         scene.set_skybox_material(setup.skybox_material.clone());
         scene.set_skybox_texture(setup.skybox_texture.clone());

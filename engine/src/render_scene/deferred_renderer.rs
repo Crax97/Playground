@@ -4,11 +4,10 @@ use engine_macros::glsl;
 use std::{collections::HashMap, mem::size_of};
 
 use crate::{
-    camera::Camera,
     material::{MasterMaterial, MasterMaterialDescription},
     post_process_pass::{PostProcessPass, PostProcessResources},
-    CvarManager, Frustum, Light, LightType, MaterialDescription, MaterialInstance, Mesh,
-    MeshPrimitive, PipelineTarget, RenderingPipeline, Scene, Texture, TextureSamplerSettings,
+    Camera, CvarManager, Frustum, Light, LightType, MaterialDescription, MaterialInstance, Mesh,
+    MeshPrimitive, PipelineTarget, RenderScene, RenderingPipeline, Texture, TextureSamplerSettings,
 };
 
 use crate::resource_map::{ResourceHandle, ResourceMap};
@@ -527,7 +526,7 @@ impl DeferredRenderingPipeline {
     fn generate_draw_calls<'r, 's>(
         frustum: &Frustum,
         resource_map: &'r ResourceMap,
-        scene: &'s Scene,
+        scene: &'s RenderScene,
     ) -> (HashMap<&'s MasterMaterial, Vec<DrawCall<'s>>>, u64)
     where
         'r: 's,
@@ -553,7 +552,7 @@ impl DeferredRenderingPipeline {
         (draw_hashmap, drawcalls)
     }
 
-    fn update_lights(&mut self, scene: &Scene) {
+    fn update_lights(&mut self, scene: &RenderScene) {
         self.light_iteration = scene.lights_iteration();
         self.active_lights.clear();
         self.light_povs.clear();
@@ -774,7 +773,7 @@ impl DeferredRenderingPipeline {
         render_size: Extent2D,
         current_buffers: &FrameBuffers,
         pov: &Camera,
-        scene: &Scene,
+        scene: &RenderScene,
     ) -> anyhow::Result<()> {
         let irradiance_map_texture = match &self.irradiance_map {
             Some(texture) => texture,
@@ -1622,7 +1621,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         &'a mut self,
         gpu: &dyn Gpu,
         pov: &Camera,
-        scene: &Scene,
+        scene: &RenderScene,
         resource_map: &ResourceMap,
         cvar_manager: &CvarManager,
     ) -> anyhow::Result<ImageViewHandle> {

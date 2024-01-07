@@ -10,7 +10,7 @@ use engine::math::shape::BoundingShape;
 use engine::{
     Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, MaterialDescription,
     MaterialDomain, MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo,
-    MeshPrimitiveCreateInfo, RenderingPipeline, ResourceMap, Scene, ScenePrimitive, Texture,
+    MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline, ResourceMap, ScenePrimitive, Texture,
     TextureInput,
 };
 use gpu::{
@@ -40,7 +40,7 @@ pub struct PlanesApp {
     dist: f32,
     movement: Vector3<f32>,
     scene_renderer: DeferredRenderingPipeline,
-    scene: Scene,
+    scene: RenderScene,
     resource_map: ResourceMap,
     cvar_manager: CvarManager,
     egui_integration: EguiSupport,
@@ -166,7 +166,7 @@ impl App for PlanesApp {
             .swapchain_mut()
             .select_present_mode(PresentMode::Mailbox)?;
 
-        let mut scene = Scene::new();
+        let mut scene = RenderScene::new();
 
         let bounds = BoundingShape::BoundingBox {
             min: point![-1.0, -1.0, 0.0],
