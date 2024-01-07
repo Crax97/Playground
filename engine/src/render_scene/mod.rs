@@ -1,6 +1,7 @@
 use nalgebra::Point3;
 
 mod bvh;
+pub use bvh::*;
 
 use crate::{components::Transform, math::shape::BoundingShape, Frustum, Mesh, ResourceHandle};
 pub enum PrimitiveKind {
