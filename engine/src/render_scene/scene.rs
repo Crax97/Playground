@@ -123,9 +123,12 @@ impl Light {
                 ),
             ],
             LightType::Directional { direction, .. } => vec![Matrix4::look_at_rh(
-                &self.position,
-                &(self.position + direction),
+                &Point3::default(),
+                &(Point3::default() + direction),
                 &vector![0.0, 1.0, 0.0],
+                // &self.position,
+                // &(self.position + direction),
+                // &vector![0.0, 1.0, 0.0],
             )],
             _ => vec![Matrix4::look_at_rh(
                 &self.position,
@@ -181,6 +184,7 @@ pub struct LightHandle(pub usize);
 #[derive(Resource, Default)]
 pub struct RenderScene {
     pub bvh: BinaryBvh<usize>,
+    pub use_frustum_culling: bool,
     pub use_bvh: bool,
     pub primitives: Vec<ScenePrimitive>,
     pub lights: Vec<Light>,
@@ -208,6 +212,7 @@ impl RenderScene {
     pub fn new() -> Self {
         Self {
             bvh: Bvh::new(),
+            use_frustum_culling: true,
             use_bvh: true,
             primitives: vec![],
             lights: vec![],
@@ -226,7 +231,9 @@ impl RenderScene {
     }
 
     pub fn intersect_frustum(&self, frustum: &Frustum) -> Vec<&ScenePrimitive> {
-        if self.use_bvh {
+        if !self.use_frustum_culling {
+            self.primitives.iter().collect()
+        } else if self.use_bvh {
             let indices = self.bvh.intersect_frustum_copy(frustum);
             indices.iter().map(|id| &self.primitives[*id]).collect()
         } else {

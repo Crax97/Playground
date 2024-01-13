@@ -79,73 +79,7 @@ impl GltfLoader {
         let mut engine_scene = RenderScene::new();
         for scene in document.scenes() {
             for node in scene.nodes() {
-                let node_transform = node.transform();
-                let (pos, rot, scale) = node_transform.decomposed();
-                let pos = Vector3::from_row_slice(&pos);
-                let rot = Quaternion::new(rot[3], rot[0], rot[1], rot[2]);
-                let rot = UnitQuaternion::from_quaternion(rot);
-
-                let rot_matrix = rot.to_homogeneous();
-                let forward = rot_matrix.column(2);
-
-                // gltf specifies light directions to be in -z
-                let forward = -vector![forward[0], forward[1], forward[2]];
-
-                if let Some(light) = node.light() {
-                    use gltf::khr_lights_punctual::Kind as GltfLightKind;
-                    let light_type = match light.kind() {
-                        GltfLightKind::Directional => LightType::Directional {
-                            direction: forward,
-                            size: vector![20.0, 20.0],
-                        },
-                        GltfLightKind::Spot {
-                            inner_cone_angle,
-                            outer_cone_angle,
-                        } => LightType::Spotlight {
-                            direction: forward,
-                            inner_cone_degrees: inner_cone_angle.to_degrees(),
-                            outer_cone_degrees: outer_cone_angle.to_degrees(),
-                        },
-                        GltfLightKind::Point => LightType::Point,
-                    };
-                    engine_scene.add_light(engine::Light {
-                        ty: light_type,
-                        position: Point3::from(pos),
-                        radius: 500.0,
-                        color: Vector3::from_row_slice(&light.color()),
-                        intensity: light.intensity() / 100.0,
-                        enabled: true,
-                        shadow_setup: Some(engine::ShadowSetup {
-                            importance: NonZeroU32::new(match light.kind() {
-                                GltfLightKind::Directional => 5,
-                                GltfLightKind::Point => 3,
-                                GltfLightKind::Spot { .. } => 4,
-                            })
-                            .unwrap(),
-                        }),
-                    });
-                } else if let Some(mesh) = node.mesh() {
-                    let transform = Matrix4::new_translation(&pos)
-                        * Matrix4::new_nonuniform_scaling(&Vector3::from_row_slice(&scale))
-                        * rot_matrix;
-
-                    let mut materials = vec![];
-                    for prim in mesh.primitives() {
-                        let material_index = prim.material().index().unwrap_or(0);
-                        let material = allocated_materials[material_index].clone();
-                        materials.push(material);
-                    }
-
-                    let (mesh, min, max) = meshes[mesh.index()].clone();
-                    // TODO: consider the bounding volumes of all mesh primitives when constructing the scene primitive
-                    let bounds = BoundingShape::BoundingBox { min, max }.transformed(transform);
-                    engine_scene.add(ScenePrimitive {
-                        mesh,
-                        materials,
-                        transform,
-                        bounds,
-                    });
-                }
+                handle_node(node, &mut engine_scene, &allocated_materials, &meshes);
             }
         }
         engine_scene
@@ -537,5 +471,88 @@ impl GltfLoader {
 
     pub fn scene_mut(&mut self) -> &mut engine::RenderScene {
         &mut self.engine_scene
+    }
+}
+
+fn handle_node(
+    node: gltf::Node<'_>,
+    engine_scene: &mut RenderScene,
+    allocated_materials: &Vec<MaterialInstance>,
+    meshes: &Vec<(
+        ResourceHandle<Mesh>,
+        nalgebra::OPoint<f32, nalgebra::Const<3>>,
+        nalgebra::OPoint<f32, nalgebra::Const<3>>,
+    )>,
+) {
+    let node_transform = node.transform();
+    let (pos, rot, scale) = node_transform.decomposed();
+    let pos = Vector3::from_row_slice(&pos);
+    let rot = Quaternion::new(rot[3], rot[0], rot[1], rot[2]);
+    let rot = UnitQuaternion::from_quaternion(rot);
+
+    let rot_matrix = rot.to_homogeneous();
+    let forward = rot_matrix.column(2);
+
+    // gltf specifies light directions to be in -z
+    let forward = -vector![forward[0], forward[1], forward[2]];
+
+    if let Some(light) = node.light() {
+        use gltf::khr_lights_punctual::Kind as GltfLightKind;
+        let light_type = match light.kind() {
+            GltfLightKind::Directional => LightType::Directional {
+                direction: forward,
+                size: vector![20.0, 20.0],
+            },
+            GltfLightKind::Spot {
+                inner_cone_angle,
+                outer_cone_angle,
+            } => LightType::Spotlight {
+                direction: forward,
+                inner_cone_degrees: inner_cone_angle.to_degrees(),
+                outer_cone_degrees: outer_cone_angle.to_degrees(),
+            },
+            GltfLightKind::Point => LightType::Point,
+        };
+        engine_scene.add_light(engine::Light {
+            ty: light_type,
+            position: Point3::from(pos),
+            radius: 500.0,
+            color: Vector3::from_row_slice(&light.color()),
+            intensity: light.intensity() / 100.0,
+            enabled: true,
+            shadow_setup: Some(engine::ShadowSetup {
+                importance: NonZeroU32::new(match light.kind() {
+                    GltfLightKind::Directional => 5,
+                    GltfLightKind::Point => 3,
+                    GltfLightKind::Spot { .. } => 4,
+                })
+                .unwrap(),
+            }),
+        });
+    } else if let Some(mesh) = node.mesh() {
+        let transform = Matrix4::new_translation(&pos)
+            * Matrix4::new_nonuniform_scaling(&Vector3::from_row_slice(&scale))
+            * rot_matrix;
+
+        let mut materials = vec![];
+        for prim in mesh.primitives() {
+            let material_index = prim.material().index().unwrap_or(0);
+            let material = allocated_materials[material_index].clone();
+            materials.push(material);
+        }
+
+        let (mesh, min, max) = meshes[mesh.index()].clone();
+        // TODO: consider the bounding volumes of all mesh primitives when constructing the scene primitive
+        let bounds = BoundingShape::BoundingBox { min, max }.transformed(transform);
+        engine_scene.add(ScenePrimitive {
+            mesh,
+            materials,
+            transform,
+            bounds,
+        });
+    }
+
+    for node in node.children() {
+        handle_node(node, engine_scene, allocated_materials, meshes);
     }
 }

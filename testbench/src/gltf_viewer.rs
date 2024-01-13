@@ -13,10 +13,11 @@ use engine::{egui, Light, LightType, ShadowSetup, Time};
 
 use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
+use engine_macros::glsl;
 use fps_camera::FpsCamera;
 use gpu::{
     CommandBuffer, Extent2D, ImageFormat, Offset2D, PipelineBarrierInfo, PipelineStageFlags,
-    PresentMode, Rect2D, ShaderStage,
+    PresentMode, Rect2D, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
 };
 use winit::{
     dpi::{PhysicalPosition, Position},
@@ -34,6 +35,12 @@ use winit::event::MouseButton;
 use winit::event_loop::EventLoop;
 
 use clap::Parser;
+
+const SHADOW_DRAW: &[u32] = glsl!(
+    path = "src/shaders/depth_draw.frag",
+    entry_point = "main",
+    kind = fragment
+);
 
 #[derive(Parser)]
 pub struct GltfViewerArgs {
@@ -65,6 +72,7 @@ pub struct GLTFViewer {
     time: Time,
     window: Window,
     egui_support: EguiSupport,
+    depth_draw: ShaderModuleHandle,
 }
 
 impl GLTFViewer {
@@ -185,7 +193,7 @@ impl GLTFViewer {
                     intensity: 10.0,
                     enabled: true,
                     shadow_setup: Some(ShadowSetup {
-                        importance: NonZeroU32::new(1).unwrap(),
+                        importance: NonZeroU32::new(5).unwrap(),
                     }),
                 });
             }
@@ -201,7 +209,7 @@ impl GLTFViewer {
                     intensity: 10.0,
                     enabled: true,
                     shadow_setup: Some(ShadowSetup {
-                        importance: NonZeroU32::new(1).unwrap(),
+                        importance: NonZeroU32::new(20).unwrap(),
                     }),
                 });
             }
@@ -214,7 +222,7 @@ impl GLTFViewer {
                     intensity: 10.0,
                     enabled: true,
                     shadow_setup: Some(ShadowSetup {
-                        importance: NonZeroU32::new(1).unwrap(),
+                        importance: NonZeroU32::new(2).unwrap(),
                     }),
                 });
             }
@@ -335,6 +343,26 @@ impl App for GLTFViewer {
 
         let egui_support = EguiSupport::new(&window, &app_state.gpu, &app_state.swapchain)?;
 
+        let depth_draw = app_state.gpu.make_shader_module(&ShaderModuleCreateInfo {
+            code: bytemuck::cast_slice(SHADOW_DRAW),
+        })?;
+
+        gltf_loader.scene_mut().add_light(Light {
+            ty: LightType::Directional {
+                direction: vector![0.45, -0.45, 0.0],
+                size: vector![50.0, 50.0],
+            },
+            position: Default::default(),
+            radius: 1000.0,
+            color: vector![1.0, 1.0, 1.0],
+
+            intensity: 10.0,
+            enabled: true,
+            shadow_setup: Some(ShadowSetup {
+                importance: NonZeroU32::new(10).unwrap(),
+            }),
+        });
+
         Ok(Self {
             scene_renderer,
             gltf_loader,
@@ -347,6 +375,7 @@ impl App for GLTFViewer {
             time,
             window,
             egui_support,
+            depth_draw,
         })
     }
 
@@ -425,6 +454,11 @@ impl App for GLTFViewer {
 
                 ui.input_float("Camera speed", &mut self.camera.speed);
                 ui.input_float("Camera rotation speed", &mut self.camera.rotation_speed);
+
+                ui.checkbox(
+                    &mut self.gltf_loader.scene_mut().use_frustum_culling,
+                    "Use frustum culling",
+                );
 
                 ui.checkbox(
                     &mut self.gltf_loader.scene_mut().use_bvh,
@@ -575,6 +609,8 @@ impl App for GLTFViewer {
             ..Default::default()
         });
 
+        let shadow_texture = self.scene_renderer.get_shadow_texture(app_state.gpu());
+
         self.scene_renderer.draw_textured_quad(
             &mut command_buffer,
             &backbuffer.image_view,
@@ -584,6 +620,22 @@ impl App for GLTFViewer {
                 extent: backbuffer.size,
             },
             true,
+            None,
+        )?;
+
+        self.scene_renderer.draw_textured_quad(
+            &mut command_buffer,
+            &backbuffer.image_view,
+            &shadow_texture.view,
+            Rect2D {
+                offset: Offset2D::default(),
+                extent: Extent2D {
+                    width: engine::SHADOW_ATLAS_WIDTH / 8,
+                    height: engine::SHADOW_ATLAS_HEIGHT / 8,
+                },
+            },
+            true,
+            Some(self.depth_draw.clone()),
         )?;
         self.egui_support
             .paint_frame(output, &app_state.swapchain, &command_buffer);

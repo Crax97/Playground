@@ -549,6 +549,7 @@ impl App for BevyEcsApp {
                 extent: backbuffer.size,
             },
             true,
+            None,
         )?;
 
         for plugin in &mut self.plugins {

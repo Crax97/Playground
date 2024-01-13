@@ -89,6 +89,10 @@ impl Camera {
         let up = vector![0.0, 1.0, 0.0];
         Matrix4::look_at_rh(&self.location, &(self.location + self.forward), &up)
     }
+
+    pub fn view_projection(&self) -> Matrix4<f32> {
+        self.projection() * self.view()
+    }
     pub fn projection(&self) -> Matrix4<f32> {
         match self.mode {
             CameraMode::Perspective { fov_degrees } => Matrix4::new_perspective(
@@ -124,6 +128,34 @@ impl Camera {
             near: Plane::from_slice(near.as_slice()),
             far: Plane::from_slice(far.as_slice()),
         }
+    }
+
+    pub fn split_into_slices(&self, num_slices: u8) -> Vec<Camera> {
+        let mut splits = Vec::with_capacity(num_slices as usize);
+        let ratio = self.far / self.near;
+        let range = self.far - self.near;
+        let mut z_near = self.near;
+
+        const LAMBDA: f32 = 1.0;
+
+        for i in 1..=num_slices {
+            let p = i as f32 / num_slices as f32;
+            let z_far =
+                LAMBDA * self.near * ratio.powf(p) + (1.0 - LAMBDA) * (self.near + p * range);
+            let mut camera = match self.mode {
+                CameraMode::Perspective { fov_degrees } => {
+                    Camera::new_perspective(fov_degrees, self.width, self.height, z_near, z_far)
+                }
+                CameraMode::Orthographic => {
+                    Camera::new_orthographic(self.width, self.height, z_near, z_far)
+                }
+            };
+            camera.location = self.location;
+            camera.forward = self.forward;
+            z_near = z_far;
+            splits.push(camera);
+        }
+        splits
     }
 }
 

@@ -76,6 +76,7 @@ impl TiledTexture2DPacker {
         if width == 0 || height == 0 || width % tile_size != 0 || height % tile_size != 0 {
             return Err(TexturePackingError::InvalidWidthOrHeight {
                 tile_size,
+
                 width,
                 height,
             });
