@@ -8,7 +8,8 @@ use crate::{
     math::shape::BoundingShape,
     post_process_pass::{PostProcessPass, PostProcessResources},
     Camera, CvarManager, Frustum, Light, LightType, MaterialDescription, MaterialInstance, Mesh,
-    MeshPrimitive, PipelineTarget, RenderScene, RenderingPipeline, Texture, TextureSamplerSettings,
+    MeshPrimitive, PipelineTarget, RenderScene, RenderingPipeline, ScenePrimitive, Texture,
+    TextureSamplerSettings,
 };
 
 use crate::resource_map::{ResourceHandle, ResourceMap};
@@ -324,6 +325,7 @@ impl From<&Light> for GpuLightInfo {
 struct FrameBuffers {
     camera_buffer: BufferHandle,
     light_buffer: BufferHandle,
+    csm_buffer: BufferHandle,
 }
 
 struct DrawCall<'a> {
@@ -367,9 +369,23 @@ impl DeferredRenderingPipeline {
                     MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
                 )?
             };
+            let csm_buffer = {
+                let create_info = BufferCreateInfo {
+                    label: Some("CSM Buffer"),
+                    size: std::mem::size_of::<f32>() * 17,
+                    usage: BufferUsageFlags::UNIFORM_BUFFER
+                        | BufferUsageFlags::STORAGE_BUFFER
+                        | BufferUsageFlags::TRANSFER_DST,
+                };
+                gpu.make_buffer(
+                    &create_info,
+                    MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
+                )?
+            };
             frame_buffers.push(FrameBuffers {
                 camera_buffer,
                 light_buffer,
+                csm_buffer,
             })
         }
 
@@ -486,21 +502,22 @@ impl DeferredRenderingPipeline {
 
     fn main_render_loop(
         gpu: &dyn Gpu,
+        primitives: &Vec<&ScenePrimitive>,
         resource_map: &ResourceMap,
         pipeline_target: PipelineTarget,
-        draw_hashmap: &HashMap<&MasterMaterial, Vec<DrawCall>>,
         render_pass: &mut RenderPass,
         camera_index: u32,
         frame_buffers: &FrameBuffers,
         sampler_allocator: &SamplerAllocator,
     ) -> anyhow::Result<()> {
         let mut total_primitives_rendered = 0;
-        for (master, material_draw_calls) in draw_hashmap.iter() {
+        for primitive in primitives {
             {
-                bind_master_material(master, pipeline_target, render_pass, frame_buffers);
-
-                for draw_call in material_draw_calls.iter() {
-                    let material = &draw_call.material;
+                let mesh = resource_map.get(&primitive.mesh);
+                for (material_idx, mesh_prim) in mesh.primitives.iter().enumerate() {
+                    let material = &primitive.materials[material_idx];
+                    let master = resource_map.get(&material.owner);
+                    bind_master_material(master, pipeline_target, render_pass, frame_buffers);
 
                     render_pass.set_cull_mode(master.cull_mode);
                     render_pass.set_front_face(master.front_face);
@@ -509,8 +526,8 @@ impl DeferredRenderingPipeline {
                         render_pass,
                         material,
                         master,
-                        draw_call.prim,
-                        draw_call.transform,
+                        mesh_prim,
+                        primitive.transform,
                         resource_map,
                         sampler_allocator,
                         camera_index,
@@ -584,15 +601,15 @@ impl DeferredRenderingPipeline {
                 let h = w;
                 if let LightType::Directional { direction, .. } = active_light.ty {
                     let slices = camera.split_into_slices(self.csm_slices);
-                    for slice in slices {
+                    let allocated_slot = packer.allocate(w * self.csm_slices as u32, h);
+                    let allocated_slot = if let Ok(slot) = allocated_slot {
+                        slot
+                    } else {
+                        break;
+                    };
+                    for (i, slice) in slices.into_iter().enumerate() {
                         let mut gpu_light: GpuLightInfo = active_light.into();
                         gpu_light.ty_shadowcaster[1] = shadow_caster_idx;
-                        let allocated_slot = packer.allocate(w, h);
-                        let allocated_slot = if let Ok(slot) = allocated_slot {
-                            slot
-                        } else {
-                            break;
-                        };
                         // Compute the frustum slice cornes by computing NDC box to world
                         let frustum_corners = {
                             let slice_view = slice.view_projection();
@@ -638,13 +655,15 @@ impl DeferredRenderingPipeline {
                             BoundingShape::bounding_box_from_points(corners_in_light);
                         let (frustum_min, frustum_max) = frustum_aabb.box_extremes();
 
+                        let frustum_offset = 10.0;
+
                         let projection = Matrix4::new_orthographic(
                             frustum_min.x,
                             frustum_max.x,
                             frustum_min.y,
                             frustum_max.y,
-                            frustum_min.z,
-                            frustum_max.z,
+                            frustum_min.z * frustum_offset,
+                            frustum_max.z * frustum_offset,
                         );
                         let view = light_v;
                         let pfd = Some(PerFrameData {
@@ -658,7 +677,7 @@ impl DeferredRenderingPipeline {
                             view,
                             projection,
                             viewport_size_offset: vector![
-                                allocated_slot.x as f32,
+                                allocated_slot.x as f32 + w as f32 * i as f32,
                                 allocated_slot.y as f32,
                                 w as f32,
                                 h as f32
@@ -750,110 +769,110 @@ impl DeferredRenderingPipeline {
         self.irradiance_map = irradiance_map;
     }
 
-    fn shadow_atlas_pass(
-        &self,
-        gpu: &dyn Gpu,
-        graphics_command_buffer: &mut CommandBuffer,
-        shadow_atlas_component: &RenderImage,
-        per_frame_data: Vec<PerFrameData>,
-        resource_map: &ResourceMap,
-        draw_hashmap: &HashMap<&MasterMaterial, Vec<DrawCall>>,
-        current_buffers: &FrameBuffers,
-    ) -> anyhow::Result<()> {
-        {
-            let mut shadow_atlas_command =
-                graphics_command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
-                    label: Some("Shadow atlas"),
-                    color_attachments: &[],
-                    depth_attachment: Some(FramebufferDepthAttachment {
-                        image_view: shadow_atlas_component.view.clone(),
-                        load_op: gpu::DepthLoadOp::Clear(1.0),
-                        store_op: gpu::AttachmentStoreOp::Store,
-                        initial_layout: ImageLayout::Undefined,
-                        final_layout: ImageLayout::DepthStencilAttachment,
-                    }),
-                    stencil_attachment: None,
-                    render_area: Rect2D {
-                        offset: Offset2D::default(),
-                        extent: Extent2D {
-                            width: SHADOW_ATLAS_WIDTH,
-                            height: SHADOW_ATLAS_HEIGHT,
-                        },
-                    },
-                    subpasses: &[SubpassDescription {
-                        label: None,
-                        input_attachments: vec![],
-                        color_attachments: vec![],
-                        resolve_attachments: vec![],
-                        depth_stencil_attachment: Some(AttachmentReference {
-                            attachment: 0,
-                            layout: ImageLayout::DepthStencilAttachment,
-                        }),
-                        preserve_attachments: vec![],
-                    }],
-                    dependencies: &[],
-                });
+    // fn shadow_atlas_pass(
+    //     &self,
+    //     gpu: &dyn Gpu,
+    //     graphics_command_buffer: &mut CommandBuffer,
+    //     shadow_atlas_component: &RenderImage,
+    //     per_frame_data: Vec<PerFrameData>,
+    //     resource_map: &ResourceMap,
+    //     draw_hashmap: &HashMap<&MasterMaterial, Vec<DrawCall>>,
+    //     current_buffers: &FrameBuffers,
+    // ) -> anyhow::Result<()> {
+    //     {
+    //         let mut shadow_atlas_command =
+    //             graphics_command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
+    //                 label: Some("Shadow atlas"),
+    //                 color_attachments: &[],
+    //                 depth_attachment: Some(FramebufferDepthAttachment {
+    //                     image_view: shadow_atlas_component.view.clone(),
+    //                     load_op: gpu::DepthLoadOp::Clear(1.0),
+    //                     store_op: gpu::AttachmentStoreOp::Store,
+    //                     initial_layout: ImageLayout::Undefined,
+    //                     final_layout: ImageLayout::DepthStencilAttachment,
+    //                 }),
+    //                 stencil_attachment: None,
+    //                 render_area: Rect2D {
+    //                     offset: Offset2D::default(),
+    //                     extent: Extent2D {
+    //                         width: SHADOW_ATLAS_WIDTH,
+    //                         height: SHADOW_ATLAS_HEIGHT,
+    //                     },
+    //                 },
+    //                 subpasses: &[SubpassDescription {
+    //                     label: None,
+    //                     input_attachments: vec![],
+    //                     color_attachments: vec![],
+    //                     resolve_attachments: vec![],
+    //                     depth_stencil_attachment: Some(AttachmentReference {
+    //                         attachment: 0,
+    //                         layout: ImageLayout::DepthStencilAttachment,
+    //                     }),
+    //                     preserve_attachments: vec![],
+    //                 }],
+    //                 dependencies: &[],
+    //             });
 
-            shadow_atlas_command.set_depth_bias(
-                self.depth_bias_constant,
-                self.depth_bias_clamp,
-                self.depth_bias_slope,
-            );
+    //         shadow_atlas_command.set_depth_bias(
+    //             self.depth_bias_constant,
+    //             self.depth_bias_clamp,
+    //             self.depth_bias_slope,
+    //         );
 
-            shadow_atlas_command.set_cull_mode(gpu::CullMode::Front);
-            shadow_atlas_command.set_depth_compare_op(gpu::CompareOp::LessEqual);
+    //         shadow_atlas_command.set_cull_mode(gpu::CullMode::Front);
+    //         shadow_atlas_command.set_depth_compare_op(gpu::CompareOp::LessEqual);
 
-            shadow_atlas_command.set_color_output_enabled(false);
-            shadow_atlas_command.set_enable_depth_test(true);
-            shadow_atlas_command.set_depth_write_enabled(true);
+    //         shadow_atlas_command.set_color_output_enabled(false);
+    //         shadow_atlas_command.set_enable_depth_test(true);
+    //         shadow_atlas_command.set_depth_write_enabled(true);
 
-            for (i, pov) in per_frame_data.iter().enumerate().skip(1) {
-                shadow_atlas_command.set_viewport(gpu::Viewport {
-                    x: pov.viewport_size_offset.x,
-                    y: pov.viewport_size_offset.y,
-                    width: pov.viewport_size_offset.z,
-                    height: pov.viewport_size_offset.w,
-                    min_depth: 0.0,
-                    max_depth: 1.0,
-                });
+    //         for (i, pov) in per_frame_data.iter().enumerate().skip(1) {
+    //             shadow_atlas_command.set_viewport(gpu::Viewport {
+    //                 x: pov.viewport_size_offset.x,
+    //                 y: pov.viewport_size_offset.y,
+    //                 width: pov.viewport_size_offset.z,
+    //                 height: pov.viewport_size_offset.w,
+    //                 min_depth: 0.0,
+    //                 max_depth: 1.0,
+    //             });
 
-                Self::main_render_loop(
-                    gpu,
-                    resource_map,
-                    PipelineTarget::DepthOnly,
-                    draw_hashmap,
-                    &mut shadow_atlas_command,
-                    i as _,
-                    &current_buffers,
-                    &self.sampler_allocator,
-                )?;
-            }
-        }
+    //             Self::main_render_loop(
+    //                 gpu,
+    //                 resource_map,
+    //                 PipelineTarget::DepthOnly,
+    //                 draw_hashmap,
+    //                 &mut shadow_atlas_command,
+    //                 i as _,
+    //                 &current_buffers,
+    //                 &self.sampler_allocator,
+    //             )?;
+    //         }
+    //     }
 
-        graphics_command_buffer.pipeline_barrier(&gpu::PipelineBarrierInfo {
-            src_stage_mask: PipelineStageFlags::LATE_FRAGMENT_TESTS,
-            dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
-            memory_barriers: &[],
-            buffer_memory_barriers: &[],
-            image_memory_barriers: &[ImageMemoryBarrier {
-                src_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                dst_access_mask: AccessFlags::SHADER_READ,
-                old_layout: ImageLayout::DepthStencilAttachment,
-                new_layout: ImageLayout::ShaderReadOnly,
-                src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-                dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-                image: shadow_atlas_component.image.clone(),
-                subresource_range: gpu::ImageSubresourceRange {
-                    aspect_mask: ImageAspectFlags::DEPTH,
-                    base_mip_level: 0,
-                    level_count: 1,
-                    base_array_layer: 0,
-                    layer_count: 1,
-                },
-            }],
-        });
-        Ok(())
-    }
+    //     graphics_command_buffer.pipeline_barrier(&gpu::PipelineBarrierInfo {
+    //         src_stage_mask: PipelineStageFlags::LATE_FRAGMENT_TESTS,
+    //         dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
+    //         memory_barriers: &[],
+    //         buffer_memory_barriers: &[],
+    //         image_memory_barriers: &[ImageMemoryBarrier {
+    //             src_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+    //             dst_access_mask: AccessFlags::SHADER_READ,
+    //             old_layout: ImageLayout::DepthStencilAttachment,
+    //             new_layout: ImageLayout::ShaderReadOnly,
+    //             src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+    //             dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
+    //             image: shadow_atlas_component.image.clone(),
+    //             subresource_range: gpu::ImageSubresourceRange {
+    //                 aspect_mask: ImageAspectFlags::DEPTH,
+    //                 base_mip_level: 0,
+    //                 level_count: 1,
+    //                 base_array_layer: 0,
+    //                 layer_count: 1,
+    //             },
+    //         }],
+    //     });
+    //     Ok(())
+    // }
 
     fn main_pass(
         &self,
@@ -1166,6 +1185,7 @@ impl DeferredRenderingPipeline {
                     },
                 });
 
+            let primitives = scene.intersect_frustum(&pov.frustum());
             if self.early_z_pass_enabled {
                 gbuffer_render_pass.set_cull_mode(gpu::CullMode::Back);
                 gbuffer_render_pass.set_depth_compare_op(gpu::CompareOp::LessEqual);
@@ -1175,9 +1195,9 @@ impl DeferredRenderingPipeline {
                 gbuffer_render_pass.set_depth_write_enabled(true);
                 Self::main_render_loop(
                     gpu,
+                    &primitives,
                     resource_map,
                     PipelineTarget::DepthOnly,
-                    &draw_hashmap,
                     &mut gbuffer_render_pass,
                     0,
                     current_buffers,
@@ -1221,9 +1241,9 @@ impl DeferredRenderingPipeline {
             });
             Self::main_render_loop(
                 gpu,
+                &primitives,
                 resource_map,
                 PipelineTarget::ColorAndDepth,
-                &draw_hashmap,
                 &mut gbuffer_render_pass,
                 0,
                 current_buffers,
@@ -1311,6 +1331,15 @@ impl DeferredRenderingPipeline {
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 8,
+                    },
+                    Binding {
+                        ty: gpu::DescriptorBindingType::StorageBuffer {
+                            handle: current_buffers.csm_buffer.clone(),
+                            offset: 0,
+                            range: gpu::WHOLE_SIZE as _,
+                        },
+                        binding_stage: ShaderStage::FRAGMENT,
+                        location: 9,
                     },
                 ],
             );
@@ -1797,7 +1826,20 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             std::mem::size_of::<Vector4<f32>>() as u64 + size_of::<u32>() as u64 * 4,
             bytemuck::cast_slice(&self.active_lights),
         )?;
+        gpu.write_buffer(
+            &current_buffers.csm_buffer,
+            0,
+            bytemuck::cast_slice(&[self.csm_slices as u32]),
+        )?;
 
+        let slices = pov.split_into_slices(4);
+        let slices = slices.iter().map(|sl| sl.near).collect::<Vec<_>>();
+
+        gpu.write_buffer(
+            &current_buffers.csm_buffer,
+            std::mem::size_of::<u32>() as u64,
+            bytemuck::cast_slice(&slices),
+        )?;
         let (draw_hashmap, drawcall_count) =
             Self::generate_draw_calls(&self.frustum, resource_map, scene);
         self.drawcalls_last_frame = drawcall_count;
@@ -1818,16 +1860,16 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let mut graphics_command_buffer = gpu.start_command_buffer(gpu::QueueType::Graphics)?;
 
-        self.shadow_atlas_pass(
-            gpu,
-            &mut graphics_command_buffer,
-            &shadow_atlas_component,
-            per_frame_data,
-            resource_map,
-            &draw_hashmap,
-            current_buffers,
-        )
-        .context("Shadow atlas pass")?;
+        // self.shadow_atlas_pass(
+        //     gpu,
+        //     &mut graphics_command_buffer,
+        //     &shadow_atlas_component,
+        //     per_frame_data,
+        //     resource_map,
+        //     &draw_hashmap,
+        //     current_buffers,
+        // )
+        // .context("Shadow atlas pass")?;
 
         self.main_pass(
             gpu,

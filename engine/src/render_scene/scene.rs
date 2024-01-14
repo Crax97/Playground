@@ -123,12 +123,12 @@ impl Light {
                 ),
             ],
             LightType::Directional { direction, .. } => vec![Matrix4::look_at_rh(
-                &Point3::default(),
-                &(Point3::default() + direction),
-                &vector![0.0, 1.0, 0.0],
-                // &self.position,
-                // &(self.position + direction),
+                // &Point3::default(),
+                // &(Point3::default() + direction),
                 // &vector![0.0, 1.0, 0.0],
+                &self.position,
+                &(self.position + direction),
+                &vector![0.0, 1.0, 0.0],
             )],
             _ => vec![Matrix4::look_at_rh(
                 &self.position,
