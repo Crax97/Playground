@@ -3,7 +3,6 @@
 #include "definitions.glsl"
 
 layout(set = 0, binding = 0) readonly buffer PerFrameDataBlock {
-    uint shadow_count;
     PointOfView pfd[];
 } per_frame_data;
 

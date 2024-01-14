@@ -88,93 +88,58 @@ impl Light {
         }
     }
 
-    pub(crate) fn shadow_view_matrices(&self) -> Vec<Matrix4<f32>> {
+    pub fn point_of_views(&self) -> Vec<Camera> {
+        let mut povs = vec![];
         match self.ty {
-            LightType::Point => vec![
-                Matrix4::look_at_rh(
-                    &self.position,
-                    &(self.position + vector![1.0, 0.0, 0.0]),
-                    &vector![0.0, 1.0, 0.0],
-                ),
-                Matrix4::look_at_rh(
-                    &self.position,
-                    &(self.position + vector![-1.0, 0.0, 0.0]),
-                    &vector![0.0, 1.0, 0.0],
-                ),
-                Matrix4::look_at_rh(
-                    &self.position,
-                    &(self.position + vector![0.0, 1.0, 0.0]),
-                    &vector![0.0, 0.0, 1.0],
-                ),
-                Matrix4::look_at_rh(
-                    &self.position,
-                    &(self.position + vector![0.0, -1.0, 0.0]),
-                    &vector![0.0, 0.0, 1.0],
-                ),
-                Matrix4::look_at_rh(
-                    &self.position,
-                    &(self.position + vector![0.0, 0.0, 1.0]),
-                    &vector![0.0, 1.0, 0.0],
-                ),
-                Matrix4::look_at_rh(
-                    &self.position,
-                    &(self.position + vector![0.0, 0.0, -1.0]),
-                    &vector![0.0, 1.0, 0.0],
-                ),
-            ],
-            LightType::Directional { direction, .. } => vec![Matrix4::look_at_rh(
-                // &Point3::default(),
-                // &(Point3::default() + direction),
-                // &vector![0.0, 1.0, 0.0],
-                &self.position,
-                &(self.position + direction),
-                &vector![0.0, 1.0, 0.0],
-            )],
-            _ => vec![Matrix4::look_at_rh(
-                &self.position,
-                &(self.position + self.direction()),
-                &vector![0.0, 1.0, 0.0],
-            )],
-        }
-    }
+            LightType::Point => {
+                let mut camera = Camera::new_perspective(90.0, 1.0, 1.0, 0.01, self.radius);
+                camera.location = self.position;
+                let directions = [
+                    vector![1.0, 0.0, 0.0],
+                    vector![-1.0, 0.0, 0.0],
+                    vector![0.0, 1.0, 0.0],
+                    vector![0.0, -1.0, 0.0],
+                    vector![0.0, 0.0, 1.0],
+                    vector![0.0, 0.0, -1.0],
+                ];
 
-    pub(crate) fn projection_matrix(&self) -> Matrix4<f32> {
-        const ZNEAR: f32 = 0.001;
-        match self.ty {
-            LightType::Point => Matrix4::new_perspective(
-                1.0,
-                90.0f32.to_radians(),
-                ZNEAR,
-                // Use max to avoid superimposing far plane onto near plane
-                self.radius.max(ZNEAR + 0.01),
-            ),
-            LightType::Directional { size, .. } => Matrix4::new_orthographic(
-                -size.x * 0.5,
-                size.x * 0.5,
-                -size.y * 0.5,
-                size.y * 0.5,
-                -self.radius * 0.5,
-                (self.radius * 0.5).max(ZNEAR),
-            ),
-            LightType::Spotlight {
-                outer_cone_degrees, ..
-            } => Matrix4::new_perspective(
-                1.0,
-                // the outer cone spans from the light center to the light side: |-/
-                //                                                               |/
-                // the fov spans from side to side: \-|-/
-                //                                   \|/
-                2.0 * outer_cone_degrees
-                    .to_radians()
-                    .min(std::f32::consts::FRAC_PI_2)
-                    .max(0.01),
-                ZNEAR,
-                self.radius.max(ZNEAR + 0.1),
-            ),
-            LightType::Rect { width, height, .. } => {
-                Matrix4::new_perspective(width / height, 90.0, ZNEAR, self.radius.max(ZNEAR + 0.1))
+                for direction in directions {
+                    let mut camera = camera;
+                    camera.forward = direction;
+                    povs.push(camera);
+                }
             }
+            LightType::Directional { direction, size } => {
+                let mut camera =
+                    Camera::new_orthographic(size.x, size.y, -self.radius * 0.5, self.radius * 0.5);
+                camera.location = self.position;
+                camera.forward = direction;
+                povs.push(camera);
+            }
+            LightType::Spotlight {
+                direction,
+                inner_cone_degrees,
+                outer_cone_degrees,
+            } => {
+                let mut camera = Camera::new_perspective(
+                    2.0 * outer_cone_degrees.clamp(0.0, 90.0),
+                    1.0,
+                    1.0,
+                    0.001,
+                    self.radius,
+                );
+                camera.location = self.position;
+                camera.forward = direction;
+                povs.push(camera);
+            }
+            LightType::Rect {
+                direction,
+                width,
+                height,
+            } => todo!(),
         }
+
+        povs
     }
 }
 
@@ -296,8 +261,8 @@ pub struct Backbuffer {
 }
 
 pub trait RenderingPipeline {
-    fn render<'a>(
-        &'a mut self,
+    fn render(
+        &mut self,
         gpu: &dyn Gpu,
         pov: &Camera,
         scene: &RenderScene,

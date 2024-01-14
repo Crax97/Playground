@@ -10,25 +10,24 @@
 layout(location=0) in vec2 uv;
 layout(location=0) out vec4 color;
 
-layout(set = 0, binding = 5) uniform sampler2DShadow shadowMap;
-layout(set = 0, binding = 6) uniform samplerCube irradianceMap;
+// layout(set = 0, binding = 5) uniform sampler2DShadow shadowMap;
+layout(set = 0, binding = 5) uniform samplerCube irradianceMap;
 
-layout(set = 0, binding = 7) readonly buffer  PerFrameDataBlock {
-    uint shadow_count;
+layout(set = 0, binding = 6) readonly buffer  PerFrameDataBlock {
     PointOfView camera;
     PointOfView shadows[];
 } per_frame_data;
 
-layout(set = 0, binding = 8, std140) readonly buffer LightData {
+layout(set = 0, binding = 7, std140) readonly buffer LightData {
     vec4 ambient_light_color;
     uint light_count;
     LightInfo lights[];
 } light_data;
 
-layout(set = 0, binding = 9, std140) readonly buffer CsmData {
-    uint csm_count;
-    float csm_splits[];
-} csm_data;
+// layout(set = 0, binding = 8, std140) readonly buffer CsmData {
+//     uint csm_count;
+//     float csm_splits[];
+// } csm_data;
 
 struct CubeSample {
 		vec2 uv;
@@ -177,65 +176,65 @@ vec2 rotate(vec2 v, float a) {
 	return m * v;
 }
 
-float shadow_map_sample(vec2 uv, float z, vec2 offset, vec2 size, vec2 tex_size) {
-    uv *= size;
-    uv += offset;
+// float shadow_map_sample(vec2 uv, float z, vec2 offset, vec2 size, vec2 tex_size) {
+//     uv *= size;
+//     uv += offset;
 
-    vec2 pixel_size = 1.0 / tex_size;
+//     vec2 pixel_size = 1.0 / tex_size;
 
-    if (uv.x < offset.x + pixel_size.x || uv.x > offset.x + size.x - pixel_size.x || 
-        uv.y < offset.y + pixel_size.y || uv.y > offset.y + size.y - pixel_size.y) {
-        return 0.0;
-    }
-	vec3 loc = vec3(uv, z);
-	loc.x = clamp(loc.x, offset.x + pixel_size.x, offset.x + size.x - pixel_size.x);
-	loc.y = clamp(loc.y, offset.y + pixel_size.y, offset.y + size.y - pixel_size.y);
-	return texture(shadowMap, loc);
-}
+//     if (uv.x < offset.x + pixel_size.x || uv.x > offset.x + size.x - pixel_size.x || 
+//         uv.y < offset.y + pixel_size.y || uv.y > offset.y + size.y - pixel_size.y) {
+//         return 0.0;
+//     }
+// 	vec3 loc = vec3(uv, z);
+// 	loc.x = clamp(loc.x, offset.x + pixel_size.x, offset.x + size.x - pixel_size.x);
+// 	loc.y = clamp(loc.y, offset.y + pixel_size.y, offset.y + size.y - pixel_size.y);
+// 	return texture(shadowMap, loc);
+// }
 
-float shadow_influence(uint shadow_index, FragmentInfo frag_info, int light_type, float light_dist) {
-    vec2 tex_size = textureSize(shadowMap, 0);
-    PointOfView shadow = per_frame_data.shadows[shadow_index];
+// float shadow_influence(uint shadow_index, FragmentInfo frag_info, int light_type, float light_dist) {
+//     vec2 tex_size = textureSize(shadowMap, 0);
+//     PointOfView shadow = per_frame_data.shadows[shadow_index];
 
-    mat4 light_vp = shadow.proj * shadow.view;
-    vec4 frag_pos_light_unnorm = light_vp * vec4(frag_info.position, 1.0);
-    vec4 frag_pos_light = frag_pos_light_unnorm / frag_pos_light_unnorm.w;
-    frag_pos_light.xy = frag_pos_light.xy * 0.5 + 0.5;
+//     mat4 light_vp = shadow.proj * shadow.view;
+//     vec4 frag_pos_light_unnorm = light_vp * vec4(frag_info.position, 1.0);
+//     vec4 frag_pos_light = frag_pos_light_unnorm / frag_pos_light_unnorm.w;
+//     frag_pos_light.xy = frag_pos_light.xy * 0.5 + 0.5;
 
-    int layer = 0;
-    if (light_type == DIRECTIONAL_LIGHT) {
-        for (int i = 0; i < csm_data.csm_count; i ++) {
-            if (abs(frag_pos_light.z) < csm_data.csm_splits[i]) {
-                layer = i;
-                break;
-            }
-        }
-    }
+//     int layer = 0;
+//     if (light_type == DIRECTIONAL_LIGHT) {
+//         for (int i = 0; i < csm_data.csm_count; i ++) {
+//             if (abs(frag_pos_light.z) < csm_data.csm_splits[i]) {
+//                 layer = i;
+//                 break;
+//             }
+//         }
+//     }
 
-    vec2 scaled_light_size = shadow.viewport_size_offset.zw / tex_size;
-    vec2 scaled_light_offset = (shadow.viewport_size_offset.xy - vec2(0.5)) / tex_size + vec2(scaled_light_size.x * layer, 0.0);
+//     vec2 scaled_light_size = shadow.viewport_size_offset.zw / tex_size;
+//     vec2 scaled_light_offset = (shadow.viewport_size_offset.xy - vec2(0.5)) / tex_size + vec2(scaled_light_size.x * layer, 0.0);
 
-	float sam = 0.0;
-	for (int i = 0; i < 16; i ++) {
-		vec2 offset = poisson_disk[i] / tex_size;
-		offset *= light_dist;
-		sam += shadow_map_sample(frag_pos_light.xy + offset,
-				frag_pos_light.z, scaled_light_offset, scaled_light_size, tex_size);
-	}
-	return sam / 16.0;
-}
+// 	float sam = 0.0;
+// 	for (int i = 0; i < 16; i ++) {
+// 		vec2 offset = poisson_disk[i] / tex_size;
+// 		offset *= light_dist;
+// 		sam += shadow_map_sample(frag_pos_light.xy + offset,
+// 				frag_pos_light.z, scaled_light_offset, scaled_light_size, tex_size);
+// 	}
+// 	return sam / 16.0;
+// }
 
-float calculate_shadow_influence(FragmentInfo frag_info, LightInfo light_info, vec3 light_dir, float light_dist) {
-    float shadow = 0.0;
+// float calculate_shadow_influence(FragmentInfo frag_info, LightInfo light_info, vec3 light_dir, float light_dist) {
+//     float shadow = 0.0;
 
-	int base_shadow_index = light_info.type_shadowcaster.y;
-    uint offset = 0;
-    if (light_info.type_shadowcaster.x == POINT_LIGHT) {
-		CubeSample sam = sample_cube(-light_dir);
-        offset = sam.face_index;
-    }
-    return shadow_influence(base_shadow_index + offset, frag_info, light_info.type_shadowcaster.x, light_dist);
-}
+// 	int base_shadow_index = light_info.type_shadowcaster.y;
+//     uint offset = 0;
+//     if (light_info.type_shadowcaster.x == POINT_LIGHT) {
+// 		CubeSample sam = sample_cube(-light_dir);
+//         offset = sam.face_index;
+//     }
+//     return shadow_influence(base_shadow_index + offset, frag_info, light_info.type_shadowcaster.x, light_dist);
+// }
 
 vec3 lit_fragment(FragmentInfo frag_info) {
 
@@ -258,9 +257,9 @@ vec3 lit_fragment(FragmentInfo frag_info) {
         vec3 masked_light_color = light_mask * light_info.color_intensity.xyz * light_info.color_intensity.w;
         overall_mask += light_mask;
         vec3 light_color = cook_torrance(view, frag_info, l_dot_n, h) * masked_light_color;
-        if (light_info.type_shadowcaster.y != -1) {
-            light_color *= calculate_shadow_influence(frag_info, light_info, light_dir, light_dist);
-        }
+        // if (light_info.type_shadowcaster.y != -1) {
+        //     light_color *= calculate_shadow_influence(frag_info, light_info, light_dir, light_dist);
+        // }
 
         fragment_light += light_color;
     }

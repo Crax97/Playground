@@ -9,7 +9,6 @@ layout(location = 3) in vec3 in_tangent;
 layout(location = 4) in vec2 in_uv;
 
 layout(set = 0, binding = 0) readonly buffer PerFrameDataBlock {
-    uint shadow_count;
     PointOfView pfd[];
 } per_frame_data;
 

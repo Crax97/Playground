@@ -26,6 +26,8 @@ use gpu::{
 };
 use nalgebra::{point, vector, Matrix, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 
+use super::{CsmRenderer, ShadowRenderer};
+
 const SCREEN_QUAD: &[u32] = glsl!(
     kind = vertex,
     path = "src/shaders/screen_quad.vert",
@@ -56,9 +58,11 @@ const TEXTURE_COPY: &[u32] = glsl!(
     entry_point = "main"
 );
 
-pub const SHADOW_ATLAS_TILE_SIZE: u32 = 128;
-pub const SHADOW_ATLAS_WIDTH: u32 = 7680;
-pub const SHADOW_ATLAS_HEIGHT: u32 = 4352;
+const TEXTURE_MUL: &[u32] = glsl!(
+    kind = fragment,
+    path = "src/shaders/texture_mul.frag",
+    entry_point = "main"
+);
 
 pub struct DeferredRenderingPipeline {
     frame_buffers: Vec<FrameBuffers>,
@@ -66,7 +70,9 @@ pub struct DeferredRenderingPipeline {
     sampler_allocator: SamplerAllocator,
     screen_quad: ShaderModuleHandle,
     texture_copy: ShaderModuleHandle,
+    texture_mul: ShaderModuleHandle,
     combine_shader: ShaderModuleHandle,
+    shadow_renderer: Box<dyn ShadowRenderer>,
 
     post_process_stack: Vec<Box<dyn PostProcessPass>>,
 
@@ -74,7 +80,7 @@ pub struct DeferredRenderingPipeline {
     max_frames_in_flight: usize,
     light_iteration: u64,
     active_lights: Vec<GpuLightInfo>,
-    light_povs: Vec<PerFrameData>,
+    light_povs: Vec<PointOfViewData>,
     pub(crate) irradiance_map: Option<ResourceHandle<Texture>>,
     default_irradiance_map: ResourceHandle<Texture>,
 
@@ -94,7 +100,6 @@ pub struct DeferredRenderingPipeline {
 
     frustum: Frustum,
     gbuffer_nearest_sampler: SamplerHandle,
-    shadow_atlas_sampler: SamplerHandle,
     screen_quad_flipped: ShaderModuleHandle,
     early_z_pass_enabled: bool,
     view_size: Extent2D,
@@ -102,11 +107,11 @@ pub struct DeferredRenderingPipeline {
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
 pub struct RenderImageDescription {
-    width: u32,
-    height: u32,
-    format: ImageFormat,
-    samples: SampleCount,
-    view_type: ImageViewType,
+    pub width: u32,
+    pub height: u32,
+    pub format: ImageFormat,
+    pub samples: SampleCount,
+    pub view_type: ImageViewType,
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
@@ -121,12 +126,21 @@ pub struct RenderImage {
     pub view: ImageViewHandle,
 }
 
+pub struct Gbuffer {
+    pub depth_component: RenderImage,
+    pub position_component: RenderImage,
+    pub normal_component: RenderImage,
+    pub diffuse_component: RenderImage,
+    pub emissive_component: RenderImage,
+    pub pbr_component: RenderImage,
+}
+
 pub struct SamplerAllocator {
     sampler_allocator: LifetimedCache<SamplerHandle>,
 }
 
 impl SamplerAllocator {
-    fn get(&self, gpu: &dyn Gpu, desc: &TextureSamplerSettings) -> SamplerHandle {
+    pub fn get(&self, gpu: &dyn Gpu, desc: &TextureSamplerSettings) -> SamplerHandle {
         self.sampler_allocator.get_clone(desc, || {
             gpu.make_sampler(&gpu::SamplerCreateInfo {
                 mag_filter: desc.mag_filter,
@@ -145,7 +159,7 @@ impl SamplerAllocator {
         })
     }
 
-    fn new(lifetime: u32) -> Self {
+    pub fn new(lifetime: u32) -> Self {
         Self {
             sampler_allocator: LifetimedCache::new(lifetime),
         }
@@ -156,7 +170,7 @@ pub struct ImageAllocator {
 }
 
 impl ImageAllocator {
-    fn get(
+    pub fn get(
         &self,
         gpu: &dyn Gpu,
         label: &'static str,
@@ -211,7 +225,7 @@ impl ImageAllocator {
             })
     }
 
-    fn new(lifetime: u32) -> Self {
+    pub fn new(lifetime: u32) -> Self {
         Self {
             image_allocator: LifetimedCache::new(lifetime),
         }
@@ -250,16 +264,15 @@ impl Default for FxaaSettings {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-pub struct PerFrameData {
+pub struct PointOfViewData {
     pub eye: Point4<f32>,
     pub eye_forward: Vector4<f32>,
     pub view: nalgebra::Matrix4<f32>,
     pub projection: nalgebra::Matrix4<f32>,
-    pub viewport_size_offset: Vector4<f32>,
 }
 
-unsafe impl Pod for PerFrameData {}
-unsafe impl Zeroable for PerFrameData {}
+unsafe impl Pod for PointOfViewData {}
+unsafe impl Zeroable for PointOfViewData {}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -322,10 +335,10 @@ impl From<&Light> for GpuLightInfo {
     }
 }
 
-struct FrameBuffers {
-    camera_buffer: BufferHandle,
-    light_buffer: BufferHandle,
-    csm_buffer: BufferHandle,
+pub(crate) struct FrameBuffers {
+    pub(crate) camera_buffer: BufferHandle,
+    pub(crate) light_buffer: BufferHandle,
+    pub(crate) csm_buffer: BufferHandle,
 }
 
 struct DrawCall<'a> {
@@ -346,7 +359,7 @@ impl DeferredRenderingPipeline {
             let camera_buffer = {
                 let create_info = BufferCreateInfo {
                     label: Some("Deferred Renderer - Camera buffer"),
-                    size: std::mem::size_of::<PerFrameData>() * 100,
+                    size: std::mem::size_of::<PointOfViewData>() * 100,
                     usage: BufferUsageFlags::STORAGE_BUFFER
                         | BufferUsageFlags::UNIFORM_BUFFER
                         | BufferUsageFlags::TRANSFER_DST,
@@ -401,6 +414,10 @@ impl DeferredRenderingPipeline {
             code: bytemuck::cast_slice(TEXTURE_COPY),
         })?;
 
+        let texture_mul = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            code: bytemuck::cast_slice(TEXTURE_MUL),
+        })?;
+
         let gbuffer_nearest_sampler = gpu.make_sampler(&gpu::SamplerCreateInfo {
             mag_filter: gpu::Filter::Linear,
             min_filter: gpu::Filter::Linear,
@@ -409,19 +426,6 @@ impl DeferredRenderingPipeline {
             address_w: gpu::SamplerAddressMode::ClampToBorder,
             mip_lod_bias: 0.0,
             compare_function: None,
-            min_lod: 0.0,
-            max_lod: 0.0,
-            border_color: [0.0; 4],
-        })?;
-
-        let shadow_atlas_sampler = gpu.make_sampler(&gpu::SamplerCreateInfo {
-            mag_filter: gpu::Filter::Linear,
-            min_filter: gpu::Filter::Linear,
-            address_u: gpu::SamplerAddressMode::ClampToBorder,
-            address_v: gpu::SamplerAddressMode::ClampToBorder,
-            address_w: gpu::SamplerAddressMode::ClampToBorder,
-            mip_lod_bias: 0.0,
-            compare_function: Some(gpu::CompareOp::LessEqual),
             min_lod: 0.0,
             max_lod: 0.0,
             border_color: [0.0; 4],
@@ -438,13 +442,18 @@ impl DeferredRenderingPipeline {
         )?;
         let default_irradiance_map = resource_map.add(default_irradiance_map);
 
+        let view_size = Extent2D {
+            width: 1920,
+            height: 1080,
+        };
         Ok(Self {
             image_allocator: ImageAllocator::new(4),
             sampler_allocator: SamplerAllocator::new(4),
-            screen_quad,
+            screen_quad: screen_quad.clone(),
             screen_quad_flipped,
             combine_shader,
             texture_copy,
+            texture_mul,
             frame_buffers,
             post_process_stack: vec![],
             light_iteration: 0,
@@ -460,18 +469,21 @@ impl DeferredRenderingPipeline {
             cube_mesh,
             irradiance_map: None,
             default_irradiance_map,
-            gbuffer_nearest_sampler,
-            shadow_atlas_sampler,
+            gbuffer_nearest_sampler: gbuffer_nearest_sampler.clone(),
             early_z_pass_enabled: true,
-            view_size: Extent2D {
-                width: 1920,
-                height: 1080,
-            },
+            view_size,
 
             update_frustum: true,
             frustum: Frustum::default(),
             drawcalls_last_frame: 0,
             csm_slices: 4,
+            shadow_renderer: Box::new(CsmRenderer::new(
+                gpu,
+                VkSwapchain::MAX_FRAMES_IN_FLIGHT,
+                view_size,
+                gbuffer_nearest_sampler,
+                screen_quad,
+            )?),
         })
     }
 
@@ -500,7 +512,7 @@ impl DeferredRenderingPipeline {
         self.early_z_pass_enabled = early_z_enabled;
     }
 
-    fn main_render_loop(
+    pub(crate) fn main_render_loop(
         gpu: &dyn Gpu,
         primitives: &Vec<&ScenePrimitive>,
         resource_map: &ResourceMap,
@@ -573,157 +585,157 @@ impl DeferredRenderingPipeline {
         (draw_hashmap, drawcalls)
     }
 
-    fn update_lights(&mut self, scene: &RenderScene, camera: &Camera) {
-        self.light_iteration = scene.lights_iteration();
-        self.active_lights.clear();
-        self.light_povs.clear();
-        let mut shadow_caster_idx = 0;
+    // fn update_lights(&mut self, scene: &RenderScene, camera: &Camera) {
+    //     self.light_iteration = scene.lights_iteration();
+    //     self.active_lights.clear();
+    //     self.light_povs.clear();
+    //     let mut shadow_caster_idx = 0;
 
-        let mut sorted_active_lights = scene.all_enabled_lights().collect::<Vec<_>>();
-        sorted_active_lights.sort_by(|a, b| {
-            let a = a.shadow_setup.unwrap_or_default();
-            let b = b.shadow_setup.unwrap_or_default();
-            b.importance.cmp(&a.importance)
-        });
+    //     let mut sorted_active_lights = scene.all_enabled_lights().collect::<Vec<_>>();
+    //     sorted_active_lights.sort_by(|a, b| {
+    //         let a = a.shadow_setup.unwrap_or_default();
+    //         let b = b.shadow_setup.unwrap_or_default();
+    //         b.importance.cmp(&a.importance)
+    //     });
 
-        let mut packer = crate::utils::TiledTexture2DPacker::new(
-            SHADOW_ATLAS_TILE_SIZE,
-            SHADOW_ATLAS_WIDTH,
-            SHADOW_ATLAS_HEIGHT,
-        )
-        .expect("Could not create packer");
+    //     let mut packer = crate::utils::TiledTexture2DPacker::new(
+    //         SHADOW_ATLAS_TILE_SIZE,
+    //         SHADOW_ATLAS_WIDTH,
+    //         SHADOW_ATLAS_HEIGHT,
+    //     )
+    //     .expect("Could not create packer");
 
-        for active_light in sorted_active_lights {
-            if active_light.shadow_setup.is_some() {
-                let light_views = active_light.shadow_view_matrices();
-                let w =
-                    active_light.shadow_setup.unwrap().importance.get() * SHADOW_ATLAS_TILE_SIZE;
-                let h = w;
-                if let LightType::Directional { direction, .. } = active_light.ty {
-                    let slices = camera.split_into_slices(self.csm_slices);
-                    let allocated_slot = packer.allocate(w * self.csm_slices as u32, h);
-                    let allocated_slot = if let Ok(slot) = allocated_slot {
-                        slot
-                    } else {
-                        break;
-                    };
-                    for (i, slice) in slices.into_iter().enumerate() {
-                        let mut gpu_light: GpuLightInfo = active_light.into();
-                        gpu_light.ty_shadowcaster[1] = shadow_caster_idx;
-                        // Compute the frustum slice cornes by computing NDC box to world
-                        let frustum_corners = {
-                            let slice_view = slice.view_projection();
-                            let inv_slice_view = slice_view
-                                .try_inverse()
-                                .expect("Failed to invert camera matrix");
+    //     for active_light in sorted_active_lights {
+    //         if active_light.shadow_setup.is_some() {
+    //             let light_views = active_light.shadow_view_matrices();
+    //             let w =
+    //                 active_light.shadow_setup.unwrap().importance.get() * SHADOW_ATLAS_TILE_SIZE;
+    //             let h = w;
+    //             if let LightType::Directional { direction, .. } = active_light.ty {
+    //                 let slices = camera.split_into_slices(self.csm_slices);
+    //                 let allocated_slot = packer.allocate(w * self.csm_slices as u32, h);
+    //                 let allocated_slot = if let Ok(slot) = allocated_slot {
+    //                     slot
+    //                 } else {
+    //                     break;
+    //                 };
+    //                 for (i, slice) in slices.into_iter().enumerate() {
+    //                     let mut gpu_light: GpuLightInfo = active_light.into();
+    //                     gpu_light.ty_shadowcaster[1] = shadow_caster_idx;
+    //                     // Compute the frustum slice cornes by computing NDC box to world
+    //                     let frustum_corners = {
+    //                         let slice_view = slice.view_projection();
+    //                         let inv_slice_view = slice_view
+    //                             .try_inverse()
+    //                             .expect("Failed to invert camera matrix");
 
-                            [
-                                inv_slice_view * vector![-1.0, 1.0, -1.0, 1.0],
-                                inv_slice_view * vector![1.0, 1.0, -1.0, 1.0],
-                                inv_slice_view * vector![-1.0, 1.0, 1.0, 1.0],
-                                inv_slice_view * vector![1.0, 1.0, 1.0, 1.0],
-                                inv_slice_view * vector![-1.0, -1.0, -1.0, 1.0],
-                                inv_slice_view * vector![1.0, -1.0, -1.0, 1.0],
-                                inv_slice_view * vector![-1.0, -1.0, 1.0, 1.0],
-                                inv_slice_view * vector![1.0, -1.0, 1.0, 1.0],
-                            ]
-                            .into_iter()
-                            // .map(|p| p / p.w)
-                            .map(|p| p.xyz() / p.w)
-                            .collect::<Vec<_>>()
-                        };
+    //                         [
+    //                             inv_slice_view * vector![-1.0, 1.0, -1.0, 1.0],
+    //                             inv_slice_view * vector![1.0, 1.0, -1.0, 1.0],
+    //                             inv_slice_view * vector![-1.0, 1.0, 1.0, 1.0],
+    //                             inv_slice_view * vector![1.0, 1.0, 1.0, 1.0],
+    //                             inv_slice_view * vector![-1.0, -1.0, -1.0, 1.0],
+    //                             inv_slice_view * vector![1.0, -1.0, -1.0, 1.0],
+    //                             inv_slice_view * vector![-1.0, -1.0, 1.0, 1.0],
+    //                             inv_slice_view * vector![1.0, -1.0, 1.0, 1.0],
+    //                         ]
+    //                         .into_iter()
+    //                         // .map(|p| p / p.w)
+    //                         .map(|p| p.xyz() / p.w)
+    //                         .collect::<Vec<_>>()
+    //                     };
 
-                        let mut center = Point3::default();
-                        for corner in &frustum_corners {
-                            center += corner;
-                        }
-                        center /= 8.0;
+    //                     let mut center = Point3::default();
+    //                     for corner in &frustum_corners {
+    //                         center += corner;
+    //                     }
+    //                     center /= 8.0;
 
-                        // Transform the corners into the light's space
-                        let light_v = Matrix4::look_at_rh(
-                            &center,
-                            &(center + direction),
-                            &vector![0.0, 1.0, 0.0],
-                        );
+    //                     // Transform the corners into the light's space
+    //                     let light_v = Matrix4::look_at_rh(
+    //                         &center,
+    //                         &(center + direction),
+    //                         &vector![0.0, 1.0, 0.0],
+    //                     );
 
-                        let corners_in_light = frustum_corners
-                            .iter()
-                            .map(|p| light_v * point![p.x, p.y, p.z, 1.0])
-                            .map(|p| p.xyz());
+    //                     let corners_in_light = frustum_corners
+    //                         .iter()
+    //                         .map(|p| light_v * point![p.x, p.y, p.z, 1.0])
+    //                         .map(|p| p.xyz());
 
-                        let frustum_aabb =
-                            BoundingShape::bounding_box_from_points(corners_in_light);
-                        let (frustum_min, frustum_max) = frustum_aabb.box_extremes();
+    //                     let frustum_aabb =
+    //                         BoundingShape::bounding_box_from_points(corners_in_light);
+    //                     let (frustum_min, frustum_max) = frustum_aabb.box_extremes();
 
-                        let frustum_offset = 10.0;
+    //                     let frustum_offset = 10.0;
 
-                        let projection = Matrix4::new_orthographic(
-                            frustum_min.x,
-                            frustum_max.x,
-                            frustum_min.y,
-                            frustum_max.y,
-                            frustum_min.z * frustum_offset,
-                            frustum_max.z * frustum_offset,
-                        );
-                        let view = light_v;
-                        let pfd = Some(PerFrameData {
-                            eye: Point4::new(
-                                active_light.position.x,
-                                active_light.position.y,
-                                active_light.position.z,
-                                0.0,
-                            ),
-                            eye_forward: gpu_light.direction,
-                            view,
-                            projection,
-                            viewport_size_offset: vector![
-                                allocated_slot.x as f32 + w as f32 * i as f32,
-                                allocated_slot.y as f32,
-                                w as f32,
-                                h as f32
-                            ],
-                        });
+    //                     let projection = Matrix4::new_orthographic(
+    //                         frustum_min.x,
+    //                         frustum_max.x,
+    //                         frustum_min.y,
+    //                         frustum_max.y,
+    //                         frustum_min.z * frustum_offset,
+    //                         frustum_max.z * frustum_offset,
+    //                     );
+    //                     let view = light_v;
+    //                     let pfd = Some(PerFrameData {
+    //                         eye: Point4::new(
+    //                             active_light.position.x,
+    //                             active_light.position.y,
+    //                             active_light.position.z,
+    //                             0.0,
+    //                         ),
+    //                         eye_forward: gpu_light.direction,
+    //                         view,
+    //                         projection,
+    //                         viewport_size_offset: vector![
+    //                             allocated_slot.x as f32 + w as f32 * i as f32,
+    //                             allocated_slot.y as f32,
+    //                             w as f32,
+    //                             h as f32
+    //                         ],
+    //                     });
 
-                        shadow_caster_idx += 1;
-                        self.light_povs.extend(pfd);
-                        self.active_lights.push(gpu_light);
-                    }
-                } else {
-                    let mut gpu_light: GpuLightInfo = active_light.into();
-                    gpu_light.ty_shadowcaster[1] = shadow_caster_idx;
-                    let allocated_slot = packer.allocate(w * light_views.len() as u32, h);
-                    let allocated_slot = if let Ok(slot) = allocated_slot {
-                        slot
-                    } else {
-                        break;
-                    };
-                    for (i, pov) in light_views.into_iter().enumerate() {
-                        let pfd = Some(PerFrameData {
-                            eye: Point4::new(
-                                active_light.position.x,
-                                active_light.position.y,
-                                active_light.position.z,
-                                0.0,
-                            ),
-                            eye_forward: gpu_light.direction,
-                            view: pov,
-                            projection: active_light.projection_matrix(),
-                            viewport_size_offset: vector![
-                                allocated_slot.x as f32 + w as f32 * i as f32,
-                                allocated_slot.y as f32,
-                                w as f32,
-                                h as f32
-                            ],
-                        });
+    //                     shadow_caster_idx += 1;
+    //                     self.light_povs.extend(pfd);
+    //                     self.active_lights.push(gpu_light);
+    //                 }
+    //             } else {
+    //                 let mut gpu_light: GpuLightInfo = active_light.into();
+    //                 gpu_light.ty_shadowcaster[1] = shadow_caster_idx;
+    //                 let allocated_slot = packer.allocate(w * light_views.len() as u32, h);
+    //                 let allocated_slot = if let Ok(slot) = allocated_slot {
+    //                     slot
+    //                 } else {
+    //                     break;
+    //                 };
+    //                 for (i, pov) in light_views.into_iter().enumerate() {
+    //                     let pfd = Some(PerFrameData {
+    //                         eye: Point4::new(
+    //                             active_light.position.x,
+    //                             active_light.position.y,
+    //                             active_light.position.z,
+    //                             0.0,
+    //                         ),
+    //                         eye_forward: gpu_light.direction,
+    //                         view: pov,
+    //                         projection: active_light.projection_matrix(),
+    //                         viewport_size_offset: vector![
+    //                             allocated_slot.x as f32 + w as f32 * i as f32,
+    //                             allocated_slot.y as f32,
+    //                             w as f32,
+    //                             h as f32
+    //                         ],
+    //                     });
 
-                        shadow_caster_idx += 1;
-                        self.light_povs.extend(pfd);
-                    }
-                    self.active_lights.push(gpu_light);
-                }
-            }
-        }
-    }
+    //                     shadow_caster_idx += 1;
+    //                     self.light_povs.extend(pfd);
+    //                 }
+    //                 self.active_lights.push(gpu_light);
+    //             }
+    //         }
+    //     }
+    // }
 
     fn draw_skybox(
         gpu: &dyn Gpu,
@@ -878,10 +890,9 @@ impl DeferredRenderingPipeline {
         &self,
         gpu: &dyn Gpu,
         graphics_command_buffer: &mut CommandBuffer,
+        gbuffer: &Gbuffer,
         resource_map: &ResourceMap,
         color_output: &RenderImage,
-        shadow_atlas_component: &RenderImage,
-        draw_hashmap: HashMap<&MasterMaterial, Vec<DrawCall<'_>>>,
         render_size: Extent2D,
         current_buffers: &FrameBuffers,
         pov: &Camera,
@@ -891,27 +902,15 @@ impl DeferredRenderingPipeline {
             Some(texture) => texture,
             None => &self.default_irradiance_map,
         };
+        let Gbuffer {
+            depth_component,
+            position_component,
+            normal_component,
+            diffuse_component,
+            emissive_component,
+            pbr_component,
+        } = gbuffer;
         let irradiance_map_texture = resource_map.get(irradiance_map_texture);
-        let vector_desc = RenderImageDescription {
-            format: ImageFormat::RgbaFloat32,
-            samples: SampleCount::Sample1,
-            width: render_size.width,
-            height: render_size.height,
-            view_type: ImageViewType::Type2D,
-        };
-        let depth_desc = RenderImageDescription {
-            format: ImageFormat::Depth,
-            samples: SampleCount::Sample1,
-            width: render_size.width,
-            height: render_size.height,
-            view_type: ImageViewType::Type2D,
-        };
-        let depth_component = self.image_allocator.get(gpu, "depth", &depth_desc);
-        let pos_component = self.image_allocator.get(gpu, "position", &vector_desc);
-        let normal_component = self.image_allocator.get(gpu, "normal", &vector_desc);
-        let diffuse_component = self.image_allocator.get(gpu, "diffuse", &vector_desc);
-        let emissive_component = self.image_allocator.get(gpu, "emissive", &vector_desc);
-        let pbr_component = self.image_allocator.get(gpu, "pbr_component", &vector_desc);
 
         {
             let early_z_enabled_descriptions: &[SubpassDescription] = &[
@@ -1119,7 +1118,7 @@ impl DeferredRenderingPipeline {
                     label: Some("Main pass"),
                     color_attachments: &[
                         FramebufferColorAttachment {
-                            image_view: pos_component.view.clone(),
+                            image_view: position_component.view.clone(),
                             load_op: ColorLoadOp::Clear([0.0; 4]),
                             store_op: AttachmentStoreOp::Store,
                             initial_layout: ImageLayout::Undefined,
@@ -1162,7 +1161,7 @@ impl DeferredRenderingPipeline {
                         },
                     ],
                     depth_attachment: Some(gpu::FramebufferDepthAttachment {
-                        image_view: depth_component.view,
+                        image_view: depth_component.view.clone(),
                         load_op: gpu::DepthLoadOp::Clear(1.0),
                         store_op: AttachmentStoreOp::Store,
                         initial_layout: ImageLayout::Undefined,
@@ -1258,7 +1257,7 @@ impl DeferredRenderingPipeline {
                 &[
                     Binding {
                         ty: gpu::DescriptorBindingType::InputAttachment {
-                            image_view_handle: pos_component.view.clone(),
+                            image_view_handle: position_component.view.clone(),
                             layout: gpu::ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
@@ -1298,21 +1297,12 @@ impl DeferredRenderingPipeline {
                     },
                     Binding {
                         ty: gpu::DescriptorBindingType::ImageView {
-                            image_view_handle: shadow_atlas_component.view.clone(),
-                            sampler_handle: self.shadow_atlas_sampler.clone(),
-                            layout: gpu::ImageLayout::ShaderReadOnly,
-                        },
-                        binding_stage: ShaderStage::FRAGMENT,
-                        location: 5,
-                    },
-                    Binding {
-                        ty: gpu::DescriptorBindingType::ImageView {
                             image_view_handle: irradiance_map_texture.view.clone(),
                             sampler_handle: self.gbuffer_nearest_sampler.clone(),
                             layout: gpu::ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
-                        location: 6,
+                        location: 5,
                     },
                     Binding {
                         ty: gpu::DescriptorBindingType::StorageBuffer {
@@ -1321,7 +1311,7 @@ impl DeferredRenderingPipeline {
                             range: gpu::WHOLE_SIZE as _,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
-                        location: 7,
+                        location: 6,
                     },
                     Binding {
                         ty: gpu::DescriptorBindingType::StorageBuffer {
@@ -1330,16 +1320,7 @@ impl DeferredRenderingPipeline {
                             range: gpu::WHOLE_SIZE as _,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
-                        location: 8,
-                    },
-                    Binding {
-                        ty: gpu::DescriptorBindingType::StorageBuffer {
-                            handle: current_buffers.csm_buffer.clone(),
-                            offset: 0,
-                            range: gpu::WHOLE_SIZE as _,
-                        },
-                        binding_stage: ShaderStage::FRAGMENT,
-                        location: 9,
+                        location: 7,
                     },
                 ],
             );
@@ -1598,21 +1579,43 @@ impl DeferredRenderingPipeline {
         self.post_process_stack.push(Box::new(pass))
     }
 
-    pub fn get_shadow_texture(&self, gpu: &dyn Gpu) -> RenderImage {
-        let shadow_atlas_desc = RenderImageDescription {
-            format: ImageFormat::Depth,
+    pub fn get_shadow_texture(&self, gpu: &dyn Gpu) -> ImageViewHandle {
+        self.shadow_renderer.get_shadow_buffer(gpu)
+    }
+
+    fn get_gbuffer(&self, gpu: &dyn Gpu) -> Gbuffer {
+        let vector_desc = RenderImageDescription {
+            format: ImageFormat::RgbaFloat32,
             samples: SampleCount::Sample1,
-            width: SHADOW_ATLAS_WIDTH,
-            height: SHADOW_ATLAS_HEIGHT,
+            width: self.view_size.width,
+            height: self.view_size.height,
             view_type: ImageViewType::Type2D,
         };
-
-        self.image_allocator
-            .get(gpu, "shadow_atlas", &shadow_atlas_desc)
+        let depth_desc = RenderImageDescription {
+            format: ImageFormat::Depth,
+            samples: SampleCount::Sample1,
+            width: self.view_size.width,
+            height: self.view_size.height,
+            view_type: ImageViewType::Type2D,
+        };
+        let depth_component = self.image_allocator.get(gpu, "depth", &depth_desc);
+        let position_component = self.image_allocator.get(gpu, "position", &vector_desc);
+        let normal_component = self.image_allocator.get(gpu, "normal", &vector_desc);
+        let diffuse_component = self.image_allocator.get(gpu, "diffuse", &vector_desc);
+        let emissive_component = self.image_allocator.get(gpu, "emissive", &vector_desc);
+        let pbr_component = self.image_allocator.get(gpu, "pbr_component", &vector_desc);
+        Gbuffer {
+            depth_component,
+            position_component,
+            normal_component,
+            diffuse_component,
+            emissive_component,
+            pbr_component,
+        }
     }
 }
 
-fn bind_master_material(
+pub fn bind_master_material(
     master: &MasterMaterial,
     pipeline_target: PipelineTarget,
     render_pass: &mut RenderPass,
@@ -1754,8 +1757,8 @@ fn draw_mesh_primitive(
 }
 
 impl RenderingPipeline for DeferredRenderingPipeline {
-    fn render<'a>(
-        &'a mut self,
+    fn render(
+        &mut self,
         gpu: &dyn Gpu,
         pov: &Camera,
         scene: &RenderScene,
@@ -1768,25 +1771,16 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let projection = pov.projection();
 
-        if self.light_iteration != scene.lights_iteration() {
-            self.update_lights(scene, pov);
-        }
-
+        self.shadow_renderer.update(pov, scene)?;
         let current_buffers = &self.frame_buffers[self.in_flight_frame];
 
         self.in_flight_frame = (1 + self.in_flight_frame) % self.max_frames_in_flight;
 
-        let mut per_frame_data = vec![PerFrameData {
+        let mut per_frame_data = vec![PointOfViewData {
             eye: Point4::new(pov.location[0], pov.location[1], pov.location[2], 0.0),
             eye_forward: vector![pov.forward.x, pov.forward.y, pov.forward.z, 0.0],
             view: pov.view(),
             projection,
-            viewport_size_offset: vector![
-                0.0,
-                0.0,
-                self.view_size.width as f32,
-                self.view_size.height as f32
-            ],
         }];
 
         per_frame_data.extend_from_slice(&self.light_povs);
@@ -1794,12 +1788,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         gpu.write_buffer(
             &current_buffers.camera_buffer,
             0,
-            bytemuck::cast_slice(&[per_frame_data.len() as u32 - 1]),
-        )
-        .unwrap();
-        gpu.write_buffer(
-            &current_buffers.camera_buffer,
-            size_of::<u32>() as u64 * 4,
             bytemuck::cast_slice(&per_frame_data),
         )
         .unwrap();
@@ -1840,8 +1828,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             std::mem::size_of::<u32>() as u64,
             bytemuck::cast_slice(&slices),
         )?;
-        let (draw_hashmap, drawcall_count) =
-            Self::generate_draw_calls(&self.frustum, resource_map, scene);
+        let (_, drawcall_count) = Self::generate_draw_calls(&self.frustum, resource_map, scene);
         self.drawcalls_last_frame = drawcall_count;
 
         let color_desc = RenderImageDescription {
@@ -1852,38 +1839,108 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             view_type: ImageViewType::Type2D,
         };
 
-        let shadow_atlas_component = self.get_shadow_texture(gpu);
-
+        let gbuffer_combine_output =
+            self.image_allocator
+                .get(gpu, "gbuffer_combine_output/post_process_1", &color_desc);
         let color_output =
             self.image_allocator
                 .get(gpu, "color_output/post_process_1", &color_desc);
 
         let mut graphics_command_buffer = gpu.start_command_buffer(gpu::QueueType::Graphics)?;
 
-        // self.shadow_atlas_pass(
-        //     gpu,
-        //     &mut graphics_command_buffer,
-        //     &shadow_atlas_component,
-        //     per_frame_data,
-        //     resource_map,
-        //     &draw_hashmap,
-        //     current_buffers,
-        // )
-        // .context("Shadow atlas pass")?;
-
+        let gbuffer = self.get_gbuffer(gpu);
+        let shadow_buffer = self.shadow_renderer.render_shadows(
+            gpu,
+            pov,
+            scene,
+            &gbuffer,
+            &mut graphics_command_buffer,
+            resource_map,
+        )?;
         self.main_pass(
             gpu,
             &mut graphics_command_buffer,
+            &gbuffer,
             resource_map,
-            &color_output,
-            &shadow_atlas_component,
-            draw_hashmap,
+            &gbuffer_combine_output,
             self.view_size,
             current_buffers,
             pov,
             scene,
         )
         .context("Main pass")?;
+
+        {
+            let mut render_pass = graphics_command_buffer.start_render_pass(&BeginRenderPassInfo {
+                label: Some("Shadow apply"),
+                color_attachments: &[FramebufferColorAttachment {
+                    image_view: color_output.view.clone(),
+                    load_op: ColorLoadOp::DontCare,
+                    store_op: AttachmentStoreOp::Store,
+                    initial_layout: ImageLayout::Undefined,
+                    final_layout: ImageLayout::ShaderReadOnly,
+                }],
+                depth_attachment: None,
+                stencil_attachment: None,
+                render_area: Rect2D {
+                    offset: Default::default(),
+                    extent: self.view_size,
+                },
+                subpasses: &[SubpassDescription {
+                    label: None,
+                    input_attachments: vec![],
+                    color_attachments: vec![AttachmentReference {
+                        attachment: 0,
+                        layout: ImageLayout::ColorAttachment,
+                    }],
+                    resolve_attachments: vec![],
+                    depth_stencil_attachment: None,
+                    preserve_attachments: vec![],
+                }],
+                dependencies: &[SubpassDependency {
+                    src_subpass: SubpassDependency::EXTERNAL,
+                    dst_subpass: 0,
+                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
+                    src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                    dst_access_mask: AccessFlags::SHADER_READ,
+                }],
+            });
+
+            render_pass.bind_resources(
+                0,
+                &[
+                    Binding {
+                        ty: gpu::DescriptorBindingType::ImageView {
+                            image_view_handle: shadow_buffer,
+                            sampler_handle: self.gbuffer_nearest_sampler.clone(),
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        binding_stage: ShaderStage::FRAGMENT,
+                        location: 0,
+                    },
+                    Binding {
+                        ty: gpu::DescriptorBindingType::ImageView {
+                            image_view_handle: gbuffer_combine_output.view,
+                            sampler_handle: self.gbuffer_nearest_sampler.clone(),
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        binding_stage: ShaderStage::FRAGMENT,
+                        location: 1,
+                    },
+                ],
+            );
+            render_pass.set_cull_mode(gpu::CullMode::None);
+            render_pass.set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
+            render_pass.set_front_face(gpu::FrontFace::ClockWise);
+            render_pass.set_enable_depth_test(false);
+            render_pass.set_depth_write_enabled(false);
+            render_pass.set_vertex_shader(self.screen_quad.clone());
+            render_pass.set_fragment_shader(self.texture_mul.clone());
+            render_pass
+                .draw(4, 1, 0, 0)
+                .context("Shadow Buffer Apply")?
+        }
 
         let final_color_output = self
             .post_process_pass(
@@ -1965,5 +2022,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
     fn on_resolution_changed(&mut self, new_resolution: Extent2D) {
         self.view_size = new_resolution;
+        self.shadow_renderer.update_viewport_size(new_resolution);
     }
 }

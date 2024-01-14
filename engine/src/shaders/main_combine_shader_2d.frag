@@ -14,7 +14,6 @@ layout(set = 0, binding = 5) uniform sampler2DShadow shadowMap;
 layout(set = 0, binding = 6) uniform samplerCube irradianceMap;
 
 layout(set = 0, binding = 7) readonly buffer  PerFrameDataBlock {
-    uint shadow_count;
     PointOfView camera;
     PointOfView shadows[];
 } per_frame_data;

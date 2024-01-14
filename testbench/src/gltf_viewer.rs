@@ -626,12 +626,12 @@ impl App for GLTFViewer {
         self.scene_renderer.draw_textured_quad(
             &mut command_buffer,
             &backbuffer.image_view,
-            &shadow_texture.view,
+            &shadow_texture,
             Rect2D {
                 offset: Offset2D::default(),
                 extent: Extent2D {
-                    width: engine::SHADOW_ATLAS_WIDTH / 8,
-                    height: engine::SHADOW_ATLAS_HEIGHT / 8,
+                    width: 256,
+                    height: 256,
                 },
             },
             true,

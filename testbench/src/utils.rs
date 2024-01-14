@@ -235,7 +235,7 @@ fn cubemap_main_loop(
         })
         .expect("Failed to create image view")
     };
-    let make_pov = |forward: Vector3<f32>, up| engine::PerFrameData {
+    let make_pov = |forward: Vector3<f32>, up| engine::PointOfViewData {
         eye: point![0.0, 0.0, 0.0, 0.0],
         eye_forward: vector![forward.x, forward.y, forward.z, 0.0],
         view: nalgebra::Matrix4::look_at_rh(
@@ -244,7 +244,6 @@ fn cubemap_main_loop(
             &up,
         ),
         projection: nalgebra::Matrix4::new_perspective(1.0, 90.0f32.to_radians(), 0.001, 1000.0),
-        viewport_size_offset: vector![size.width as f32, size.height as f32, 0.0, 0.0],
     };
     let views = [
         make_image_view(0),
@@ -282,7 +281,7 @@ fn cubemap_main_loop(
             layer_count: 6,
         },
     )?;
-    let mesh = resource_map.get(&cube_mesh);
+    let mesh = resource_map.get(cube_mesh);
     for (i, view) in views.iter().enumerate() {
         let mvp = povs[i].projection * povs[i].view;
         let views = vec![FramebufferColorAttachment {
