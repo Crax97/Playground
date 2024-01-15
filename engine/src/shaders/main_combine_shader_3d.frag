@@ -11,14 +11,14 @@ layout(location=0) in vec2 uv;
 layout(location=0) out vec4 color;
 
 // layout(set = 0, binding = 5) uniform sampler2DShadow shadowMap;
-layout(set = 0, binding = 5) uniform samplerCube irradianceMap;
+layout(set = 0, binding = 6) uniform samplerCube irradianceMap;
 
-layout(set = 0, binding = 6) readonly buffer  PerFrameDataBlock {
+layout(set = 0, binding = 7) readonly buffer  PerFrameDataBlock {
     PointOfView camera;
     PointOfView shadows[];
 } per_frame_data;
 
-layout(set = 0, binding = 7, std140) readonly buffer LightData {
+layout(set = 0, binding = 8, std140) readonly buffer LightData {
     vec4 ambient_light_color;
     uint light_count;
     LightInfo lights[];

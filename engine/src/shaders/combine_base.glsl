@@ -1,8 +1,9 @@
-layout(input_attachment_index = 0, set = 0, binding = 0) uniform subpassInput posSampler;
-layout(input_attachment_index = 1, set = 0, binding = 1) uniform subpassInput normSampler;
-layout(input_attachment_index = 2, set = 0, binding = 2) uniform subpassInput difSampler;
-layout(input_attachment_index = 3, set = 0, binding = 3) uniform subpassInput emissSampler;
-layout(input_attachment_index = 4, set = 0, binding = 4) uniform subpassInput pbrSampler;
+layout(set = 0, binding = 0) uniform sampler2D posSampler;
+layout(set = 0, binding = 1) uniform sampler2D normSampler;
+layout(set = 0, binding = 2) uniform sampler2D difSampler;
+layout(set = 0, binding = 3) uniform sampler2D emissSampler;
+layout(set = 0, binding = 4) uniform sampler2D pbrSampler;
+layout(set = 0, binding = 5) uniform sampler2D shadowBuffer;
 
 struct FragmentInfo {
     vec3 diffuse;
@@ -16,13 +17,14 @@ struct FragmentInfo {
 
 FragmentInfo get_fragment_info(vec2 in_uv) {
     FragmentInfo info;
-    info.diffuse = subpassLoad(difSampler).rgb;
-    info.emissive = subpassLoad(emissSampler);
-    info.position = subpassLoad(posSampler).xyz;
-    info.normal = subpassLoad(normSampler).xyz;
+    in_uv.y = 1.0 - in_uv.y;
+    info.diffuse = texture(difSampler, in_uv).rgb;
+    info.emissive = texture(emissSampler, in_uv);
+    info.position = texture(posSampler, in_uv).xyz;
+    info.normal = texture(normSampler, in_uv).xyz;
     info.normal = info.normal * 2.0 - 1.0;
 
-    vec4 pbr_sample = subpassLoad(pbrSampler);
+    vec4 pbr_sample = texture(pbrSampler, in_uv);
     info.metalness = pbr_sample.x;
     info.roughness = pbr_sample.y;
 

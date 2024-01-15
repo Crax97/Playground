@@ -238,10 +238,6 @@ impl CsmRenderer {
 }
 
 impl ShadowRenderer for CsmRenderer {
-    fn update(&mut self, camera: &crate::Camera, scene: &crate::RenderScene) -> anyhow::Result<()> {
-        self.cur_framebuffer = (self.cur_framebuffer + 1) % self.num_framebuffers;
-        Ok(())
-    }
     fn render_shadows(
         &mut self,
         gpu: &dyn Gpu,
@@ -250,7 +246,7 @@ impl ShadowRenderer for CsmRenderer {
         gbuffer: &Gbuffer,
         command_buffer: &mut gpu::CommandBuffer,
         resource_map: &ResourceMap,
-    ) -> anyhow::Result<gpu::ImageViewHandle> {
+    ) -> anyhow::Result<()> {
         let mut texture_packer = TiledTexture2DPacker::new(
             SHADOW_ATLAS_TILE_SIZE,
             SHADOW_ATLAS_WIDTH,
@@ -340,7 +336,6 @@ impl ShadowRenderer for CsmRenderer {
             bytemuck::cast_slice(&shadow_casters),
         )?;
 
-        let shadow_buffer = self.get_shadow_render_image(gpu);
         let shadow_atlas = self.get_shadow_atlas(gpu);
 
         {
@@ -427,7 +422,7 @@ impl ShadowRenderer for CsmRenderer {
             let mut shadow_pass = command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
                 label: Some("Cascaded Shadow Map rendering"),
                 color_attachments: &[FramebufferColorAttachment {
-                    image_view: shadow_buffer.view,
+                    image_view: gbuffer.shadow_buffer.view.clone(),
                     load_op: gpu::ColorLoadOp::Clear([1.0; 4]),
                     store_op: gpu::AttachmentStoreOp::Store,
                     initial_layout: gpu::ImageLayout::Undefined,
@@ -437,7 +432,7 @@ impl ShadowRenderer for CsmRenderer {
                 stencil_attachment: None,
                 render_area: Rect2D {
                     offset: Default::default(),
-                    extent: self.viewport_size,
+                    extent: gbuffer.viewport_size,
                 },
                 subpasses: &[SubpassDescription {
                     label: Some("Shadow Buffer Emit".to_owned()),
@@ -525,11 +520,9 @@ impl ShadowRenderer for CsmRenderer {
                 .draw(4, 1, 0, 0)
                 .context("Shadow pass subpass")?
         }
-        Ok(self.get_shadow_buffer(gpu))
-    }
 
-    fn update_viewport_size(&mut self, new_viewport_size: Extent2D) {
-        self.viewport_size = new_viewport_size;
+        self.cur_framebuffer = (self.cur_framebuffer + 1) % self.num_framebuffers;
+        Ok(())
     }
 
     fn get_shadow_buffer(&self, gpu: &dyn Gpu) -> ImageViewHandle {
