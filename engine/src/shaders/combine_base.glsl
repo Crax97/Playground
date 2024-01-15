@@ -28,6 +28,6 @@ FragmentInfo get_fragment_info(vec2 in_uv) {
     info.metalness = pbr_sample.x;
     info.roughness = pbr_sample.y;
 
-    info.shadow_scale = pbr_sample.w;
+    info.shadow_scale = pbr_sample.w * texture(shadowBuffer, in_uv);
     return info;
 }
