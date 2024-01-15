@@ -13,6 +13,7 @@ struct FragmentInfo {
     float roughness;
     float metalness;
     float shadow_scale;
+    float shadow_sample;
 };
 
 FragmentInfo get_fragment_info(vec2 in_uv) {
@@ -28,6 +29,8 @@ FragmentInfo get_fragment_info(vec2 in_uv) {
     info.metalness = pbr_sample.x;
     info.roughness = pbr_sample.y;
 
-    info.shadow_scale = pbr_sample.w * texture(shadowBuffer, in_uv);
+    in_uv.y = 1.0 - in_uv.y;
+    info.shadow_scale = pbr_sample.w;
+    info.shadow_sample = texture(shadowBuffer, in_uv).r;
     return info;
 }

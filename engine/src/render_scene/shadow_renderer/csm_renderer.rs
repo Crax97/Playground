@@ -86,6 +86,7 @@ impl CsmRenderer {
             MemoryDomain::DeviceLocal,
             None,
         )?;
+
         let shadow_atlas_view = gpu.make_image_view(&ImageViewCreateInfo {
             image: shadow_atlas.clone(),
             view_type: gpu::ImageViewType::Type2D,
@@ -167,23 +168,9 @@ impl CsmRenderer {
                     MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
                 )?
             };
-            let csm_buffer = {
-                let create_info = BufferCreateInfo {
-                    label: Some("CSM Buffer"),
-                    size: std::mem::size_of::<f32>() * 17,
-                    usage: BufferUsageFlags::UNIFORM_BUFFER
-                        | BufferUsageFlags::STORAGE_BUFFER
-                        | BufferUsageFlags::TRANSFER_DST,
-                };
-                gpu.make_buffer(
-                    &create_info,
-                    MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
-                )?
-            };
             frame_buffers.push(FrameBuffers {
                 camera_buffer,
                 light_buffer,
-                csm_buffer,
             });
         }
 
@@ -235,8 +222,7 @@ impl ShadowRenderer for CsmRenderer {
         scene
             .lights
             .iter()
-            .filter(|l| l.enabled)
-            .filter(|l| l.shadow_setup.is_some())
+            .filter(|l| l.enabled && l.shadow_setup.is_some())
             .filter_map(|l| {
                 let ty = match l.ty {
                     crate::LightType::Point => 1,
@@ -309,6 +295,12 @@ impl ShadowRenderer for CsmRenderer {
             bytemuck::cast_slice(&shadow_casters),
         )?;
 
+        if shadow_casters.is_empty() {
+            return Ok(());
+        }
+
+        let mut total_primitives = 0;
+
         {
             let mut shadow_atlas_pass =
                 command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
@@ -357,9 +349,10 @@ impl ShadowRenderer for CsmRenderer {
                     let pov = &light_cameras[first_pov as usize + n as usize];
                     let frustum = pov.frustum();
                     let primitives = scene.intersect_frustum(&frustum);
+                    total_primitives += primitives.len();
                     let pov_idx = first_pov + n;
 
-                    shadow_atlas_pass.set_cull_mode(gpu::CullMode::Front);
+                    shadow_atlas_pass.set_cull_mode(gpu::CullMode::Back);
                     shadow_atlas_pass.set_depth_compare_op(gpu::CompareOp::LessEqual);
 
                     shadow_atlas_pass.set_color_output_enabled(false);
@@ -387,6 +380,10 @@ impl ShadowRenderer for CsmRenderer {
                     )?;
                 }
             }
+        }
+
+        if total_primitives == 0 {
+            return Ok(());
         }
 
         {

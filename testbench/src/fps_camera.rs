@@ -18,7 +18,7 @@ impl Default for FpsCamera {
         Self {
             location: Default::default(),
             rotation: Default::default(),
-            speed: 10.0,
+            speed: 150.0,
             rotation_speed: 180.0,
             roll: Default::default(),
             pitch: Default::default(),

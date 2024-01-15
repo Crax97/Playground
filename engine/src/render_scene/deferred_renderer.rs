@@ -70,7 +70,6 @@ pub struct DeferredRenderingPipeline {
     sampler_allocator: SamplerAllocator,
     screen_quad: ShaderModuleHandle,
     texture_copy: ShaderModuleHandle,
-    texture_mul: ShaderModuleHandle,
     combine_shader: ShaderModuleHandle,
     shadow_renderer: Box<dyn ShadowRenderer>,
 
@@ -78,7 +77,6 @@ pub struct DeferredRenderingPipeline {
 
     in_flight_frame: usize,
     max_frames_in_flight: usize,
-    light_iteration: u64,
     active_lights: Vec<GpuLightInfo>,
     light_povs: Vec<PointOfViewData>,
     pub(crate) irradiance_map: Option<ResourceHandle<Texture>>,
@@ -284,7 +282,7 @@ struct GpuLightInfo {
     direction: Vector4<f32>,
     color: Vector4<f32>,
     extras: Vector4<f32>,
-    ty_shadowcaster: [i32; 4],
+    ty: [i32; 4],
 }
 
 unsafe impl Pod for GpuLightInfo {}
@@ -333,7 +331,7 @@ impl From<&Light> for GpuLightInfo {
             color: vector![light.color.x, light.color.y, light.color.z, light.intensity],
             direction,
             extras,
-            ty_shadowcaster: [ty, -1, 0, 0],
+            ty: [ty, -1, 0, 0],
         }
     }
 }
@@ -341,7 +339,6 @@ impl From<&Light> for GpuLightInfo {
 pub(crate) struct FrameBuffers {
     pub(crate) camera_buffer: BufferHandle,
     pub(crate) light_buffer: BufferHandle,
-    pub(crate) csm_buffer: BufferHandle,
 }
 
 struct DrawCall<'a> {
@@ -385,23 +382,9 @@ impl DeferredRenderingPipeline {
                     MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
                 )?
             };
-            let csm_buffer = {
-                let create_info = BufferCreateInfo {
-                    label: Some("CSM Buffer"),
-                    size: std::mem::size_of::<f32>() * 17,
-                    usage: BufferUsageFlags::UNIFORM_BUFFER
-                        | BufferUsageFlags::STORAGE_BUFFER
-                        | BufferUsageFlags::TRANSFER_DST,
-                };
-                gpu.make_buffer(
-                    &create_info,
-                    MemoryDomain::HostVisible | MemoryDomain::HostCoherent,
-                )?
-            };
             frame_buffers.push(FrameBuffers {
                 camera_buffer,
                 light_buffer,
-                csm_buffer,
             })
         }
 
@@ -456,10 +439,8 @@ impl DeferredRenderingPipeline {
             screen_quad_flipped,
             combine_shader,
             texture_copy,
-            texture_mul,
             frame_buffers,
             post_process_stack: vec![],
-            light_iteration: 0,
             in_flight_frame: 0,
             max_frames_in_flight: VkSwapchain::MAX_FRAMES_IN_FLIGHT,
             depth_bias_constant: 2.0,
@@ -588,157 +569,17 @@ impl DeferredRenderingPipeline {
         (draw_hashmap, drawcalls)
     }
 
-    // fn update_lights(&mut self, scene: &RenderScene, camera: &Camera) {
-    //     self.light_iteration = scene.lights_iteration();
-    //     self.active_lights.clear();
-    //     self.light_povs.clear();
-    //     let mut shadow_caster_idx = 0;
+    fn update_lights(&mut self, scene: &RenderScene) {
+        self.active_lights.clear();
+        self.light_povs.clear();
 
-    //     let mut sorted_active_lights = scene.all_enabled_lights().collect::<Vec<_>>();
-    //     sorted_active_lights.sort_by(|a, b| {
-    //         let a = a.shadow_setup.unwrap_or_default();
-    //         let b = b.shadow_setup.unwrap_or_default();
-    //         b.importance.cmp(&a.importance)
-    //     });
+        let active_lights = scene.all_enabled_lights().collect::<Vec<_>>();
 
-    //     let mut packer = crate::utils::TiledTexture2DPacker::new(
-    //         SHADOW_ATLAS_TILE_SIZE,
-    //         SHADOW_ATLAS_WIDTH,
-    //         SHADOW_ATLAS_HEIGHT,
-    //     )
-    //     .expect("Could not create packer");
-
-    //     for active_light in sorted_active_lights {
-    //         if active_light.shadow_setup.is_some() {
-    //             let light_views = active_light.shadow_view_matrices();
-    //             let w =
-    //                 active_light.shadow_setup.unwrap().importance.get() * SHADOW_ATLAS_TILE_SIZE;
-    //             let h = w;
-    //             if let LightType::Directional { direction, .. } = active_light.ty {
-    //                 let slices = camera.split_into_slices(self.csm_slices);
-    //                 let allocated_slot = packer.allocate(w * self.csm_slices as u32, h);
-    //                 let allocated_slot = if let Ok(slot) = allocated_slot {
-    //                     slot
-    //                 } else {
-    //                     break;
-    //                 };
-    //                 for (i, slice) in slices.into_iter().enumerate() {
-    //                     let mut gpu_light: GpuLightInfo = active_light.into();
-    //                     gpu_light.ty_shadowcaster[1] = shadow_caster_idx;
-    //                     // Compute the frustum slice cornes by computing NDC box to world
-    //                     let frustum_corners = {
-    //                         let slice_view = slice.view_projection();
-    //                         let inv_slice_view = slice_view
-    //                             .try_inverse()
-    //                             .expect("Failed to invert camera matrix");
-
-    //                         [
-    //                             inv_slice_view * vector![-1.0, 1.0, -1.0, 1.0],
-    //                             inv_slice_view * vector![1.0, 1.0, -1.0, 1.0],
-    //                             inv_slice_view * vector![-1.0, 1.0, 1.0, 1.0],
-    //                             inv_slice_view * vector![1.0, 1.0, 1.0, 1.0],
-    //                             inv_slice_view * vector![-1.0, -1.0, -1.0, 1.0],
-    //                             inv_slice_view * vector![1.0, -1.0, -1.0, 1.0],
-    //                             inv_slice_view * vector![-1.0, -1.0, 1.0, 1.0],
-    //                             inv_slice_view * vector![1.0, -1.0, 1.0, 1.0],
-    //                         ]
-    //                         .into_iter()
-    //                         // .map(|p| p / p.w)
-    //                         .map(|p| p.xyz() / p.w)
-    //                         .collect::<Vec<_>>()
-    //                     };
-
-    //                     let mut center = Point3::default();
-    //                     for corner in &frustum_corners {
-    //                         center += corner;
-    //                     }
-    //                     center /= 8.0;
-
-    //                     // Transform the corners into the light's space
-    //                     let light_v = Matrix4::look_at_rh(
-    //                         &center,
-    //                         &(center + direction),
-    //                         &vector![0.0, 1.0, 0.0],
-    //                     );
-
-    //                     let corners_in_light = frustum_corners
-    //                         .iter()
-    //                         .map(|p| light_v * point![p.x, p.y, p.z, 1.0])
-    //                         .map(|p| p.xyz());
-
-    //                     let frustum_aabb =
-    //                         BoundingShape::bounding_box_from_points(corners_in_light);
-    //                     let (frustum_min, frustum_max) = frustum_aabb.box_extremes();
-
-    //                     let frustum_offset = 10.0;
-
-    //                     let projection = Matrix4::new_orthographic(
-    //                         frustum_min.x,
-    //                         frustum_max.x,
-    //                         frustum_min.y,
-    //                         frustum_max.y,
-    //                         frustum_min.z * frustum_offset,
-    //                         frustum_max.z * frustum_offset,
-    //                     );
-    //                     let view = light_v;
-    //                     let pfd = Some(PerFrameData {
-    //                         eye: Point4::new(
-    //                             active_light.position.x,
-    //                             active_light.position.y,
-    //                             active_light.position.z,
-    //                             0.0,
-    //                         ),
-    //                         eye_forward: gpu_light.direction,
-    //                         view,
-    //                         projection,
-    //                         viewport_size_offset: vector![
-    //                             allocated_slot.x as f32 + w as f32 * i as f32,
-    //                             allocated_slot.y as f32,
-    //                             w as f32,
-    //                             h as f32
-    //                         ],
-    //                     });
-
-    //                     shadow_caster_idx += 1;
-    //                     self.light_povs.extend(pfd);
-    //                     self.active_lights.push(gpu_light);
-    //                 }
-    //             } else {
-    //                 let mut gpu_light: GpuLightInfo = active_light.into();
-    //                 gpu_light.ty_shadowcaster[1] = shadow_caster_idx;
-    //                 let allocated_slot = packer.allocate(w * light_views.len() as u32, h);
-    //                 let allocated_slot = if let Ok(slot) = allocated_slot {
-    //                     slot
-    //                 } else {
-    //                     break;
-    //                 };
-    //                 for (i, pov) in light_views.into_iter().enumerate() {
-    //                     let pfd = Some(PerFrameData {
-    //                         eye: Point4::new(
-    //                             active_light.position.x,
-    //                             active_light.position.y,
-    //                             active_light.position.z,
-    //                             0.0,
-    //                         ),
-    //                         eye_forward: gpu_light.direction,
-    //                         view: pov,
-    //                         projection: active_light.projection_matrix(),
-    //                         viewport_size_offset: vector![
-    //                             allocated_slot.x as f32 + w as f32 * i as f32,
-    //                             allocated_slot.y as f32,
-    //                             w as f32,
-    //                             h as f32
-    //                         ],
-    //                     });
-
-    //                     shadow_caster_idx += 1;
-    //                     self.light_povs.extend(pfd);
-    //                 }
-    //                 self.active_lights.push(gpu_light);
-    //             }
-    //         }
-    //     }
-    // }
+        for active_light in active_lights {
+            let gpu_light: GpuLightInfo = active_light.into();
+            self.active_lights.push(gpu_light);
+        }
+    }
 
     fn draw_skybox(
         gpu: &dyn Gpu,
@@ -1416,8 +1257,8 @@ impl DeferredRenderingPipeline {
             height: self.view_size.height,
             view_type: ImageViewType::Type2D,
         };
-        let shadow_desc = RenderImageDescription {
-            format: ImageFormat::Rgb8,
+        let rgba_desc = RenderImageDescription {
+            format: ImageFormat::Rgba8,
             samples: SampleCount::Sample1,
             width: self.view_size.width,
             height: self.view_size.height,
@@ -1429,7 +1270,7 @@ impl DeferredRenderingPipeline {
         let diffuse_component = self.image_allocator.get(gpu, "diffuse", &vector_desc);
         let emissive_component = self.image_allocator.get(gpu, "emissive", &vector_desc);
         let pbr_component = self.image_allocator.get(gpu, "pbr_component", &vector_desc);
-        let shadow_buffer = self.image_allocator.get(gpu, "shadow_buffer", &vector_desc);
+        let shadow_buffer = self.image_allocator.get(gpu, "shadow_buffer", &rgba_desc);
         Gbuffer {
             depth_component,
             position_component,
@@ -1737,25 +1578,32 @@ impl RenderingPipeline for DeferredRenderingPipeline {
     fn render(
         &mut self,
         gpu: &dyn Gpu,
-        pov: &Camera,
+        camera: &Camera,
         scene: &RenderScene,
         resource_map: &ResourceMap,
         cvar_manager: &CvarManager,
     ) -> anyhow::Result<ImageViewHandle> {
         if self.update_frustum {
-            self.frustum = pov.frustum();
+            self.frustum = camera.frustum();
         }
 
-        let projection = pov.projection();
+        self.update_lights(scene);
+
+        let projection = camera.projection();
 
         let current_buffers = &self.frame_buffers[self.in_flight_frame];
 
         self.in_flight_frame = (1 + self.in_flight_frame) % self.max_frames_in_flight;
 
         let mut per_frame_data = vec![PointOfViewData {
-            eye: Point4::new(pov.location[0], pov.location[1], pov.location[2], 0.0),
-            eye_forward: vector![pov.forward.x, pov.forward.y, pov.forward.z, 0.0],
-            view: pov.view(),
+            eye: Point4::new(
+                camera.location[0],
+                camera.location[1],
+                camera.location[2],
+                0.0,
+            ),
+            eye_forward: vector![camera.forward.x, camera.forward.y, camera.forward.z, 0.0],
+            view: camera.view(),
             projection,
         }];
 
@@ -1790,20 +1638,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             std::mem::size_of::<Vector4<f32>>() as u64 + size_of::<u32>() as u64 * 4,
             bytemuck::cast_slice(&self.active_lights),
         )?;
-        gpu.write_buffer(
-            &current_buffers.csm_buffer,
-            0,
-            bytemuck::cast_slice(&[self.csm_slices as u32]),
-        )?;
 
-        let slices = pov.split_into_slices(4);
-        let slices = slices.iter().map(|sl| sl.near).collect::<Vec<_>>();
-
-        gpu.write_buffer(
-            &current_buffers.csm_buffer,
-            std::mem::size_of::<u32>() as u64,
-            bytemuck::cast_slice(&slices),
-        )?;
+        // let slices = pov.split_into_slices(4);
+        // let slices = slices.iter().map(|sl| sl.near).collect::<Vec<_>>();
 
         let color_desc = RenderImageDescription {
             format: ImageFormat::Rgba8,
@@ -1823,7 +1660,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         self.shadow_renderer.render_shadows(
             gpu,
             &gbuffer,
-            pov,
+            camera,
             scene,
             &mut graphics_command_buffer,
             resource_map,
@@ -1839,7 +1676,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
                 self.view_size,
                 current_buffers,
                 &primitives,
-                pov,
+                camera,
                 scene,
             )
             .context("Main pass")?;

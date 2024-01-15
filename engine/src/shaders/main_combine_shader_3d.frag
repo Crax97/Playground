@@ -257,13 +257,11 @@ vec3 lit_fragment(FragmentInfo frag_info) {
         vec3 masked_light_color = light_mask * light_info.color_intensity.xyz * light_info.color_intensity.w;
         overall_mask += light_mask;
         vec3 light_color = cook_torrance(view, frag_info, l_dot_n, h) * masked_light_color;
-        // if (light_info.type_shadowcaster.y != -1) {
-        //     light_color *= calculate_shadow_influence(frag_info, light_info, light_dir, light_dist);
-        // }
 
         fragment_light += light_color;
     }
 
+    fragment_light *= frag_info.shadow_sample;
     vec3 irradiance_sample = texture(irradianceMap, normalize(frag_info.normal)).rgb;
     return frag_info.diffuse * irradiance_sample * (ambient_color + fragment_light);
 }

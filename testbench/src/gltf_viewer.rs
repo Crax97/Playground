@@ -5,6 +5,7 @@ mod utils;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
+use std::sync::Arc;
 
 use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App, Console};
@@ -630,8 +631,8 @@ impl App for GLTFViewer {
             Rect2D {
                 offset: Offset2D::default(),
                 extent: Extent2D {
-                    width: 256,
-                    height: 256,
+                    width: backbuffer.size.width / 4,
+                    height: backbuffer.size.height / 4,
                 },
             },
             true,
