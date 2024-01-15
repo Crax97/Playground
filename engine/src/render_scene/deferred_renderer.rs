@@ -1398,7 +1398,7 @@ impl DeferredRenderingPipeline {
     }
 
     pub fn get_shadow_texture(&self, gpu: &dyn Gpu) -> ImageViewHandle {
-        self.shadow_renderer.get_shadow_buffer(gpu)
+        self.get_gbuffer(gpu).shadow_buffer.view
     }
 
     fn get_gbuffer(&self, gpu: &dyn Gpu) -> Gbuffer {
@@ -1822,9 +1822,9 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let gbuffer = self.get_gbuffer(gpu);
         self.shadow_renderer.render_shadows(
             gpu,
+            &gbuffer,
             pov,
             scene,
-            &gbuffer,
             &mut graphics_command_buffer,
             resource_map,
         )?;

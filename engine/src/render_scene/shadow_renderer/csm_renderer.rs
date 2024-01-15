@@ -91,10 +91,10 @@ impl CsmRenderer {
             view_type: gpu::ImageViewType::Type2D,
             format: gpu::ImageFormat::Depth,
             components: ComponentMapping {
-                r: gpu::ComponentSwizzle::A,
-                g: gpu::ComponentSwizzle::A,
-                b: gpu::ComponentSwizzle::A,
-                a: gpu::ComponentSwizzle::A,
+                r: gpu::ComponentSwizzle::Identity,
+                g: gpu::ComponentSwizzle::Identity,
+                b: gpu::ComponentSwizzle::Identity,
+                a: gpu::ComponentSwizzle::Identity,
             },
             subresource_range: ImageSubresourceRange {
                 aspect_mask: ImageAspectFlags::DEPTH,
@@ -208,42 +208,15 @@ impl CsmRenderer {
             shadow_emit_handle,
         })
     }
-
-    fn get_shadow_render_image(&self, gpu: &dyn Gpu) -> RenderImage {
-        self.buffer_allocator.get(
-            gpu,
-            "Shadow Buffer",
-            &RenderImageDescription {
-                width: self.viewport_size.width,
-                height: self.viewport_size.height,
-                format: gpu::ImageFormat::Rgba8,
-                samples: gpu::SampleCount::Sample1,
-                view_type: gpu::ImageViewType::Type2D,
-            },
-        )
-    }
-    fn get_shadow_atlas(&self, gpu: &dyn Gpu) -> RenderImage {
-        self.buffer_allocator.get(
-            gpu,
-            "Shadow Alas",
-            &RenderImageDescription {
-                width: SHADOW_ATLAS_WIDTH,
-                height: SHADOW_ATLAS_HEIGHT,
-                format: gpu::ImageFormat::Depth,
-                samples: gpu::SampleCount::Sample1,
-                view_type: gpu::ImageViewType::Type2D,
-            },
-        )
-    }
 }
 
 impl ShadowRenderer for CsmRenderer {
     fn render_shadows(
         &mut self,
         gpu: &dyn Gpu,
+        gbuffer: &Gbuffer,
         camera: &crate::Camera,
         scene: &crate::RenderScene,
-        gbuffer: &Gbuffer,
         command_buffer: &mut gpu::CommandBuffer,
         resource_map: &ResourceMap,
     ) -> anyhow::Result<()> {
@@ -336,15 +309,13 @@ impl ShadowRenderer for CsmRenderer {
             bytemuck::cast_slice(&shadow_casters),
         )?;
 
-        let shadow_atlas = self.get_shadow_atlas(gpu);
-
         {
             let mut shadow_atlas_pass =
                 command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
                     label: Some("CSM Shadow Atlas Emit"),
                     color_attachments: &[],
                     depth_attachment: Some(FramebufferDepthAttachment {
-                        image_view: shadow_atlas.view,
+                        image_view: self.shadow_atlas_view.clone(),
                         load_op: gpu::DepthLoadOp::Clear(1.0),
                         store_op: gpu::AttachmentStoreOp::Store,
                         initial_layout: gpu::ImageLayout::Undefined,
@@ -523,9 +494,5 @@ impl ShadowRenderer for CsmRenderer {
 
         self.cur_framebuffer = (self.cur_framebuffer + 1) % self.num_framebuffers;
         Ok(())
-    }
-
-    fn get_shadow_buffer(&self, gpu: &dyn Gpu) -> ImageViewHandle {
-        self.get_shadow_render_image(gpu).view
     }
 }
