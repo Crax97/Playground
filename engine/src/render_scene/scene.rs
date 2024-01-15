@@ -113,13 +113,13 @@ impl Light {
                 let mut camera =
                     Camera::new_orthographic(size.x, size.y, -self.radius * 0.5, self.radius * 0.5);
                 camera.location = self.position;
-                camera.forward = -(self.position.to_homogeneous().xyz().normalize());
+                camera.forward = direction;
                 povs.push(camera);
             }
             LightType::Spotlight {
                 direction,
-                inner_cone_degrees,
                 outer_cone_degrees,
+                ..
             } => {
                 let mut camera = Camera::new_perspective(
                     (2.0 * outer_cone_degrees).clamp(0.0, 90.0),

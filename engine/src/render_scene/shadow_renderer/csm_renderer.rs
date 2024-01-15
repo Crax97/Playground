@@ -9,19 +9,18 @@ use gpu::{
     ImageViewCreateInfo, ImageViewHandle, MemoryDomain, PipelineStageFlags, Rect2D, SamplerHandle,
     ShaderModuleHandle, ShaderStage, SubpassDependency, SubpassDescription, Viewport,
 };
-use nalgebra::{point, Point3, Point4, Vector4};
+use nalgebra::point;
 
 use crate::{
     DeferredRenderingPipeline, FrameBuffers, Gbuffer, ImageAllocator, PipelineTarget,
-    PointOfViewData, RenderImage, RenderImageDescription, ResourceMap, SamplerAllocator,
-    TiledTexture2DPacker,
+    PointOfViewData, ResourceMap, SamplerAllocator, TiledTexture2DPacker,
 };
 
 use super::ShadowRenderer;
 
 pub const SHADOW_ATLAS_TILE_SIZE: u32 = 128;
-pub const SHADOW_ATLAS_WIDTH: u32 = 7680;
-pub const SHADOW_ATLAS_HEIGHT: u32 = 4352;
+pub const SHADOW_ATLAS_WIDTH: u32 = SHADOW_ATLAS_TILE_SIZE * 70;
+pub const SHADOW_ATLAS_HEIGHT: u32 = SHADOW_ATLAS_TILE_SIZE * 35;
 
 const SHADOW_EMIT_SOURCE: &[u32] = glsl!(
     kind = fragment,
@@ -35,20 +34,17 @@ pub struct CsmBuffers {
 }
 
 pub struct CsmRenderer {
-    buffer_allocator: ImageAllocator,
     sampler_allocator: SamplerAllocator,
     csm_buffers: Vec<CsmBuffers>,
     frame_buffers: Vec<FrameBuffers>,
     num_framebuffers: usize,
     cur_framebuffer: usize,
-    viewport_size: Extent2D,
 
     shadow_atlas: ImageHandle,
     shadow_atlas_view: ImageViewHandle,
     shadow_atlas_sampler: SamplerHandle,
     linear_sampler: SamplerHandle,
-
-    csm_split_count: u32,
+    csm_split_count: usize,
 
     screen_quad_vs: ShaderModuleHandle,
     shadow_emit_handle: ShaderModuleHandle,
@@ -67,7 +63,6 @@ impl CsmRenderer {
     pub fn new(
         gpu: &dyn Gpu,
         num_framebuffers: usize,
-        initial_viewport_size: Extent2D,
         linear_sampler: SamplerHandle,
         screen_quad_vs: ShaderModuleHandle,
     ) -> anyhow::Result<Self> {
@@ -112,7 +107,7 @@ impl CsmRenderer {
             address_v: gpu::SamplerAddressMode::ClampToEdge,
             address_w: gpu::SamplerAddressMode::ClampToEdge,
             mip_lod_bias: 0.0,
-            compare_function: Some(gpu::CompareOp::LessEqual),
+            compare_function: None,
             min_lod: 0.0,
             max_lod: 1.0,
             border_color: [0.0; 4],
@@ -179,13 +174,11 @@ impl CsmRenderer {
         })?;
 
         Ok(Self {
-            buffer_allocator: ImageAllocator::new(NEVER_DEALLOCATE),
             sampler_allocator: SamplerAllocator::new(NEVER_DEALLOCATE),
             num_framebuffers,
             csm_buffers,
             frame_buffers,
             cur_framebuffer: 0,
-            viewport_size: initial_viewport_size,
             shadow_atlas,
             shadow_atlas_view,
             shadow_atlas_sampler,
@@ -491,5 +484,9 @@ impl ShadowRenderer for CsmRenderer {
 
         self.cur_framebuffer = (self.cur_framebuffer + 1) % self.num_framebuffers;
         Ok(())
+    }
+
+    fn gettext(&self) -> ImageViewHandle {
+        self.shadow_atlas_view.clone()
     }
 }

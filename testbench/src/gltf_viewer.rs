@@ -452,6 +452,8 @@ impl App for GLTFViewer {
                     );
                     self.camera.rotation = rotation;
                 }
+                let mut fwd = self.camera.forward();
+                if ui.input_floats("Camera forward", fwd.data.as_mut_slice()) {}
 
                 ui.input_float("Camera speed", &mut self.camera.speed);
                 ui.input_float("Camera rotation speed", &mut self.camera.rotation_speed);

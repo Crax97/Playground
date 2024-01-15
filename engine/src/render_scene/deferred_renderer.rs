@@ -464,7 +464,6 @@ impl DeferredRenderingPipeline {
             shadow_renderer: Box::new(CsmRenderer::new(
                 gpu,
                 VkSwapchain::MAX_FRAMES_IN_FLIGHT,
-                view_size,
                 gbuffer_nearest_sampler,
                 screen_quad,
             )?),
@@ -1239,7 +1238,7 @@ impl DeferredRenderingPipeline {
     }
 
     pub fn get_shadow_texture(&self, gpu: &dyn Gpu) -> ImageViewHandle {
-        self.get_gbuffer(gpu).shadow_buffer.view
+        self.shadow_renderer.gettext()
     }
 
     fn get_gbuffer(&self, gpu: &dyn Gpu) -> Gbuffer {

@@ -18,4 +18,6 @@ pub trait ShadowRenderer {
         command_buffer: &mut CommandBuffer,
         resource_map: &ResourceMap,
     ) -> anyhow::Result<()>;
+
+    fn gettext(&self) -> ImageViewHandle;
 }

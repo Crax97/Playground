@@ -17,7 +17,7 @@ struct ShadowCaster {
 };
 
 layout(set = 1, binding = 0) uniform sampler2D position_component;
-layout(set = 1, binding = 1) uniform sampler2DShadow shadow_atlas;
+layout(set = 1, binding = 1) uniform sampler2D shadow_atlas;
 layout(set = 1, binding = 2) readonly buffer ShadowCasters {
     uint shadow_caster_count;
     ShadowCaster casters[];
@@ -64,15 +64,19 @@ CubeSample sample_cube(vec3 v)
 	sam.face_index = face_index;
 	return sam;
 }
+
+// returns 1.0 if pixel is in shadow, 0 otherwise
 float sample_shadow_atlas(vec3 light_pos, ShadowCaster shadow_caster) {
     vec2 texture_size = textureSize(shadow_atlas, 0);
     vec2 texel_size = 1.0 / texture_size;
 
     vec2 shadow_map_size = shadow_caster.offset_size.zw * texel_size;
     vec2 shadow_map_offset = shadow_caster.offset_size.xy * texel_size;
-    light_pos.xy = light_pos.xy * texel_size + shadow_map_offset;
-    
-    return texture(shadow_atlas, light_pos);
+    light_pos.xy = shadow_map_offset + light_pos.xy * shadow_map_size;
+
+    float compare_z = light_pos.z; 
+    float stored_z = texture(shadow_atlas, light_pos.xy).r;
+    return compare_z > stored_z ? 1.0 : 0.0;
 }
 
 void main() {
@@ -85,15 +89,16 @@ void main() {
         PointOfView pov = per_frame_data.shadows[pov_idx];
         mat4 pov_vp = pov.proj * pov.view;
         vec4 from_light = pov_vp * vec4(pixel_pos, 1.0); 
-        from_light /= from_light.w;
-        from_light.xyw = from_light.xyw * 0.5 + 0.5;
+        vec3 light_proj = from_light.xyz / from_light.w;
+        light_proj = light_proj * 0.5 + 0.5;
 
-        if (from_light.x < 0.0 || from_light.x > 1.0 || from_light.y < 0.0 || from_light.y > 1.0) {
+        if (light_proj.x < 0.0 || light_proj.x > 1.0 || light_proj.y < 0.0 || light_proj.y > 1.0 
+            || light_proj.z < 0.0 || light_proj.z > 1.0) {
             continue;
         }
 
         num_lights += 1;
-        float in_shadow = sample_shadow_atlas(from_light.xyz, caster);
+        float in_shadow = sample_shadow_atlas(light_proj, caster);
         shadow_count += in_shadow;
     }
     shadow_count /= float(num_lights);
