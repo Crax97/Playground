@@ -89,10 +89,12 @@ impl Light {
     }
 
     pub fn point_of_views(&self) -> Vec<Camera> {
+        const ZNEAR: f32 = 0.001;
         let mut povs = vec![];
         match self.ty {
             LightType::Point => {
-                let mut camera = Camera::new_perspective(90.0, 1.0, 1.0, 0.01, self.radius);
+                let mut camera =
+                    Camera::new_perspective(90.0, 1.0, 1.0, ZNEAR, self.radius.max(ZNEAR + 0.1));
                 camera.location = self.position;
                 let directions = [
                     vector![1.0, 0.0, 0.0],
@@ -122,11 +124,11 @@ impl Light {
                 ..
             } => {
                 let mut camera = Camera::new_perspective(
-                    (2.0 * outer_cone_degrees).clamp(0.0, 90.0),
+                    2.0 * outer_cone_degrees.max(0.01),
                     1.0,
                     1.0,
-                    0.001,
-                    self.radius,
+                    ZNEAR,
+                    self.radius.max(ZNEAR + 0.01),
                 );
                 camera.location = self.position;
                 camera.forward = direction;

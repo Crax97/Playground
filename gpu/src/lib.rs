@@ -210,8 +210,8 @@ pub mod command_buffer_2 {
 }
 pub mod render_pass {
     use crate::{
-        BufferHandle, CompareOp, CullMode, FrontFace, IndexType, PolygonMode, PrimitiveTopology,
-        ShaderModuleHandle, VertexBindingInfo, Viewport,
+        BufferHandle, CompareOp, CullMode, FrontFace, IndexType, PipelineColorBlendAttachmentState,
+        PolygonMode, PrimitiveTopology, ShaderModuleHandle, VertexBindingInfo, Viewport,
     };
     define_pass_type!(RenderPass {
      fn set_primitive_topology(&mut self, new_topology: PrimitiveTopology) ;
@@ -227,6 +227,7 @@ pub mod render_pass {
      fn set_enable_depth_test(&mut self, enable_depth_test: bool) ;
      fn set_depth_write_enabled(&mut self, depth_write_enabled: bool) ;
      fn set_depth_compare_op(&mut self, depth_compare_op: CompareOp) ;
+     fn set_color_attachment_blend_state(&mut self, attachment: usize, blend_state: PipelineColorBlendAttachmentState);
      fn advance_to_next_subpass(&mut self) ;
     /* If enabled, fragments may be discarded after the vertex shader stage,
     before any fragment shader is executed.
@@ -666,6 +667,7 @@ pub enum ImageFormat {
     SRgba8,
     Rgb8,
     Depth,
+    RUint8,
 }
 
 impl ImageFormat {
@@ -693,6 +695,7 @@ impl ImageFormat {
             ImageFormat::RgbSint32 => 12,
             ImageFormat::RgbaUint32 => 16,
             ImageFormat::RgbaSint32 => 16,
+            ImageFormat::RUint8 => 1,
         }
     }
     pub fn is_color(&self) -> bool {

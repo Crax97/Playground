@@ -12,8 +12,8 @@ use gpu::{
 use nalgebra::point;
 
 use crate::{
-    DeferredRenderingPipeline, FrameBuffers, Gbuffer, ImageAllocator, PipelineTarget,
-    PointOfViewData, ResourceMap, SamplerAllocator, TiledTexture2DPacker,
+    DeferredRenderingPipeline, FrameBuffers, ImageAllocator, PipelineTarget, PointOfViewData,
+    ResourceMap, SamplerAllocator, SceneTextures, TiledTexture2DPacker,
 };
 
 use super::ShadowRenderer;
@@ -139,7 +139,7 @@ impl CsmRenderer {
             });
             let camera_buffer = {
                 let create_info = BufferCreateInfo {
-                    label: Some("Deferred Renderer - Camera buffer"),
+                    label: Some("CMS - Light POV buffer"),
                     size: std::mem::size_of::<PointOfViewData>() * 100,
                     usage: BufferUsageFlags::STORAGE_BUFFER
                         | BufferUsageFlags::UNIFORM_BUFFER
@@ -194,7 +194,7 @@ impl ShadowRenderer for CsmRenderer {
     fn render_shadows(
         &mut self,
         gpu: &dyn Gpu,
-        gbuffer: &Gbuffer,
+        gbuffer: &SceneTextures,
         camera: &crate::Camera,
         scene: &crate::RenderScene,
         command_buffer: &mut gpu::CommandBuffer,
@@ -443,7 +443,7 @@ impl ShadowRenderer for CsmRenderer {
                     Binding {
                         ty: DescriptorBindingType::ImageView {
                             image_view_handle: self.shadow_atlas_view.clone(),
-                            sampler_handle: self.shadow_atlas_sampler.clone(),
+                            sampler_handle: self.linear_sampler.clone(),
                             layout: ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,

@@ -14,15 +14,15 @@ use crate::{
 
 use crate::resource_map::{ResourceHandle, ResourceMap};
 use gpu::{
-    AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, Binding,
-    BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorLoadOp, CommandBuffer,
-    CommandBufferSubmitInfo, Extent2D, FragmentStageInfo, FramebufferColorAttachment,
-    FramebufferDepthAttachment, Gpu, ImageAspectFlags, ImageFormat, ImageHandle, ImageLayout,
-    ImageMemoryBarrier, ImageSubresourceRange, ImageUsageFlags, ImageViewHandle, ImageViewType,
-    IndexType, InputRate, LifetimedCache, MemoryDomain, Offset2D, PipelineBarrierInfo,
-    PipelineStageFlags, Rect2D, RenderPass, SampleCount, SamplerHandle, ShaderModuleCreateInfo,
-    ShaderModuleHandle, ShaderStage, SubpassDependency, SubpassDescription, VertexBindingInfo,
-    VertexStageInfo, VkSwapchain,
+    AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, Binding, BlendMode,
+    BlendOp, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorComponentFlags, ColorLoadOp,
+    CommandBuffer, CommandBufferSubmitInfo, Extent2D, FragmentStageInfo,
+    FramebufferColorAttachment, FramebufferDepthAttachment, Gpu, ImageAspectFlags, ImageFormat,
+    ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageUsageFlags,
+    ImageViewHandle, ImageViewType, IndexType, InputRate, LifetimedCache, MemoryDomain, Offset2D,
+    PipelineBarrierInfo, PipelineColorBlendAttachmentState, PipelineStageFlags, Rect2D, RenderPass,
+    SampleCount, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
+    SubpassDependency, SubpassDescription, VertexBindingInfo, VertexStageInfo, VkSwapchain,
 };
 use nalgebra::{point, vector, Matrix, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 
@@ -58,6 +58,12 @@ const TEXTURE_COPY: &[u32] = glsl!(
     entry_point = "main"
 );
 
+const LIGHT_MASK: &[u32] = glsl!(
+    kind = fragment,
+    path = "src/shaders/light_mask.frag",
+    entry_point = "main"
+);
+
 const TEXTURE_MUL: &[u32] = glsl!(
     kind = fragment,
     path = "src/shaders/texture_mul.frag",
@@ -69,6 +75,7 @@ pub struct DeferredRenderingPipeline {
     image_allocator: ImageAllocator,
     sampler_allocator: SamplerAllocator,
     screen_quad: ShaderModuleHandle,
+    light_mask: ShaderModuleHandle,
     texture_copy: ShaderModuleHandle,
     combine_shader: ShaderModuleHandle,
     shadow_renderer: Box<dyn ShadowRenderer>,
@@ -124,13 +131,14 @@ pub struct RenderImage {
     pub view: ImageViewHandle,
 }
 
-pub struct Gbuffer {
+pub struct SceneTextures {
     pub depth_component: RenderImage,
     pub position_component: RenderImage,
     pub normal_component: RenderImage,
     pub diffuse_component: RenderImage,
     pub emissive_component: RenderImage,
     pub pbr_component: RenderImage,
+    pub light_mask: RenderImage,
     pub shadow_buffer: RenderImage,
 
     pub viewport_size: Extent2D,
@@ -400,6 +408,10 @@ impl DeferredRenderingPipeline {
             code: bytemuck::cast_slice(TEXTURE_COPY),
         })?;
 
+        let light_mask = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            code: bytemuck::cast_slice(LIGHT_MASK),
+        })?;
+
         let texture_mul = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(TEXTURE_MUL),
         })?;
@@ -439,6 +451,7 @@ impl DeferredRenderingPipeline {
             screen_quad_flipped,
             combine_shader,
             texture_copy,
+            light_mask,
             frame_buffers,
             post_process_stack: vec![],
             in_flight_frame: 0,
@@ -514,8 +527,8 @@ impl DeferredRenderingPipeline {
                     let master = resource_map.get(&material.owner);
                     bind_master_material(master, pipeline_target, render_pass, frame_buffers);
 
-                    render_pass.set_cull_mode(master.cull_mode);
-                    render_pass.set_front_face(master.front_face);
+                    // render_pass.set_cull_mode(master.cull_mode);
+                    // render_pass.set_front_face(master.front_face);
                     draw_mesh_primitive(
                         gpu,
                         render_pass,
@@ -733,7 +746,7 @@ impl DeferredRenderingPipeline {
         &self,
         gpu: &dyn Gpu,
         graphics_command_buffer: &mut CommandBuffer,
-        gbuffer: &Gbuffer,
+        gbuffer: &SceneTextures,
         resource_map: &ResourceMap,
         render_size: Extent2D,
         current_buffers: &FrameBuffers,
@@ -741,13 +754,14 @@ impl DeferredRenderingPipeline {
         pov: &Camera,
         scene: &RenderScene,
     ) -> anyhow::Result<()> {
-        let Gbuffer {
+        let SceneTextures {
             depth_component,
             position_component,
             normal_component,
             diffuse_component,
             emissive_component,
             pbr_component,
+            light_mask,
             shadow_buffer: _,
             viewport_size: _,
         } = gbuffer;
@@ -760,7 +774,7 @@ impl DeferredRenderingPipeline {
                     color_attachments: vec![],
                     resolve_attachments: vec![],
                     depth_stencil_attachment: Some(AttachmentReference {
-                        attachment: 5,
+                        attachment: 6,
                         layout: ImageLayout::DepthStencilAttachment,
                     }),
                     preserve_attachments: vec![],
@@ -792,9 +806,41 @@ impl DeferredRenderingPipeline {
                     ],
                     resolve_attachments: vec![],
                     depth_stencil_attachment: Some(AttachmentReference {
-                        attachment: 5,
+                        attachment: 6,
                         layout: ImageLayout::DepthStencilReadOnly,
                     }),
+                    preserve_attachments: vec![],
+                },
+                SubpassDescription {
+                    label: Some("Light Mask".to_owned()),
+                    input_attachments: vec![
+                        AttachmentReference {
+                            attachment: 0,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        AttachmentReference {
+                            attachment: 1,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        AttachmentReference {
+                            attachment: 2,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        AttachmentReference {
+                            attachment: 3,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        AttachmentReference {
+                            attachment: 4,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                    ],
+                    color_attachments: vec![AttachmentReference {
+                        attachment: 5,
+                        layout: ImageLayout::ColorAttachment,
+                    }],
+                    resolve_attachments: vec![],
+                    depth_stencil_attachment: None,
                     preserve_attachments: vec![],
                 },
             ];
@@ -825,7 +871,7 @@ impl DeferredRenderingPipeline {
                 ],
                 resolve_attachments: vec![],
                 depth_stencil_attachment: Some(AttachmentReference {
-                    attachment: 5,
+                    attachment: 6,
                     layout: ImageLayout::DepthStencilAttachment,
                 }),
                 preserve_attachments: vec![],
@@ -852,7 +898,16 @@ impl DeferredRenderingPipeline {
                     dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
                         .union(AccessFlags::COLOR_ATTACHMENT_WRITE),
                 },
+                SubpassDependency {
+                    src_subpass: 1,
+                    dst_subpass: 2,
+                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
+                    src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                    dst_access_mask: AccessFlags::SHADER_READ,
+                },
             ];
+
             let early_z_disabled_dependencies: &[SubpassDependency] = &[SubpassDependency {
                 src_subpass: SubpassDependency::EXTERNAL,
                 dst_subpass: 0,
@@ -904,6 +959,13 @@ impl DeferredRenderingPipeline {
                             initial_layout: ImageLayout::Undefined,
                             final_layout: ImageLayout::ShaderReadOnly,
                         },
+                        FramebufferColorAttachment {
+                            image_view: light_mask.view.clone(),
+                            load_op: ColorLoadOp::Clear([0.0; 4]),
+                            store_op: AttachmentStoreOp::Store,
+                            initial_layout: ImageLayout::Undefined,
+                            final_layout: ImageLayout::ShaderReadOnly,
+                        },
                     ],
                     depth_attachment: Some(gpu::FramebufferDepthAttachment {
                         image_view: depth_component.view.clone(),
@@ -938,7 +1000,7 @@ impl DeferredRenderingPipeline {
                 gbuffer_render_pass.set_depth_write_enabled(true);
                 Self::main_render_loop(
                     gpu,
-                    &primitives,
+                    primitives,
                     resource_map,
                     PipelineTarget::DepthOnly,
                     &mut gbuffer_render_pass,
@@ -984,7 +1046,7 @@ impl DeferredRenderingPipeline {
             });
             Self::main_render_loop(
                 gpu,
-                &primitives,
+                primitives,
                 resource_map,
                 PipelineTarget::ColorAndDepth,
                 &mut gbuffer_render_pass,
@@ -993,6 +1055,87 @@ impl DeferredRenderingPipeline {
                 &self.sampler_allocator,
             )
             .context("Gbuffer output pass")?;
+            gbuffer_render_pass.advance_to_next_subpass();
+
+            // Light mask
+            gbuffer_render_pass.set_front_face(gpu::FrontFace::ClockWise);
+            gbuffer_render_pass.set_cull_mode(gpu::CullMode::None);
+            gbuffer_render_pass.set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
+            gbuffer_render_pass.set_enable_depth_test(false);
+            gbuffer_render_pass.set_depth_write_enabled(false);
+
+            gbuffer_render_pass.bind_resources(
+                0,
+                &[
+                    Binding {
+                        ty: gpu::DescriptorBindingType::StorageBuffer {
+                            handle: current_buffers.camera_buffer.clone(),
+                            offset: 0,
+                            range: gpu::WHOLE_SIZE as _,
+                        },
+                        binding_stage: ShaderStage::ALL_GRAPHICS,
+                        location: 0,
+                    },
+                    Binding {
+                        ty: gpu::DescriptorBindingType::StorageBuffer {
+                            handle: current_buffers.light_buffer.clone(),
+                            offset: 0,
+                            range: 100 * size_of::<ObjectDrawInfo>(),
+                        },
+                        binding_stage: ShaderStage::ALL_GRAPHICS,
+                        location: 1,
+                    },
+                ],
+            );
+            gbuffer_render_pass.bind_resources(
+                1,
+                &[
+                    Binding {
+                        ty: gpu::DescriptorBindingType::InputAttachment {
+                            image_view_handle: position_component.view.clone(),
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        binding_stage: ShaderStage::FRAGMENT,
+                        location: 0,
+                    },
+                    Binding {
+                        ty: gpu::DescriptorBindingType::InputAttachment {
+                            image_view_handle: normal_component.view.clone(),
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        binding_stage: ShaderStage::FRAGMENT,
+                        location: 1,
+                    },
+                    Binding {
+                        ty: gpu::DescriptorBindingType::InputAttachment {
+                            image_view_handle: diffuse_component.view.clone(),
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        binding_stage: ShaderStage::FRAGMENT,
+                        location: 2,
+                    },
+                    Binding {
+                        ty: gpu::DescriptorBindingType::InputAttachment {
+                            image_view_handle: emissive_component.view.clone(),
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        binding_stage: ShaderStage::FRAGMENT,
+                        location: 3,
+                    },
+                    Binding {
+                        ty: gpu::DescriptorBindingType::InputAttachment {
+                            image_view_handle: pbr_component.view.clone(),
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        binding_stage: ShaderStage::FRAGMENT,
+                        location: 4,
+                    },
+                ],
+            );
+
+            gbuffer_render_pass.set_vertex_shader(self.screen_quad.clone());
+            gbuffer_render_pass.set_fragment_shader(self.light_mask.clone());
+            gbuffer_render_pass.draw(4, 1, 0, 0)?;
         }
 
         // graphics_command_buffer.pipeline_barrier(&gpu::PipelineBarrierInfo {
@@ -1241,7 +1384,7 @@ impl DeferredRenderingPipeline {
         self.shadow_renderer.gettext()
     }
 
-    fn get_gbuffer(&self, gpu: &dyn Gpu) -> Gbuffer {
+    fn get_gbuffer(&self, gpu: &dyn Gpu) -> SceneTextures {
         let vector_desc = RenderImageDescription {
             format: ImageFormat::RgbaFloat32,
             samples: SampleCount::Sample1,
@@ -1263,14 +1406,16 @@ impl DeferredRenderingPipeline {
             height: self.view_size.height,
             view_type: ImageViewType::Type2D,
         };
+
         let depth_component = self.image_allocator.get(gpu, "depth", &depth_desc);
         let position_component = self.image_allocator.get(gpu, "position", &vector_desc);
         let normal_component = self.image_allocator.get(gpu, "normal", &vector_desc);
         let diffuse_component = self.image_allocator.get(gpu, "diffuse", &vector_desc);
         let emissive_component = self.image_allocator.get(gpu, "emissive", &vector_desc);
         let pbr_component = self.image_allocator.get(gpu, "pbr_component", &vector_desc);
+        let light_mask = self.image_allocator.get(gpu, "light_mask", &vector_desc);
         let shadow_buffer = self.image_allocator.get(gpu, "shadow_buffer", &rgba_desc);
-        Gbuffer {
+        SceneTextures {
             depth_component,
             position_component,
             normal_component,
@@ -1278,6 +1423,7 @@ impl DeferredRenderingPipeline {
             emissive_component,
             pbr_component,
             shadow_buffer,
+            light_mask,
             viewport_size: self.view_size,
         }
     }
@@ -1287,7 +1433,7 @@ impl DeferredRenderingPipeline {
         gpu: &dyn Gpu,
         graphics_command_buffer: &mut CommandBuffer,
         color_output: &RenderImage,
-        gbuffer: &Gbuffer,
+        gbuffer: &SceneTextures,
         resource_map: &ResourceMap,
         view_size: Extent2D,
     ) -> anyhow::Result<()> {
@@ -1387,6 +1533,15 @@ impl DeferredRenderingPipeline {
                 },
                 Binding {
                     ty: gpu::DescriptorBindingType::ImageView {
+                        image_view_handle: gbuffer.light_mask.view.clone(),
+                        sampler_handle: self.gbuffer_nearest_sampler.clone(),
+                        layout: ImageLayout::ShaderReadOnly,
+                    },
+                    binding_stage: ShaderStage::FRAGMENT,
+                    location: 6,
+                },
+                Binding {
+                    ty: gpu::DescriptorBindingType::ImageView {
                         image_view_handle: resource_map
                             .get(
                                 self.irradiance_map
@@ -1399,7 +1554,7 @@ impl DeferredRenderingPipeline {
                         layout: ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: ShaderStage::FRAGMENT,
-                    location: 6,
+                    location: 7,
                 },
                 Binding {
                     ty: gpu::DescriptorBindingType::StorageBuffer {
@@ -1408,7 +1563,7 @@ impl DeferredRenderingPipeline {
                         range: gpu::WHOLE_SIZE as usize,
                     },
                     binding_stage: ShaderStage::FRAGMENT,
-                    location: 7,
+                    location: 8,
                 },
                 Binding {
                     ty: gpu::DescriptorBindingType::StorageBuffer {
@@ -1417,7 +1572,7 @@ impl DeferredRenderingPipeline {
                         range: gpu::WHOLE_SIZE as usize,
                     },
                     binding_stage: ShaderStage::FRAGMENT,
-                    location: 8,
+                    location: 9,
                 },
             ],
         );
@@ -1656,14 +1811,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let mut graphics_command_buffer = gpu.start_command_buffer(gpu::QueueType::Graphics)?;
 
         let gbuffer = self.get_gbuffer(gpu);
-        self.shadow_renderer.render_shadows(
-            gpu,
-            &gbuffer,
-            camera,
-            scene,
-            &mut graphics_command_buffer,
-            resource_map,
-        )?;
         {
             let primitives = scene.intersect_frustum(&self.frustum);
             self.drawcalls_last_frame = primitives.len() as u64;
@@ -1680,6 +1827,15 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             )
             .context("Main pass")?;
         }
+        self.shadow_renderer.render_shadows(
+            gpu,
+            &gbuffer,
+            camera,
+            scene,
+            &mut graphics_command_buffer,
+            resource_map,
+        )?;
+
         self.gbuffer_combine(
             gpu,
             &mut graphics_command_buffer,
@@ -1719,7 +1875,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let master_description = MasterMaterialDescription {
             name: material_description.name,
             domain: material_description.domain,
-
             texture_inputs: material_description.texture_inputs,
             material_parameters: material_description.material_parameters,
             vertex_info: &VertexStageInfo {

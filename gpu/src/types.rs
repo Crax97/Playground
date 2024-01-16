@@ -221,6 +221,7 @@ impl ToVk for ImageFormat {
     type Inner = vk::Format;
     fn to_vk(&self) -> Self::Inner {
         match self {
+            ImageFormat::RUint8 => vk::Format::R8_UINT,
             ImageFormat::Rgba8 => vk::Format::R8G8B8A8_UNORM,
             ImageFormat::SRgba8 => vk::Format::R8G8B8A8_SRGB,
             ImageFormat::Rgb8 => vk::Format::R8G8B8_UNORM,
@@ -259,6 +260,7 @@ impl From<&vk::Format> for ImageFormat {
             vk::Format::D32_SFLOAT => ImageFormat::Depth,
             vk::Format::R32G32B32A32_SFLOAT => ImageFormat::RgbaFloat32,
             vk::Format::B8G8R8A8_UNORM => ImageFormat::Bgra8,
+            vk::Format::R8_UINT => ImageFormat::RUint8,
             _ => panic!("ImageFormat::from(vk::Format): cannot convert {:?} to ImageFormat, most likely a bug: report it", value)
         }
     }

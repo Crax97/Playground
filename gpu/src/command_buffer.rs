@@ -932,7 +932,7 @@ impl VkRenderPassCommand {
                         &state.push_constant_data[idx],
                     );
                 }
-                if self.pipeline_state.vertex_inputs.len() > 0 {
+                if !self.pipeline_state.vertex_inputs.is_empty() {
                     let buffers = self
                         .pipeline_state
                         .vertex_inputs
@@ -955,7 +955,7 @@ impl VkRenderPassCommand {
             }
         }
 
-        if state.descriptor_state.sets.len() > 0 {
+        if !state.descriptor_state.sets.is_empty() {
             let descriptors = self.find_matching_descriptor_sets(&state.descriptor_state);
             unsafe {
                 device.cmd_bind_descriptor_sets(
@@ -1026,11 +1026,25 @@ impl VkRenderPassCommand {
                 }
             };
         }
+        
+        let command_buffer_state = 
+                self.command_buffer_state.borrow();
+
         validate!(
             !self.pipeline_state.early_discard_enabled
                 || (self.pipeline_state.early_discard_enabled
                     && self.pipeline_state.fragment_shader.is_valid()),
             "Primitive early discard is enabled, but no valid fragment shader has been set"
+        );
+        validate!(
+            {
+                command_buffer_state.descriptor_state.sets.iter().all(|s| {
+                    s.bindings.iter().all(|b| 
+                    !matches!(b.ty, DescriptorBindingType::InputAttachment { .. }) || b.binding_stage == ShaderStage::FRAGMENT
+                    )
+                })
+            },
+            "If there's an InputAttachment in the bindings, it must only be visible to the Fragment stage"       
         );
         Ok(())
     }
@@ -1280,6 +1294,10 @@ impl render_pass::Impl for VkRenderPassCommand {
     When enabled, a valid fragment shader must be set */
     fn set_early_discard_enabled(&mut self, allow_early_discard: bool) {
         self.pipeline_state.early_discard_enabled = allow_early_discard;
+    }
+
+    fn set_color_attachment_blend_state(&mut self, attachment:usize, blend_state:PipelineColorBlendAttachmentState,) {
+        self.pipeline_state.color_blend_states[attachment] = blend_state
     }
 }
 

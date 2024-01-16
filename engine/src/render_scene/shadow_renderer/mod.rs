@@ -4,7 +4,7 @@ pub use csm_renderer::CsmRenderer;
 
 use gpu::{CommandBuffer, Extent2D, Gpu, ImageViewHandle};
 
-use crate::{Camera, Gbuffer, RenderScene, ResourceMap};
+use crate::{Camera, RenderScene, ResourceMap, SceneTextures};
 
 pub trait ShadowRenderer {
     // The rendered shadow must be a linear gray texture (no depth)
@@ -12,7 +12,7 @@ pub trait ShadowRenderer {
     fn render_shadows(
         &mut self,
         gpu: &dyn Gpu,
-        gbuffer: &Gbuffer,
+        gbuffer: &SceneTextures,
         camera: &Camera,
         scene: &RenderScene,
         command_buffer: &mut CommandBuffer,

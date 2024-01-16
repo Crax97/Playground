@@ -3,7 +3,6 @@ layout(set = 0, binding = 1) uniform sampler2D normSampler;
 layout(set = 0, binding = 2) uniform sampler2D difSampler;
 layout(set = 0, binding = 3) uniform sampler2D emissSampler;
 layout(set = 0, binding = 4) uniform sampler2D pbrSampler;
-layout(set = 0, binding = 5) uniform sampler2D shadowBuffer;
 
 struct FragmentInfo {
     vec3 diffuse;
@@ -13,12 +12,10 @@ struct FragmentInfo {
     float roughness;
     float metalness;
     float shadow_scale;
-    float shadow_sample;
 };
 
 FragmentInfo get_fragment_info(vec2 in_uv) {
     FragmentInfo info;
-    in_uv.y = 1.0 - in_uv.y;
     info.diffuse = texture(difSampler, in_uv).rgb;
     info.emissive = texture(emissSampler, in_uv);
     info.position = texture(posSampler, in_uv).xyz;
@@ -31,6 +28,5 @@ FragmentInfo get_fragment_info(vec2 in_uv) {
 
     in_uv.y = 1.0 - in_uv.y;
     info.shadow_scale = pbr_sample.w;
-    info.shadow_sample = texture(shadowBuffer, in_uv).r;
     return info;
 }
