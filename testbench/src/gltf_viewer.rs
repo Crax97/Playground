@@ -514,6 +514,19 @@ impl App for GLTFViewer {
             ui.separator();
 
             ui.collapsing("Shadow settings", |ui| {
+                ui.slider("CSM Splits", 0, 6, &mut self.scene_renderer.csm_slices);
+                ui.slider(
+                    "CSM Split lambda",
+                    0.0,
+                    1.0,
+                    &mut self.scene_renderer.csm_split_lambda,
+                );
+                ui.slider(
+                    "CSM Z Multiplier",
+                    0.1,
+                    20.0,
+                    &mut self.scene_renderer.z_mult,
+                );
                 ui.slider(
                     "Depth Bias constant",
                     -10.0,

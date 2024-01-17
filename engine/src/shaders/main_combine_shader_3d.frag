@@ -1,6 +1,9 @@
 #version 460
 
 #pragma GL_GOOGLE_include_directive : require
+#extension GL_EXT_debug_printf : enable
+
+#define printf debugPrintfEXT
 
 #include "definitions.glsl"
 #include "random.glsl"
@@ -8,7 +11,7 @@
 #include "combine_base.glsl"
 
 
-struct ShadowCaster {
+struct ShadowMap {
     uvec4 offset_size;
     uvec4 type_nummaps_povs_splitidx;
 };
@@ -17,10 +20,9 @@ layout(location=0) in vec2 uv;
 layout(location=0) out vec4 color;
 
 layout(set = 0, binding = 5) uniform sampler2D shadow_atlas;
-layout(set = 0, binding = 6) readonly buffer ShadowCasters {
-    uint shadow_caster_count;
-    ShadowCaster casters[];
-} shadow_casters;
+layout(set = 0, binding = 6) readonly buffer ShadowMaps {
+    ShadowMap casters[];
+} shadow_maps;
 layout(set = 0, binding = 7) uniform samplerCube irradianceMap;
 
 layout(set = 0, binding = 8) readonly buffer  PerFrameDataBlock {
@@ -34,10 +36,10 @@ layout(set = 0, binding = 9, std140) readonly buffer LightData {
     LightInfo lights[];
 } light_data;
 
-layout(set = 0, binding = 10) readonly buffer CsmSplits {
-    uint split_count;
-    float splits[];
-};
+layout(push_constant) uniform PerObjectData {
+    uint csm_count;
+    float splits[6];
+} csm_data;
 
 struct CubeSample {
     vec2 uv;
@@ -87,7 +89,7 @@ vec3 get_unnormalized_light_direction(int light_type, vec3 light_direction, vec3
 }
 
 float get_light_mask(float n_dot_l, int light_type, vec3 light_position,  LightInfo light, vec3 position) {
-    if (light.type_shadowcaster.x == DIRECTIONAL_LIGHT) {
+    if (light.type_shadow_map.x == DIRECTIONAL_LIGHT) {
         // Directional lights are not attenuated
         return 1.0;
     }
@@ -95,7 +97,7 @@ float get_light_mask(float n_dot_l, int light_type, vec3 light_position,  LightI
     float light_distance = length(light_dir);
     light_dir /= light_distance;
     float attenuation = clamp(1.0 - pow(light_distance / light.position_radius.w, 4.0), 0.0, 1.0) / max(light_distance * light_distance, 0.01);
-    if (light.type_shadowcaster.x == SPOT_LIGHT) {
+    if (light.type_shadow_map.x == SPOT_LIGHT) {
         float inner_angle_cutoff = light.extras.x;
         float outer_angle_cutoff = light.extras.y;
 
@@ -109,21 +111,21 @@ float get_light_mask(float n_dot_l, int light_type, vec3 light_position,  LightI
 }
 
 // returns 1.0 if pixel is in shadow, 0 otherwise
-float sample_shadow_atlas(vec3 light_pos, ShadowCaster shadow_caster) {
+float sample_shadow_atlas(vec3 light_pos, ShadowMap shadow_map) {
     const float depth_bias = 0.0;
     vec2 texture_size = textureSize(shadow_atlas, 0);
     vec2 texel_size = 1.0 / texture_size;
 
-    vec2 shadow_map_size = shadow_caster.offset_size.zw * texel_size;
-    vec2 shadow_map_offset = shadow_caster.offset_size.xy * texel_size;
+    vec2 shadow_map_size = shadow_map.offset_size.zw * texel_size;
+    vec2 shadow_map_offset = shadow_map.offset_size.xy * texel_size;
     light_pos.xy = shadow_map_offset + light_pos.xy * shadow_map_size;
+    light_pos.x = clamp(light_pos.x, shadow_map_offset.x, shadow_map_offset.x + shadow_map_size.x);
+    light_pos.y = clamp(light_pos.y, shadow_map_offset.y, shadow_map_offset.y + shadow_map_size.y);
 
     float compare_z = light_pos.z - depth_bias; 
     float stored_z = texture(shadow_atlas, light_pos.xy).r;
     return compare_z > stored_z ? 1.0 : 0.0;
 }
-
-
 
 vec2 poisson_disk[16] = vec2[](
         vec2(0.0, 0.0),
@@ -145,9 +147,9 @@ vec2 poisson_disk[16] = vec2[](
 );
 
 vec3 get_unnormalized_light_direction(LightInfo info, vec3 position) {
-    if (info.type_shadowcaster.x == DIRECTIONAL_LIGHT) {
+    if (info.type_shadow_map.x == DIRECTIONAL_LIGHT) {
         return info.direction.xyz;
-    } else if (info.type_shadowcaster.x == SPOT_LIGHT) {
+    } else if (info.type_shadow_map.x == SPOT_LIGHT) {
         return info.direction.xyz;
     } else {
         return position - info.position_radius.xyz;
@@ -155,7 +157,7 @@ vec3 get_unnormalized_light_direction(LightInfo info, vec3 position) {
 }
 
 float get_light_mask(float n_dot_l, LightInfo light, vec3 position) {
-    if (light.type_shadowcaster.x == DIRECTIONAL_LIGHT) {
+    if (light.type_shadow_map.x == DIRECTIONAL_LIGHT) {
         // Directional lights are not attenuated
         return 1.0;
     }
@@ -163,7 +165,7 @@ float get_light_mask(float n_dot_l, LightInfo light, vec3 position) {
     float light_distance = length(light_dir);
     light_dir /= light_distance;
     float attenuation = clamp(1.0 - pow(light_distance / light.position_radius.w, 4.0), 0.0, 1.0) / max(light_distance * light_distance, 0.01);
-    if (light.type_shadowcaster.x == SPOT_LIGHT) {
+    if (light.type_shadow_map.x == SPOT_LIGHT) {
         float inner_angle_cutoff = light.extras.x;
         float outer_angle_cutoff = light.extras.y;
 
@@ -236,72 +238,47 @@ vec2 rotate(vec2 v, float a) {
 	return m * v;
 }
 
-// float shadow_map_sample(vec2 uv, float z, vec2 offset, vec2 size, vec2 tex_size) {
-//     uv *= size;
-//     uv += offset;
+ShadowMap select_directiona_light_layer(int first_shadow_map, vec2 uv, vec3 pixel_pos_world) {
+    vec4 pos_in_view = per_frame_data.camera.view * vec4(pixel_pos_world, 1.0);
+    float depth = abs(pos_in_view.z);
 
-//     vec2 pixel_size = 1.0 / tex_size;
+    int offset = -1;
+    for (uint i = 0; i < csm_data.csm_count; i++)
+    {
+		if (depth < csm_data.splits[i]) {
+			offset = int(i);
+			break;
+		}
+    }
 
-//     if (uv.x < offset.x + pixel_size.x || uv.x > offset.x + size.x - pixel_size.x || 
-//         uv.y < offset.y + pixel_size.y || uv.y > offset.y + size.y - pixel_size.y) {
-//         return 0.0;
-//     }
-// 	vec3 loc = vec3(uv, z);
-// 	loc.x = clamp(loc.x, offset.x + pixel_size.x, offset.x + size.x - pixel_size.x);
-// 	loc.y = clamp(loc.y, offset.y + pixel_size.y, offset.y + size.y - pixel_size.y);
-// 	return texture(shadowMap, loc);
-// }
+    if (offset == -1) {
+        offset = int(csm_data.csm_count) - 1;
+    }
 
-// float shadow_influence(uint shadow_index, FragmentInfo frag_info, int light_type, float light_dist) {
-//     vec2 tex_size = textureSize(shadowMap, 0);
-//     PointOfView shadow = per_frame_data.shadows[shadow_index];
+    return shadow_maps.casters[first_shadow_map + offset];
+}
 
-//     mat4 light_vp = shadow.proj * shadow.view;
-//     vec4 frag_pos_light_unnorm = light_vp * vec4(frag_info.position, 1.0);
-//     vec4 frag_pos_light = frag_pos_light_unnorm / frag_pos_light_unnorm.w;
-//     frag_pos_light.xy = frag_pos_light.xy * 0.5 + 0.5;
-
-//     int layer = 0;
-//     if (light_type == DIRECTIONAL_LIGHT) {
-//         for (int i = 0; i < csm_data.csm_count; i ++) {
-//             if (abs(frag_pos_light.z) < csm_data.csm_splits[i]) {
-//                 layer = i;
-//                 break;
-//             }
-//         }
-//     }
-
-//     vec2 scaled_light_size = shadow.viewport_size_offset.zw / tex_size;
-//     vec2 scaled_light_offset = (shadow.viewport_size_offset.xy - vec2(0.5)) / tex_size + vec2(scaled_light_size.x * layer, 0.0);
-
-// 	float sam = 0.0;
-// 	for (int i = 0; i < 16; i ++) {
-// 		vec2 offset = poisson_disk[i] / tex_size;
-// 		offset *= light_dist;
-// 		sam += shadow_map_sample(frag_pos_light.xy + offset,
-// 				frag_pos_light.z, scaled_light_offset, scaled_light_size, tex_size);
-// 	}
-// 	return sam / 16.0;
-// }
-
-// float calculate_shadow_influence(FragmentInfo frag_info, LightInfo light_info, vec3 light_dir, float light_dist) {
-//     float shadow = 0.0;
-
-// 	int base_shadow_index = light_info.type_shadowcaster.y;
-//     uint offset = 0;
-//     if (light_info.type_shadowcaster.x == POINT_LIGHT) {
-// 		CubeSample sam = sample_cube(-light_dir);
-//         offset = sam.face_index;
-//     }
-//     return shadow_influence(base_shadow_index + offset, frag_info, light_info.type_shadowcaster.x, light_dist);
-// }
+ShadowMap select_point_light_face(int first_shadow_map, vec3 direction) {
+    CubeSample sam = sample_cube(-direction);
+    return shadow_maps.casters[first_shadow_map + sam.face_index];
+}
 
 float is_fragment_lit(vec2 uv, LightInfo light_info, vec3 pixel_pos) {
-    int light_shadowcaster = light_info.type_shadowcaster[1];
-    if (light_shadowcaster == -1) {
+    int light_type = light_info.type_shadow_map[0];
+    int light_shadow_map = light_info.type_shadow_map[1];
+    if (light_shadow_map == -1) {
         return 1.0;
     }
-    ShadowCaster caster = shadow_casters.casters[light_shadowcaster];
+
+    ShadowMap caster;
+    if (light_type == DIRECTIONAL_LIGHT) {
+        caster = select_directiona_light_layer(light_shadow_map, uv, pixel_pos);
+    } else if (light_type == POINT_LIGHT) {
+        caster = select_point_light_face(light_shadow_map, light_info.direction.xyz);
+    } else {
+        caster = shadow_maps.casters[light_shadow_map];
+    }
+
     uint pov_idx = caster.type_nummaps_povs_splitidx[2];
     PointOfView pov = per_frame_data.light_povs[pov_idx - 1];
     mat4 pov_vp = pov.proj * pov.view;
@@ -358,6 +335,32 @@ void main() {
     vec2 nuv = uv;
     nuv.y = 1.0 - nuv.y;
     FragmentInfo fragInfo = get_fragment_info(nuv);
+
+    // vec4 pos_in_view = per_frame_data.camera.view * vec4(fragInfo.position, 1.0);
+    // float depth = abs(pos_in_view.z);
+    // int offset = -1;
+    // for (uint i = 0; i < csm_data.csm_count; i++)
+    // {
+	// 	if (depth < csm_data.splits[i]) {
+	// 		offset = int(i);
+	// 		break;
+	// 	}
+    // }
+
+    // vec3 colors[6] = vec3[] (
+    //     vec3(1.0, 0.0, 0.0),
+    //     vec3(0.0, 1.0, 0.0),
+    //     vec3(0.0, 0.0, 1.0),
+    //     vec3(0.5, 0.5, 1.0),
+    //     vec3(0.5, 1.0, 0.5),
+    //     vec3(0.1, 0.3, 0.4)
+    // );
+
+
+    // vec4 col = vec4(colors[offset], 1.0);
+
     vec3 light_a = lit_fragment(fragInfo, nuv);
-    color = fragInfo.shadow_scale * vec4(light_a, 1.0) + fragInfo.emissive;
+    color = (fragInfo.shadow_scale * vec4(light_a, 1.0) + fragInfo.emissive);
+
+    // color *= col;
 }

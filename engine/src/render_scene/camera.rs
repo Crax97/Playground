@@ -31,6 +31,24 @@ impl Frustum {
             && self.near.is_shape_behind_plane(shape)
             && self.far.is_shape_behind_plane(shape)
     }
+
+    pub fn from_view_proj(view: Matrix4<f32>, proj: Matrix4<f32>) -> Self {
+        let view_projection_matrix = proj * view;
+        let left = -(view_projection_matrix.row(3) + view_projection_matrix.row(0));
+        let right = -(view_projection_matrix.row(3) - view_projection_matrix.row(0));
+        let bottom = -(view_projection_matrix.row(3) + view_projection_matrix.row(1));
+        let top = -(view_projection_matrix.row(3) - view_projection_matrix.row(1));
+        let near = -(view_projection_matrix.row(3) + view_projection_matrix.row(2));
+        let far = -(view_projection_matrix.row(3) - view_projection_matrix.row(2));
+        Frustum {
+            left: Plane::from_slice(left.as_slice()),
+            right: Plane::from_slice(right.as_slice()),
+            bottom: Plane::from_slice(bottom.as_slice()),
+            top: Plane::from_slice(top.as_slice()),
+            near: Plane::from_slice(near.as_slice()),
+            far: Plane::from_slice(far.as_slice()),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -122,35 +140,21 @@ impl Camera {
     }
 
     pub fn frustum(&self) -> Frustum {
-        let view_projection_matrix = self.projection() * self.view();
-        let left = -(view_projection_matrix.row(3) + view_projection_matrix.row(0));
-        let right = -(view_projection_matrix.row(3) - view_projection_matrix.row(0));
-        let bottom = -(view_projection_matrix.row(3) + view_projection_matrix.row(1));
-        let top = -(view_projection_matrix.row(3) - view_projection_matrix.row(1));
-        let near = -(view_projection_matrix.row(3) + view_projection_matrix.row(2));
-        let far = -(view_projection_matrix.row(3) - view_projection_matrix.row(2));
-        Frustum {
-            left: Plane::from_slice(left.as_slice()),
-            right: Plane::from_slice(right.as_slice()),
-            bottom: Plane::from_slice(bottom.as_slice()),
-            top: Plane::from_slice(top.as_slice()),
-            near: Plane::from_slice(near.as_slice()),
-            far: Plane::from_slice(far.as_slice()),
-        }
+        Frustum::from_view_proj(self.view(), self.projection())
     }
 
-    pub fn split_into_slices(&self, num_slices: u8) -> Vec<Camera> {
+    pub fn split_into_slices(&self, num_slices: u8, lambda: f32) -> Vec<Camera> {
         let mut splits = Vec::with_capacity(num_slices as usize);
         let ratio = self.far / self.near;
         let range = self.far - self.near;
         let mut z_near = self.near;
 
-        const LAMBDA: f32 = 1.0;
+        let lambda = lambda.clamp(0.0, 1.0);
 
         for i in 1..=num_slices {
             let p = i as f32 / num_slices as f32;
             let z_far =
-                LAMBDA * self.near * ratio.powf(p) + (1.0 - LAMBDA) * (self.near + p * range);
+                lambda * self.near * ratio.powf(p) + (1.0 - lambda) * (self.near + p * range);
             let mut camera = match self.mode {
                 CameraMode::Perspective { fov_degrees } => {
                     Camera::new_perspective(fov_degrees, self.width, self.height, z_near, z_far)

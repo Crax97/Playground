@@ -5,6 +5,7 @@ use std::mem::size_of;
 
 use crate::{
     material::{MasterMaterial, MasterMaterialDescription},
+    math::shape::BoundingShape,
     post_process_pass::{PostProcessPass, PostProcessResources},
     Camera, CvarManager, Frustum, Light, LightType, MaterialDescription, MaterialInstance, Mesh,
     MeshPrimitive, PipelineTarget, RenderScene, RenderingPipeline, ScenePrimitive, Texture,
@@ -25,6 +26,8 @@ use gpu::{
     Viewport, VkSwapchain,
 };
 use nalgebra::{point, vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
+
+use super::camera;
 
 const SCREEN_QUAD: &[u32] = glsl!(
     kind = vertex,
@@ -62,12 +65,6 @@ const LIGHT_MASK: &[u32] = glsl!(
     entry_point = "main"
 );
 
-const TEXTURE_MUL: &[u32] = glsl!(
-    kind = fragment,
-    path = "src/shaders/texture_mul.frag",
-    entry_point = "main"
-);
-
 pub const SHADOW_ATLAS_TILE_SIZE: u32 = 128;
 pub const SHADOW_ATLAS_WIDTH: u32 = SHADOW_ATLAS_TILE_SIZE * 70;
 pub const SHADOW_ATLAS_HEIGHT: u32 = SHADOW_ATLAS_TILE_SIZE * 35;
@@ -79,7 +76,7 @@ pub struct CsmBuffers {
 
 #[repr(C)]
 #[derive(Pod, Zeroable, Copy, Clone)]
-pub struct ShadowCaster {
+pub struct ShadowMap {
     offset_size: [u32; 4],
     // type: x, num_maps: y, pov: z, split_idx: w (directional only)
     type_num_maps_pov_splitidx: [u32; 4],
@@ -120,9 +117,10 @@ pub struct DeferredRenderingPipeline {
     csm_buffers: Vec<CsmBuffers>,
     shadow_atlas: ImageHandle,
     shadow_atlas_view: ImageViewHandle,
-    csm_split_count: usize,
-    shadow_casters: Vec<ShadowCaster>,
-    light_cameras: Vec<Camera>,
+    shadow_casters: Vec<ShadowMap>,
+    pub csm_split_lambda: f32,
+    csm_splits: Vec<f32>,
+    pub z_mult: f32,
 
     frustum: Frustum,
     gbuffer_nearest_sampler: SamplerHandle,
@@ -433,10 +431,6 @@ impl DeferredRenderingPipeline {
             code: bytemuck::cast_slice(LIGHT_MASK),
         })?;
 
-        let texture_mul = gpu.make_shader_module(&ShaderModuleCreateInfo {
-            code: bytemuck::cast_slice(TEXTURE_MUL),
-        })?;
-
         let gbuffer_nearest_sampler = gpu.make_sampler(&gpu::SamplerCreateInfo {
             mag_filter: gpu::Filter::Linear,
             min_filter: gpu::Filter::Linear,
@@ -500,25 +494,13 @@ impl DeferredRenderingPipeline {
                 layer_count: 1,
             },
         })?;
-        let shadow_atlas_sampler = gpu.make_sampler(&gpu::SamplerCreateInfo {
-            mag_filter: gpu::Filter::Nearest,
-            min_filter: gpu::Filter::Nearest,
-            address_u: gpu::SamplerAddressMode::ClampToEdge,
-            address_v: gpu::SamplerAddressMode::ClampToEdge,
-            address_w: gpu::SamplerAddressMode::ClampToEdge,
-            mip_lod_bias: 0.0,
-            compare_function: None,
-            min_lod: 0.0,
-            max_lod: 1.0,
-            border_color: [0.0; 4],
-        })?;
 
         let mut csm_buffers = Vec::with_capacity(VkSwapchain::MAX_FRAMES_IN_FLIGHT);
         for i in 0..VkSwapchain::MAX_FRAMES_IN_FLIGHT {
             let shadow_casters = gpu.make_buffer(
                 &BufferCreateInfo {
                     label: Some(&format!("Shadow Casters #{}", i)),
-                    size: Self::MAX_SHADOW_CASTERS * std::mem::size_of::<ShadowCaster>(),
+                    size: Self::MAX_SHADOW_CASTERS * std::mem::size_of::<ShadowMap>(),
                     usage: BufferUsageFlags::STORAGE_BUFFER | BufferUsageFlags::UNIFORM_BUFFER,
                 },
                 MemoryDomain::HostCoherent | MemoryDomain::HostVisible,
@@ -570,11 +552,11 @@ impl DeferredRenderingPipeline {
             csm_slices: 4,
             csm_buffers,
             shadow_atlas,
-
+            csm_split_lambda: 0.98,
             shadow_atlas_view,
-            csm_split_count: 4,
             shadow_casters: vec![],
-            light_cameras: vec![],
+            csm_splits: vec![],
+            z_mult: 10.0,
         })
     }
 
@@ -1191,28 +1173,6 @@ impl DeferredRenderingPipeline {
             gbuffer_render_pass.draw(4, 1, 0, 0)?;
         }
 
-        // graphics_command_buffer.pipeline_barrier(&gpu::PipelineBarrierInfo {
-        //     src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-        //     dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
-        //     memory_barriers: &[],
-        //     buffer_memory_barriers: &[],
-        //     image_memory_barriers: &[ImageMemoryBarrier {
-        //         src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-        //         dst_access_mask: AccessFlags::SHADER_READ,
-        //         old_layout: ImageLayout::ColorAttachment,
-        //         new_layout: ImageLayout::ShaderReadOnly,
-        //         src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-        //         dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-        //         image: color_output.image.clone(),
-        //         subresource_range: gpu::ImageSubresourceRange {
-        //             aspect_mask: ImageAspectFlags::COLOR,
-        //             base_mip_level: 0,
-        //             level_count: 1,
-        //             base_array_layer: 0,
-        //             layer_count: 1,
-        //         },
-        //     }],
-        // });
         Ok(())
     }
 
@@ -1490,43 +1450,40 @@ impl DeferredRenderingPipeline {
                 });
 
             for shadow_caster in &self.shadow_casters {
-                let num_povs = shadow_caster.type_num_maps_pov_splitidx[1];
-                let first_pov = shadow_caster.type_num_maps_pov_splitidx[2];
-                for n in 0..num_povs {
-                    // We subtract 1 because index 0 is reserved for the camera
-                    let pov = &self.light_cameras[first_pov as usize + n as usize - 1];
-                    let frustum = pov.frustum();
-                    let primitives = scene.intersect_frustum(&frustum);
-                    total_primitives += primitives.len();
-                    let pov_idx = first_pov + n;
+                let caster_pov = shadow_caster.type_num_maps_pov_splitidx[2];
+                // We subtract 1 because index 0 is reserved for the camera
+                let pov = &self.light_povs[caster_pov as usize - 1];
+                let frustum = Frustum::from_view_proj(pov.view, pov.projection);
+                let primitives = scene.intersect_frustum(&frustum);
+                total_primitives += primitives.len();
+                let pov_idx = shadow_caster.type_num_maps_pov_splitidx[2];
 
-                    shadow_atlas_pass.set_cull_mode(gpu::CullMode::Back);
-                    shadow_atlas_pass.set_depth_compare_op(gpu::CompareOp::LessEqual);
+                shadow_atlas_pass.set_cull_mode(gpu::CullMode::Back);
+                shadow_atlas_pass.set_depth_compare_op(gpu::CompareOp::LessEqual);
 
-                    shadow_atlas_pass.set_color_output_enabled(false);
-                    shadow_atlas_pass.set_enable_depth_test(true);
-                    shadow_atlas_pass.set_depth_write_enabled(true);
-                    let width = shadow_caster.offset_size[2] as f32;
-                    shadow_atlas_pass.set_viewport(Viewport {
-                        x: shadow_caster.offset_size[0] as f32 + width * n as f32,
-                        y: shadow_caster.offset_size[1] as f32,
-                        width,
-                        height: shadow_caster.offset_size[3] as f32,
-                        min_depth: 0.0,
-                        max_depth: 1.0,
-                    });
+                shadow_atlas_pass.set_color_output_enabled(false);
+                shadow_atlas_pass.set_enable_depth_test(true);
+                shadow_atlas_pass.set_depth_write_enabled(true);
+                let width = shadow_caster.offset_size[2] as f32;
+                shadow_atlas_pass.set_viewport(Viewport {
+                    x: shadow_caster.offset_size[0] as f32,
+                    y: shadow_caster.offset_size[1] as f32,
+                    width,
+                    height: shadow_caster.offset_size[3] as f32,
+                    min_depth: 0.0,
+                    max_depth: 1.0,
+                });
 
-                    DeferredRenderingPipeline::main_render_loop(
-                        gpu,
-                        &primitives,
-                        resource_map,
-                        PipelineTarget::DepthOnly,
-                        &mut shadow_atlas_pass,
-                        pov_idx,
-                        frame_buffers,
-                        &self.sampler_allocator,
-                    )?;
-                }
+                DeferredRenderingPipeline::main_render_loop(
+                    gpu,
+                    &primitives,
+                    resource_map,
+                    PipelineTarget::DepthOnly,
+                    &mut shadow_atlas_pass,
+                    pov_idx,
+                    frame_buffers,
+                    &self.sampler_allocator,
+                )?;
             }
         }
 
@@ -1715,17 +1672,40 @@ impl DeferredRenderingPipeline {
                     binding_stage: ShaderStage::FRAGMENT,
                     location: 9,
                 },
-                Binding {
-                    ty: gpu::DescriptorBindingType::StorageBuffer {
-                        handle: csm_buffers.csm_splits.clone(),
-                        offset: 0,
-                        range: gpu::WHOLE_SIZE as usize,
-                    },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: 10,
-                },
             ],
         );
+
+        // render_pass.bind_resources(
+        //     1,
+        //     &[Binding {
+        //         ty: gpu::DescriptorBindingType::StorageBuffer {
+        //             handle: csm_buffers.csm_splits.clone(),
+        //             offset: 0,
+        //             range: gpu::WHOLE_SIZE as usize,
+        //         },
+        //         binding_stage: ShaderStage::FRAGMENT,
+        //         location: 0,
+        //     }],
+        // );
+
+        #[repr(C)]
+        #[derive(Clone, Copy, Pod, Zeroable)]
+        struct CSMConstantData {
+            count: u32,
+            splits: [f32; 6],
+        }
+
+        let mut data = CSMConstantData {
+            count: self.csm_splits.len() as _,
+            splits: [0.0; 6],
+        };
+
+        for (i, split) in self.csm_splits.iter().take(6).enumerate() {
+            data.splits[i] = *split;
+        }
+
+        render_pass.push_constants(0, 0, bytemuck::cast_slice(&[data]), ShaderStage::FRAGMENT);
+
         render_pass.set_front_face(gpu::FrontFace::ClockWise);
         render_pass.set_cull_mode(gpu::CullMode::None);
         render_pass.set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
@@ -1736,9 +1716,18 @@ impl DeferredRenderingPipeline {
         render_pass.draw(4, 1, 0, 0)
     }
 
-    fn update_light_data(&mut self, gpu: &dyn Gpu, scene: &RenderScene) -> anyhow::Result<()> {
+    fn update_light_data(
+        &mut self,
+        gpu: &dyn Gpu,
+        scene_camera: &Camera,
+        scene: &RenderScene,
+    ) -> anyhow::Result<()> {
         self.active_lights.clear();
         self.light_povs.clear();
+        self.csm_splits.clear();
+
+        let camera_splits = scene_camera.split_into_slices(self.csm_slices, self.csm_split_lambda);
+        self.csm_splits.extend(camera_splits.iter().map(|c| c.far));
 
         let mut texture_packer = TiledTexture2DPacker::new(
             SHADOW_ATLAS_TILE_SIZE,
@@ -1747,8 +1736,7 @@ impl DeferredRenderingPipeline {
         )
         .expect("Failed to create packer");
 
-        let mut shadow_casters = vec![];
-        let mut light_cameras = vec![];
+        let mut shadow_maps = vec![];
 
         let mut pov_idx = 1;
 
@@ -1762,7 +1750,7 @@ impl DeferredRenderingPipeline {
 
             let num_maps = match l.ty {
                 crate::LightType::Point => 6,
-                crate::LightType::Directional { .. } => 1,
+                crate::LightType::Directional { .. } => self.csm_slices as u32,
                 crate::LightType::Spotlight { .. } => 1,
                 crate::LightType::Rect { .. } => 1,
             };
@@ -1775,28 +1763,26 @@ impl DeferredRenderingPipeline {
             if let Ok(allocation) =
                 texture_packer.allocate(shadow_map_width * num_maps, shadow_map_height)
             {
-                let shadow_caster = ShadowCaster {
-                    offset_size: [
-                        allocation.x,
-                        allocation.y,
-                        shadow_map_width,
-                        shadow_map_height,
-                    ],
-                    type_num_maps_pov_splitidx: [ty, num_maps, pov_idx, 0],
-                };
-                let light_povs = l.point_of_views();
-                pov_idx += light_povs.len() as u32;
-                light_cameras.extend(light_povs.clone());
-                self.light_povs
-                    .extend(light_povs.into_iter().map(|p| PointOfViewData {
-                        eye: point![p.location.x, p.location.y, p.location.z, 0.0],
-                        eye_forward: p.forward.to_homogeneous(),
-                        view: p.view(),
-                        projection: p.projection(),
-                    }));
-                let shadow_caster_idx = shadow_casters.len();
-                shadow_casters.push(shadow_caster);
-                gpu_light.ty[1] = shadow_caster_idx as i32;
+                let this_light_cameras = l.light_cameras();
+                let povs = self.get_light_povs(l, &camera_splits, this_light_cameras);
+                let shadow_map_idx = shadow_maps.len();
+                let light_shadow_maps = povs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| ShadowMap {
+                        offset_size: [
+                            allocation.x + shadow_map_width * i as u32,
+                            allocation.y,
+                            shadow_map_width,
+                            shadow_map_height,
+                        ],
+                        type_num_maps_pov_splitidx: [ty, num_maps, pov_idx + i as u32, 0],
+                    })
+                    .collect::<Vec<_>>();
+                pov_idx += light_shadow_maps.len() as u32;
+                self.light_povs.extend(povs);
+                shadow_maps.extend(light_shadow_maps.into_iter());
+                gpu_light.ty[1] = shadow_map_idx as i32;
             }
             self.active_lights.push(gpu_light);
         }
@@ -1827,21 +1813,112 @@ impl DeferredRenderingPipeline {
         )?;
 
         let current_buffers = &self.csm_buffers[self.in_flight_frame];
-        self.shadow_casters = shadow_casters;
-        self.light_cameras = light_cameras;
+        self.shadow_casters = shadow_maps;
 
         gpu.write_buffer(
             &current_buffers.shadow_casters,
             0,
-            bytemuck::cast_slice(&[self.shadow_casters.len() as u32]),
-        )?;
-        gpu.write_buffer(
-            &current_buffers.shadow_casters,
-            std::mem::size_of::<u32>() as u64 * 4u64,
             bytemuck::cast_slice(&self.shadow_casters),
         )?;
 
+        gpu.write_buffer(
+            &current_buffers.csm_splits,
+            0,
+            bytemuck::cast_slice(&[self.csm_splits.len() as u32]),
+        )?;
+        gpu.write_buffer(
+            &current_buffers.csm_splits,
+            std::mem::size_of::<u32>() as u64 * 4u64,
+            bytemuck::cast_slice(&self.csm_splits),
+        )?;
+
         Ok(())
+    }
+
+    fn get_light_povs(
+        &self,
+        l: &Light,
+        camera_splits: &Vec<Camera>,
+        light_povs: Vec<Camera>,
+    ) -> Vec<PointOfViewData> {
+        match l.ty {
+            LightType::Directional { direction, .. } => {
+                let povs = camera_splits.iter().map(|split| {
+                    let split_viewproj = split.projection() * split.view();
+                    let inv_splitviewproj = split_viewproj.try_inverse().unwrap();
+                    let ndc_cube_corners = [
+                        vector![1.0, 1.0, 1.0, 1.0],
+                        vector![-1.0, 1.0, 1.0, 1.0],
+                        vector![1.0, 1.0, -1.0, 1.0],
+                        vector![-1.0, 1.0, -1.0, 1.0],
+                        vector![1.0, -1.0, 1.0, 1.0],
+                        vector![-1.0, -1.0, 1.0, 1.0],
+                        vector![1.0, -1.0, -1.0, 1.0],
+                        vector![-1.0, -1.0, -1.0, 1.0],
+                    ];
+                    let frustum_corners = ndc_cube_corners
+                        .iter()
+                        .map(|corner| inv_splitviewproj * corner)
+                        .map(|v| v / v.w);
+
+                    let mut frustum_center = Vector3::default();
+                    for corner in frustum_corners.clone() {
+                        frustum_center += corner.xyz();
+                    }
+                    frustum_center /= 8.0;
+                    let frustum_center = Point3::from(frustum_center.xyz());
+
+                    let light_view = Matrix4::look_at_rh(
+                        &frustum_center,
+                        &(&frustum_center + direction),
+                        &vector![0.0, 1.0, 0.0],
+                    );
+                    let frustum_bounds = BoundingShape::bounding_box_from_points(
+                        frustum_corners
+                            .map(|pt| light_view * pt)
+                            .map(|corner| Point3::from(corner.xyz())),
+                    );
+                    let (mut frustum_min, mut frustum_max) = frustum_bounds.box_extremes();
+
+                    if frustum_min.z < 0.0 {
+                        frustum_min.z *= self.z_mult;
+                    } else {
+                        frustum_min.z /= self.z_mult;
+                    }
+
+                    if frustum_max.z < 0.0 {
+                        frustum_max.z *= self.z_mult;
+                    } else {
+                        frustum_max.z /= self.z_mult;
+                    }
+
+                    let light_projection = Matrix4::new_orthographic(
+                        frustum_min.x,
+                        frustum_max.x,
+                        frustum_min.y,
+                        frustum_max.y,
+                        frustum_min.z,
+                        frustum_max.z,
+                    );
+                    PointOfViewData {
+                        eye: point![l.position.x, l.position.y, l.position.z, 0.0],
+                        eye_forward: direction.to_homogeneous(),
+                        view: light_view,
+                        projection: light_projection,
+                    }
+                });
+                povs.collect()
+            }
+            _ => light_povs
+                .into_iter()
+                .map(|c| PointOfViewData {
+                    eye: point![c.location.x, c.location.y, c.location.z, 0.0],
+                    eye_forward: c.forward.to_homogeneous(),
+                    view: c.view(),
+                    projection: c.projection(),
+                })
+                .collect(),
+        }
     }
 }
 
@@ -1999,7 +2076,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             self.frustum = camera.frustum();
         }
 
-        self.update_light_data(gpu, scene)?;
+        self.update_light_data(gpu, camera, scene)?;
 
         let projection = camera.projection();
 

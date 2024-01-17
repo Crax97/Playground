@@ -26,5 +26,5 @@ vec3 aces_tonemap(vec3 color){
 
 void main() {
     vec4 col = texture(source, uv);
-    color = vec4(aces_tonemap(col.xyz), 1.0);
+    color = col; //vec4(aces_tonemap(col.xyz), 1.0);
 }

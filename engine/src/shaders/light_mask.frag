@@ -24,9 +24,9 @@ layout(set = 0, binding = 1, std140) readonly buffer LightData {
 } light_data;
 
 vec3 get_unnormalized_light_direction(LightInfo info, vec3 position) {
-    if (info.type_shadowcaster.x == DIRECTIONAL_LIGHT) {
+    if (info.type_shadow_map.x == DIRECTIONAL_LIGHT) {
         return info.direction.xyz;
-    } else if (info.type_shadowcaster.x == SPOT_LIGHT) {
+    } else if (info.type_shadow_map.x == SPOT_LIGHT) {
         return info.direction.xyz;
     } else {
         return position - info.position_radius.xyz ;
@@ -34,7 +34,7 @@ vec3 get_unnormalized_light_direction(LightInfo info, vec3 position) {
 }
 
 float get_light_mask(float n_dot_l, LightInfo light, vec3 position) {
-    if (light.type_shadowcaster.x == DIRECTIONAL_LIGHT) {
+    if (light.type_shadow_map.x == DIRECTIONAL_LIGHT) {
         // Directional lights are not attenuated
         return 1.0;
     }
@@ -42,7 +42,7 @@ float get_light_mask(float n_dot_l, LightInfo light, vec3 position) {
     float light_distance = length(light_dir);
     light_dir /= light_distance;
     float attenuation = clamp(1.0 - pow(light_distance / light.position_radius.w, 4.0), 0.0, 1.0) / max(light_distance * light_distance, 0.01);
-    if (light.type_shadowcaster.x == SPOT_LIGHT) {
+    if (light.type_shadow_map.x == SPOT_LIGHT) {
         float inner_angle_cutoff = light.extras.x;
         float outer_angle_cutoff = light.extras.y;
 

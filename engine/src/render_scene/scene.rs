@@ -88,7 +88,7 @@ impl Light {
         }
     }
 
-    pub fn point_of_views(&self) -> Vec<Camera> {
+    pub fn light_cameras(&self) -> Vec<Camera> {
         const ZNEAR: f32 = 0.001;
         let mut povs = vec![];
         match self.ty {
