@@ -220,7 +220,7 @@ pub mod render_pass {
      fn set_vertex_buffers(&mut self, bindings: &[VertexBindingInfo]) ;
      fn set_color_output_enabled(&mut self, color_output_enabled: bool) ;
      fn set_viewport(&mut self, viewport: Viewport) ;
-     fn set_depth_bias(&mut self, constant: f32, clamp: f32, slope: f32) ;
+     fn set_depth_bias(&mut self, constant: f32, slope: f32) ;
      fn set_front_face(&mut self, front_face: FrontFace) ;
      fn set_polygon_mode(&mut self, polygon_mode: PolygonMode) ;
      fn set_cull_mode(&mut self, cull_mode: CullMode) ;

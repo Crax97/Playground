@@ -520,13 +520,14 @@ fn handle_node(
             color: Vector3::from_row_slice(&light.color()),
             intensity: light.intensity() / 100.0,
             enabled: true,
-            shadow_setup: Some(engine::ShadowSetup {
+            shadow_configuration: Some(engine::ShadowConfiguration {
                 importance: NonZeroU32::new(match light.kind() {
                     GltfLightKind::Directional => 5,
                     GltfLightKind::Point => 3,
                     GltfLightKind::Spot { .. } => 4,
                 })
                 .unwrap(),
+                ..Default::default()
             }),
         });
     } else if let Some(mesh) = node.mesh() {

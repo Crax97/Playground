@@ -10,7 +10,7 @@ use std::sync::Arc;
 use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App, Console};
 use engine::editor::ui_extension::UiExtension;
-use engine::{egui, Light, LightType, ShadowSetup, Time};
+use engine::{egui, Light, LightType, ShadowConfiguration, Time};
 
 use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
@@ -141,6 +141,12 @@ impl GLTFViewer {
                         ui.color_edit3("Color", &mut l.color.data.0[0]);
                         ui.slider("Intensity", 0.0, 1000.0, &mut l.intensity);
                         ui.slider("Radius", 0.0, 1000.0, &mut l.radius);
+
+                        if let Some(setup) = l.shadow_configuration.as_mut() {
+                            ui.separator();
+                            ui.slider("Depth Bias", -10.0, 10.0, &mut setup.depth_bias);
+                            ui.slider("Depth Slope", -10.0, 10.0, &mut setup.depth_slope);
+                        }
                         match &mut l.ty {
                             LightType::Point => {}
                             LightType::Directional { direction, size } => {
@@ -193,8 +199,9 @@ impl GLTFViewer {
                     color: vector![1.0, 1.0, 1.0],
                     intensity: 10.0,
                     enabled: true,
-                    shadow_setup: Some(ShadowSetup {
+                    shadow_configuration: Some(ShadowConfiguration {
                         importance: NonZeroU32::new(5).unwrap(),
+                        ..Default::default()
                     }),
                 });
             }
@@ -209,8 +216,10 @@ impl GLTFViewer {
                     color: vector![1.0, 1.0, 1.0],
                     intensity: 10.0,
                     enabled: true,
-                    shadow_setup: Some(ShadowSetup {
+                    shadow_configuration: Some(ShadowConfiguration {
                         importance: NonZeroU32::new(20).unwrap(),
+                        depth_bias: 0.05,
+                        depth_slope: 1.0,
                     }),
                 });
             }
@@ -222,8 +231,9 @@ impl GLTFViewer {
                     color: vector![1.0, 1.0, 1.0],
                     intensity: 10.0,
                     enabled: true,
-                    shadow_setup: Some(ShadowSetup {
+                    shadow_configuration: Some(ShadowConfiguration {
                         importance: NonZeroU32::new(2).unwrap(),
+                        ..Default::default()
                     }),
                 });
             }
@@ -359,8 +369,10 @@ impl App for GLTFViewer {
 
             intensity: 10.0,
             enabled: true,
-            shadow_setup: Some(ShadowSetup {
+            shadow_configuration: Some(ShadowConfiguration {
                 importance: NonZeroU32::new(10).unwrap(),
+                depth_bias: 0.05,
+                depth_slope: 1.0,
             }),
         });
 
@@ -425,126 +437,116 @@ impl App for GLTFViewer {
         let context = self.egui_support.create_context();
         let mut early_return = false;
         egui::Window::new("GLTF Viewer").show(&context, |ui| {
-            ui.group(|ui| {
-                ui.heading("Stats");
-                ui.label(format!("FPS {}", fps));
-                ui.label(format!("Delta time {}", self.time.delta_frame()));
-                ui.label(format!(
-                    "Primitives drawn last frame: {}",
-                    self.scene_renderer.drawcalls_last_frame,
-                ));
-            });
+            egui::ScrollArea::new([false, true]).show(ui, |ui| {
+                ui.group(|ui| {
+                    ui.heading("Stats");
+                    ui.label(format!("FPS {}", fps));
+                    ui.label(format!("Delta time {}", self.time.delta_frame()));
+                    ui.label(format!(
+                        "Primitives drawn last frame: {}",
+                        self.scene_renderer.drawcalls_last_frame,
+                    ));
+                });
 
-            ui.group(|ui| {
-                ui.heading("Camera");
-                ui.input_floats(
-                    "Camera location",
-                    self.camera.location.coords.as_mut_slice(),
-                );
-                let (rx, ry, rz) = self.camera.rotation.euler_angles();
-                let mut rotation = vec![rx.to_degrees(), ry.to_degrees(), rz.to_degrees()];
-                if ui.input_floats("Camera rotation", &mut rotation) {
-                    let (roll, pitch, yaw) = (rotation[0], rotation[1], rotation[2]);
-                    let rotation = Rotation3::from_euler_angles(
-                        roll.to_radians(),
-                        pitch.to_radians(),
-                        yaw.to_radians(),
+                ui.group(|ui| {
+                    ui.heading("Camera");
+                    ui.input_floats(
+                        "Camera location",
+                        self.camera.location.coords.as_mut_slice(),
                     );
-                    self.camera.rotation = rotation;
-                }
-                let mut fwd = self.camera.forward();
-                ui.input_floats("Camera forward", fwd.data.as_mut_slice());
+                    let (rx, ry, rz) = self.camera.rotation.euler_angles();
+                    let mut rotation = vec![rx.to_degrees(), ry.to_degrees(), rz.to_degrees()];
+                    if ui.input_floats("Camera rotation", &mut rotation) {
+                        let (roll, pitch, yaw) = (rotation[0], rotation[1], rotation[2]);
+                        let rotation = Rotation3::from_euler_angles(
+                            roll.to_radians(),
+                            pitch.to_radians(),
+                            yaw.to_radians(),
+                        );
+                        self.camera.rotation = rotation;
+                    }
+                    let mut fwd = self.camera.forward();
+                    ui.input_floats("Camera forward", fwd.data.as_mut_slice());
 
-                ui.input_float("Camera speed", &mut self.camera.speed);
-                ui.input_float("Camera rotation speed", &mut self.camera.rotation_speed);
+                    ui.input_float("Camera speed", &mut self.camera.speed);
+                    ui.input_float("Camera rotation speed", &mut self.camera.rotation_speed);
 
-                ui.checkbox(
-                    &mut self.gltf_loader.scene_mut().use_frustum_culling,
-                    "Use frustum culling",
-                );
+                    ui.checkbox(
+                        &mut self.gltf_loader.scene_mut().use_frustum_culling,
+                        "Use frustum culling",
+                    );
 
-                ui.checkbox(
-                    &mut self.gltf_loader.scene_mut().use_bvh,
-                    "Use BVH for frustum culling",
-                );
+                    ui.checkbox(
+                        &mut self.gltf_loader.scene_mut().use_bvh,
+                        "Use BVH for frustum culling",
+                    );
 
-                if ui.button("Reset camera").clicked() {
-                    self.camera.location = Default::default();
-                    self.camera.rotation = Default::default();
-                }
+                    if ui.button("Reset camera").clicked() {
+                        self.camera.location = Default::default();
+                        self.camera.rotation = Default::default();
+                    }
 
-                ui.checkbox(&mut self.scene_renderer.update_frustum, "Update frustum");
-            });
+                    ui.checkbox(&mut self.scene_renderer.update_frustum, "Update frustum");
+                });
 
-            ui.separator();
+                ui.separator();
 
-            ui.slider(
-                "FXAA iterations",
-                0,
-                12,
-                self.cvar_manager
-                    .get_named_ref_mut::<i32>(FxaaPass::FXAA_ITERATIONS_CVAR_NAME)
-                    .unwrap(),
-            );
-            ui.slider(
-                "FXAA subpix",
-                0.0,
-                1.0,
-                self.cvar_manager
-                    .get_named_ref_mut::<f32>(FxaaPass::FXAA_SUBPIX_CVAR_NAME)
-                    .unwrap(),
-            );
-            ui.slider(
-                "FXAA Edge Threshold",
-                0.0,
-                1.0,
-                self.cvar_manager
-                    .get_named_ref_mut::<f32>(FxaaPass::FXAA_EDGE_THRESHOLD_CVAR_NAME)
-                    .unwrap(),
-            );
-            ui.slider(
-                "FXAA Edge Threshold min",
-                0.0,
-                1.0,
-                self.cvar_manager
-                    .get_named_ref_mut::<f32>(FxaaPass::FXAA_EDGE_THRESHOLD_MIN_CVAR_NAME)
-                    .unwrap(),
-            );
-
-            ui.separator();
-
-            ui.collapsing("Shadow settings", |ui| {
-                ui.slider("CSM Splits", 0, 6, &mut self.scene_renderer.csm_slices);
                 ui.slider(
-                    "CSM Split lambda",
+                    "FXAA iterations",
+                    0,
+                    12,
+                    self.cvar_manager
+                        .get_named_ref_mut::<i32>(FxaaPass::FXAA_ITERATIONS_CVAR_NAME)
+                        .unwrap(),
+                );
+                ui.slider(
+                    "FXAA subpix",
                     0.0,
                     1.0,
-                    &mut self.scene_renderer.csm_split_lambda,
+                    self.cvar_manager
+                        .get_named_ref_mut::<f32>(FxaaPass::FXAA_SUBPIX_CVAR_NAME)
+                        .unwrap(),
                 );
                 ui.slider(
-                    "CSM Z Multiplier",
-                    0.1,
-                    20.0,
-                    &mut self.scene_renderer.z_mult,
+                    "FXAA Edge Threshold",
+                    0.0,
+                    1.0,
+                    self.cvar_manager
+                        .get_named_ref_mut::<f32>(FxaaPass::FXAA_EDGE_THRESHOLD_CVAR_NAME)
+                        .unwrap(),
                 );
                 ui.slider(
-                    "Depth Bias constant",
-                    -10.0,
-                    10.0,
-                    &mut self.scene_renderer.depth_bias_constant,
+                    "FXAA Edge Threshold min",
+                    0.0,
+                    1.0,
+                    self.cvar_manager
+                        .get_named_ref_mut::<f32>(FxaaPass::FXAA_EDGE_THRESHOLD_MIN_CVAR_NAME)
+                        .unwrap(),
                 );
-                ui.slider(
-                    "Depth Bias slope",
-                    -10.0,
-                    10.0,
-                    &mut self.scene_renderer.depth_bias_slope,
-                );
-            });
 
-            if ui.ui_contains_pointer() {
-                early_return = true;
-            }
-            self.lights_ui(ui);
+                ui.separator();
+
+                ui.collapsing("Global shadow settings", |ui| {
+                    ui.slider("CSM Splits", 0, 6, &mut self.scene_renderer.csm_slices);
+                    ui.slider(
+                        "CSM Split lambda",
+                        0.0,
+                        1.0,
+                        &mut self.scene_renderer.csm_split_lambda,
+                    );
+                    ui.slider(
+                        "CSM Z Multiplier",
+                        0.1,
+                        20.0,
+                        &mut self.scene_renderer.z_mult,
+                    );
+                });
+
+                self.lights_ui(ui);
+                if ui.ui_contains_pointer() {
+                    early_return = true;
+                }
+            });
         });
 
         if early_return {

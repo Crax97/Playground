@@ -4,7 +4,7 @@ use crate::app::app_state::app_state;
 use crate::math::shape::BoundingShape;
 use crate::{
     bevy_ecs_app::CommonResources, resource_map::ResourceHandle, LightType, RenderScene,
-    ShadowSetup, Texture,
+    ShadowConfiguration, Texture,
 };
 use bevy_ecs::reflect::ReflectComponent;
 use bevy_ecs::{
@@ -152,7 +152,7 @@ pub struct LightComponent {
     pub color: Vector3<f32>,
 
     pub enabled: bool,
-    pub shadow_setup: Option<ShadowSetup>,
+    pub shadow_setup: Option<ShadowConfiguration>,
 }
 
 #[derive(Component, Reflect, Default)]
@@ -246,7 +246,7 @@ pub fn rendering_system(
             color: light.color,
             intensity: light.intensity,
             enabled: light.enabled,
-            shadow_setup: light.shadow_setup,
+            shadow_configuration: light.shadow_setup,
         });
     }
 

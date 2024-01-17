@@ -1178,8 +1178,8 @@ impl render_pass::Impl for VkRenderPassCommand {
         self.viewport_area = Some(viewport);
     }
 
-    fn set_depth_bias(&mut self, constant: f32, clamp: f32, slope: f32) {
-        self.depth_bias_setup = Some((constant, clamp, slope));
+    fn set_depth_bias(&mut self, constant: f32, slope: f32) {
+        self.depth_bias_setup = Some((constant, 0.0, slope));
     }
 
     fn set_front_face(&mut self, front_face: FrontFace) {

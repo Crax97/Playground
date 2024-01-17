@@ -46,14 +46,18 @@ pub enum LightType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ShadowSetup {
+pub struct ShadowConfiguration {
     pub importance: NonZeroU32,
+    pub depth_bias: f32,
+    pub depth_slope: f32,
 }
 
-impl Default for ShadowSetup {
+impl Default for ShadowConfiguration {
     fn default() -> Self {
         Self {
             importance: NonZeroU32::new(1).unwrap(),
+            depth_bias: 0.0,
+            depth_slope: 0.0,
         }
     }
 }
@@ -67,7 +71,7 @@ pub struct Light {
     pub intensity: f32,
 
     pub enabled: bool,
-    pub shadow_setup: Option<ShadowSetup>,
+    pub shadow_configuration: Option<ShadowConfiguration>,
 }
 impl Light {
     pub fn set_direction(&mut self, forward: Vector3<f32>) {

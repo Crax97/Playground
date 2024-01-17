@@ -79,7 +79,7 @@ pub struct CsmBuffers {
 pub struct ShadowMap {
     offset_size: [u32; 4],
     // type: x, num_maps: y, pov: z, split_idx: w (directional only)
-    type_num_maps_pov_splitidx: [u32; 4],
+    type_num_maps_pov_lightid: [u32; 4],
 }
 
 pub struct DeferredRenderingPipeline {
@@ -102,10 +102,6 @@ pub struct DeferredRenderingPipeline {
 
     cube_mesh: ResourceHandle<Mesh>,
 
-    pub depth_bias_constant: f32,
-    pub depth_bias_clamp: f32,
-    pub depth_bias_slope: f32,
-
     pub csm_slices: u8,
 
     pub ambient_color: Vector3<f32>,
@@ -117,7 +113,7 @@ pub struct DeferredRenderingPipeline {
     csm_buffers: Vec<CsmBuffers>,
     shadow_atlas: ImageHandle,
     shadow_atlas_view: ImageViewHandle,
-    shadow_casters: Vec<ShadowMap>,
+    shadow_maps: Vec<ShadowMap>,
     pub csm_split_lambda: f32,
     csm_splits: Vec<f32>,
     pub z_mult: f32,
@@ -532,9 +528,6 @@ impl DeferredRenderingPipeline {
             post_process_stack: vec![],
             in_flight_frame: 0,
             max_frames_in_flight: VkSwapchain::MAX_FRAMES_IN_FLIGHT,
-            depth_bias_constant: 2.0,
-            depth_bias_clamp: 0.0,
-            depth_bias_slope: 4.0,
             ambient_color: vector![1.0, 1.0, 1.0],
             ambient_intensity: 0.3,
             active_lights: vec![],
@@ -554,7 +547,7 @@ impl DeferredRenderingPipeline {
             shadow_atlas,
             csm_split_lambda: 0.98,
             shadow_atlas_view,
-            shadow_casters: vec![],
+            shadow_maps: vec![],
             csm_splits: vec![],
             z_mult: 10.0,
         })
@@ -1406,8 +1399,6 @@ impl DeferredRenderingPipeline {
         frame_buffers: &FrameBuffers,
         resource_map: &ResourceMap,
     ) -> anyhow::Result<()> {
-        let mut total_primitives = 0;
-
         {
             let mut shadow_atlas_pass =
                 command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
@@ -1449,27 +1440,31 @@ impl DeferredRenderingPipeline {
                     }],
                 });
 
-            for shadow_caster in &self.shadow_casters {
-                let caster_pov = shadow_caster.type_num_maps_pov_splitidx[2];
+            for shadow_map in &self.shadow_maps {
+                let caster_pov = shadow_map.type_num_maps_pov_lightid[2];
                 // We subtract 1 because index 0 is reserved for the camera
                 let pov = &self.light_povs[caster_pov as usize - 1];
                 let frustum = Frustum::from_view_proj(pov.view, pov.projection);
                 let primitives = scene.intersect_frustum(&frustum);
-                total_primitives += primitives.len();
-                let pov_idx = shadow_caster.type_num_maps_pov_splitidx[2];
+                let pov_idx = shadow_map.type_num_maps_pov_lightid[2];
+                let light = &scene.lights[shadow_map.type_num_maps_pov_lightid[3] as usize];
+                let setup = light
+                    .shadow_configuration
+                    .expect("Bug: a light is set to render a shadow map, but has no shadow setup");
 
+                shadow_atlas_pass.set_depth_bias(setup.depth_bias, setup.depth_slope);
                 shadow_atlas_pass.set_cull_mode(gpu::CullMode::Back);
                 shadow_atlas_pass.set_depth_compare_op(gpu::CompareOp::LessEqual);
 
                 shadow_atlas_pass.set_color_output_enabled(false);
                 shadow_atlas_pass.set_enable_depth_test(true);
                 shadow_atlas_pass.set_depth_write_enabled(true);
-                let width = shadow_caster.offset_size[2] as f32;
+                let width = shadow_map.offset_size[2] as f32;
                 shadow_atlas_pass.set_viewport(Viewport {
-                    x: shadow_caster.offset_size[0] as f32,
-                    y: shadow_caster.offset_size[1] as f32,
+                    x: shadow_map.offset_size[0] as f32,
+                    y: shadow_map.offset_size[1] as f32,
                     width,
-                    height: shadow_caster.offset_size[3] as f32,
+                    height: shadow_map.offset_size[3] as f32,
                     min_depth: 0.0,
                     max_depth: 1.0,
                 });
@@ -1740,7 +1735,10 @@ impl DeferredRenderingPipeline {
 
         let mut pov_idx = 1;
 
-        for l in scene.lights.iter().filter(|l| l.enabled) {
+        for (light_id, l) in scene.lights.iter().enumerate() {
+            if !l.enabled {
+                continue;
+            }
             let ty = match l.ty {
                 crate::LightType::Point => 1,
                 crate::LightType::Directional { .. } => 2,
@@ -1756,7 +1754,7 @@ impl DeferredRenderingPipeline {
             };
 
             let shadow_map_width =
-                SHADOW_ATLAS_TILE_SIZE * l.shadow_setup.unwrap().importance.get();
+                SHADOW_ATLAS_TILE_SIZE * l.shadow_configuration.unwrap().importance.get();
             let shadow_map_height = shadow_map_width;
 
             let mut gpu_light: GpuLightInfo = l.into();
@@ -1776,7 +1774,12 @@ impl DeferredRenderingPipeline {
                             shadow_map_width,
                             shadow_map_height,
                         ],
-                        type_num_maps_pov_splitidx: [ty, num_maps, pov_idx + i as u32, 0],
+                        type_num_maps_pov_lightid: [
+                            ty,
+                            num_maps,
+                            pov_idx + i as u32,
+                            light_id as u32,
+                        ],
                     })
                     .collect::<Vec<_>>();
                 pov_idx += light_shadow_maps.len() as u32;
@@ -1813,12 +1816,12 @@ impl DeferredRenderingPipeline {
         )?;
 
         let current_buffers = &self.csm_buffers[self.in_flight_frame];
-        self.shadow_casters = shadow_maps;
+        self.shadow_maps = shadow_maps;
 
         gpu.write_buffer(
             &current_buffers.shadow_casters,
             0,
-            bytemuck::cast_slice(&self.shadow_casters),
+            bytemuck::cast_slice(&self.shadow_maps),
         )?;
 
         gpu.write_buffer(
@@ -1870,7 +1873,7 @@ impl DeferredRenderingPipeline {
 
                     let light_view = Matrix4::look_at_rh(
                         &frustum_center,
-                        &(&frustum_center + direction),
+                        &(frustum_center + direction),
                         &vector![0.0, 1.0, 0.0],
                     );
                     let frustum_bounds = BoundingShape::bounding_box_from_points(
