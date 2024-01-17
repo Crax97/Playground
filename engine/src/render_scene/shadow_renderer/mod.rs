@@ -1,7 +1,5 @@
 mod csm_renderer;
 
-pub use csm_renderer::CsmRenderer;
-
 use gpu::{CommandBuffer, Extent2D, Gpu, ImageViewHandle};
 
 use crate::{Camera, RenderScene, ResourceMap, SceneTextures};
