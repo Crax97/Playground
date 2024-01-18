@@ -9,8 +9,9 @@ use gpu::{
 use nalgebra::{point, vector, Matrix4, Point3, Vector3};
 
 use crate::{
-    math::shape::BoundingShape, Camera, DeferredRenderingPipeline, FrameBuffers, Frustum, Light,
-    LightType, PipelineTarget, PointOfViewData, ResourceMap, TiledTexture2DPacker,
+    math::shape::BoundingShape, render_scene::scene, Camera, DeferredRenderingPipeline,
+    FrameBuffers, Frustum, Light, LightType, PipelineTarget, PointOfViewData, ResourceMap,
+    TiledTexture2DPacker,
 };
 
 use super::SamplerAllocator;
@@ -255,7 +256,9 @@ impl CascadedShadowMap {
         self.camera_splits =
             scene_camera.split_into_slices(self.num_cascades, self.csm_split_lambda);
 
-        self.csm_splits = self.camera_splits.iter().map(|c| c.far).collect();
+        let range = scene_camera.far - scene_camera.near;
+
+        self.csm_splits = self.camera_splits.iter().map(|c| c.near).collect();
     }
 
     // Returns the povs added for each shadow map added
@@ -279,36 +282,39 @@ impl CascadedShadowMap {
             crate::LightType::Rect { .. } => 1,
         };
 
-        let shadow_map_width =
-            SHADOW_ATLAS_TILE_SIZE * light.shadow_configuration.unwrap().importance.get();
-        let shadow_map_height = shadow_map_width;
+        if let Some(shadow_map_configuration) = &light.shadow_configuration {
+            let shadow_map_width = shadow_map_configuration.shadow_map_width;
+            let shadow_map_height = shadow_map_configuration.shadow_map_height;
 
-        if let Ok(allocation) = self
-            .texture_packer
-            .allocate(shadow_map_width * num_maps, shadow_map_height)
-        {
-            let this_light_cameras = light.light_cameras();
-            let povs = self.get_light_povs(light, this_light_cameras);
-            let shadow_map_index = self.shadow_maps.len();
-            let light_shadow_maps = povs
-                .iter()
-                .enumerate()
-                .map(|(i, _)| ShadowMap {
-                    offset_size: [
-                        allocation.x + shadow_map_width * i as u32,
-                        allocation.y,
-                        shadow_map_width,
-                        shadow_map_height,
-                    ],
-                    type_num_maps_pov_lightid: [ty, num_maps, pov_idx + i as u32, light_id],
+            if let Ok(allocation) = self
+                .texture_packer
+                .allocate(shadow_map_width * num_maps, shadow_map_height)
+            {
+                let this_light_cameras = light.light_cameras();
+                let povs = self.get_light_povs(light, this_light_cameras);
+                let shadow_map_index = self.shadow_maps.len();
+                let light_shadow_maps = povs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| ShadowMap {
+                        offset_size: [
+                            allocation.x + shadow_map_width * i as u32,
+                            allocation.y,
+                            shadow_map_width,
+                            shadow_map_height,
+                        ],
+                        type_num_maps_pov_lightid: [ty, num_maps, pov_idx + i as u32, light_id],
+                    })
+                    .collect::<Vec<_>>();
+                self.shadow_maps.extend(light_shadow_maps);
+
+                Some(NewShadowMapAllocation {
+                    povs,
+                    shadow_map_index,
                 })
-                .collect::<Vec<_>>();
-            self.shadow_maps.extend(light_shadow_maps.into_iter());
-
-            Some(NewShadowMapAllocation {
-                povs,
-                shadow_map_index,
-            })
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -347,14 +353,20 @@ impl CascadedShadowMap {
                         &(frustum_center + direction),
                         &vector![0.0, 1.0, 0.0],
                     );
-                    let frustum_bounds = BoundingShape::bounding_box_from_points(
-                        frustum_corners
-                            .map(|pt| light_view * pt)
-                            .map(|corner| Point3::from(corner.xyz())),
-                    );
-                    let (frustum_min, frustum_max) = frustum_bounds.box_extremes();
+                    // let frustum_bounds = BoundingShape::bounding_box_from_points(
+                    //     frustum_corners
+                    //         .clone()
+                    //         .map(|pt| light_view * pt)
+                    //         .map(|corner| Point3::from(corner.xyz())),
+                    // );
+                    // let (frustum_min, frustum_max) = frustum_bounds.box_extremes();
 
-                    let radius = (frustum_max - frustum_min).magnitude();
+                    let mut radius: f32 = 0.0;
+                    for corner in frustum_corners {
+                        radius = radius.max(
+                            (corner.xyz() - frustum_center.to_homogeneous().xyz()).magnitude(),
+                        );
+                    }
                     let mut frustum_min = frustum_center + vector![-radius, -radius, -radius];
                     let mut frustum_max = frustum_center + vector![radius, radius, radius];
 
@@ -413,6 +425,8 @@ impl CascadedShadowMap {
 
     pub(crate) fn update_buffers(&self, gpu: &dyn Gpu, buffer_index: usize) -> anyhow::Result<()> {
         let current_buffers = &self.csm_buffers[buffer_index];
+
+        let csm_data = self.get_csm_constant_data();
         gpu.write_buffer(
             &current_buffers.shadow_casters,
             0,
@@ -424,10 +438,11 @@ impl CascadedShadowMap {
             0,
             bytemuck::cast_slice(&[self.csm_splits.len() as u32]),
         )?;
+
         gpu.write_buffer(
             &current_buffers.csm_splits,
-            std::mem::size_of::<u32>() as u64 * 4u64,
-            bytemuck::cast_slice(&self.csm_splits),
+            0,
+            bytemuck::cast_slice(&[csm_data]),
         )?;
         Ok(())
     }

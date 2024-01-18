@@ -20,7 +20,11 @@ impl UiExtension for Ui {
     fn slider<N: Numeric>(&mut self, label: &str, min: N, max: N, current: &mut N) {
         self.horizontal(|ui| {
             ui.label(label);
-            ui.add(egui::DragValue::new(current).clamp_range(min..=max));
+            ui.add(
+                egui::DragValue::new(current)
+                    .clamp_range(min..=max)
+                    .speed(0.01f64),
+            );
         });
     }
     fn horizontal_with_label<R, F: FnOnce(&mut Ui) -> R>(

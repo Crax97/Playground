@@ -7,7 +7,6 @@ use crate::{
 use bevy_ecs::system::Resource;
 use gpu::{Extent2D, Gpu, ImageFormat, ImageHandle, ImageViewHandle};
 use nalgebra::{vector, Matrix4, Point3, Vector2, Vector3};
-use std::num::NonZeroU32;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -47,7 +46,8 @@ pub enum LightType {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShadowConfiguration {
-    pub importance: NonZeroU32,
+    pub shadow_map_width: u32,
+    pub shadow_map_height: u32,
     pub depth_bias: f32,
     pub depth_slope: f32,
 }
@@ -55,7 +55,8 @@ pub struct ShadowConfiguration {
 impl Default for ShadowConfiguration {
     fn default() -> Self {
         Self {
-            importance: NonZeroU32::new(1).unwrap(),
+            shadow_map_width: 512,
+            shadow_map_height: 512,
             depth_bias: 0.0,
             depth_slope: 0.0,
         }

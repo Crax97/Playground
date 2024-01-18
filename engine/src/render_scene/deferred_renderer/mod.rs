@@ -698,16 +698,16 @@ impl DeferredRenderingPipeline {
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 4,
                     },
+                    Binding {
+                        ty: gpu::DescriptorBindingType::StorageBuffer {
+                            handle: csm_buffers.csm_splits.clone(),
+                            offset: 0,
+                            range: gpu::WHOLE_SIZE as usize,
+                        },
+                        binding_stage: ShaderStage::FRAGMENT,
+                        location: 5,
+                    },
                 ],
-            );
-
-            let csm_constant_data = self.cascaded_shadow_map.get_csm_constant_data();
-
-            render_pass.push_constants(
-                0,
-                0,
-                bytemuck::cast_slice(&[csm_constant_data]),
-                ShaderStage::FRAGMENT,
             );
 
             render_pass.set_front_face(gpu::FrontFace::ClockWise);

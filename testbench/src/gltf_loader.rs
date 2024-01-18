@@ -17,7 +17,6 @@ use gpu::{
 use nalgebra::{point, vector, Matrix4, Point3, Quaternion, UnitQuaternion, Vector3, Vector4};
 use std::collections::HashMap;
 use std::mem::size_of;
-use std::num::NonZeroU32;
 use std::path::Path;
 
 #[repr(C)]
@@ -521,12 +520,9 @@ fn handle_node(
             intensity: light.intensity() / 100.0,
             enabled: true,
             shadow_configuration: Some(engine::ShadowConfiguration {
-                importance: NonZeroU32::new(match light.kind() {
-                    GltfLightKind::Directional => 5,
-                    GltfLightKind::Point => 3,
-                    GltfLightKind::Spot { .. } => 4,
-                })
-                .unwrap(),
+                shadow_map_width: 512,
+                shadow_map_height: 512,
+
                 ..Default::default()
             }),
         });

@@ -4,7 +4,6 @@ mod utils;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::num::NonZeroU32;
 
 use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App, Console};
@@ -191,7 +190,8 @@ impl GLTFViewer {
                     intensity: 10.0,
                     enabled: true,
                     shadow_configuration: Some(ShadowConfiguration {
-                        importance: NonZeroU32::new(5).unwrap(),
+                        shadow_map_width: 512,
+                        shadow_map_height: 512,
                         ..Default::default()
                     }),
                 });
@@ -208,7 +208,8 @@ impl GLTFViewer {
                     intensity: 10.0,
                     enabled: true,
                     shadow_configuration: Some(ShadowConfiguration {
-                        importance: NonZeroU32::new(20).unwrap(),
+                        shadow_map_width: 2048,
+                        shadow_map_height: 2048,
                         depth_bias: 0.05,
                         depth_slope: 1.0,
                     }),
@@ -223,7 +224,8 @@ impl GLTFViewer {
                     intensity: 10.0,
                     enabled: true,
                     shadow_configuration: Some(ShadowConfiguration {
-                        importance: NonZeroU32::new(2).unwrap(),
+                        shadow_map_width: 512,
+                        shadow_map_height: 512,
                         ..Default::default()
                     }),
                 });
@@ -357,7 +359,8 @@ impl App for GLTFViewer {
             intensity: 10.0,
             enabled: true,
             shadow_configuration: Some(ShadowConfiguration {
-                importance: NonZeroU32::new(10).unwrap(),
+                shadow_map_width: 2048,
+                shadow_map_height: 2048,
                 depth_bias: 0.05,
                 depth_slope: 1.0,
             }),
