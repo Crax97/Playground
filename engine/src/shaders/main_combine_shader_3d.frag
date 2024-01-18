@@ -1,6 +1,6 @@
 #version 460
 
-#pragma GL_GOOGLE_include_directive : require
+#extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_debug_printf : enable
 
 #define printf debugPrintfEXT
@@ -9,7 +9,6 @@
 #include "random.glsl"
 #include "light_definitions.glsl"
 #include "combine_base.glsl"
-
 
 struct ShadowMap {
     uvec4 offset_size;
@@ -38,7 +37,7 @@ layout(set = 1, binding = 4, std140) readonly buffer LightData {
 
 layout(push_constant) uniform PerObjectData {
     uint csm_count;
-    float splits[6];
+    float splits[4];
 } csm_data;
 
 struct CubeSample {

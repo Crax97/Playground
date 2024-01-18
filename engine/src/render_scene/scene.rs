@@ -138,11 +138,7 @@ impl Light {
                 camera.forward = direction;
                 povs.push(camera);
             }
-            LightType::Rect {
-                direction,
-                width,
-                height,
-            } => todo!(),
+            LightType::Rect { .. } => todo!(),
         }
 
         povs

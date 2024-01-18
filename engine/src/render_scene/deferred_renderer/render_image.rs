@@ -13,7 +13,7 @@ pub struct RenderImageDescription {
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq)]
-pub struct ImageId {
+pub struct RenderImageId {
     pub label: &'static str,
     pub desc: RenderImageDescription,
 }
@@ -24,11 +24,11 @@ pub struct RenderImage {
     pub view: ImageViewHandle,
 }
 
-pub struct ImageAllocator {
+pub struct RenderImageAllocator {
     image_allocator: LifetimedCache<RenderImage>,
 }
 
-impl ImageAllocator {
+impl RenderImageAllocator {
     pub fn get(
         &self,
         gpu: &dyn Gpu,
@@ -36,7 +36,7 @@ impl ImageAllocator {
         desc: &RenderImageDescription,
     ) -> RenderImage {
         self.image_allocator
-            .get_clone(&ImageId { label, desc: *desc }, || {
+            .get_clone(&RenderImageId { label, desc: *desc }, || {
                 let image = gpu
                     .make_image(
                         &gpu::ImageCreateInfo {

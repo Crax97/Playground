@@ -526,18 +526,23 @@ impl App for GLTFViewer {
                 ui.separator();
 
                 ui.collapsing("Global shadow settings", |ui| {
-                    ui.slider("CSM Splits", 0, 6, &mut self.scene_renderer.csm_slices);
+                    ui.slider(
+                        "CSM Splits",
+                        0,
+                        4,
+                        &mut self.scene_renderer.cascaded_shadow_map.num_cascades,
+                    );
                     ui.slider(
                         "CSM Split lambda",
                         0.0,
                         1.0,
-                        &mut self.scene_renderer.csm_split_lambda,
+                        &mut self.scene_renderer.cascaded_shadow_map.csm_split_lambda,
                     );
                     ui.slider(
                         "CSM Z Multiplier",
                         0.1,
                         20.0,
-                        &mut self.scene_renderer.z_mult,
+                        &mut self.scene_renderer.cascaded_shadow_map.z_mult,
                     );
                 });
 

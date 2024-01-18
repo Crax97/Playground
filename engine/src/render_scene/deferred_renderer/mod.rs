@@ -3,40 +3,37 @@ mod gbuffer;
 mod render_image;
 mod sampler_allocator;
 
-use crate::render_scene::render_structs::*;
+use crate::{
+    post_process_pass::{PostProcessPass, PostProcessResources},
+    render_scene::render_structs::*,
+};
 use cascaded_shadow_map::*;
 use gbuffer::*;
 use render_image::*;
 use sampler_allocator::*;
 
 use anyhow::Context;
-use bytemuck::{Pod, Zeroable};
 use engine_macros::glsl;
 use std::mem::size_of;
 
 use crate::{
     material::{MasterMaterial, MasterMaterialDescription},
-    math::shape::BoundingShape,
-    post_process_pass::{PostProcessPass, PostProcessResources},
-    Camera, CvarManager, Frustum, Light, LightType, MaterialDescription, MaterialInstance, Mesh,
-    MeshPrimitive, PipelineTarget, RenderScene, RenderingPipeline, ScenePrimitive, Texture,
-    TiledTexture2DPacker,
+    Camera, CvarManager, Frustum, MaterialDescription, MaterialInstance, Mesh, MeshPrimitive,
+    PipelineTarget, RenderScene, RenderingPipeline, ScenePrimitive, Texture,
 };
 
 use crate::resource_map::{ResourceHandle, ResourceMap};
 use gpu::{
     AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, Binding,
-    BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorLoadOp, CommandBuffer,
-    CommandBufferSubmitInfo, ComponentMapping, Extent2D, FragmentStageInfo,
-    FramebufferColorAttachment, FramebufferDepthAttachment, Gpu, ImageAspectFlags, ImageCreateInfo,
-    ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
-    ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, ImageViewType, IndexType, InputRate,
-    MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags, Rect2D, RenderPass,
-    SampleCount, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
-    SubpassDependency, SubpassDescription, VertexBindingInfo, VertexStageInfo, Viewport,
+    BufferCreateInfo, BufferUsageFlags, ColorLoadOp, CommandBuffer, CommandBufferSubmitInfo,
+    Extent2D, FragmentStageInfo, FramebufferColorAttachment, Gpu, ImageAspectFlags, ImageFormat,
+    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewHandle, ImageViewType,
+    IndexType, InputRate, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags, Rect2D,
+    RenderPass, SampleCount, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle,
+    ShaderStage, SubpassDependency, SubpassDescription, VertexBindingInfo, VertexStageInfo,
     VkSwapchain,
 };
-use nalgebra::{point, vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
+use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 
 const SCREEN_QUAD: &[u32] = glsl!(
     kind = vertex,
@@ -69,7 +66,7 @@ const TEXTURE_COPY: &[u32] = glsl!(
 );
 pub struct DeferredRenderingPipeline {
     frame_buffers: Vec<FrameBuffers>,
-    image_allocator: ImageAllocator,
+    image_allocator: RenderImageAllocator,
     sampler_allocator: SamplerAllocator,
     screen_quad: ShaderModuleHandle,
     texture_copy: ShaderModuleHandle,
@@ -86,21 +83,13 @@ pub struct DeferredRenderingPipeline {
 
     cube_mesh: ResourceHandle<Mesh>,
 
-    pub csm_slices: u8,
-
     pub ambient_color: Vector3<f32>,
     pub ambient_intensity: f32,
 
     pub update_frustum: bool,
     pub drawcalls_last_frame: u64,
 
-    csm_buffers: Vec<CsmBuffers>,
-    shadow_atlas: ImageHandle,
-    shadow_atlas_view: ImageViewHandle,
-    shadow_maps: Vec<ShadowMap>,
-    pub csm_split_lambda: f32,
-    csm_splits: Vec<f32>,
-    pub z_mult: f32,
+    pub cascaded_shadow_map: CascadedShadowMap,
 
     frustum: Frustum,
     gbuffer_nearest_sampler: SamplerHandle,
@@ -110,7 +99,6 @@ pub struct DeferredRenderingPipeline {
 }
 
 impl DeferredRenderingPipeline {
-    pub const MAX_SHADOW_CASTERS: usize = 100;
     pub fn new(
         gpu: &dyn Gpu,
         resource_map: &mut ResourceMap,
@@ -192,68 +180,10 @@ impl DeferredRenderingPipeline {
             height: 1080,
         };
 
-        let shadow_atlas = gpu.make_image(
-            &ImageCreateInfo {
-                label: Some("CSM Shadow Atlas"),
-                width: SHADOW_ATLAS_WIDTH,
-                height: SHADOW_ATLAS_HEIGHT,
-                depth: 1,
-                mips: 1,
-                layers: 1,
-                samples: gpu::SampleCount::Sample1,
-                format: gpu::ImageFormat::Depth,
-                usage: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | ImageUsageFlags::SAMPLED,
-            },
-            MemoryDomain::DeviceLocal,
-            None,
-        )?;
-
-        let shadow_atlas_view = gpu.make_image_view(&ImageViewCreateInfo {
-            image: shadow_atlas.clone(),
-            view_type: gpu::ImageViewType::Type2D,
-            format: gpu::ImageFormat::Depth,
-            components: ComponentMapping {
-                r: gpu::ComponentSwizzle::Identity,
-                g: gpu::ComponentSwizzle::Identity,
-                b: gpu::ComponentSwizzle::Identity,
-                a: gpu::ComponentSwizzle::Identity,
-            },
-            subresource_range: ImageSubresourceRange {
-                aspect_mask: ImageAspectFlags::DEPTH,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 1,
-            },
-        })?;
-
-        let mut csm_buffers = Vec::with_capacity(VkSwapchain::MAX_FRAMES_IN_FLIGHT);
-        for i in 0..VkSwapchain::MAX_FRAMES_IN_FLIGHT {
-            let shadow_casters = gpu.make_buffer(
-                &BufferCreateInfo {
-                    label: Some(&format!("Shadow Casters #{}", i)),
-                    size: Self::MAX_SHADOW_CASTERS * std::mem::size_of::<ShadowMap>(),
-                    usage: BufferUsageFlags::STORAGE_BUFFER | BufferUsageFlags::UNIFORM_BUFFER,
-                },
-                MemoryDomain::HostCoherent | MemoryDomain::HostVisible,
-            )?;
-            let csm_splits = gpu.make_buffer(
-                &BufferCreateInfo {
-                    label: Some(&format!("CSM Splits #{}", i)),
-                    size: Self::MAX_SHADOW_CASTERS * std::mem::size_of::<f32>(),
-                    usage: BufferUsageFlags::STORAGE_BUFFER | BufferUsageFlags::UNIFORM_BUFFER,
-                },
-                MemoryDomain::HostCoherent | MemoryDomain::HostVisible,
-            )?;
-
-            csm_buffers.push(CsmBuffers {
-                shadow_casters,
-                csm_splits,
-            });
-        }
+        let cascaded_shadow_map = CascadedShadowMap::new(gpu, VkSwapchain::MAX_FRAMES_IN_FLIGHT)?;
 
         Ok(Self {
-            image_allocator: ImageAllocator::new(4),
+            image_allocator: RenderImageAllocator::new(4),
             sampler_allocator: SamplerAllocator::new(4),
             screen_quad,
             screen_quad_flipped,
@@ -277,14 +207,7 @@ impl DeferredRenderingPipeline {
             update_frustum: true,
             frustum: Frustum::default(),
             drawcalls_last_frame: 0,
-            csm_slices: 4,
-            csm_buffers,
-            shadow_atlas,
-            csm_split_lambda: 0.98,
-            shadow_atlas_view,
-            shadow_maps: vec![],
-            csm_splits: vec![],
-            z_mult: 10.0,
+            cascaded_shadow_map,
         })
     }
 
@@ -718,14 +641,14 @@ impl DeferredRenderingPipeline {
             render_pass.advance_to_next_subpass();
 
             // Combine
-            let csm_buffers = &self.csm_buffers[self.in_flight_frame];
+            let csm_buffers = &self.cascaded_shadow_map.csm_buffers[self.in_flight_frame];
             gbuffer.bind_as_input_attachments(&mut render_pass, 0, 0);
             render_pass.bind_resources(
                 1,
                 &[
                     Binding {
                         ty: gpu::DescriptorBindingType::ImageView {
-                            image_view_handle: self.shadow_atlas_view.clone(),
+                            image_view_handle: self.cascaded_shadow_map.shadow_atlas_view.clone(),
                             sampler_handle: self.gbuffer_nearest_sampler.clone(),
                             layout: ImageLayout::ShaderReadOnly,
                         },
@@ -778,23 +701,14 @@ impl DeferredRenderingPipeline {
                 ],
             );
 
-            #[repr(C)]
-            #[derive(Clone, Copy, Pod, Zeroable)]
-            struct CSMConstantData {
-                count: u32,
-                splits: [f32; 6],
-            }
+            let csm_constant_data = self.cascaded_shadow_map.get_csm_constant_data();
 
-            let mut data = CSMConstantData {
-                count: self.csm_splits.len() as _,
-                splits: [0.0; 6],
-            };
-
-            for (i, split) in self.csm_splits.iter().take(6).enumerate() {
-                data.splits[i] = *split;
-            }
-
-            render_pass.push_constants(0, 0, bytemuck::cast_slice(&[data]), ShaderStage::FRAGMENT);
+            render_pass.push_constants(
+                0,
+                0,
+                bytemuck::cast_slice(&[csm_constant_data]),
+                ShaderStage::FRAGMENT,
+            );
 
             render_pass.set_front_face(gpu::FrontFace::ClockWise);
             render_pass.set_cull_mode(gpu::CullMode::None);
@@ -1026,103 +940,8 @@ impl DeferredRenderingPipeline {
         self.post_process_stack.push(Box::new(pass))
     }
 
-    pub fn get_shadow_texture(&self, gpu: &dyn Gpu) -> ImageViewHandle {
-        self.shadow_atlas_view.clone()
-    }
-
-    fn render_shadow_atlas(
-        &self,
-        gpu: &dyn Gpu,
-        camera: &crate::Camera,
-        scene: &crate::RenderScene,
-        command_buffer: &mut gpu::CommandBuffer,
-        frame_buffers: &FrameBuffers,
-        resource_map: &ResourceMap,
-    ) -> anyhow::Result<()> {
-        {
-            let mut shadow_atlas_pass =
-                command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
-                    label: Some("CSM Shadow Atlas Emit"),
-                    color_attachments: &[],
-                    depth_attachment: Some(FramebufferDepthAttachment {
-                        image_view: self.shadow_atlas_view.clone(),
-                        load_op: gpu::DepthLoadOp::Clear(1.0),
-                        store_op: gpu::AttachmentStoreOp::Store,
-                        initial_layout: gpu::ImageLayout::Undefined,
-                        final_layout: gpu::ImageLayout::ShaderReadOnly,
-                    }),
-                    stencil_attachment: None,
-                    render_area: Rect2D {
-                        offset: Default::default(),
-                        extent: Extent2D {
-                            width: SHADOW_ATLAS_WIDTH,
-                            height: SHADOW_ATLAS_HEIGHT,
-                        },
-                    },
-                    subpasses: &[SubpassDescription {
-                        label: None,
-                        input_attachments: vec![],
-                        color_attachments: vec![],
-                        resolve_attachments: vec![],
-                        depth_stencil_attachment: Some(AttachmentReference {
-                            attachment: 0,
-                            layout: ImageLayout::DepthStencilAttachment,
-                        }),
-                        preserve_attachments: vec![],
-                    }],
-                    dependencies: &[SubpassDependency {
-                        src_subpass: SubpassDependency::EXTERNAL,
-                        dst_subpass: 0,
-                        src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                        dst_stage_mask: PipelineStageFlags::LATE_FRAGMENT_TESTS,
-                        src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                        dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                    }],
-                });
-
-            for shadow_map in &self.shadow_maps {
-                let caster_pov = shadow_map.type_num_maps_pov_lightid[2];
-                // We subtract 1 because index 0 is reserved for the camera
-                let pov = &self.light_povs[caster_pov as usize - 1];
-                let frustum = Frustum::from_view_proj(pov.view, pov.projection);
-                let primitives = scene.intersect_frustum(&frustum);
-                let pov_idx = shadow_map.type_num_maps_pov_lightid[2];
-                let light = &scene.lights[shadow_map.type_num_maps_pov_lightid[3] as usize];
-                let setup = light
-                    .shadow_configuration
-                    .expect("Bug: a light is set to render a shadow map, but has no shadow setup");
-
-                shadow_atlas_pass.set_depth_bias(setup.depth_bias, setup.depth_slope);
-                shadow_atlas_pass.set_cull_mode(gpu::CullMode::Back);
-                shadow_atlas_pass.set_depth_compare_op(gpu::CompareOp::LessEqual);
-
-                shadow_atlas_pass.set_color_output_enabled(false);
-                shadow_atlas_pass.set_enable_depth_test(true);
-                shadow_atlas_pass.set_depth_write_enabled(true);
-                let width = shadow_map.offset_size[2] as f32;
-                shadow_atlas_pass.set_viewport(Viewport {
-                    x: shadow_map.offset_size[0] as f32,
-                    y: shadow_map.offset_size[1] as f32,
-                    width,
-                    height: shadow_map.offset_size[3] as f32,
-                    min_depth: 0.0,
-                    max_depth: 1.0,
-                });
-
-                DeferredRenderingPipeline::main_render_loop(
-                    gpu,
-                    &primitives,
-                    resource_map,
-                    PipelineTarget::DepthOnly,
-                    &mut shadow_atlas_pass,
-                    pov_idx,
-                    frame_buffers,
-                    &self.sampler_allocator,
-                )?;
-            }
-        }
-
-        Ok(())
+    pub fn get_shadow_texture(&self, _gpu: &dyn Gpu) -> ImageViewHandle {
+        self.cascaded_shadow_map.shadow_atlas_view.clone()
     }
 
     fn get_gbuffer(&self, gpu: &dyn Gpu) -> GBuffer {
@@ -1167,74 +986,29 @@ impl DeferredRenderingPipeline {
     ) -> anyhow::Result<()> {
         self.active_lights.clear();
         self.light_povs.clear();
-        self.csm_splits.clear();
+        self.cascaded_shadow_map.clear();
 
-        let camera_splits = scene_camera.split_into_slices(self.csm_slices, self.csm_split_lambda);
-        self.csm_splits.extend(camera_splits.iter().map(|c| c.far));
-
-        let mut texture_packer = TiledTexture2DPacker::new(
-            SHADOW_ATLAS_TILE_SIZE,
-            SHADOW_ATLAS_WIDTH,
-            SHADOW_ATLAS_HEIGHT,
-        )
-        .expect("Failed to create packer");
-
-        let mut shadow_maps = vec![];
-
+        self.cascaded_shadow_map.update_cascade_splits(scene_camera);
         let mut pov_idx = 1;
 
-        for (light_id, l) in scene.lights.iter().enumerate() {
-            if !l.enabled {
+        for (light_id, light) in scene.lights.iter().enumerate() {
+            if !light.enabled {
                 continue;
             }
-            let ty = match l.ty {
-                crate::LightType::Point => 1,
-                crate::LightType::Directional { .. } => 2,
-                crate::LightType::Spotlight { .. } => 3,
-                crate::LightType::Rect { .. } => 4,
-            };
 
-            let num_maps = match l.ty {
-                crate::LightType::Point => 6,
-                crate::LightType::Directional { .. } => self.csm_slices as u32,
-                crate::LightType::Spotlight { .. } => 1,
-                crate::LightType::Rect { .. } => 1,
-            };
-
-            let shadow_map_width =
-                SHADOW_ATLAS_TILE_SIZE * l.shadow_configuration.unwrap().importance.get();
-            let shadow_map_height = shadow_map_width;
-
-            let mut gpu_light: GpuLightInfo = l.into();
-            if let Ok(allocation) =
-                texture_packer.allocate(shadow_map_width * num_maps, shadow_map_height)
+            let mut gpu_light: GpuLightInfo = light.into();
+            if let Some(NewShadowMapAllocation {
+                povs,
+                shadow_map_index,
+            }) = self
+                .cascaded_shadow_map
+                .add_light(light, pov_idx, light_id as u32)
             {
-                let this_light_cameras = l.light_cameras();
-                let povs = self.get_light_povs(l, &camera_splits, this_light_cameras);
-                let shadow_map_idx = shadow_maps.len();
-                let light_shadow_maps = povs
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| ShadowMap {
-                        offset_size: [
-                            allocation.x + shadow_map_width * i as u32,
-                            allocation.y,
-                            shadow_map_width,
-                            shadow_map_height,
-                        ],
-                        type_num_maps_pov_lightid: [
-                            ty,
-                            num_maps,
-                            pov_idx + i as u32,
-                            light_id as u32,
-                        ],
-                    })
-                    .collect::<Vec<_>>();
-                pov_idx += light_shadow_maps.len() as u32;
-                self.light_povs.extend(povs);
-                shadow_maps.extend(light_shadow_maps.into_iter());
-                gpu_light.ty[1] = shadow_map_idx as i32;
+                pov_idx += povs.len() as u32;
+                self.light_povs.extend(povs.into_iter());
+                gpu_light.ty_shadow_map_idx[1] = shadow_map_index as i32;
             }
+
             self.active_lights.push(gpu_light);
         }
 
@@ -1263,121 +1037,14 @@ impl DeferredRenderingPipeline {
             bytemuck::cast_slice(&self.active_lights),
         )?;
 
-        let current_buffers = &self.csm_buffers[self.in_flight_frame];
-        self.shadow_maps = shadow_maps;
-
-        gpu.write_buffer(
-            &current_buffers.shadow_casters,
-            0,
-            bytemuck::cast_slice(&self.shadow_maps),
-        )?;
-
-        gpu.write_buffer(
-            &current_buffers.csm_splits,
-            0,
-            bytemuck::cast_slice(&[self.csm_splits.len() as u32]),
-        )?;
-        gpu.write_buffer(
-            &current_buffers.csm_splits,
-            std::mem::size_of::<u32>() as u64 * 4u64,
-            bytemuck::cast_slice(&self.csm_splits),
-        )?;
+        self.cascaded_shadow_map
+            .update_buffers(gpu, self.in_flight_frame)?;
 
         Ok(())
     }
-
-    fn get_light_povs(
-        &self,
-        l: &Light,
-        camera_splits: &Vec<Camera>,
-        light_povs: Vec<Camera>,
-    ) -> Vec<PointOfViewData> {
-        match l.ty {
-            LightType::Directional { direction, .. } => {
-                let povs = camera_splits.iter().map(|split| {
-                    let split_viewproj = split.projection() * split.view();
-                    let inv_splitviewproj = split_viewproj.try_inverse().unwrap();
-                    let ndc_cube_corners = [
-                        vector![1.0, 1.0, 1.0, 1.0],
-                        vector![-1.0, 1.0, 1.0, 1.0],
-                        vector![1.0, 1.0, -1.0, 1.0],
-                        vector![-1.0, 1.0, -1.0, 1.0],
-                        vector![1.0, -1.0, 1.0, 1.0],
-                        vector![-1.0, -1.0, 1.0, 1.0],
-                        vector![1.0, -1.0, -1.0, 1.0],
-                        vector![-1.0, -1.0, -1.0, 1.0],
-                    ];
-                    let frustum_corners = ndc_cube_corners
-                        .iter()
-                        .map(|corner| inv_splitviewproj * corner)
-                        .map(|v| v / v.w);
-
-                    let mut frustum_center = Vector3::default();
-                    for corner in frustum_corners.clone() {
-                        frustum_center += corner.xyz();
-                    }
-                    frustum_center /= 8.0;
-                    let frustum_center = Point3::from(frustum_center.xyz());
-
-                    let light_view = Matrix4::look_at_rh(
-                        &frustum_center,
-                        &(frustum_center + direction),
-                        &vector![0.0, 1.0, 0.0],
-                    );
-                    let frustum_bounds = BoundingShape::bounding_box_from_points(
-                        frustum_corners
-                            .map(|pt| light_view * pt)
-                            .map(|corner| Point3::from(corner.xyz())),
-                    );
-                    let (frustum_min, mut frustum_max) = frustum_bounds.box_extremes();
-
-                    let radius = (frustum_max - frustum_min).magnitude();
-                    let mut frustum_min = frustum_center + vector![-radius, -radius, -radius];
-                    let mut frustum_max = frustum_center + vector![radius, radius, radius];
-
-                    if frustum_min.z < 0.0 {
-                        frustum_min.z *= self.z_mult;
-                    } else {
-                        frustum_min.z /= self.z_mult;
-                    }
-
-                    if frustum_max.z < 0.0 {
-                        frustum_max.z *= self.z_mult;
-                    } else {
-                        frustum_max.z /= self.z_mult;
-                    }
-
-                    let light_projection = Matrix4::new_orthographic(
-                        frustum_min.x,
-                        frustum_max.x,
-                        frustum_min.y,
-                        frustum_max.y,
-                        frustum_min.z,
-                        frustum_max.z,
-                    );
-                    PointOfViewData {
-                        eye: point![l.position.x, l.position.y, l.position.z, 0.0],
-                        eye_forward: direction.to_homogeneous(),
-                        view: light_view,
-                        projection: light_projection,
-                    }
-                });
-                povs.collect()
-            }
-            _ => light_povs
-                .into_iter()
-                .map(|c| PointOfViewData {
-                    eye: point![c.location.x, c.location.y, c.location.z, 0.0],
-                    eye_forward: c.forward.to_homogeneous(),
-                    view: c.view(),
-                    projection: c.projection(),
-                })
-                .collect(),
-        }
-    }
 }
 
-pub fn bind_master_material(
+fn bind_master_material(
     master: &MasterMaterial,
     pipeline_target: PipelineTarget,
     render_pass: &mut RenderPass,
@@ -1575,13 +1242,14 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let mut graphics_command_buffer = gpu.start_command_buffer(gpu::QueueType::Graphics)?;
 
-        self.render_shadow_atlas(
+        self.cascaded_shadow_map.render_shadow_atlas(
             gpu,
-            camera,
             scene,
             &mut graphics_command_buffer,
             current_buffers,
             resource_map,
+            &self.light_povs,
+            &self.sampler_allocator,
         )?;
 
         let gbuffer = self.get_gbuffer(gpu);

@@ -7,7 +7,6 @@ use gpu::{CullMode, ImageFormat, ShaderModuleHandle, ShaderStage};
 pub use material_instance::*;
 
 pub use master_material::*;
-pub use material_instance::*;
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum MaterialDomain {
