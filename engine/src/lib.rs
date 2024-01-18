@@ -31,7 +31,7 @@ pub use utils::*;
 
 pub use egui;
 
-pub use render_scene::{camera::*, deferred_renderer::*, scene::*};
+pub use render_scene::{camera::*, deferred_renderer::*, render_structs::*, scene::*};
 
 /*
  * Conventions used

@@ -1,3 +1,14 @@
+mod cascaded_shadow_map;
+mod gbuffer;
+mod render_image;
+mod sampler_allocator;
+
+use crate::render_scene::render_structs::*;
+use cascaded_shadow_map::*;
+use gbuffer::*;
+use render_image::*;
+use sampler_allocator::*;
+
 use anyhow::Context;
 use bytemuck::{Pod, Zeroable};
 use engine_macros::glsl;
@@ -9,7 +20,7 @@ use crate::{
     post_process_pass::{PostProcessPass, PostProcessResources},
     Camera, CvarManager, Frustum, Light, LightType, MaterialDescription, MaterialInstance, Mesh,
     MeshPrimitive, PipelineTarget, RenderScene, RenderingPipeline, ScenePrimitive, Texture,
-    TextureSamplerSettings, TiledTexture2DPacker,
+    TiledTexture2DPacker,
 };
 
 use crate::resource_map::{ResourceHandle, ResourceMap};
@@ -20,14 +31,12 @@ use gpu::{
     FramebufferColorAttachment, FramebufferDepthAttachment, Gpu, ImageAspectFlags, ImageCreateInfo,
     ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
     ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, ImageViewType, IndexType, InputRate,
-    LifetimedCache, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags, Rect2D,
-    RenderPass, SampleCount, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle,
-    ShaderStage, SubpassDependency, SubpassDescription, VertexBindingInfo, VertexStageInfo,
-    Viewport, VkSwapchain,
+    MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags, Rect2D, RenderPass,
+    SampleCount, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
+    SubpassDependency, SubpassDescription, VertexBindingInfo, VertexStageInfo, Viewport,
+    VkSwapchain,
 };
 use nalgebra::{point, vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
-
-use super::camera;
 
 const SCREEN_QUAD: &[u32] = glsl!(
     kind = vertex,
@@ -58,36 +67,11 @@ const TEXTURE_COPY: &[u32] = glsl!(
     path = "src/shaders/texture_copy.frag",
     entry_point = "main"
 );
-
-const LIGHT_MASK: &[u32] = glsl!(
-    kind = fragment,
-    path = "src/shaders/light_mask.frag",
-    entry_point = "main"
-);
-
-pub const SHADOW_ATLAS_TILE_SIZE: u32 = 128;
-pub const SHADOW_ATLAS_WIDTH: u32 = SHADOW_ATLAS_TILE_SIZE * 70;
-pub const SHADOW_ATLAS_HEIGHT: u32 = SHADOW_ATLAS_TILE_SIZE * 35;
-
-pub struct CsmBuffers {
-    shadow_casters: BufferHandle,
-    csm_splits: BufferHandle,
-}
-
-#[repr(C)]
-#[derive(Pod, Zeroable, Copy, Clone)]
-pub struct ShadowMap {
-    offset_size: [u32; 4],
-    // type: x, num_maps: y, pov: z, split_idx: w (directional only)
-    type_num_maps_pov_lightid: [u32; 4],
-}
-
 pub struct DeferredRenderingPipeline {
     frame_buffers: Vec<FrameBuffers>,
     image_allocator: ImageAllocator,
     sampler_allocator: SamplerAllocator,
     screen_quad: ShaderModuleHandle,
-    light_mask: ShaderModuleHandle,
     texture_copy: ShaderModuleHandle,
     combine_shader: ShaderModuleHandle,
 
@@ -123,250 +107,6 @@ pub struct DeferredRenderingPipeline {
     screen_quad_flipped: ShaderModuleHandle,
     early_z_pass_enabled: bool,
     view_size: Extent2D,
-}
-
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
-pub struct RenderImageDescription {
-    pub width: u32,
-    pub height: u32,
-    pub format: ImageFormat,
-    pub samples: SampleCount,
-    pub view_type: ImageViewType,
-}
-
-#[derive(Clone, Copy, Hash, Eq, PartialEq)]
-pub struct ImageId {
-    pub label: &'static str,
-    pub desc: RenderImageDescription,
-}
-
-#[derive(Clone)]
-pub struct RenderImage {
-    pub image: ImageHandle,
-    pub view: ImageViewHandle,
-}
-
-pub struct SceneTextures {
-    pub depth_component: RenderImage,
-    pub position_component: RenderImage,
-    pub normal_component: RenderImage,
-    pub diffuse_component: RenderImage,
-    pub emissive_component: RenderImage,
-    pub pbr_component: RenderImage,
-    pub light_mask: RenderImage,
-
-    pub viewport_size: Extent2D,
-}
-
-pub struct SamplerAllocator {
-    sampler_allocator: LifetimedCache<SamplerHandle>,
-}
-
-impl SamplerAllocator {
-    pub fn get(&self, gpu: &dyn Gpu, desc: &TextureSamplerSettings) -> SamplerHandle {
-        self.sampler_allocator.get_clone(desc, || {
-            gpu.make_sampler(&gpu::SamplerCreateInfo {
-                mag_filter: desc.mag_filter,
-                min_filter: desc.min_filter,
-                address_u: desc.address_u,
-                address_v: desc.address_v,
-                address_w: desc.address_w,
-                // TODO: Have a global lod bias
-                mip_lod_bias: 0.0,
-                compare_function: None,
-                min_lod: 0.0,
-                max_lod: 1.0,
-                border_color: [0.0; 4],
-            })
-            .expect("failed to create sampler")
-        })
-    }
-
-    pub fn new(lifetime: u32) -> Self {
-        Self {
-            sampler_allocator: LifetimedCache::new(lifetime),
-        }
-    }
-}
-pub struct ImageAllocator {
-    image_allocator: LifetimedCache<RenderImage>,
-}
-
-impl ImageAllocator {
-    pub fn get(
-        &self,
-        gpu: &dyn Gpu,
-        label: &'static str,
-        desc: &RenderImageDescription,
-    ) -> RenderImage {
-        self.image_allocator
-            .get_clone(&ImageId { label, desc: *desc }, || {
-                let image = gpu
-                    .make_image(
-                        &gpu::ImageCreateInfo {
-                            label: Some(label),
-                            width: desc.width,
-                            height: desc.height,
-                            depth: 1,
-                            mips: 1,
-                            layers: 1,
-                            samples: desc.samples,
-                            format: desc.format,
-                            usage: ImageUsageFlags::SAMPLED
-                                | ImageUsageFlags::INPUT_ATTACHMENT
-                                | if desc.format.is_color() {
-                                    ImageUsageFlags::COLOR_ATTACHMENT
-                                } else {
-                                    ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
-                                },
-                        },
-                        MemoryDomain::DeviceLocal,
-                        None,
-                    )
-                    .expect("failed to create image");
-
-                let view = gpu
-                    .make_image_view(&gpu::ImageViewCreateInfo {
-                        image: image.clone(),
-                        view_type: gpu::ImageViewType::Type2D,
-                        format: desc.format,
-                        components: gpu::ComponentMapping::default(),
-                        subresource_range: gpu::ImageSubresourceRange {
-                            aspect_mask: if desc.format.is_color() {
-                                ImageAspectFlags::COLOR
-                            } else {
-                                ImageAspectFlags::DEPTH
-                            },
-                            base_mip_level: 0,
-                            level_count: 1,
-                            base_array_layer: 0,
-                            layer_count: 1,
-                        },
-                    })
-                    .expect("failed to create view");
-                RenderImage { image, view }
-            })
-    }
-
-    pub fn new(lifetime: u32) -> Self {
-        Self {
-            image_allocator: LifetimedCache::new(lifetime),
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct ObjectDrawInfo {
-    pub model: Matrix4<f32>,
-    pub camera_index: u32,
-}
-
-unsafe impl Pod for ObjectDrawInfo {}
-unsafe impl Zeroable for ObjectDrawInfo {}
-
-#[derive(Clone, Copy)]
-pub struct FxaaSettings {
-    pub fxaa_quality_subpix: f32,
-    pub fxaa_quality_edge_threshold: f32,
-    pub fxaa_quality_edge_threshold_min: f32,
-}
-
-unsafe impl Pod for FxaaSettings {}
-unsafe impl Zeroable for FxaaSettings {}
-
-impl Default for FxaaSettings {
-    fn default() -> Self {
-        Self {
-            fxaa_quality_subpix: 0.75,
-            fxaa_quality_edge_threshold: 0.166,
-            fxaa_quality_edge_threshold_min: 0.0833,
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct PointOfViewData {
-    pub eye: Point4<f32>,
-    pub eye_forward: Vector4<f32>,
-    pub view: nalgebra::Matrix4<f32>,
-    pub projection: nalgebra::Matrix4<f32>,
-}
-
-unsafe impl Pod for PointOfViewData {}
-unsafe impl Zeroable for PointOfViewData {}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct GpuLightInfo {
-    position_radius: Vector4<f32>,
-    direction: Vector4<f32>,
-    color: Vector4<f32>,
-    extras: Vector4<f32>,
-    ty: [i32; 4],
-}
-
-unsafe impl Pod for GpuLightInfo {}
-unsafe impl Zeroable for GpuLightInfo {}
-
-impl From<&Light> for GpuLightInfo {
-    fn from(light: &Light) -> Self {
-        let (direction, extras, ty) = match light.ty {
-            LightType::Point => (Default::default(), Default::default(), 0),
-            LightType::Directional { direction, .. } => (
-                vector![direction.x, direction.y, direction.z, 0.0],
-                Default::default(),
-                1,
-            ),
-            LightType::Spotlight {
-                direction,
-                inner_cone_degrees,
-                outer_cone_degrees,
-            } => (
-                vector![direction.x, direction.y, direction.z, 0.0],
-                vector![
-                    inner_cone_degrees.to_radians().cos(),
-                    outer_cone_degrees.to_radians().cos(),
-                    0.0,
-                    0.0
-                ],
-                2,
-            ),
-            LightType::Rect {
-                direction,
-                width,
-                height,
-            } => (
-                vector![direction.x, direction.y, direction.z, 0.0],
-                vector![width, height, 0.0, 0.0],
-                3,
-            ),
-        };
-        Self {
-            position_radius: vector![
-                light.position.x,
-                light.position.y,
-                light.position.z,
-                light.radius
-            ],
-            color: vector![light.color.x, light.color.y, light.color.z, light.intensity],
-            direction,
-            extras,
-            ty: [ty, -1, 0, 0],
-        }
-    }
-}
-
-pub(crate) struct FrameBuffers {
-    pub(crate) camera_buffer: BufferHandle,
-    pub(crate) light_buffer: BufferHandle,
-}
-
-struct DrawCall<'a> {
-    prim: &'a MeshPrimitive,
-    transform: Matrix4<f32>,
-    material: MaterialInstance,
 }
 
 impl DeferredRenderingPipeline {
@@ -421,10 +161,6 @@ impl DeferredRenderingPipeline {
 
         let texture_copy = gpu.make_shader_module(&ShaderModuleCreateInfo {
             code: bytemuck::cast_slice(TEXTURE_COPY),
-        })?;
-
-        let light_mask = gpu.make_shader_module(&ShaderModuleCreateInfo {
-            code: bytemuck::cast_slice(LIGHT_MASK),
         })?;
 
         let gbuffer_nearest_sampler = gpu.make_sampler(&gpu::SamplerCreateInfo {
@@ -523,7 +259,6 @@ impl DeferredRenderingPipeline {
             screen_quad_flipped,
             combine_shader,
             texture_copy,
-            light_mask,
             frame_buffers,
             post_process_stack: vec![],
             in_flight_frame: 0,
@@ -599,13 +334,14 @@ impl DeferredRenderingPipeline {
 
                     // render_pass.set_cull_mode(master.cull_mode);
                     // render_pass.set_front_face(master.front_face);
+                    let model = primitive.transform;
                     draw_mesh_primitive(
                         gpu,
                         render_pass,
                         material,
                         master,
                         mesh_prim,
-                        primitive.transform,
+                        model,
                         resource_map,
                         sampler_allocator,
                         camera_index,
@@ -666,116 +402,12 @@ impl DeferredRenderingPipeline {
         self.irradiance_map = irradiance_map;
     }
 
-    // fn shadow_atlas_pass(
-    //     &self,
-    //     gpu: &dyn Gpu,
-    //     graphics_command_buffer: &mut CommandBuffer,
-    //     shadow_atlas_component: &RenderImage,
-    //     per_frame_data: Vec<PerFrameData>,
-    //     resource_map: &ResourceMap,
-    //     draw_hashmap: &HashMap<&MasterMaterial, Vec<DrawCall>>,
-    //     current_buffers: &FrameBuffers,
-    // ) -> anyhow::Result<()> {
-    //     {
-    //         let mut shadow_atlas_command =
-    //             graphics_command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
-    //                 label: Some("Shadow atlas"),
-    //                 color_attachments: &[],
-    //                 depth_attachment: Some(FramebufferDepthAttachment {
-    //                     image_view: shadow_atlas_component.view.clone(),
-    //                     load_op: gpu::DepthLoadOp::Clear(1.0),
-    //                     store_op: gpu::AttachmentStoreOp::Store,
-    //                     initial_layout: ImageLayout::Undefined,
-    //                     final_layout: ImageLayout::DepthStencilAttachment,
-    //                 }),
-    //                 stencil_attachment: None,
-    //                 render_area: Rect2D {
-    //                     offset: Offset2D::default(),
-    //                     extent: Extent2D {
-    //                         width: SHADOW_ATLAS_WIDTH,
-    //                         height: SHADOW_ATLAS_HEIGHT,
-    //                     },
-    //                 },
-    //                 subpasses: &[SubpassDescription {
-    //                     label: None,
-    //                     input_attachments: vec![],
-    //                     color_attachments: vec![],
-    //                     resolve_attachments: vec![],
-    //                     depth_stencil_attachment: Some(AttachmentReference {
-    //                         attachment: 0,
-    //                         layout: ImageLayout::DepthStencilAttachment,
-    //                     }),
-    //                     preserve_attachments: vec![],
-    //                 }],
-    //                 dependencies: &[],
-    //             });
-
-    //         shadow_atlas_command.set_depth_bias(
-    //             self.depth_bias_constant,
-    //             self.depth_bias_clamp,
-    //             self.depth_bias_slope,
-    //         );
-
-    //         shadow_atlas_command.set_cull_mode(gpu::CullMode::Front);
-    //         shadow_atlas_command.set_depth_compare_op(gpu::CompareOp::LessEqual);
-
-    //         shadow_atlas_command.set_color_output_enabled(false);
-    //         shadow_atlas_command.set_enable_depth_test(true);
-    //         shadow_atlas_command.set_depth_write_enabled(true);
-
-    //         for (i, pov) in per_frame_data.iter().enumerate().skip(1) {
-    //             shadow_atlas_command.set_viewport(gpu::Viewport {
-    //                 x: pov.viewport_size_offset.x,
-    //                 y: pov.viewport_size_offset.y,
-    //                 width: pov.viewport_size_offset.z,
-    //                 height: pov.viewport_size_offset.w,
-    //                 min_depth: 0.0,
-    //                 max_depth: 1.0,
-    //             });
-
-    //             Self::main_render_loop(
-    //                 gpu,
-    //                 resource_map,
-    //                 PipelineTarget::DepthOnly,
-    //                 draw_hashmap,
-    //                 &mut shadow_atlas_command,
-    //                 i as _,
-    //                 &current_buffers,
-    //                 &self.sampler_allocator,
-    //             )?;
-    //         }
-    //     }
-
-    //     graphics_command_buffer.pipeline_barrier(&gpu::PipelineBarrierInfo {
-    //         src_stage_mask: PipelineStageFlags::LATE_FRAGMENT_TESTS,
-    //         dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
-    //         memory_barriers: &[],
-    //         buffer_memory_barriers: &[],
-    //         image_memory_barriers: &[ImageMemoryBarrier {
-    //             src_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-    //             dst_access_mask: AccessFlags::SHADER_READ,
-    //             old_layout: ImageLayout::DepthStencilAttachment,
-    //             new_layout: ImageLayout::ShaderReadOnly,
-    //             src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-    //             dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-    //             image: shadow_atlas_component.image.clone(),
-    //             subresource_range: gpu::ImageSubresourceRange {
-    //                 aspect_mask: ImageAspectFlags::DEPTH,
-    //                 base_mip_level: 0,
-    //                 level_count: 1,
-    //                 base_array_layer: 0,
-    //                 layer_count: 1,
-    //             },
-    //         }],
-    //     });
-    //     Ok(())
-    // }
-
-    fn gbuffer_output(
+    fn main_pass(
         &self,
         gpu: &dyn Gpu,
         graphics_command_buffer: &mut CommandBuffer,
-        gbuffer: &SceneTextures,
+        final_scene_image: &RenderImage,
+        gbuffer: &GBuffer,
         resource_map: &ResourceMap,
         render_size: Extent2D,
         current_buffers: &FrameBuffers,
@@ -783,14 +415,14 @@ impl DeferredRenderingPipeline {
         pov: &Camera,
         scene: &RenderScene,
     ) -> anyhow::Result<()> {
-        let SceneTextures {
+        let GBuffer {
             depth_component,
             position_component,
             normal_component,
             diffuse_component,
             emissive_component,
             pbr_component,
-            light_mask,
+            gbuffer_sampler: _,
             viewport_size: _,
         } = gbuffer;
 
@@ -840,7 +472,7 @@ impl DeferredRenderingPipeline {
                     preserve_attachments: vec![],
                 },
                 SubpassDescription {
-                    label: Some("Light Mask".to_owned()),
+                    label: Some("Gbuffer Combine".to_owned()),
                     input_attachments: vec![
                         AttachmentReference {
                             attachment: 0,
@@ -948,7 +580,7 @@ impl DeferredRenderingPipeline {
                     .union(AccessFlags::COLOR_ATTACHMENT_WRITE),
             }];
 
-            let mut gbuffer_render_pass =
+            let mut render_pass =
                 graphics_command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
                     label: Some("Main pass"),
                     color_attachments: &[
@@ -988,7 +620,7 @@ impl DeferredRenderingPipeline {
                             final_layout: ImageLayout::ShaderReadOnly,
                         },
                         FramebufferColorAttachment {
-                            image_view: light_mask.view.clone(),
+                            image_view: final_scene_image.view.clone(),
                             load_op: ColorLoadOp::Clear([0.0; 4]),
                             store_op: AttachmentStoreOp::Store,
                             initial_layout: ImageLayout::Undefined,
@@ -1020,25 +652,25 @@ impl DeferredRenderingPipeline {
                 });
 
             if self.early_z_pass_enabled {
-                gbuffer_render_pass.set_cull_mode(gpu::CullMode::Back);
-                gbuffer_render_pass.set_depth_compare_op(gpu::CompareOp::LessEqual);
+                render_pass.set_cull_mode(gpu::CullMode::Back);
+                render_pass.set_depth_compare_op(gpu::CompareOp::LessEqual);
 
-                gbuffer_render_pass.set_color_output_enabled(false);
-                gbuffer_render_pass.set_enable_depth_test(true);
-                gbuffer_render_pass.set_depth_write_enabled(true);
+                render_pass.set_color_output_enabled(false);
+                render_pass.set_enable_depth_test(true);
+                render_pass.set_depth_write_enabled(true);
                 Self::main_render_loop(
                     gpu,
                     primitives,
                     resource_map,
                     PipelineTarget::DepthOnly,
-                    &mut gbuffer_render_pass,
+                    &mut render_pass,
                     0,
                     current_buffers,
                     &self.sampler_allocator,
                 )
                 .context("Early Z Pass")?;
 
-                gbuffer_render_pass.advance_to_next_subpass();
+                render_pass.advance_to_next_subpass();
             }
 
             if let Some(material) = scene.get_skybox_material() {
@@ -1047,13 +679,13 @@ impl DeferredRenderingPipeline {
                 bind_master_material(
                     skybox_master,
                     PipelineTarget::ColorAndDepth,
-                    &mut gbuffer_render_pass,
+                    &mut render_pass,
                     current_buffers,
                 );
                 Self::draw_skybox(
                     gpu,
                     &pov.location,
-                    &mut gbuffer_render_pass,
+                    &mut render_pass,
                     cube_mesh,
                     material,
                     skybox_master,
@@ -1062,12 +694,12 @@ impl DeferredRenderingPipeline {
                 )?;
             }
 
-            gbuffer_render_pass.set_front_face(gpu::FrontFace::CounterClockWise);
-            gbuffer_render_pass.set_enable_depth_test(true);
-            gbuffer_render_pass.set_depth_write_enabled(!self.early_z_pass_enabled);
-            gbuffer_render_pass.set_color_output_enabled(true);
-            gbuffer_render_pass.set_cull_mode(gpu::CullMode::Back);
-            gbuffer_render_pass.set_depth_compare_op(if self.early_z_pass_enabled {
+            render_pass.set_front_face(gpu::FrontFace::CounterClockWise);
+            render_pass.set_enable_depth_test(true);
+            render_pass.set_depth_write_enabled(!self.early_z_pass_enabled);
+            render_pass.set_color_output_enabled(true);
+            render_pass.set_cull_mode(gpu::CullMode::Back);
+            render_pass.set_depth_compare_op(if self.early_z_pass_enabled {
                 gpu::CompareOp::Equal
             } else {
                 gpu::CompareOp::LessEqual
@@ -1077,83 +709,68 @@ impl DeferredRenderingPipeline {
                 primitives,
                 resource_map,
                 PipelineTarget::ColorAndDepth,
-                &mut gbuffer_render_pass,
+                &mut render_pass,
                 0,
                 current_buffers,
                 &self.sampler_allocator,
             )
             .context("Gbuffer output pass")?;
-            gbuffer_render_pass.advance_to_next_subpass();
+            render_pass.advance_to_next_subpass();
 
-            // Light mask
-            gbuffer_render_pass.set_front_face(gpu::FrontFace::ClockWise);
-            gbuffer_render_pass.set_cull_mode(gpu::CullMode::None);
-            gbuffer_render_pass.set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
-            gbuffer_render_pass.set_enable_depth_test(false);
-            gbuffer_render_pass.set_depth_write_enabled(false);
-
-            gbuffer_render_pass.bind_resources(
-                0,
-                &[
-                    Binding {
-                        ty: gpu::DescriptorBindingType::StorageBuffer {
-                            handle: current_buffers.camera_buffer.clone(),
-                            offset: 0,
-                            range: gpu::WHOLE_SIZE as _,
-                        },
-                        binding_stage: ShaderStage::ALL_GRAPHICS,
-                        location: 0,
-                    },
-                    Binding {
-                        ty: gpu::DescriptorBindingType::StorageBuffer {
-                            handle: current_buffers.light_buffer.clone(),
-                            offset: 0,
-                            range: 100 * size_of::<ObjectDrawInfo>(),
-                        },
-                        binding_stage: ShaderStage::ALL_GRAPHICS,
-                        location: 1,
-                    },
-                ],
-            );
-            gbuffer_render_pass.bind_resources(
+            // Combine
+            let csm_buffers = &self.csm_buffers[self.in_flight_frame];
+            gbuffer.bind_as_input_attachments(&mut render_pass, 0, 0);
+            render_pass.bind_resources(
                 1,
                 &[
                     Binding {
-                        ty: gpu::DescriptorBindingType::InputAttachment {
-                            image_view_handle: position_component.view.clone(),
+                        ty: gpu::DescriptorBindingType::ImageView {
+                            image_view_handle: self.shadow_atlas_view.clone(),
+                            sampler_handle: self.gbuffer_nearest_sampler.clone(),
                             layout: ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 0,
                     },
                     Binding {
-                        ty: gpu::DescriptorBindingType::InputAttachment {
-                            image_view_handle: normal_component.view.clone(),
-                            layout: ImageLayout::ShaderReadOnly,
+                        ty: gpu::DescriptorBindingType::StorageBuffer {
+                            handle: csm_buffers.shadow_casters.clone(),
+                            offset: 0,
+                            range: gpu::WHOLE_SIZE as _,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 1,
                     },
                     Binding {
-                        ty: gpu::DescriptorBindingType::InputAttachment {
-                            image_view_handle: diffuse_component.view.clone(),
+                        ty: gpu::DescriptorBindingType::ImageView {
+                            image_view_handle: resource_map
+                                .get(
+                                    self.irradiance_map
+                                        .as_ref()
+                                        .unwrap_or(&self.default_irradiance_map),
+                                )
+                                .view
+                                .clone(),
+                            sampler_handle: self.gbuffer_nearest_sampler.clone(),
                             layout: ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 2,
                     },
                     Binding {
-                        ty: gpu::DescriptorBindingType::InputAttachment {
-                            image_view_handle: emissive_component.view.clone(),
-                            layout: ImageLayout::ShaderReadOnly,
+                        ty: gpu::DescriptorBindingType::StorageBuffer {
+                            handle: current_buffers.camera_buffer.clone(),
+                            offset: 0,
+                            range: gpu::WHOLE_SIZE as usize,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 3,
                     },
                     Binding {
-                        ty: gpu::DescriptorBindingType::InputAttachment {
-                            image_view_handle: pbr_component.view.clone(),
-                            layout: ImageLayout::ShaderReadOnly,
+                        ty: gpu::DescriptorBindingType::StorageBuffer {
+                            handle: current_buffers.light_buffer.clone(),
+                            offset: 0,
+                            range: gpu::WHOLE_SIZE as usize,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
                         location: 4,
@@ -1161,9 +778,32 @@ impl DeferredRenderingPipeline {
                 ],
             );
 
-            gbuffer_render_pass.set_vertex_shader(self.screen_quad.clone());
-            gbuffer_render_pass.set_fragment_shader(self.light_mask.clone());
-            gbuffer_render_pass.draw(4, 1, 0, 0)?;
+            #[repr(C)]
+            #[derive(Clone, Copy, Pod, Zeroable)]
+            struct CSMConstantData {
+                count: u32,
+                splits: [f32; 6],
+            }
+
+            let mut data = CSMConstantData {
+                count: self.csm_splits.len() as _,
+                splits: [0.0; 6],
+            };
+
+            for (i, split) in self.csm_splits.iter().take(6).enumerate() {
+                data.splits[i] = *split;
+            }
+
+            render_pass.push_constants(0, 0, bytemuck::cast_slice(&[data]), ShaderStage::FRAGMENT);
+
+            render_pass.set_front_face(gpu::FrontFace::ClockWise);
+            render_pass.set_cull_mode(gpu::CullMode::None);
+            render_pass.set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
+            render_pass.set_enable_depth_test(false);
+            render_pass.set_depth_write_enabled(false);
+            render_pass.set_vertex_shader(self.screen_quad.clone());
+            render_pass.set_fragment_shader(self.combine_shader.clone());
+            render_pass.draw(4, 1, 0, 0)?;
         }
 
         Ok(())
@@ -1485,7 +1125,7 @@ impl DeferredRenderingPipeline {
         Ok(())
     }
 
-    fn get_gbuffer(&self, gpu: &dyn Gpu) -> SceneTextures {
+    fn get_gbuffer(&self, gpu: &dyn Gpu) -> GBuffer {
         let vector_desc = RenderImageDescription {
             format: ImageFormat::RgbaFloat32,
             samples: SampleCount::Sample1,
@@ -1507,208 +1147,16 @@ impl DeferredRenderingPipeline {
         let diffuse_component = self.image_allocator.get(gpu, "diffuse", &vector_desc);
         let emissive_component = self.image_allocator.get(gpu, "emissive", &vector_desc);
         let pbr_component = self.image_allocator.get(gpu, "pbr_component", &vector_desc);
-        let light_mask = self.image_allocator.get(gpu, "light_mask", &vector_desc);
-        SceneTextures {
+        GBuffer {
             depth_component,
             position_component,
             normal_component,
             diffuse_component,
             emissive_component,
             pbr_component,
-            light_mask,
+            gbuffer_sampler: self.gbuffer_nearest_sampler.clone(),
             viewport_size: self.view_size,
         }
-    }
-
-    fn gbuffer_combine(
-        &self,
-        gpu: &dyn Gpu,
-        graphics_command_buffer: &mut CommandBuffer,
-        color_output: &RenderImage,
-        gbuffer: &SceneTextures,
-        resource_map: &ResourceMap,
-        view_size: Extent2D,
-    ) -> anyhow::Result<()> {
-        let mut render_pass = graphics_command_buffer.start_render_pass(&BeginRenderPassInfo {
-            label: Some("GBuffer combine"),
-            color_attachments: &[FramebufferColorAttachment {
-                image_view: color_output.view.clone(),
-                load_op: ColorLoadOp::Clear([0.0; 4]),
-                store_op: AttachmentStoreOp::Store,
-                initial_layout: ImageLayout::Undefined,
-                final_layout: ImageLayout::ShaderReadOnly,
-            }],
-            depth_attachment: None,
-            stencil_attachment: None,
-            render_area: Rect2D {
-                extent: self.view_size,
-                ..Default::default()
-            },
-            subpasses: &[SubpassDescription {
-                label: None,
-                input_attachments: vec![],
-                color_attachments: vec![AttachmentReference {
-                    attachment: 0,
-                    layout: ImageLayout::ColorAttachment,
-                }],
-                resolve_attachments: vec![],
-                depth_stencil_attachment: None,
-                preserve_attachments: vec![],
-            }],
-            dependencies: &[SubpassDependency {
-                src_subpass: SubpassDependency::EXTERNAL,
-                dst_subpass: 0,
-                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
-                src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                dst_access_mask: AccessFlags::SHADER_READ,
-            }],
-        });
-
-        let framebuffers = &self.frame_buffers[self.in_flight_frame];
-        let csm_buffers = &self.csm_buffers[self.in_flight_frame];
-        render_pass.bind_resources(
-            0,
-            &[
-                Binding {
-                    ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: gbuffer.position_component.view.clone(),
-                        sampler_handle: self.gbuffer_nearest_sampler.clone(),
-                        layout: ImageLayout::ShaderReadOnly,
-                    },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: 0,
-                },
-                Binding {
-                    ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: gbuffer.normal_component.view.clone(),
-                        sampler_handle: self.gbuffer_nearest_sampler.clone(),
-                        layout: ImageLayout::ShaderReadOnly,
-                    },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: 1,
-                },
-                Binding {
-                    ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: gbuffer.diffuse_component.view.clone(),
-                        sampler_handle: self.gbuffer_nearest_sampler.clone(),
-                        layout: ImageLayout::ShaderReadOnly,
-                    },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: 2,
-                },
-                Binding {
-                    ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: gbuffer.emissive_component.view.clone(),
-                        sampler_handle: self.gbuffer_nearest_sampler.clone(),
-                        layout: ImageLayout::ShaderReadOnly,
-                    },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: 3,
-                },
-                Binding {
-                    ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: gbuffer.pbr_component.view.clone(),
-                        sampler_handle: self.gbuffer_nearest_sampler.clone(),
-                        layout: ImageLayout::ShaderReadOnly,
-                    },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: 4,
-                },
-                Binding {
-                    ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: self.shadow_atlas_view.clone(),
-                        sampler_handle: self.gbuffer_nearest_sampler.clone(),
-                        layout: ImageLayout::ShaderReadOnly,
-                    },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: 5,
-                },
-                Binding {
-                    ty: gpu::DescriptorBindingType::StorageBuffer {
-                        handle: csm_buffers.shadow_casters.clone(),
-                        offset: 0,
-                        range: gpu::WHOLE_SIZE as _,
-                    },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: 6,
-                },
-                Binding {
-                    ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: resource_map
-                            .get(
-                                self.irradiance_map
-                                    .as_ref()
-                                    .unwrap_or(&self.default_irradiance_map),
-                            )
-                            .view
-                            .clone(),
-                        sampler_handle: self.gbuffer_nearest_sampler.clone(),
-                        layout: ImageLayout::ShaderReadOnly,
-                    },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: 7,
-                },
-                Binding {
-                    ty: gpu::DescriptorBindingType::StorageBuffer {
-                        handle: framebuffers.camera_buffer.clone(),
-                        offset: 0,
-                        range: gpu::WHOLE_SIZE as usize,
-                    },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: 8,
-                },
-                Binding {
-                    ty: gpu::DescriptorBindingType::StorageBuffer {
-                        handle: framebuffers.light_buffer.clone(),
-                        offset: 0,
-                        range: gpu::WHOLE_SIZE as usize,
-                    },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: 9,
-                },
-            ],
-        );
-
-        // render_pass.bind_resources(
-        //     1,
-        //     &[Binding {
-        //         ty: gpu::DescriptorBindingType::StorageBuffer {
-        //             handle: csm_buffers.csm_splits.clone(),
-        //             offset: 0,
-        //             range: gpu::WHOLE_SIZE as usize,
-        //         },
-        //         binding_stage: ShaderStage::FRAGMENT,
-        //         location: 0,
-        //     }],
-        // );
-
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct CSMConstantData {
-            count: u32,
-            splits: [f32; 6],
-        }
-
-        let mut data = CSMConstantData {
-            count: self.csm_splits.len() as _,
-            splits: [0.0; 6],
-        };
-
-        for (i, split) in self.csm_splits.iter().take(6).enumerate() {
-            data.splits[i] = *split;
-        }
-
-        render_pass.push_constants(0, 0, bytemuck::cast_slice(&[data]), ShaderStage::FRAGMENT);
-
-        render_pass.set_front_face(gpu::FrontFace::ClockWise);
-        render_pass.set_cull_mode(gpu::CullMode::None);
-        render_pass.set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
-        render_pass.set_enable_depth_test(false);
-        render_pass.set_depth_write_enabled(false);
-        render_pass.set_vertex_shader(self.screen_quad.clone());
-        render_pass.set_fragment_shader(self.combine_shader.clone());
-        render_pass.draw(4, 1, 0, 0)
     }
 
     fn update_light_data(
@@ -1881,7 +1329,11 @@ impl DeferredRenderingPipeline {
                             .map(|pt| light_view * pt)
                             .map(|corner| Point3::from(corner.xyz())),
                     );
-                    let (mut frustum_min, mut frustum_max) = frustum_bounds.box_extremes();
+                    let (frustum_min, mut frustum_max) = frustum_bounds.box_extremes();
+
+                    let radius = (frustum_max - frustum_min).magnitude();
+                    let mut frustum_min = frustum_center + vector![-radius, -radius, -radius];
+                    let mut frustum_max = frustum_center + vector![radius, radius, radius];
 
                     if frustum_min.z < 0.0 {
                         frustum_min.z *= self.z_mult;
@@ -2085,8 +1537,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let current_buffers = &self.frame_buffers[self.in_flight_frame];
 
-        self.in_flight_frame = (1 + self.in_flight_frame) % self.max_frames_in_flight;
-
         let mut per_frame_data = vec![PointOfViewData {
             eye: Point4::new(
                 camera.location[0],
@@ -2125,23 +1575,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let mut graphics_command_buffer = gpu.start_command_buffer(gpu::QueueType::Graphics)?;
 
-        let gbuffer = self.get_gbuffer(gpu);
-        {
-            let primitives = scene.intersect_frustum(&self.frustum);
-            self.drawcalls_last_frame = primitives.len() as u64;
-            self.gbuffer_output(
-                gpu,
-                &mut graphics_command_buffer,
-                &gbuffer,
-                resource_map,
-                self.view_size,
-                current_buffers,
-                &primitives,
-                camera,
-                scene,
-            )
-            .context("Main pass")?;
-        }
         self.render_shadow_atlas(
             gpu,
             camera,
@@ -2151,15 +1584,22 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             resource_map,
         )?;
 
-        self.gbuffer_combine(
+        let gbuffer = self.get_gbuffer(gpu);
+        let primitives = scene.intersect_frustum(&self.frustum);
+        self.drawcalls_last_frame = primitives.len() as u64;
+        self.main_pass(
             gpu,
             &mut graphics_command_buffer,
             &color_output,
             &gbuffer,
             resource_map,
             self.view_size,
+            current_buffers,
+            &primitives,
+            camera,
+            scene,
         )
-        .context("GBuffer combine")?;
+        .context("Main pass")?;
 
         let final_color_output = self
             .post_process_pass(
@@ -2179,6 +1619,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             fence: None,
         })?;
 
+        self.in_flight_frame = (1 + self.in_flight_frame) % self.max_frames_in_flight;
         Ok(final_color_output.view)
     }
 

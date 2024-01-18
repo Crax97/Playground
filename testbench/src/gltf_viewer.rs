@@ -5,7 +5,6 @@ mod utils;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
-use std::sync::Arc;
 
 use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App, Console};

@@ -19,18 +19,18 @@ struct ShadowMap {
 layout(location=0) in vec2 uv;
 layout(location=0) out vec4 color;
 
-layout(set = 0, binding = 5) uniform sampler2D shadow_atlas;
-layout(set = 0, binding = 6) readonly buffer ShadowMaps {
+layout(set = 1, binding = 0) uniform sampler2D shadow_atlas;
+layout(set = 1, binding = 1) readonly buffer ShadowMaps {
     ShadowMap casters[];
 } shadow_maps;
-layout(set = 0, binding = 7) uniform samplerCube irradianceMap;
+layout(set = 1, binding = 2) uniform samplerCube irradianceMap;
 
-layout(set = 0, binding = 8) readonly buffer  PerFrameDataBlock {
+layout(set = 1, binding = 3) readonly buffer  PerFrameDataBlock {
     PointOfView camera;
     PointOfView light_povs[];
 } per_frame_data;
 
-layout(set = 0, binding = 9, std140) readonly buffer LightData {
+layout(set = 1, binding = 4, std140) readonly buffer LightData {
     vec4 ambient_light_color;
     uint light_count;
     LightInfo lights[];
