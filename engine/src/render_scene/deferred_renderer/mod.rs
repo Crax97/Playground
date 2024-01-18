@@ -31,7 +31,6 @@ use gpu::{
     IndexType, InputRate, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags, Rect2D,
     RenderPass, SampleCount, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle,
     ShaderStage, SubpassDependency, SubpassDescription, VertexBindingInfo, VertexStageInfo,
-    VkSwapchain,
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 
@@ -106,7 +105,7 @@ impl DeferredRenderingPipeline {
         combine_shader: ShaderModuleHandle,
     ) -> anyhow::Result<Self> {
         let mut frame_buffers = vec![];
-        for _ in 0..VkSwapchain::MAX_FRAMES_IN_FLIGHT {
+        for _ in 0..gpu::constants::MAX_FRAMES_IN_FLIGHT {
             let camera_buffer = {
                 let create_info = BufferCreateInfo {
                     label: Some("Deferred Renderer - Camera buffer"),
@@ -180,7 +179,8 @@ impl DeferredRenderingPipeline {
             height: 1080,
         };
 
-        let cascaded_shadow_map = CascadedShadowMap::new(gpu, VkSwapchain::MAX_FRAMES_IN_FLIGHT)?;
+        let cascaded_shadow_map =
+            CascadedShadowMap::new(gpu, gpu::constants::MAX_FRAMES_IN_FLIGHT)?;
 
         Ok(Self {
             image_allocator: RenderImageAllocator::new(4),
@@ -192,7 +192,7 @@ impl DeferredRenderingPipeline {
             frame_buffers,
             post_process_stack: vec![],
             in_flight_frame: 0,
-            max_frames_in_flight: VkSwapchain::MAX_FRAMES_IN_FLIGHT,
+            max_frames_in_flight: gpu::constants::MAX_FRAMES_IN_FLIGHT,
             ambient_color: vector![1.0, 1.0, 1.0],
             ambient_intensity: 0.3,
             active_lights: vec![],

@@ -3,11 +3,13 @@ use std::{
     ffi::{c_void, CStr, CString},
     ptr::addr_of_mut,
     ptr::{addr_of, null},
-    sync::{Arc, RwLock, RwLockReadGuard},
+    sync::{atomic::AtomicUsize, Arc, RwLock, RwLockReadGuard},
 };
 
 use anyhow::{bail, Result};
-use ash::vk::{PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR};
+use ash::vk::{
+    CommandPoolResetFlags, PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR,
+};
 use ash::{
     extensions::ext::DebugUtils,
     prelude::*,
@@ -897,51 +899,67 @@ impl Drop for GpuThreadSharedState {
         }
     }
 }
-
+pub struct CommandPools {
+    pub graphics_command_pool: VkCommandPool,
+    pub async_compute_command_pool: VkCommandPool,
+    pub transfer_command_pool: VkCommandPool,
+}
 /*
  * All the stuff that should be specific for a thread should go here
  * e.g since command pools cannot be shared across threads, each thread should have its own command
  * pool
  * */
 pub struct GpuThreadLocalState {
-    pub graphics_command_pool: VkCommandPool,
-    pub async_compute_command_pool: VkCommandPool,
-    pub transfer_command_pool: VkCommandPool,
+    command_pools: Vec<CommandPools>,
+    current_command_pools: AtomicUsize,
+    max_command_pools: usize,
 }
 
 impl GpuThreadLocalState {
-    pub fn new(shared_state: Arc<GpuThreadSharedState>) -> VkResult<Self> {
-        let graphics_command_pool = VkCommandPool::new(
-            shared_state.logical_device.clone(),
-            &shared_state.queue_families,
-            &CommandPoolCreateInfo {
-                queue_type: QueueType::Graphics,
-                flags: CommandPoolCreateFlags::empty(),
-            },
-        )?;
+    pub fn new(
+        shared_state: Arc<GpuThreadSharedState>,
+        max_command_pools: usize,
+    ) -> VkResult<Self> {
+        let mut command_pools = Vec::with_capacity(max_command_pools);
+        for _ in 0..max_command_pools {
+            let graphics_command_pool = VkCommandPool::new(
+                shared_state.logical_device.clone(),
+                &shared_state.queue_families,
+                &CommandPoolCreateInfo {
+                    queue_type: QueueType::Graphics,
+                    flags: CommandPoolCreateFlags::empty(),
+                },
+            )?;
 
-        let async_compute_command_pool = VkCommandPool::new(
-            shared_state.logical_device.clone(),
-            &shared_state.queue_families,
-            &CommandPoolCreateInfo {
-                queue_type: QueueType::AsyncCompute,
-                flags: CommandPoolCreateFlags::empty(),
-            },
-        )?;
+            let async_compute_command_pool = VkCommandPool::new(
+                shared_state.logical_device.clone(),
+                &shared_state.queue_families,
+                &CommandPoolCreateInfo {
+                    queue_type: QueueType::AsyncCompute,
+                    flags: CommandPoolCreateFlags::empty(),
+                },
+            )?;
 
-        let transfer_command_pool = VkCommandPool::new(
-            shared_state.logical_device.clone(),
-            &shared_state.queue_families,
-            &CommandPoolCreateInfo {
-                queue_type: QueueType::Transfer,
-                flags: CommandPoolCreateFlags::empty(),
-            },
-        )?;
+            let transfer_command_pool = VkCommandPool::new(
+                shared_state.logical_device.clone(),
+                &shared_state.queue_families,
+                &CommandPoolCreateInfo {
+                    queue_type: QueueType::Transfer,
+                    flags: CommandPoolCreateFlags::empty(),
+                },
+            )?;
+            let command_pool = CommandPools {
+                graphics_command_pool,
+                async_compute_command_pool,
+                transfer_command_pool,
+            };
+            command_pools.push(command_pool);
+        }
 
         Ok(Self {
-            graphics_command_pool,
-            async_compute_command_pool,
-            transfer_command_pool,
+            command_pools,
+            current_command_pools: AtomicUsize::new(0),
+            max_command_pools,
         })
     }
 }
@@ -1140,6 +1158,7 @@ impl QueueFamilies {
 }
 
 impl VkGpu {
+    pub const MAX_COMMAND_POOLS: usize = crate::constants::MAX_FRAMES_IN_FLIGHT + 1;
     pub fn new(configuration: GpuConfiguration) -> Result<Self> {
         let entry = unsafe { Entry::load()? };
 
@@ -1281,7 +1300,7 @@ impl VkGpu {
             operations_receiver,
         });
 
-        let thread_local_state = GpuThreadLocalState::new(state.clone())?;
+        let thread_local_state = GpuThreadLocalState::new(state.clone(), Self::MAX_COMMAND_POOLS)?;
 
         let staging_buffer = create_staging_buffer(&state)?;
         Ok(VkGpu {
@@ -1566,15 +1585,27 @@ impl VkGpu {
     }
 
     pub fn graphics_command_pool(&self) -> &VkCommandPool {
-        &self.thread_local_state.graphics_command_pool
+        &self.thread_local_state.command_pools[self
+            .thread_local_state
+            .current_command_pools
+            .load(std::sync::atomic::Ordering::Relaxed)]
+        .graphics_command_pool
     }
 
     pub fn async_compute_command_pool(&self) -> &VkCommandPool {
-        &self.thread_local_state.async_compute_command_pool
+        &self.thread_local_state.command_pools[self
+            .thread_local_state
+            .current_command_pools
+            .load(std::sync::atomic::Ordering::Relaxed)]
+        .async_compute_command_pool
     }
 
     pub fn transfer_command_pool(&self) -> &VkCommandPool {
-        &self.thread_local_state.transfer_command_pool
+        &self.thread_local_state.command_pools[self
+            .thread_local_state
+            .current_command_pools
+            .load(std::sync::atomic::Ordering::Relaxed)]
+        .transfer_command_pool
     }
 
     pub fn queue_families(&self) -> QueueFamilies {
@@ -2442,6 +2473,27 @@ impl VkGpu {
                 .map(|r| DestroyedResource::new(r, T::AssociatedHandle::handle_type())),
         );
     }
+
+    fn clear_command_pools(&self, current_pools: usize) -> anyhow::Result<()> {
+        let command_pools = &self.thread_local_state.command_pools[current_pools];
+        unsafe {
+            self.vk_logical_device().reset_command_pool(
+                command_pools.async_compute_command_pool.inner,
+                CommandPoolResetFlags::RELEASE_RESOURCES,
+            )?;
+
+            self.vk_logical_device().reset_command_pool(
+                command_pools.transfer_command_pool.inner,
+                CommandPoolResetFlags::RELEASE_RESOURCES,
+            )?;
+            self.vk_logical_device().reset_command_pool(
+                command_pools.graphics_command_pool.inner,
+                CommandPoolResetFlags::RELEASE_RESOURCES,
+            )?;
+        }
+
+        Ok(())
+    }
 }
 
 impl Gpu for VkGpu {
@@ -2683,6 +2735,18 @@ impl Gpu for VkGpu {
                 }
             },
         );
+
+        let next_command_pools = (self
+            .thread_local_state
+            .current_command_pools
+            .load(std::sync::atomic::Ordering::Relaxed)
+            + 1)
+            % self.thread_local_state.max_command_pools;
+        self.thread_local_state
+            .current_command_pools
+            .store(next_command_pools, std::sync::atomic::Ordering::Relaxed);
+        self.clear_command_pools(next_command_pools)
+            .expect("Failed to clear the command pools");
     }
 
     fn make_semaphore(

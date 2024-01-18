@@ -13,11 +13,10 @@ use engine::{egui, Light, LightType, ShadowConfiguration, Time};
 
 use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
-use engine_macros::glsl;
 use fps_camera::FpsCamera;
 use gpu::{
     CommandBuffer, Extent2D, ImageFormat, Offset2D, PipelineBarrierInfo, PipelineStageFlags,
-    PresentMode, Rect2D, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
+    PresentMode, Rect2D, ShaderStage,
 };
 use winit::{
     dpi::{PhysicalPosition, Position},
@@ -35,12 +34,6 @@ use winit::event::MouseButton;
 use winit::event_loop::EventLoop;
 
 use clap::Parser;
-
-const SHADOW_DRAW: &[u32] = glsl!(
-    path = "src/shaders/depth_draw.frag",
-    entry_point = "main",
-    kind = fragment
-);
 
 #[derive(Parser)]
 pub struct GltfViewerArgs {
@@ -72,7 +65,6 @@ pub struct GLTFViewer {
     time: Time,
     window: Window,
     egui_support: EguiSupport,
-    depth_draw: ShaderModuleHandle,
 }
 
 impl GLTFViewer {
@@ -353,10 +345,6 @@ impl App for GLTFViewer {
 
         let egui_support = EguiSupport::new(&window, &app_state.gpu, &app_state.swapchain)?;
 
-        let depth_draw = app_state.gpu.make_shader_module(&ShaderModuleCreateInfo {
-            code: bytemuck::cast_slice(SHADOW_DRAW),
-        })?;
-
         gltf_loader.scene_mut().add_light(Light {
             ty: LightType::Directional {
                 direction: vector![0.45, -0.45, 0.0],
@@ -387,7 +375,6 @@ impl App for GLTFViewer {
             time,
             window,
             egui_support,
-            depth_draw,
         })
     }
 

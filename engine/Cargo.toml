@@ -10,28 +10,28 @@ anyhow = { version = "1.0.*", features = ["backtrace"] }
 anymap = "0.12.*"
 winit = { version = "0.28", features = [ "x11" ] }
 nalgebra = "0.32.2"
-raw-window-handle = "0.5.2"
+raw-window-handle = "0.5.*"
 thiserror = "1.0"
 log = "0.4.17"
 once_cell = "1.17.1"
-memoffset = "0.8"
+memoffset = "0.9.0"
 image = "0.24.6"
-indexmap = "1.9.3"
+indexmap = "2.1"
 bytemuck = { version = "1.13.1", features = ["derive"] }
 strum = { version = "0.25.0", features = ["derive", "strum_macros"] }
 strum_macros = "0.25.1"
 env_logger = "0.10.0"
-bitflags = "2.2.*"
 bevy_ecs = "0.12.*"
 bevy_reflect = "0.12"
 bevy_reflect_derive = "0.12"
 crossbeam = "0.8.*"
 thunderdome = "0.6.*"
+bitflags = "2.*"
 
 egui = "0.23.0"
 egui-winit = { version = "0.23.0", default-features = false }
 gpu-allocator = { version = "0.23.0", default-features = false, features = ["vulkan"] }
-egui-winit-ash-integration = { git = "https://github.com/Crax97/egui-winit-ash-integration", features = ["gpu-allocator-feature"] }
+egui-winit-ash-integration = { version = "0.6.0", features = ["gpu-allocator-feature"] }
 
 rapier2d = { version = "0.17", features = ["simd-stable", "serde-serialize"] }
 

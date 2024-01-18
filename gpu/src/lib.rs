@@ -24,6 +24,10 @@ use winit::window::Window;
 pub const WHOLE_SIZE: u64 = u64::MAX;
 pub const QUEUE_FAMILY_IGNORED: u32 = u32::MAX;
 
+pub mod constants {
+    pub const MAX_FRAMES_IN_FLIGHT: usize = 3;
+}
+
 pub struct GpuConfiguration<'a> {
     pub app_name: &'a str,
     pub pipeline_cache_path: Option<&'a str>,

@@ -14,7 +14,7 @@ use crate::CvarManager;
 
 use super::Console;
 
-type EguiAllocator = Arc<Mutex<Allocator>>;
+type EguiAllocator = Arc<Mutex<gpu_allocator::vulkan::Allocator>>;
 
 pub struct EguiSupport {
     integration: Integration<EguiAllocator>,
