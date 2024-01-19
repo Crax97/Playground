@@ -3,7 +3,7 @@ struct LightInfo {
     vec4 direction;
     vec4 color_intensity;
     vec4 extras;
-    ivec4 type_shadow_map; // -1 means no shadow map, since 0 is reserved for the camera
+    ivec4 type_shadow_map_csmsplit_idx; // -1 means no shadow map, since 0 is reserved for the camera
 };
 
 const int POINT_LIGHT = 0;

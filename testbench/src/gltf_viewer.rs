@@ -5,6 +5,7 @@ mod utils;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use bytemuck::{Pod, Zeroable};
 use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App, Console};
 use engine::editor::ui_extension::UiExtension;
@@ -12,10 +13,11 @@ use engine::{egui, Light, LightType, ShadowConfiguration, Time};
 
 use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
+use engine_macros::glsl;
 use fps_camera::FpsCamera;
 use gpu::{
     CommandBuffer, Extent2D, ImageFormat, Offset2D, PipelineBarrierInfo, PipelineStageFlags,
-    PresentMode, Rect2D, ShaderStage,
+    PresentMode, Rect2D, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
 };
 use winit::{
     dpi::{PhysicalPosition, Position},
@@ -34,6 +36,12 @@ use winit::event_loop::EventLoop;
 
 use clap::Parser;
 
+const DEPTH_DRAW: &[u32] = glsl!(
+    path = "src/shaders/depth_draw.frag",
+    kind = fragment,
+    entry_point = "main"
+);
+
 #[derive(Parser)]
 pub struct GltfViewerArgs {
     #[arg(value_name = "FILE")]
@@ -51,6 +59,13 @@ struct VertexData {
     pub uv: Vector2<f32>,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct DepthDrawConstants {
+    near: f32,
+    far: f32,
+}
+
 pub struct GLTFViewer {
     camera: FpsCamera,
     scene_renderer: DeferredRenderingPipeline,
@@ -64,6 +79,8 @@ pub struct GLTFViewer {
     time: Time,
     window: Window,
     egui_support: EguiSupport,
+
+    depth_draw: ShaderModuleHandle,
 }
 
 impl GLTFViewer {
@@ -366,6 +383,10 @@ impl App for GLTFViewer {
             }),
         });
 
+        let depth_draw = app_state.gpu.make_shader_module(&ShaderModuleCreateInfo {
+            code: bytemuck::cast_slice(DEPTH_DRAW),
+        })?;
+
         Ok(Self {
             scene_renderer,
             gltf_loader,
@@ -378,6 +399,7 @@ impl App for GLTFViewer {
             time,
             window,
             egui_support,
+            depth_draw,
         })
     }
 
@@ -534,6 +556,10 @@ impl App for GLTFViewer {
                         20.0,
                         &mut self.scene_renderer.cascaded_shadow_map.z_mult,
                     );
+                    ui.checkbox(
+                        &mut self.scene_renderer.cascaded_shadow_map.debug_csm_splits,
+                        "Debug CSM Splits",
+                    );
                 });
 
                 self.lights_ui(ui);
@@ -635,7 +661,7 @@ impl App for GLTFViewer {
             None,
         )?;
 
-        self.scene_renderer.draw_textured_quad(
+        self.scene_renderer.draw_textured_quad_with_callback(
             &mut command_buffer,
             &backbuffer.image_view,
             &shadow_texture,
@@ -647,7 +673,18 @@ impl App for GLTFViewer {
                 },
             },
             true,
-            None,
+            Some(self.depth_draw.clone()),
+            |pass| {
+                pass.push_constants(
+                    0,
+                    0,
+                    &bytemuck::cast_slice(&[DepthDrawConstants {
+                        near: self.camera.camera().near,
+                        far: self.camera.camera().far,
+                    }]),
+                    ShaderStage::FRAGMENT,
+                )
+            },
         )?;
         self.egui_support
             .paint_frame(output, &app_state.swapchain, &command_buffer);

@@ -33,7 +33,8 @@ pub struct GpuLightInfo {
     pub direction: Vector4<f32>,
     pub color: Vector4<f32>,
     pub extras: Vector4<f32>,
-    pub ty_shadow_map_idx: [i32; 4],
+    // x: type, y: shadow map index, z: csm split base index
+    pub ty_shadow_map_idx_csm_split: [i32; 4],
 }
 unsafe impl Pod for GpuLightInfo {}
 unsafe impl Zeroable for GpuLightInfo {}
@@ -81,7 +82,7 @@ impl From<&Light> for GpuLightInfo {
             color: vector![light.color.x, light.color.y, light.color.z, light.intensity],
             direction,
             extras,
-            ty_shadow_map_idx: [ty, -1, 0, 0],
+            ty_shadow_map_idx_csm_split: [ty, -1, -1, 0],
         }
     }
 }

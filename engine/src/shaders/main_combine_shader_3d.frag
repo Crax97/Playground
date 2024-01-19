@@ -1,14 +1,13 @@
 #version 460
 
 #extension GL_GOOGLE_include_directive : require
-#extension GL_EXT_debug_printf : enable
 
-#define printf debugPrintfEXT
 
 #include "definitions.glsl"
 #include "random.glsl"
 #include "light_definitions.glsl"
 #include "combine_base.glsl"
+#include "debug.glsl"
 
 struct ShadowMap {
     uvec4 offset_size;
@@ -36,14 +35,29 @@ layout(set = 1, binding = 4, std140) readonly buffer LightData {
 } light_data;
 
 layout(set = 1, binding = 5, std140) readonly buffer CsmData {
-    uint csm_count;
-    float splits[];
+    uvec4 csm_settings;
+    vec4 splits[];
 } csm_data;
 
 struct CubeSample {
     vec2 uv;
     uint face_index;
 };
+
+float get_csm_split(uint index) {
+    uint base = index / 4;
+    uint offset = index % 4;
+    vec4 split_vec = csm_data.splits[base];
+    return split_vec[offset];
+}
+
+uint get_csm_count() {
+    return csm_data.csm_settings[0];
+}
+
+bool is_csm_debug_enabled() {
+    return csm_data.csm_settings[1] != 0;
+}
 
 CubeSample sample_cube(vec3 v)
 {
@@ -88,7 +102,7 @@ vec3 get_unnormalized_light_direction(int light_type, vec3 light_direction, vec3
 }
 
 float get_light_mask(float n_dot_l, int light_type, vec3 light_position,  LightInfo light, vec3 position) {
-    if (light.type_shadow_map.x == DIRECTIONAL_LIGHT) {
+    if (light.type_shadow_map_csmsplit_idx.x == DIRECTIONAL_LIGHT) {
         // Directional lights are not attenuated
         return 1.0;
     }
@@ -96,7 +110,7 @@ float get_light_mask(float n_dot_l, int light_type, vec3 light_position,  LightI
     float light_distance = length(light_dir);
     light_dir /= light_distance;
     float attenuation = clamp(1.0 - pow(light_distance / light.position_radius.w, 4.0), 0.0, 1.0) / max(light_distance * light_distance, 0.01);
-    if (light.type_shadow_map.x == SPOT_LIGHT) {
+    if (light.type_shadow_map_csmsplit_idx.x == SPOT_LIGHT) {
         float inner_angle_cutoff = light.extras.x;
         float outer_angle_cutoff = light.extras.y;
 
@@ -145,9 +159,9 @@ vec2 poisson_disk[16] = vec2[](
 );
 
 vec3 get_unnormalized_light_direction(LightInfo info, vec3 position) {
-    if (info.type_shadow_map.x == DIRECTIONAL_LIGHT) {
+    if (info.type_shadow_map_csmsplit_idx.x == DIRECTIONAL_LIGHT) {
         return info.direction.xyz;
-    } else if (info.type_shadow_map.x == SPOT_LIGHT) {
+    } else if (info.type_shadow_map_csmsplit_idx.x == SPOT_LIGHT) {
         return info.direction.xyz;
     } else {
         return position - info.position_radius.xyz;
@@ -155,7 +169,7 @@ vec3 get_unnormalized_light_direction(LightInfo info, vec3 position) {
 }
 
 float get_light_mask(float n_dot_l, LightInfo light, vec3 position) {
-    if (light.type_shadow_map.x == DIRECTIONAL_LIGHT) {
+    if (light.type_shadow_map_csmsplit_idx.x == DIRECTIONAL_LIGHT) {
         // Directional lights are not attenuated
         return 1.0;
     }
@@ -163,7 +177,7 @@ float get_light_mask(float n_dot_l, LightInfo light, vec3 position) {
     float light_distance = length(light_dir);
     light_dir /= light_distance;
     float attenuation = clamp(1.0 - pow(light_distance / light.position_radius.w, 4.0), 0.0, 1.0) / max(light_distance * light_distance, 0.01);
-    if (light.type_shadow_map.x == SPOT_LIGHT) {
+    if (light.type_shadow_map_csmsplit_idx.x == SPOT_LIGHT) {
         float inner_angle_cutoff = light.extras.x;
         float outer_angle_cutoff = light.extras.y;
 
@@ -236,22 +250,26 @@ vec2 rotate(vec2 v, float a) {
 	return m * v;
 }
 
-ShadowMap select_directiona_light_layer(int first_shadow_map, vec2 uv, vec3 pixel_pos_world) {
-    vec4 pos_in_view = per_frame_data.camera.view * vec4(pixel_pos_world, 1.0);
-    float depth = abs(pos_in_view.z);
+uint select_directiona_light_offset(vec4 pos_in_view, int base){
 
-    int offset = -1;
-    for (uint i = 0; i < csm_data.csm_count; i++)
+    float depth = pos_in_view.z;
+    uint csm_count = get_csm_count();
+    uint offset = 0;
+    for (uint i = 0; i < csm_count - 1; i++)
     {
-		if (depth < csm_data.splits[i]) {
-			offset = int(i);
-			break;
+		if (depth < get_csm_split(base + i)) {
+			offset = i + 1;
 		}
     }
 
-    if (offset == -1) {
-        offset = int(csm_data.csm_count) - 1;
-    }
+    return offset;
+}
+
+ShadowMap select_directiona_light_layer(int first_shadow_map, vec2 uv, vec3 pixel_pos_world, int base_split) {
+    vec4 pos_in_view = per_frame_data.camera.view * vec4(pixel_pos_world, 1.0);
+
+    printf("Base %d 1 %f 2 %f 3 %f 4 %f", base_split, get_csm_split(base_split),get_csm_split(base_split + 1),get_csm_split(base_split + 2),   get_csm_split(base_split + 3) );
+    uint offset = select_directiona_light_offset(pos_in_view, base_split);
 
     return shadow_maps.casters[first_shadow_map + offset];
 }
@@ -262,15 +280,16 @@ ShadowMap select_point_light_face(int first_shadow_map, vec3 direction) {
 }
 
 float is_fragment_lit(vec2 uv, LightInfo light_info, vec3 pixel_pos) {
-    int light_type = light_info.type_shadow_map[0];
-    int light_shadow_map = light_info.type_shadow_map[1];
+    int light_type = light_info.type_shadow_map_csmsplit_idx[0];
+    int light_shadow_map = light_info.type_shadow_map_csmsplit_idx[1];
+    int base_split = light_info.type_shadow_map_csmsplit_idx[2];
     if (light_shadow_map == -1) {
         return 1.0;
     }
 
     ShadowMap caster;
     if (light_type == DIRECTIONAL_LIGHT) {
-        caster = select_directiona_light_layer(light_shadow_map, uv, pixel_pos);
+        caster = select_directiona_light_layer(light_shadow_map, uv, pixel_pos, base_split);
     } else if (light_type == POINT_LIGHT) {
         caster = select_point_light_face(light_shadow_map, light_info.direction.xyz);
     } else {
@@ -333,32 +352,23 @@ void main() {
     vec2 nuv = uv;
     nuv.y = 1.0 - nuv.y;
     FragmentInfo fragInfo = get_fragment_info(nuv);
-
-    // vec4 pos_in_view = per_frame_data.camera.view * vec4(fragInfo.position, 1.0);
-    // float depth = abs(pos_in_view.z);
-    // int offset = -1;
-    // for (uint i = 0; i < csm_data.csm_count; i++)
-    // {
-	// 	if (depth < csm_data.splits[i]) {
-	// 		offset = int(i);
-	// 		break;
-	// 	}
-    // }
-
-    // vec3 colors[6] = vec3[] (
-    //     vec3(1.0, 0.0, 0.0),
-    //     vec3(0.0, 1.0, 0.0),
-    //     vec3(0.0, 0.0, 1.0),
-    //     vec3(0.5, 0.5, 1.0),
-    //     vec3(0.5, 1.0, 0.5),
-    //     vec3(0.1, 0.3, 0.4)
-    // );
-
-
-    // vec4 col = vec4(colors[offset], 1.0);
-
     vec3 light_a = lit_fragment(fragInfo, nuv);
     color = (fragInfo.shadow_scale * vec4(light_a, 1.0) + fragInfo.emissive);
 
-    // color *= col;
+    if (is_csm_debug_enabled()) {
+        vec4 pos_in_view = per_frame_data.camera.view * vec4(fragInfo.position, 1.0);
+        uint offset = select_directiona_light_offset(pos_in_view, 0);
+
+        vec3 colors[6] = vec3[] (
+            vec3(1.0, 0.0, 0.0),
+            vec3(0.0, 1.0, 0.0),
+            vec3(0.0, 0.0, 1.0),
+            vec3(0.5, 0.5, 1.0),
+            vec3(0.5, 1.0, 0.5),
+            vec3(0.1, 0.3, 0.4)
+        );
+
+        vec4 col = vec4(colors[offset], 1.0);
+        color *= col;
+    }
 }

@@ -6,12 +6,11 @@ use gpu::{
     ImageViewHandle, MemoryDomain, PipelineStageFlags, Rect2D, SubpassDependency,
     SubpassDescription, Viewport,
 };
-use nalgebra::{point, vector, Matrix4, Point3, Vector3};
+use nalgebra::{point, vector, Matrix4, Point3};
 
 use crate::{
-    math::shape::BoundingShape, render_scene::scene, Camera, DeferredRenderingPipeline,
-    FrameBuffers, Frustum, Light, LightType, PipelineTarget, PointOfViewData, ResourceMap,
-    TiledTexture2DPacker,
+    Camera, DeferredRenderingPipeline, FrameBuffers, Frustum, Light, LightType, PipelineTarget,
+    PointOfViewData, ResourceMap, TiledTexture2DPacker,
 };
 
 use super::SamplerAllocator;
@@ -36,19 +35,20 @@ pub struct ShadowMap {
 pub struct NewShadowMapAllocation {
     pub povs: Vec<PointOfViewData>,
     pub shadow_map_index: usize,
+    pub csm_split: i32,
 }
 
 pub struct CascadedShadowMap {
     pub num_cascades: u8,
     pub csm_split_lambda: f32,
     pub z_mult: f32,
+    pub debug_csm_splits: bool,
 
     pub(crate) csm_buffers: Vec<CsmBuffers>,
     #[allow(dead_code)]
     pub(crate) shadow_atlas: ImageHandle,
     pub(crate) shadow_atlas_view: ImageViewHandle,
     pub(crate) shadow_maps: Vec<ShadowMap>,
-    pub(crate) camera_splits: Vec<Camera>,
     pub(crate) csm_splits: Vec<f32>,
 
     texture_packer: TiledTexture2DPacker,
@@ -115,7 +115,8 @@ impl CascadedShadowMap {
             let csm_splits = gpu.make_buffer(
                 &BufferCreateInfo {
                     label: Some(&format!("CSM Splits #{}", i)),
-                    size: Self::MAX_SHADOW_CASTERS * std::mem::size_of::<f32>(),
+                    size: Self::MAX_SHADOW_CASTERS * std::mem::size_of::<f32>()
+                        + std::mem::size_of::<[u32; 4]>(),
                     usage: BufferUsageFlags::STORAGE_BUFFER | BufferUsageFlags::UNIFORM_BUFFER,
                 },
                 MemoryDomain::HostCoherent | MemoryDomain::HostVisible,
@@ -128,14 +129,14 @@ impl CascadedShadowMap {
         }
         Ok(Self {
             num_cascades: 4,
-            csm_split_lambda: 0.89,
+            csm_split_lambda: 0.80,
             z_mult: 10.0,
+            debug_csm_splits: false,
 
             csm_buffers,
             shadow_atlas,
             shadow_atlas_view,
             shadow_maps: vec![],
-            camera_splits: vec![],
             csm_splits: vec![],
             texture_packer: TiledTexture2DPacker::new(
                 SHADOW_ATLAS_TILE_SIZE,
@@ -244,6 +245,7 @@ impl CascadedShadowMap {
 
     pub(crate) fn clear(&mut self) {
         self.shadow_maps.clear();
+        self.csm_splits.clear();
         self.texture_packer = TiledTexture2DPacker::new(
             SHADOW_ATLAS_TILE_SIZE,
             SHADOW_ATLAS_WIDTH,
@@ -252,19 +254,11 @@ impl CascadedShadowMap {
         .expect("Failed to recreate texture packer");
     }
 
-    pub(crate) fn update_cascade_splits(&mut self, scene_camera: &crate::Camera) {
-        self.camera_splits =
-            scene_camera.split_into_slices(self.num_cascades, self.csm_split_lambda);
-
-        let range = scene_camera.far - scene_camera.near;
-
-        self.csm_splits = self.camera_splits.iter().map(|c| c.near).collect();
-    }
-
     // Returns the povs added for each shadow map added
     pub(crate) fn add_light(
         &mut self,
         light: &Light,
+        scene_camera: &crate::Camera,
         pov_idx: u32,
         light_id: u32,
     ) -> Option<NewShadowMapAllocation> {
@@ -291,7 +285,8 @@ impl CascadedShadowMap {
                 .allocate(shadow_map_width * num_maps, shadow_map_height)
             {
                 let this_light_cameras = light.light_cameras();
-                let povs = self.get_light_povs(light, this_light_cameras);
+                let (povs, splits) =
+                    self.get_light_povs_and_splits(light, scene_camera, this_light_cameras);
                 let shadow_map_index = self.shadow_maps.len();
                 let light_shadow_maps = povs
                     .iter()
@@ -307,10 +302,18 @@ impl CascadedShadowMap {
                     })
                     .collect::<Vec<_>>();
                 self.shadow_maps.extend(light_shadow_maps);
+                let idx = self.csm_splits.len();
+                let csm_split = if let Some(splits) = splits {
+                    self.csm_splits.extend(splits);
+                    idx as i32
+                } else {
+                    -1
+                };
 
                 Some(NewShadowMapAllocation {
                     povs,
                     shadow_map_index,
+                    csm_split,
                 })
             } else {
                 None
@@ -320,113 +323,208 @@ impl CascadedShadowMap {
         }
     }
 
-    fn get_light_povs(&self, l: &Light, light_povs: Vec<Camera>) -> Vec<PointOfViewData> {
+    fn get_light_povs_and_splits(
+        &self,
+        l: &Light,
+        scene_camera: &crate::Camera,
+        light_povs: Vec<Camera>,
+    ) -> (Vec<PointOfViewData>, Option<Vec<f32>>) {
         match l.ty {
             LightType::Directional { direction, .. } => {
-                let povs = self.camera_splits.iter().map(|split| {
-                    let split_viewproj = split.projection() * split.view();
-                    let inv_splitviewproj = split_viewproj.try_inverse().unwrap();
-                    let ndc_cube_corners = [
-                        vector![1.0, 1.0, 1.0, 1.0],
-                        vector![-1.0, 1.0, 1.0, 1.0],
-                        vector![1.0, 1.0, -1.0, 1.0],
-                        vector![-1.0, 1.0, -1.0, 1.0],
-                        vector![1.0, -1.0, 1.0, 1.0],
-                        vector![-1.0, -1.0, 1.0, 1.0],
-                        vector![1.0, -1.0, -1.0, 1.0],
-                        vector![-1.0, -1.0, -1.0, 1.0],
+                let mut cascade_splits = Vec::with_capacity(MAX_CASCADES);
+                let mut splits = Vec::with_capacity(MAX_CASCADES);
+
+                let near_clip = scene_camera.near;
+                let far_clip = scene_camera.far;
+                let clip_range = far_clip - near_clip;
+
+                let min_z = near_clip;
+                let max_z = near_clip + clip_range;
+                let range = max_z - min_z;
+                let ratio = max_z / min_z;
+
+                let mut povs = vec![];
+
+                for i in 0..MAX_CASCADES {
+                    let p = (i + 1) as f32 / MAX_CASCADES as f32;
+                    let log = min_z + ratio.powf(p);
+                    let linear = min_z + range * p;
+                    let d = self.csm_split_lambda * (log - linear) + linear;
+                    cascade_splits.push((d - near_clip) / range);
+                }
+
+                let mut last_split_dist = 0.0;
+                for i in 0..MAX_CASCADES {
+                    let split_dist = cascade_splits[i];
+
+                    let mut frustum_corners = [
+                        vector![-1.0, 1.0, 0.0],
+                        vector![1.0, 1.0, 0.0],
+                        vector![1.0, -1.0, 0.0],
+                        vector![-1.0, -1.0, 0.0],
+                        vector![-1.0, 1.0, 1.0],
+                        vector![1.0, 1.0, 1.0],
+                        vector![1.0, -1.0, 1.0],
+                        vector![-1.0, -1.0, 1.0],
                     ];
-                    let frustum_corners = ndc_cube_corners
-                        .iter()
-                        .map(|corner| inv_splitviewproj * corner)
-                        .map(|v| v / v.w);
 
-                    let mut frustum_center = Vector3::default();
-                    for corner in frustum_corners.clone() {
-                        frustum_center += corner.xyz();
+                    let inv_camera = scene_camera.projection() * scene_camera.view();
+                    let inv_camera = inv_camera
+                        .try_inverse()
+                        .expect("Failed to invert scene matrix");
+                    for i in 0..8 {
+                        let corner = frustum_corners[i];
+                        let corner = inv_camera * vector![corner.x, corner.y, corner.z, 1.0];
+                        frustum_corners[i] = corner.xyz() / corner.w;
                     }
-                    frustum_center /= 8.0;
-                    let frustum_center = Point3::from(frustum_center.xyz());
 
-                    let light_view = Matrix4::look_at_rh(
-                        &frustum_center,
-                        &(frustum_center + direction),
-                        &vector![0.0, 1.0, 0.0],
-                    );
-                    // let frustum_bounds = BoundingShape::bounding_box_from_points(
-                    //     frustum_corners
-                    //         .clone()
-                    //         .map(|pt| light_view * pt)
-                    //         .map(|corner| Point3::from(corner.xyz())),
-                    // );
-                    // let (frustum_min, frustum_max) = frustum_bounds.box_extremes();
+                    for i in 0..4 {
+                        let dist = frustum_corners[i + 4] - frustum_corners[i];
+                        frustum_corners[i + 4] = frustum_corners[i] + (dist * split_dist);
+                        frustum_corners[i] = frustum_corners[i] + (dist * last_split_dist);
+                    }
+
+                    let mut center = vector![0.0, 0.0, 0.0];
+                    for i in 0..8 {
+                        center += frustum_corners[i];
+                    }
+                    center /= 8.0;
 
                     let mut radius: f32 = 0.0;
-                    for corner in frustum_corners {
-                        radius = radius.max(
-                            (corner.xyz() - frustum_center.to_homogeneous().xyz()).magnitude(),
-                        );
+                    for i in 0..8 {
+                        let dist = (frustum_corners[i] - center).magnitude();
+                        radius = radius.max(dist);
                     }
-                    let mut frustum_min = frustum_center + vector![-radius, -radius, -radius];
-                    let mut frustum_max = frustum_center + vector![radius, radius, radius];
+                    let radius = (radius * 16.0).ceil() / 16.0;
 
-                    if frustum_min.z < 0.0 {
-                        frustum_min.z *= self.z_mult;
-                    } else {
-                        frustum_min.z /= self.z_mult;
-                    }
+                    let max_extents = vector![radius, radius, radius];
+                    let min_extents = -max_extents;
 
-                    if frustum_max.z < 0.0 {
-                        frustum_max.z *= self.z_mult;
-                    } else {
-                        frustum_max.z /= self.z_mult;
-                    }
-
-                    let light_projection = Matrix4::new_orthographic(
-                        frustum_min.x,
-                        frustum_max.x,
-                        frustum_min.y,
-                        frustum_max.y,
-                        frustum_min.z,
-                        frustum_max.z,
+                    let center = Point3::from(center);
+                    let light_dir = l.direction();
+                    let view_matrix = Matrix4::look_at_rh(
+                        &(center - light_dir * -min_extents.z),
+                        &center,
+                        &vector![0.0, 1.0, 0.0],
                     );
-                    PointOfViewData {
+                    let light_ortho = Matrix4::new_orthographic(
+                        min_extents.x,
+                        max_extents.x,
+                        min_extents.y,
+                        max_extents.y,
+                        min_extents.z,
+                        max_extents.z,
+                    );
+
+                    povs.push(PointOfViewData {
                         eye: point![l.position.x, l.position.y, l.position.z, 0.0],
                         eye_forward: direction.to_homogeneous(),
-                        view: light_view,
-                        projection: light_projection,
-                    }
-                });
-                povs.collect()
+                        view: view_matrix,
+                        projection: light_ortho,
+                    });
+
+                    splits.push((near_clip + split_dist * clip_range) * -1.0);
+
+                    last_split_dist = cascade_splits[i];
+                }
+
+                // let camera_splits = scene_camera.split_into_slices(4, self.csm_split_lambda);
+                // camera_splits.iter().for_each(|split| {
+                //     let split_viewproj = split.projection() * split.view();
+                //     let inv_splitviewproj = split_viewproj.try_inverse().unwrap();
+                //     let ndc_cube_corners = [
+                //         vector![1.0, 1.0, 1.0, 1.0],
+                //         vector![-1.0, 1.0, 1.0, 1.0],
+                //         vector![1.0, 1.0, -1.0, 1.0],
+                //         vector![-1.0, 1.0, -1.0, 1.0],
+                //         vector![1.0, -1.0, 1.0, 1.0],
+                //         vector![-1.0, -1.0, 1.0, 1.0],
+                //         vector![1.0, -1.0, -1.0, 1.0],
+                //         vector![-1.0, -1.0, -1.0, 1.0],
+                //     ];
+                //     let frustum_corners = ndc_cube_corners
+                //         .iter()
+                //         .map(|corner| inv_splitviewproj * corner)
+                //         .map(|v| v / v.w);
+
+                //     let mut frustum_center = Vector3::default();
+                //     for corner in frustum_corners.clone() {
+                //         frustum_center += corner.xyz();
+                //     }
+                //     frustum_center /= 8.0;
+                //     let frustum_center = Point3::from(frustum_center.xyz());
+
+                //     let light_view = Matrix4::look_at_rh(
+                //         &frustum_center,
+                //         &(frustum_center + direction),
+                //         &vector![0.0, 1.0, 0.0],
+                //     );
+                //     // let frustum_bounds = BoundingShape::bounding_box_from_points(
+                //     //     frustum_corners
+                //     //         .clone()
+                //     //         .map(|pt| light_view * pt)
+                //     //         .map(|corner| Point3::from(corner.xyz())),
+                //     // );
+                //     // let (frustum_min, frustum_max) = frustum_bounds.box_extremes();
+
+                //     let mut radius: f32 = 0.0;
+                //     for corner in frustum_corners {
+                //         radius = radius.max(
+                //             (corner.xyz() - frustum_center.to_homogeneous().xyz()).magnitude(),
+                //         );
+                //     }
+                //     let radius = (radius / 16.0).ceil() * 16.0;
+                //     let mut frustum_min = vector![-radius, -radius, -radius];
+                //     let mut frustum_max = vector![radius, radius, radius];
+
+                //     if frustum_min.z < 0.0 {
+                //         frustum_min.z *= self.z_mult;
+                //     } else {
+                //         frustum_min.z /= self.z_mult;
+                //     }
+
+                //     if frustum_max.z < 0.0 {
+                //         frustum_max.z *= self.z_mult;
+                //     } else {
+                //         frustum_max.z /= self.z_mult;
+                //     }
+
+                //     let light_projection = Matrix4::new_orthographic(
+                //         frustum_min.x,
+                //         frustum_max.x,
+                //         frustum_min.y,
+                //         frustum_max.y,
+                //         frustum_min.z - 0.01,
+                //         frustum_max.z,
+                //     );
+                //     splits.push(frustum_max.z);
+                //     povs.push(PointOfViewData {
+                //         eye: point![l.position.x, l.position.y, l.position.z, 0.0],
+                //         eye_forward: direction.to_homogeneous(),
+                //         view: light_view,
+                //         projection: light_projection,
+                //     });
+                // });
+                (povs, Some(splits))
             }
-            _ => light_povs
-                .into_iter()
-                .map(|c| PointOfViewData {
-                    eye: point![c.location.x, c.location.y, c.location.z, 0.0],
-                    eye_forward: c.forward.to_homogeneous(),
-                    view: c.view(),
-                    projection: c.projection(),
-                })
-                .collect(),
+            _ => (
+                light_povs
+                    .into_iter()
+                    .map(|c| PointOfViewData {
+                        eye: point![c.location.x, c.location.y, c.location.z, 0.0],
+                        eye_forward: c.forward.to_homogeneous(),
+                        view: c.view(),
+                        projection: c.projection(),
+                    })
+                    .collect(),
+                None,
+            ),
         }
-    }
-
-    pub(crate) fn get_csm_constant_data(&self) -> CSMConstantData {
-        let mut data = CSMConstantData {
-            count: self.csm_splits.len() as _,
-            splits: [0.0; MAX_CASCADES],
-        };
-
-        for (i, split) in self.csm_splits.iter().take(MAX_CASCADES).enumerate() {
-            data.splits[i] = *split;
-        }
-        data
     }
 
     pub(crate) fn update_buffers(&self, gpu: &dyn Gpu, buffer_index: usize) -> anyhow::Result<()> {
         let current_buffers = &self.csm_buffers[buffer_index];
 
-        let csm_data = self.get_csm_constant_data();
         gpu.write_buffer(
             &current_buffers.shadow_casters,
             0,
@@ -436,13 +534,16 @@ impl CascadedShadowMap {
         gpu.write_buffer(
             &current_buffers.csm_splits,
             0,
-            bytemuck::cast_slice(&[self.csm_splits.len() as u32]),
+            bytemuck::cast_slice(&[
+                self.num_cascades as u32,
+                if self.debug_csm_splits { 1 } else { 0 },
+            ]),
         )?;
 
         gpu.write_buffer(
             &current_buffers.csm_splits,
-            0,
-            bytemuck::cast_slice(&[csm_data]),
+            std::mem::size_of::<[u32; 4]>() as u64,
+            bytemuck::cast_slice(&self.csm_splits),
         )?;
         Ok(())
     }

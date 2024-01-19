@@ -722,7 +722,6 @@ impl DeferredRenderingPipeline {
 
         Ok(())
     }
-
     pub fn draw_textured_quad(
         &self,
         graphics_command_buffer: &mut CommandBuffer,
@@ -731,6 +730,26 @@ impl DeferredRenderingPipeline {
         viewport: Rect2D,
         flip_render_target: bool,
         override_shader: Option<ShaderModuleHandle>,
+    ) -> anyhow::Result<()> {
+        self.draw_textured_quad_with_callback(
+            graphics_command_buffer,
+            destination,
+            source,
+            viewport,
+            flip_render_target,
+            override_shader,
+            |_| (),
+        )
+    }
+    pub fn draw_textured_quad_with_callback<F: FnMut(&mut RenderPass)>(
+        &self,
+        graphics_command_buffer: &mut CommandBuffer,
+        destination: &ImageViewHandle,
+        source: &ImageViewHandle,
+        viewport: Rect2D,
+        flip_render_target: bool,
+        override_shader: Option<ShaderModuleHandle>,
+        mut callback: F,
     ) -> anyhow::Result<()> {
         let mut present_render_pass =
             graphics_command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
@@ -785,6 +804,9 @@ impl DeferredRenderingPipeline {
         present_render_pass.set_vertex_shader(screen_quad);
         present_render_pass
             .set_fragment_shader(override_shader.unwrap_or(self.texture_copy.clone()));
+
+        callback(&mut present_render_pass);
+
         present_render_pass.draw(4, 1, 0, 0)
     }
 
@@ -988,7 +1010,6 @@ impl DeferredRenderingPipeline {
         self.light_povs.clear();
         self.cascaded_shadow_map.clear();
 
-        self.cascaded_shadow_map.update_cascade_splits(scene_camera);
         let mut pov_idx = 1;
 
         for (light_id, light) in scene.lights.iter().enumerate() {
@@ -1000,13 +1021,15 @@ impl DeferredRenderingPipeline {
             if let Some(NewShadowMapAllocation {
                 povs,
                 shadow_map_index,
-            }) = self
-                .cascaded_shadow_map
-                .add_light(light, pov_idx, light_id as u32)
+                csm_split,
+            }) =
+                self.cascaded_shadow_map
+                    .add_light(light, scene_camera, pov_idx, light_id as u32)
             {
                 pov_idx += povs.len() as u32;
                 self.light_povs.extend(povs.into_iter());
-                gpu_light.ty_shadow_map_idx[1] = shadow_map_index as i32;
+                gpu_light.ty_shadow_map_idx_csm_split[1] = shadow_map_index as i32;
+                gpu_light.ty_shadow_map_idx_csm_split[2] = csm_split;
             }
 
             self.active_lights.push(gpu_light);
