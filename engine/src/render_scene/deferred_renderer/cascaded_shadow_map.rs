@@ -129,8 +129,8 @@ impl CascadedShadowMap {
         }
         Ok(Self {
             num_cascades: 4,
-            csm_split_lambda: 0.80,
-            z_mult: 1.0,
+            csm_split_lambda: 0.55,
+            z_mult: 1.5,
             debug_csm_splits: false,
 
             csm_buffers,
@@ -146,6 +146,7 @@ impl CascadedShadowMap {
             .expect("Failed to create texture packer"),
         })
     }
+
     pub(crate) fn render_shadow_atlas(
         &self,
         gpu: &dyn Gpu,
@@ -363,10 +364,10 @@ impl CascadedShadowMap {
                     let split_dist = cascade_splits[i];
 
                     let mut frustum_corners = [
-                        vector![-1.0, 1.0, -1.0],
-                        vector![1.0, 1.0, -1.0],
-                        vector![1.0, -1.0, -1.0],
-                        vector![-1.0, -1.0, -1.0],
+                        vector![-1.0, 1.0, 0.0],
+                        vector![1.0, 1.0, 0.0],
+                        vector![1.0, -1.0, 0.0],
+                        vector![-1.0, -1.0, 0.0],
                         vector![-1.0, 1.0, 1.0],
                         vector![1.0, 1.0, 1.0],
                         vector![1.0, -1.0, 1.0],
@@ -390,9 +391,9 @@ impl CascadedShadowMap {
                     }
 
                     let mut center = vector![0.0, 0.0, 0.0];
-                    for i in 0..8 {
+                    (0..8).for_each(|i| {
                         center += frustum_corners[i];
-                    }
+                    });
                     center /= 8.0;
 
                     let mut radius: f32 = 0.0;
@@ -419,7 +420,7 @@ impl CascadedShadowMap {
                         min_extents.y,
                         max_extents.y,
                         0.0,
-                        (max_extents.z - min_extents.z) * self.z_mult,
+                        (max_extents.z - min_extents.z) + self.z_mult,
                     );
 
                     povs.push(PointOfViewData {

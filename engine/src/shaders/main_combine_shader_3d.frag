@@ -123,22 +123,6 @@ float get_light_mask(float n_dot_l, int light_type, vec3 light_position,  LightI
     return attenuation;
 }
 
-// returns 1.0 if pixel is in shadow, 0 otherwise
-float sample_shadow_atlas(vec3 light_pos, ShadowMap shadow_map) {
-    vec2 texture_size = textureSize(shadow_atlas, 0);
-    vec2 texel_size = 1.0 / texture_size;
-
-    vec2 shadow_map_size = shadow_map.offset_size.zw * texel_size;
-    vec2 shadow_map_offset = shadow_map.offset_size.xy * texel_size;
-    light_pos.xy = shadow_map_offset + light_pos.xy * shadow_map_size;
-    light_pos.x = clamp(light_pos.x, shadow_map_offset.x, shadow_map_offset.x + shadow_map_size.x);
-    light_pos.y = clamp(light_pos.y, shadow_map_offset.y, shadow_map_offset.y + shadow_map_size.y);
-
-    float compare_z = light_pos.z; 
-    float stored_z = texture(shadow_atlas, light_pos.xy).r;
-    return compare_z > stored_z ? 1.0 : 0.0;
-}
-
 vec2 poisson_disk[16] = vec2[](
         vec2(0.0, 0.0),
 		vec2( -0.94201624, -0.39906216 ),
@@ -250,6 +234,22 @@ vec2 rotate(vec2 v, float a) {
 	return m * v;
 }
 
+// returns 1.0 if pixel is in shadow, 0 otherwise
+float sample_shadow_atlas(vec3 light_pos, ShadowMap shadow_map) {
+    vec2 texture_size = textureSize(shadow_atlas, 0);
+    vec2 texel_size = 1.0 / texture_size;
+
+    vec2 shadow_map_size = shadow_map.offset_size.zw * texel_size;
+    vec2 shadow_map_offset = shadow_map.offset_size.xy * texel_size;
+    light_pos.xy = shadow_map_offset + light_pos.xy * shadow_map_size;
+    light_pos.x = clamp(light_pos.x, shadow_map_offset.x, shadow_map_offset.x + shadow_map_size.x);
+    light_pos.y = clamp(light_pos.y, shadow_map_offset.y, shadow_map_offset.y + shadow_map_size.y);
+
+    float compare_z = light_pos.z; 
+    float stored_z = texture(shadow_atlas, light_pos.xy).r;
+    return compare_z > stored_z ? 1.0 : 0.0;
+}
+
 uint select_directiona_light_offset(vec4 pos_in_view, int base){
 
     float depth = pos_in_view.z;
@@ -301,11 +301,11 @@ float is_fragment_lit(vec2 uv, LightInfo light_info, vec3 pixel_pos) {
     mat4 pov_vp = pov.proj * pov.view;
     vec4 from_light = pov_vp * vec4(pixel_pos, 1.0); 
     vec3 light_proj = from_light.xyz / from_light.w;
-    light_proj.xyz = light_proj.xyz * 0.5 + 0.5;
+    light_proj.xy = light_proj.xy * 0.5 + 0.5;
 
     if (light_proj.x < 0.0 || light_proj.x > 1.0
         || light_proj.y < 0.0 || light_proj.y > 1.0 
-        || light_proj.z < 0.0 || light_proj.z > 1.0
+        || light_proj.z < 0.0 || light_proj.z > 1.0 
     ) {
         return 1.0;
     }
