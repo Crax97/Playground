@@ -62,7 +62,7 @@ impl FpsCamera {
             width: 1920.0,
             height: 1080.0,
             near: 0.1,
-            far: 10000.0,
+            far: 1000.0,
         }
     }
 
