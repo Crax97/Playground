@@ -668,8 +668,8 @@ impl App for GLTFViewer {
             Rect2D {
                 offset: Offset2D::default(),
                 extent: Extent2D {
-                    width: backbuffer.size.width / 4,
-                    height: backbuffer.size.height / 4,
+                    width: backbuffer.size.width / 2,
+                    height: backbuffer.size.height / 2,
                 },
             },
             true,
@@ -678,7 +678,7 @@ impl App for GLTFViewer {
                 pass.push_constants(
                     0,
                     0,
-                    &bytemuck::cast_slice(&[DepthDrawConstants {
+                    bytemuck::cast_slice(&[DepthDrawConstants {
                         near: self.camera.camera().near,
                         far: self.camera.camera().far,
                     }]),

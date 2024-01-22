@@ -218,25 +218,26 @@ pub mod render_pass {
         PolygonMode, PrimitiveTopology, ShaderModuleHandle, VertexBindingInfo, Viewport,
     };
     define_pass_type!(RenderPass {
-     fn set_primitive_topology(&mut self, new_topology: PrimitiveTopology) ;
-     fn set_vertex_shader(&mut self, vertex_shader: ShaderModuleHandle) ;
-     fn set_fragment_shader(&mut self, fragment_shader: ShaderModuleHandle) ;
-     fn set_vertex_buffers(&mut self, bindings: &[VertexBindingInfo]) ;
-     fn set_color_output_enabled(&mut self, color_output_enabled: bool) ;
-     fn set_viewport(&mut self, viewport: Viewport) ;
-     fn set_depth_bias(&mut self, constant: f32, slope: f32) ;
-     fn set_front_face(&mut self, front_face: FrontFace) ;
-     fn set_polygon_mode(&mut self, polygon_mode: PolygonMode) ;
-     fn set_cull_mode(&mut self, cull_mode: CullMode) ;
-     fn set_enable_depth_test(&mut self, enable_depth_test: bool) ;
-     fn set_depth_write_enabled(&mut self, depth_write_enabled: bool) ;
-     fn set_depth_compare_op(&mut self, depth_compare_op: CompareOp) ;
+     fn set_primitive_topology(&mut self, new_topology: PrimitiveTopology);
+     fn set_vertex_shader(&mut self, vertex_shader: ShaderModuleHandle);
+     fn set_fragment_shader(&mut self, fragment_shader: ShaderModuleHandle);
+     fn set_vertex_buffers(&mut self, bindings: &[VertexBindingInfo]);
+     fn set_color_output_enabled(&mut self, color_output_enabled: bool);
+     fn set_viewport(&mut self, viewport: Viewport);
+     fn set_depth_bias(&mut self, constant: f32, slope: f32);
+     fn set_front_face(&mut self, front_face: FrontFace);
+     fn set_polygon_mode(&mut self, polygon_mode: PolygonMode);
+     fn set_cull_mode(&mut self, cull_mode: CullMode);
+     fn set_enable_depth_test(&mut self, enable_depth_test: bool);
+     fn set_enable_depth_clamp(&mut self, enable_depth_clamp: bool);
+     fn set_depth_write_enabled(&mut self, depth_write_enabled: bool);
+     fn set_depth_compare_op(&mut self, depth_compare_op: CompareOp);
      fn set_color_attachment_blend_state(&mut self, attachment: usize, blend_state: PipelineColorBlendAttachmentState);
-     fn advance_to_next_subpass(&mut self) ;
+     fn advance_to_next_subpass(&mut self);
     /* If enabled, fragments may be discarded after the vertex shader stage,
     before any fragment shader is executed.
     When enabled, a valid fragment shader must be set */
-     fn set_early_discard_enabled(&mut self, allow_early_discard: bool) ;
+     fn set_early_discard_enabled(&mut self, allow_early_discard: bool);
 
      fn draw_indexed(
         &mut self,

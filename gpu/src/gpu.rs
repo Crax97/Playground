@@ -1468,6 +1468,7 @@ impl VkGpu {
 
         let device_features = PhysicalDeviceFeatures {
             sampler_anisotropy: vk::TRUE,
+            depth_clamp: vk::TRUE,
 
             ..Default::default()
         };

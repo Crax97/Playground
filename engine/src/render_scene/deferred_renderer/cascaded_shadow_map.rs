@@ -130,7 +130,7 @@ impl CascadedShadowMap {
         Ok(Self {
             num_cascades: 4,
             csm_split_lambda: 0.80,
-            z_mult: 10.0,
+            z_mult: 1.0,
             debug_csm_splits: false,
 
             csm_buffers,
@@ -200,17 +200,22 @@ impl CascadedShadowMap {
 
             for shadow_map in &self.shadow_maps {
                 let caster_pov = shadow_map.type_num_maps_pov_lightid[2];
-                // We subtract 1 because index 0 is reserved for the camera
-                let pov = &light_povs[caster_pov as usize - 1];
-                let frustum = Frustum::from_view_proj(pov.view, pov.projection);
-                let primitives = scene.intersect_frustum(&frustum);
                 let pov_idx = shadow_map.type_num_maps_pov_lightid[2];
                 let light = &scene.lights[shadow_map.type_num_maps_pov_lightid[3] as usize];
+                // We subtract 1 because index 0 is reserved for the camera
+                let pov = &light_povs[caster_pov as usize - 1];
+                let frustum = if let LightType::Directional { .. } = light.ty {
+                    Frustum::from_view(&pov.view)
+                } else {
+                    Frustum::from_view_proj(&pov.view, &pov.projection)
+                };
+                let primitives = scene.intersect_frustum(&frustum);
                 let setup = light
                     .shadow_configuration
                     .expect("Bug: a light is set to render a shadow map, but has no shadow setup");
 
                 shadow_atlas_pass.set_depth_bias(setup.depth_bias, setup.depth_slope);
+                shadow_atlas_pass.set_enable_depth_clamp(true);
                 shadow_atlas_pass.set_cull_mode(gpu::CullMode::Back);
                 shadow_atlas_pass.set_depth_compare_op(gpu::CompareOp::LessEqual);
 
@@ -235,7 +240,7 @@ impl CascadedShadowMap {
                     &mut shadow_atlas_pass,
                     pov_idx,
                     frame_buffers,
-                    &sampler_allocator,
+                    sampler_allocator,
                 )?;
             }
         }
@@ -354,14 +359,14 @@ impl CascadedShadowMap {
                 }
 
                 let mut last_split_dist = 0.0;
-                for i in 0..MAX_CASCADES {
+                (0..MAX_CASCADES).for_each(|i| {
                     let split_dist = cascade_splits[i];
 
                     let mut frustum_corners = [
-                        vector![-1.0, 1.0, 0.0],
-                        vector![1.0, 1.0, 0.0],
-                        vector![1.0, -1.0, 0.0],
-                        vector![-1.0, -1.0, 0.0],
+                        vector![-1.0, 1.0, -1.0],
+                        vector![1.0, 1.0, -1.0],
+                        vector![1.0, -1.0, -1.0],
+                        vector![-1.0, -1.0, -1.0],
                         vector![-1.0, 1.0, 1.0],
                         vector![1.0, 1.0, 1.0],
                         vector![1.0, -1.0, 1.0],
@@ -372,16 +377,16 @@ impl CascadedShadowMap {
                     let inv_camera = inv_camera
                         .try_inverse()
                         .expect("Failed to invert scene matrix");
-                    for i in 0..8 {
+                    (0..8).for_each(|i| {
                         let corner = frustum_corners[i];
                         let corner = inv_camera * vector![corner.x, corner.y, corner.z, 1.0];
                         frustum_corners[i] = corner.xyz() / corner.w;
-                    }
+                    });
 
                     for i in 0..4 {
                         let dist = frustum_corners[i + 4] - frustum_corners[i];
                         frustum_corners[i + 4] = frustum_corners[i] + (dist * split_dist);
-                        frustum_corners[i] = frustum_corners[i] + (dist * last_split_dist);
+                        frustum_corners[i] += dist * last_split_dist;
                     }
 
                     let mut center = vector![0.0, 0.0, 0.0];
@@ -391,11 +396,12 @@ impl CascadedShadowMap {
                     center /= 8.0;
 
                     let mut radius: f32 = 0.0;
-                    for i in 0..8 {
+                    (0..8).for_each(|i| {
                         let dist = (frustum_corners[i] - center).magnitude();
                         radius = radius.max(dist);
-                    }
+                    });
                     let radius = (radius * 16.0).ceil() / 16.0;
+                    let radius = radius * self.z_mult;
 
                     let max_extents = vector![radius, radius, radius];
                     let min_extents = -max_extents;
@@ -403,7 +409,7 @@ impl CascadedShadowMap {
                     let center = Point3::from(center);
                     let light_dir = l.direction();
                     let view_matrix = Matrix4::look_at_rh(
-                        &(center - light_dir * -min_extents.z),
+                        &(center - light_dir * -min_extents.z * self.z_mult),
                         &center,
                         &vector![0.0, 1.0, 0.0],
                     );
@@ -412,8 +418,8 @@ impl CascadedShadowMap {
                         max_extents.x,
                         min_extents.y,
                         max_extents.y,
-                        min_extents.z,
-                        max_extents.z,
+                        0.0,
+                        (max_extents.z - min_extents.z) * self.z_mult,
                     );
 
                     povs.push(PointOfViewData {
@@ -426,85 +432,8 @@ impl CascadedShadowMap {
                     splits.push((near_clip + split_dist * clip_range) * -1.0);
 
                     last_split_dist = cascade_splits[i];
-                }
+                });
 
-                // let camera_splits = scene_camera.split_into_slices(4, self.csm_split_lambda);
-                // camera_splits.iter().for_each(|split| {
-                //     let split_viewproj = split.projection() * split.view();
-                //     let inv_splitviewproj = split_viewproj.try_inverse().unwrap();
-                //     let ndc_cube_corners = [
-                //         vector![1.0, 1.0, 1.0, 1.0],
-                //         vector![-1.0, 1.0, 1.0, 1.0],
-                //         vector![1.0, 1.0, -1.0, 1.0],
-                //         vector![-1.0, 1.0, -1.0, 1.0],
-                //         vector![1.0, -1.0, 1.0, 1.0],
-                //         vector![-1.0, -1.0, 1.0, 1.0],
-                //         vector![1.0, -1.0, -1.0, 1.0],
-                //         vector![-1.0, -1.0, -1.0, 1.0],
-                //     ];
-                //     let frustum_corners = ndc_cube_corners
-                //         .iter()
-                //         .map(|corner| inv_splitviewproj * corner)
-                //         .map(|v| v / v.w);
-
-                //     let mut frustum_center = Vector3::default();
-                //     for corner in frustum_corners.clone() {
-                //         frustum_center += corner.xyz();
-                //     }
-                //     frustum_center /= 8.0;
-                //     let frustum_center = Point3::from(frustum_center.xyz());
-
-                //     let light_view = Matrix4::look_at_rh(
-                //         &frustum_center,
-                //         &(frustum_center + direction),
-                //         &vector![0.0, 1.0, 0.0],
-                //     );
-                //     // let frustum_bounds = BoundingShape::bounding_box_from_points(
-                //     //     frustum_corners
-                //     //         .clone()
-                //     //         .map(|pt| light_view * pt)
-                //     //         .map(|corner| Point3::from(corner.xyz())),
-                //     // );
-                //     // let (frustum_min, frustum_max) = frustum_bounds.box_extremes();
-
-                //     let mut radius: f32 = 0.0;
-                //     for corner in frustum_corners {
-                //         radius = radius.max(
-                //             (corner.xyz() - frustum_center.to_homogeneous().xyz()).magnitude(),
-                //         );
-                //     }
-                //     let radius = (radius / 16.0).ceil() * 16.0;
-                //     let mut frustum_min = vector![-radius, -radius, -radius];
-                //     let mut frustum_max = vector![radius, radius, radius];
-
-                //     if frustum_min.z < 0.0 {
-                //         frustum_min.z *= self.z_mult;
-                //     } else {
-                //         frustum_min.z /= self.z_mult;
-                //     }
-
-                //     if frustum_max.z < 0.0 {
-                //         frustum_max.z *= self.z_mult;
-                //     } else {
-                //         frustum_max.z /= self.z_mult;
-                //     }
-
-                //     let light_projection = Matrix4::new_orthographic(
-                //         frustum_min.x,
-                //         frustum_max.x,
-                //         frustum_min.y,
-                //         frustum_max.y,
-                //         frustum_min.z - 0.01,
-                //         frustum_max.z,
-                //     );
-                //     splits.push(frustum_max.z);
-                //     povs.push(PointOfViewData {
-                //         eye: point![l.position.x, l.position.y, l.position.z, 0.0],
-                //         eye_forward: direction.to_homogeneous(),
-                //         view: light_view,
-                //         projection: light_projection,
-                //     });
-                // });
                 (povs, Some(splits))
             }
             _ => (

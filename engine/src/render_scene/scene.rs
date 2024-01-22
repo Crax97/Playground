@@ -200,7 +200,7 @@ impl RenderScene {
 
     pub fn intersect_frustum(&self, frustum: &Frustum) -> Vec<&ScenePrimitive> {
         if !self.use_frustum_culling {
-            self.primitives.iter().collect()
+            return self.primitives.iter().collect();
         } else if self.use_bvh {
             let indices = self.bvh.intersect_frustum_copy(frustum);
             indices.iter().map(|id| &self.primitives[*id]).collect()

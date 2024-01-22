@@ -61,7 +61,7 @@ impl FpsCamera {
             mode: engine::CameraMode::Perspective { fov_degrees: 45.0 },
             width: 1920.0,
             height: 1080.0,
-            near: 0.1,
+            near: 0.001,
             far: 1000.0,
         }
     }

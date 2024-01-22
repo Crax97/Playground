@@ -80,6 +80,7 @@ pub(crate) struct GraphicsPipelineState {
     // If vulkan complains about a missing shader frament shader, check that these two bastards are
     // enabled
     pub(crate) enable_depth_test: bool,
+    pub(crate) depth_clamp_enabled: bool,
     pub(crate) depth_write_enabled: bool,
 
     pub(crate) early_discard_enabled: bool,
@@ -120,6 +121,7 @@ impl GraphicsPipelineState {
             cull_mode: CullMode::default(),
             render_area: info.render_area,
             enable_depth_test: false,
+            depth_clamp_enabled: false,
             depth_write_enabled: false,
             depth_compare_op: CompareOp::Never,
             primitive_topology: PrimitiveTopology::TriangleList,
@@ -176,12 +178,12 @@ impl GraphicsPipelineState {
             s_type: StructureType::PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
             p_next: std::ptr::null(),
             flags: vk::PipelineRasterizationStateCreateFlags::empty(),
-            depth_clamp_enable: vk::FALSE,
+            depth_clamp_enable: self.depth_clamp_enabled.to_vk(),
             rasterizer_discard_enable: self.early_discard_enabled.to_vk(),
             polygon_mode: vk::PolygonMode::FILL,
             cull_mode: self.cull_mode.to_vk(),
             front_face: self.front_face.to_vk(),
-            depth_bias_enable: vk::FALSE,
+            depth_bias_enable: vk::TRUE,
             depth_bias_constant_factor: 0.0,
             depth_bias_clamp: 0.0,
             depth_bias_slope_factor: 0.0,
@@ -1298,6 +1300,10 @@ impl render_pass::Impl for VkRenderPassCommand {
 
     fn set_color_attachment_blend_state(&mut self, attachment:usize, blend_state:PipelineColorBlendAttachmentState,) {
         self.pipeline_state.color_blend_states[attachment] = blend_state
+    }
+
+    fn set_enable_depth_clamp(&mut self, enable_depth_clamp:bool) {
+        self.pipeline_state.depth_clamp_enabled = enable_depth_clamp;
     }
 }
 
