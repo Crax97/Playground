@@ -10,7 +10,7 @@ use nalgebra::{point, vector, Matrix4, Point3};
 
 use crate::{
     Camera, DeferredRenderingPipeline, FrameBuffers, Frustum, Light, LightType, PipelineTarget,
-    PointOfViewData, ResourceMap, TiledTexture2DPacker,
+    PointOfViewData, ResourceMap, TiledTexture2DPacker, TiledTexture2DSection,
 };
 
 use super::SamplerAllocator;
@@ -291,8 +291,12 @@ impl CascadedShadowMap {
                 .allocate(shadow_map_width * num_maps, shadow_map_height)
             {
                 let this_light_cameras = light.light_cameras();
-                let (povs, splits) =
-                    self.get_light_povs_and_splits(light, scene_camera, this_light_cameras);
+                let (povs, splits) = self.get_light_povs_and_splits(
+                    light,
+                    scene_camera,
+                    this_light_cameras,
+                    &allocation,
+                );
                 let shadow_map_index = self.shadow_maps.len();
                 let light_shadow_maps = povs
                     .iter()
@@ -334,6 +338,7 @@ impl CascadedShadowMap {
         l: &Light,
         scene_camera: &crate::Camera,
         light_povs: Vec<Camera>,
+        allocation: &TiledTexture2DSection,
     ) -> (Vec<PointOfViewData>, Option<Vec<f32>>) {
         match l.ty {
             LightType::Directional { direction, .. } => {
@@ -414,7 +419,7 @@ impl CascadedShadowMap {
                         &center,
                         &vector![0.0, 1.0, 0.0],
                     );
-                    let light_ortho = Matrix4::new_orthographic(
+                    let mut light_ortho = Matrix4::new_orthographic(
                         min_extents.x,
                         max_extents.x,
                         min_extents.y,
@@ -422,6 +427,19 @@ impl CascadedShadowMap {
                         0.0,
                         (max_extents.z - min_extents.z) + self.z_mult,
                     );
+
+                    // Compute texel snapping factor
+                    // https://johanmedestrom.wordpress.com/2016/03/18/opengl-cascaded-shadow-maps/
+                    let shadow_matrix = light_ortho * view_matrix;
+                    let origin = shadow_matrix * vector![0.0, 0.0, 0.0, 1.0];
+                    let origin = origin * (allocation.width as f32) / 2.0;
+
+                    let rounded_origin = origin.map(|v| v.round());
+                    let offset = rounded_origin - origin;
+                    let mut offset = offset * 2.0 / (allocation.width as f32);
+                    offset.z = 0.0;
+                    offset.w = 0.0;
+                    light_ortho.set_column(3, &(light_ortho.column(3) + offset));
 
                     povs.push(PointOfViewData {
                         eye: point![l.position.x, l.position.y, l.position.z, 0.0],
