@@ -517,6 +517,9 @@ impl App for BevyEcsApp {
         app_state: &'a crate::app::app_state::AppState,
         backbuffer: &crate::Backbuffer,
     ) -> anyhow::Result<gpu::CommandBuffer> {
+        let mut command_buffer = app_state
+            .gpu
+            .start_command_buffer(gpu::QueueType::Graphics)?;
         let empty_scene = RenderScene::default();
         let scene = self
             .world
@@ -531,15 +534,13 @@ impl App for BevyEcsApp {
         };
         let render_final_color = self.renderer.render(
             app_state.gpu.as_ref(),
+            &mut command_buffer,
             &pov,
             scene,
             resource_map,
             cvar_manager,
         )?;
 
-        let mut command_buffer = app_state
-            .gpu
-            .start_command_buffer(gpu::QueueType::Graphics)?;
         self.renderer.draw_textured_quad(
             &mut command_buffer,
             &backbuffer.image_view,

@@ -5,7 +5,7 @@ use crate::{
     CvarManager, Frustum,
 };
 use bevy_ecs::system::Resource;
-use gpu::{Extent2D, Gpu, ImageFormat, ImageHandle, ImageViewHandle};
+use gpu::{CommandBuffer, Extent2D, Gpu, ImageFormat, ImageHandle, ImageViewHandle};
 use nalgebra::{vector, Matrix4, Point3, Vector2, Vector3};
 
 #[repr(C)]
@@ -267,6 +267,7 @@ pub trait RenderingPipeline {
     fn render(
         &mut self,
         gpu: &dyn Gpu,
+        graphics_command_buffer: &mut CommandBuffer,
         pov: &Camera,
         scene: &RenderScene,
         resource_map: &ResourceMap,

@@ -775,7 +775,14 @@ impl DeferredRenderingPipeline {
                     depth_stencil_attachment: None,
                     preserve_attachments: vec![],
                 }],
-                dependencies: &[],
+                dependencies: &[SubpassDependency {
+                    src_subpass: SubpassDependency::EXTERNAL,
+                    dst_subpass: 0,
+                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
+                    src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+                    dst_access_mask: AccessFlags::SHADER_READ,
+                }],
             });
         present_render_pass.bind_resources(
             0,
@@ -1212,6 +1219,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
     fn render(
         &mut self,
         gpu: &dyn Gpu,
+        graphics_command_buffer: &mut CommandBuffer,
         camera: &Camera,
         scene: &RenderScene,
         resource_map: &ResourceMap,
@@ -1263,12 +1271,10 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             self.image_allocator
                 .get(gpu, "color_output/post_process_1", &color_desc);
 
-        let mut graphics_command_buffer = gpu.start_command_buffer(gpu::QueueType::Graphics)?;
-
         self.cascaded_shadow_map.render_shadow_atlas(
             gpu,
             scene,
-            &mut graphics_command_buffer,
+            graphics_command_buffer,
             current_buffers,
             resource_map,
             &self.light_povs,
@@ -1280,7 +1286,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         self.drawcalls_last_frame = primitives.len() as u64;
         self.main_pass(
             gpu,
-            &mut graphics_command_buffer,
+            graphics_command_buffer,
             &color_output,
             &gbuffer,
             resource_map,
@@ -1295,20 +1301,13 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         let final_color_output = self
             .post_process_pass(
                 gpu,
-                &mut graphics_command_buffer,
+                graphics_command_buffer,
                 color_output,
                 color_desc,
                 self.view_size,
                 cvar_manager,
             )
             .context("Post process pass")?;
-
-        graphics_command_buffer.submit(&CommandBufferSubmitInfo {
-            wait_semaphores: &[],
-            wait_stages: &[],
-            signal_semaphores: &[],
-            fence: None,
-        })?;
 
         self.in_flight_frame = (1 + self.in_flight_frame) % self.max_frames_in_flight;
         Ok(final_color_output.view)

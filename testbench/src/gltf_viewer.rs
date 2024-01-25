@@ -628,8 +628,12 @@ impl App for GLTFViewer {
         app_state: &'a AppState,
         backbuffer: &Backbuffer,
     ) -> anyhow::Result<CommandBuffer> {
+        let mut command_buffer = app_state
+            .gpu
+            .start_command_buffer(gpu::QueueType::Graphics)?;
         let final_render = self.scene_renderer.render(
             app_state.gpu(),
+            &mut command_buffer,
             &self.camera.camera(),
             self.gltf_loader.scene(),
             &self.resource_map,
@@ -637,18 +641,6 @@ impl App for GLTFViewer {
         )?;
         // write_image_to_swapchain(backbuffer);
         let output = self.egui_support.end_frame(&self.window);
-        let mut command_buffer = app_state
-            .gpu
-            .start_command_buffer(gpu::QueueType::Graphics)?;
-
-        command_buffer.pipeline_barrier(&PipelineBarrierInfo {
-            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
-            ..Default::default()
-        });
-
-        let shadow_texture = self.scene_renderer.get_shadow_texture(app_state.gpu());
-
         self.scene_renderer.draw_textured_quad(
             &mut command_buffer,
             &backbuffer.image_view,
@@ -661,31 +653,12 @@ impl App for GLTFViewer {
             None,
         )?;
 
-        self.scene_renderer.draw_textured_quad_with_callback(
-            &mut command_buffer,
-            &backbuffer.image_view,
-            &shadow_texture,
-            Rect2D {
-                offset: Offset2D::default(),
-                extent: Extent2D {
-                    width: backbuffer.size.width / 2,
-                    height: backbuffer.size.height / 2,
-                },
-            },
-            true,
-            Some(self.depth_draw.clone()),
-            |pass| {
-                pass.push_constants(
-                    0,
-                    0,
-                    bytemuck::cast_slice(&[DepthDrawConstants {
-                        near: self.camera.camera().near,
-                        far: self.camera.camera().far,
-                    }]),
-                    ShaderStage::FRAGMENT,
-                )
-            },
-        )?;
+        command_buffer.pipeline_barrier(&PipelineBarrierInfo {
+            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            dst_stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+            ..Default::default()
+        });
+
         self.egui_support
             .paint_frame(output, &app_state.swapchain, &command_buffer);
 
