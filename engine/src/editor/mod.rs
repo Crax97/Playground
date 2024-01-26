@@ -3,7 +3,7 @@ mod entity_outliner;
 
 pub mod ui_extension;
 
-use std::any::TypeId;
+use std::{any::TypeId, sync::Arc};
 
 pub use editor_ui::EditorUi;
 
@@ -13,14 +13,11 @@ use bevy_ecs::{
     world::{EntityWorldMut, World},
 };
 use egui::{Context, FullOutput, Ui};
-use gpu::CommandBuffer;
+use gpu::{CommandBuffer, Gpu, Swapchain};
 use std::collections::HashMap;
 
 use crate::{
-    app::{
-        app_state::{app_state, AppState},
-        egui_support::EguiSupport,
-    },
+    app::{app_state::AppState, egui_support::EguiSupport},
     components::{DebugName, EngineWindow, Transform2D},
     physics::{Collider2DHandle, RigidBody2DHandle},
     AppTypeRegistry, BevyEcsApp, Plugin,
@@ -83,17 +80,26 @@ impl EditorPluginBuilder {
         self
     }
 
-    pub fn build(self, app: &mut BevyEcsApp) -> EditorPlugin {
-        EditorPlugin::new(app, self)
+    pub fn build(
+        self,
+        gpu: &Arc<dyn Gpu>,
+        swapchain: &Swapchain,
+        app: &mut BevyEcsApp,
+    ) -> EditorPlugin {
+        EditorPlugin::new(gpu, swapchain, app, self)
     }
 }
 
 impl EditorPlugin {
-    fn new(app: &mut crate::BevyEcsApp, builder: EditorPluginBuilder) -> Self {
+    fn new(
+        gpu: &Arc<dyn Gpu>,
+        swapchain: &Swapchain,
+        app: &mut crate::BevyEcsApp,
+        builder: EditorPluginBuilder,
+    ) -> Self {
         let window = app.world.get_resource::<EngineWindow>().unwrap();
 
-        let egui_support =
-            EguiSupport::new(window, &app_state().gpu, &app_state().swapchain).unwrap();
+        let egui_support = EguiSupport::new(window, gpu, swapchain).unwrap();
 
         let context = egui_support.create_context();
         let egui_app_context = EguiContext(context.clone());

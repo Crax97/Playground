@@ -1,6 +1,5 @@
 use std::ops::{Deref, DerefMut};
 
-use crate::app::app_state::app_state;
 use crate::math::shape::BoundingShape;
 use crate::{
     bevy_ecs_app::CommonResources, resource_map::ResourceHandle, LightType, RenderScene,
@@ -21,7 +20,7 @@ use nalgebra::{
 };
 use winit::window::Window;
 
-use crate::{MasterMaterial, MaterialInstance, Mesh};
+use crate::{GpuDevice, MasterMaterial, MaterialInstance, Mesh};
 
 #[derive(Resource)]
 pub struct EngineWindow(pub(crate) Window);
@@ -170,7 +169,7 @@ pub struct SceneSetup {
 }
 
 impl SpriteComponent {
-    pub fn new(description: SpriteComponentDescription) -> Self {
+    pub fn new(gpu: &GpuDevice, description: SpriteComponentDescription) -> Self {
         let sprite_gpu_data = SpriteGpuData {
             offset_size: vector![
                 description.atlas_offset.x,
@@ -179,8 +178,7 @@ impl SpriteComponent {
                 description.atlas_size.y
             ],
         };
-        let parameter_buffer = app_state()
-            .gpu
+        let parameter_buffer = gpu
             .make_buffer(
                 &BufferCreateInfo {
                     label: Some("Sprite parameters"),
@@ -190,14 +188,12 @@ impl SpriteComponent {
                 MemoryDomain::HostVisible,
             )
             .unwrap();
-        app_state()
-            .gpu
-            .write_buffer(
-                &parameter_buffer,
-                0,
-                bytemuck::cast_slice(&[sprite_gpu_data]),
-            )
-            .expect("Failed to write buffer");
+        gpu.write_buffer(
+            &parameter_buffer,
+            0,
+            bytemuck::cast_slice(&[sprite_gpu_data]),
+        )
+        .expect("Failed to write buffer");
         Self {
             texture: description.texture,
             z_layer: description.z_layer,

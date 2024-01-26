@@ -358,7 +358,7 @@ impl App for GLTFViewer {
             .scene_mut()
             .set_skybox_material(Some(skybox_instance));
 
-        app_state_mut()
+        app_state
             .swapchain_mut()
             .select_present_mode(PresentMode::Immediate)?;
 
@@ -625,7 +625,7 @@ impl App for GLTFViewer {
 
     fn draw<'a>(
         &'a mut self,
-        app_state: &'a AppState,
+        app_state: &'a mut AppState,
         backbuffer: &Backbuffer,
     ) -> anyhow::Result<CommandBuffer> {
         let mut command_buffer = app_state

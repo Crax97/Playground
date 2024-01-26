@@ -4,7 +4,6 @@ mod entities;
 
 use bitmap_level::BitmapLevelLoader;
 use character::{player_input_system, player_movement_system, KinematicCharacter};
-use engine::app::app_state::app_state;
 use engine::bevy_ecs::entity::Entity;
 use engine::bevy_ecs::query::With;
 use engine::bevy_ecs::schedule::IntoSystemConfigs;
@@ -34,11 +33,8 @@ pub struct GameState {
 
 fn main() -> anyhow::Result<()> {
     let mut app = BevyEcsApp::new()?;
-
-    app.renderer()
-        .set_combine_shader(DeferredRenderingPipeline::make_2d_combine_shader(
-            app_state().gpu.as_ref(),
-        )?);
+    let shader = DeferredRenderingPipeline::make_2d_combine_shader(app.state.gpu())?;
+    app.renderer().set_combine_shader(shader);
 
     app.setup_2d();
     app.resource_map()
@@ -57,7 +53,8 @@ fn main() -> anyhow::Result<()> {
         .add_systems(camera_system.after(player_movement_system));
     app.post_update_schedule().add_systems(collision_checking);
 
-    let plugin = EditorPluginBuilder::new().build(&mut app);
+    let plugin =
+        EditorPluginBuilder::new().build(&app.state.gpu, app.state.swapchain(), &mut app.app);
     app.add_plugin::<EditorPlugin>(plugin);
 
     app.world().insert_resource(GameState::default());

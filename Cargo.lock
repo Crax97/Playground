@@ -895,7 +895,6 @@ dependencies = [
  "log",
  "memoffset 0.9.0",
  "nalgebra",
- "once_cell",
  "rand",
  "rapier2d",
  "raw-window-handle 0.5.2",

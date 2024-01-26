@@ -17,10 +17,7 @@ use nalgebra::vector;
 use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop, window::Window};
 
 use crate::{
-    app::{
-        app_state::{app_state_mut, AppState},
-        App,
-    },
+    app::{app_state::AppState, App},
     components::EngineWindow,
     input::InputState,
     loaders::FileSystemTextureLoader,
@@ -124,8 +121,9 @@ pub struct BevyEcsApp {
 }
 
 pub struct BevyEcsAppWithLoop {
-    app: BevyEcsApp,
+    pub app: BevyEcsApp,
     evt_loop: EventLoop<()>,
+    pub state: AppState,
 }
 
 #[derive(Resource)]
@@ -143,9 +141,13 @@ pub struct CommonResources {
 
 impl BevyEcsApp {
     pub fn new() -> anyhow::Result<BevyEcsAppWithLoop> {
-        let (app, evt_loop) = crate::app::create_app::<Self>()?;
+        let (app, evt_loop, state) = crate::app::create_app::<Self>()?;
 
-        Ok(BevyEcsAppWithLoop { app, evt_loop })
+        Ok(BevyEcsAppWithLoop {
+            app,
+            evt_loop,
+            state,
+        })
     }
 
     pub fn add_plugin<P: Plugin>(&mut self, plugin: P) {
@@ -514,7 +516,7 @@ impl App for BevyEcsApp {
     }
     fn draw<'a>(
         &'a mut self,
-        app_state: &'a crate::app::app_state::AppState,
+        app_state: &'a mut crate::app::app_state::AppState,
         backbuffer: &crate::Backbuffer,
     ) -> anyhow::Result<gpu::CommandBuffer> {
         let mut command_buffer = app_state
@@ -554,7 +556,7 @@ impl App for BevyEcsApp {
         )?;
 
         for plugin in &mut self.plugins {
-            plugin.draw(&mut self.world, app_state_mut(), &mut command_buffer)
+            plugin.draw(&mut self.world, app_state, &mut command_buffer)
         }
 
         Ok(command_buffer)
@@ -580,7 +582,7 @@ fn setup_world_resources(
 
 impl BevyEcsAppWithLoop {
     pub fn run(self) -> anyhow::Result<()> {
-        crate::app::run(self.app, self.evt_loop)
+        crate::app::run(self.app, self.evt_loop, self.state)
     }
 
     pub fn event_loop(&self) -> &EventLoop<()> {

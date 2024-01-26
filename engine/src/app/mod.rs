@@ -3,7 +3,7 @@ pub mod egui_support;
 
 mod console;
 
-use std::{borrow::Cow, mem::ManuallyDrop};
+use std::borrow::Cow;
 
 use crate::Backbuffer;
 pub use console::*;
@@ -18,7 +18,7 @@ use winit::{
     window::Window,
 };
 
-use app_state::{app_state_mut, AppState};
+use app_state::AppState;
 pub trait App {
     fn window_name(&self, app_state: &AppState) -> Cow<str>;
 
@@ -55,58 +55,56 @@ pub trait App {
 
     fn draw<'a>(
         &'a mut self,
-        app_state: &'a AppState,
+        app_state: &'a mut AppState,
         backbuffer: &Backbuffer,
     ) -> anyhow::Result<CommandBuffer>;
 }
 
 pub fn app_loop<A: App + 'static>(
     app: &mut A,
+    app_state: &mut AppState,
     event: Event<'_, ()>,
 ) -> anyhow::Result<ControlFlow> {
-    let app_state_mut = app_state_mut();
-    app.on_event(&event, app_state_mut)?;
+    app.on_event(&event, app_state)?;
     match event {
         winit::event::Event::NewEvents(_) => {}
         winit::event::Event::WindowEvent { event, .. } => {
             match event {
                 winit::event::WindowEvent::CloseRequested => {
-                    // app_state_mut.gpu.on_destroyed();
+                    // app_state.gpu.on_destroyed();
                     return Ok(ControlFlow::ExitWithCode(0));
                 }
                 winit::event::WindowEvent::Resized(new_size) => {
-                    app_state_mut.needs_new_swapchain = true;
-                    app_state_mut.current_window_size = new_size;
+                    app_state.needs_new_swapchain = true;
+                    app_state.current_window_size = new_size;
                 }
                 _ => {}
             };
         }
         winit::event::Event::DeviceEvent { event, .. } => {
-            app.input(app_state_mut, event)?;
+            app.input(app_state, event)?;
         }
         winit::event::Event::UserEvent(_) => {}
         winit::event::Event::Suspended => {}
         winit::event::Event::Resumed => {}
         winit::event::Event::MainEventsCleared => {
-            let sz = app_state_mut.current_window_size;
-            if app_state_mut.needs_new_swapchain && sz.width > 0 && sz.height > 0 {
-                app_state_mut.swapchain_mut().recreate_swapchain()?;
+            let sz = app_state.current_window_size;
+            if app_state.needs_new_swapchain && sz.width > 0 && sz.height > 0 {
+                app_state.swapchain_mut().recreate_swapchain()?;
 
-                app_state_mut.needs_new_swapchain = false;
-                app.on_resized(&app_state_mut, sz);
+                app_state.needs_new_swapchain = false;
+                app.on_resized(&app_state, sz);
             }
 
             if sz.width > 0 && sz.height > 0 {
-                update_app(app, app_state_mut)?;
+                update_app(app, app_state)?;
             }
         }
         winit::event::Event::RedrawRequested(..) => {}
         winit::event::Event::RedrawEventsCleared => {}
         winit::event::Event::LoopDestroyed => {
-            app_state_mut.gpu.wait_device_idle().unwrap();
-            app_state_mut
-                .gpu
-                .save_pipeline_cache("pipeline_cache.pso")?;
+            app_state.gpu.wait_device_idle().unwrap();
+            app_state.gpu.save_pipeline_cache("pipeline_cache.pso")?;
         }
     }
 
@@ -138,7 +136,7 @@ fn draw_app(app_state_mut: &mut AppState, app: &mut dyn App) -> Result<(), anyho
         image: swapchain_image,
         image_view: swapchain_image_view,
     };
-    let mut command_buffer = app.draw(self::app_state_mut(), &backbuffer)?;
+    let mut command_buffer = app.draw(app_state_mut, &backbuffer)?;
     let frame = app_state_mut.swapchain.get_current_swapchain_frame();
     command_buffer.submit(&CommandBufferSubmitInfo {
         wait_semaphores: &[&frame.image_available_semaphore],
@@ -149,7 +147,7 @@ fn draw_app(app_state_mut: &mut AppState, app: &mut dyn App) -> Result<(), anyho
     Ok(())
 }
 
-pub fn create_app<A: App + 'static>() -> anyhow::Result<(A, EventLoop<()>)> {
+pub fn create_app<A: App + 'static>() -> anyhow::Result<(A, EventLoop<()>, AppState)> {
     let mut env_logger_builder = env_logger::builder();
 
     if cfg!(debug_assertions) {
@@ -172,15 +170,23 @@ pub fn create_app<A: App + 'static>() -> anyhow::Result<(A, EventLoop<()>)> {
         .with_title("Winit App")
         .build(&event_loop)?;
 
-    crate::app::app_state::init("Winit App", &window)?;
-    Ok((A::create(app_state_mut(), &event_loop, window)?, event_loop))
+    let mut state = crate::app::app_state::init("Winit App", &window)?;
+    Ok((
+        A::create(&mut state, &event_loop, window)?,
+        event_loop,
+        state,
+    ))
 }
 
-pub fn run<A: App + 'static>(mut app: A, mut event_loop: EventLoop<()>) -> anyhow::Result<()> {
+pub fn run<A: App + 'static>(
+    mut app: A,
+    mut event_loop: EventLoop<()>,
+    mut app_state: AppState,
+) -> anyhow::Result<()> {
     trace!("Created app");
-    app.on_startup(app_state_mut())?;
-    let exit_code =
-        event_loop.run_return(|event, _, control_flow| match app_loop(&mut app, event) {
+    app.on_startup(&mut app_state)?;
+    let exit_code = event_loop.run_return(|event, _, control_flow| {
+        match app_loop(&mut app, &mut app_state, event) {
             Ok(flow) => {
                 *control_flow = flow;
             }
@@ -190,15 +196,17 @@ pub fn run<A: App + 'static>(mut app: A, mut event_loop: EventLoop<()>) -> anyho
                 e.chain()
                     .fold(String::new(), |s, e| s + &e.to_string() + "\n"),
             ),
-        });
-    let app = ManuallyDrop::new(app);
-    std::mem::drop(ManuallyDrop::into_inner(app));
-    app_state_mut().gpu().on_destroyed();
+        }
+    });
+    std::mem::drop(app);
+    std::mem::drop(app_state.swapchain);
+    app_state.gpu.on_destroyed();
+    std::mem::drop(app_state.gpu);
     std::process::exit(exit_code);
 }
 
 pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
-    let (app, event_loop) = create_app::<A>()?;
+    let (app, event_loop, state) = create_app::<A>()?;
 
-    run::<A>(app, event_loop)
+    run::<A>(app, event_loop, state)
 }

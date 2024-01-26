@@ -228,7 +228,7 @@ impl App for TriangleApp {
 
     fn draw<'a>(
         &'a mut self,
-        app_state: &'a AppState,
+        app_state: &'a mut AppState,
         backbuffer: &Backbuffer,
     ) -> anyhow::Result<CommandBuffer> {
         let gpu = &app_state.gpu;

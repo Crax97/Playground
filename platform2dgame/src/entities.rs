@@ -1,4 +1,4 @@
-use engine::bevy_ecs;
+use engine::{bevy_ecs, GpuDevice};
 use engine::{
     bevy_ecs::{
         component::Component,
@@ -30,6 +30,7 @@ pub struct Star;
 
 const SPRITE_SIZE: u32 = 8;
 pub fn load_level_system(
+    gpu: Res<GpuDevice>,
     mut resource_map: ResMut<ResourceMap>,
     mut physics_context: ResMut<PhysicsContext2D>,
     common_resources: Res<CommonResources>,
@@ -63,6 +64,7 @@ pub fn load_level_system(
         match entity.ty {
             bitmap_level::EntityType::Player => {
                 spawn_player(
+                    &gpu,
                     entity,
                     &common_resources,
                     entities.clone(),
@@ -72,6 +74,7 @@ pub fn load_level_system(
             }
             bitmap_level::EntityType::Enemy => {
                 spawn_enemy(
+                    &gpu,
                     entity,
                     &common_resources,
                     entities.clone(),
@@ -80,6 +83,7 @@ pub fn load_level_system(
                 );
             }
             bitmap_level::EntityType::Terrain => spawn_terrain(
+                &gpu,
                 entity,
                 &common_resources,
                 entities.clone(),
@@ -87,9 +91,10 @@ pub fn load_level_system(
                 &mut physics_context,
             ),
             bitmap_level::EntityType::Grass => {
-                spawn_grass(&common_resources, entities.clone(), entity_spawned)
+                spawn_grass(&gpu, &common_resources, entities.clone(), entity_spawned)
             }
             bitmap_level::EntityType::Star => spawn_star(
+                &gpu,
                 entity,
                 &common_resources,
                 entities.clone(),
@@ -97,6 +102,7 @@ pub fn load_level_system(
                 &mut physics_context,
             ),
             bitmap_level::EntityType::Platform => spawn_platform(
+                &gpu,
                 entity,
                 &common_resources,
                 entities.clone(),
@@ -115,6 +121,7 @@ fn make_collider() -> ColliderBuilder {
 }
 
 fn spawn_player(
+    gpu: &GpuDevice,
     entity: &Entity,
     common_resources: &CommonResources,
     entities_texture: engine::ResourceHandle<Texture>,
@@ -132,14 +139,17 @@ fn spawn_player(
     let rigid_body = physics_context.add_rigidbody(rigid_body);
     let collider = physics_context.add_collider_with_parent(collider, rigid_body);
     entity_spawned.insert((
-        SpriteComponent::new(SpriteComponentDescription {
-            texture: entities_texture,
-            material: common_resources.default_sprite_material.clone(),
-            atlas_offset: [SPRITE_SIZE * 2, 0].into(),
-            atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
-            sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
-            z_layer: 0,
-        }),
+        SpriteComponent::new(
+            gpu,
+            SpriteComponentDescription {
+                texture: entities_texture,
+                material: common_resources.default_sprite_material.clone(),
+                atlas_offset: [SPRITE_SIZE * 2, 0].into(),
+                atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
+                sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
+                z_layer: 0,
+            },
+        ),
         rigid_body,
         collider,
         Player,
@@ -149,6 +159,7 @@ fn spawn_player(
 }
 
 fn spawn_enemy(
+    gpu: &GpuDevice,
     entity: &Entity,
     common_resources: &CommonResources,
     entities_texture: engine::ResourceHandle<Texture>,
@@ -163,14 +174,17 @@ fn spawn_enemy(
     let rigid_body = physics_context.add_rigidbody(rigid_body);
     let collider = physics_context.add_collider_with_parent(collider, rigid_body);
     entity_spawned.insert((
-        SpriteComponent::new(SpriteComponentDescription {
-            texture: entities_texture,
-            material: common_resources.default_sprite_material.clone(),
-            atlas_offset: [SPRITE_SIZE * 2, 0].into(),
-            atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
-            sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
-            z_layer: 0,
-        }),
+        SpriteComponent::new(
+            gpu,
+            SpriteComponentDescription {
+                texture: entities_texture,
+                material: common_resources.default_sprite_material.clone(),
+                atlas_offset: [SPRITE_SIZE * 2, 0].into(),
+                atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
+                sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
+                z_layer: 0,
+            },
+        ),
         rigid_body,
         collider,
         Enemy,
@@ -180,6 +194,7 @@ fn spawn_enemy(
 }
 
 fn spawn_terrain(
+    gpu: &GpuDevice,
     entity: &Entity,
     common_resources: &CommonResources,
     entities_texture: engine::ResourceHandle<Texture>,
@@ -191,34 +206,42 @@ fn spawn_terrain(
         .build();
     let collider = physics_context.add_collider(collider);
     entity_spawned.insert((
-        SpriteComponent::new(SpriteComponentDescription {
-            texture: entities_texture,
-            material: common_resources.default_sprite_material.clone(),
-            atlas_offset: [0, 0].into(),
-            atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
-            sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
-            z_layer: 0,
-        }),
+        SpriteComponent::new(
+            gpu,
+            SpriteComponentDescription {
+                texture: entities_texture,
+                material: common_resources.default_sprite_material.clone(),
+                atlas_offset: [0, 0].into(),
+                atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
+                sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
+                z_layer: 0,
+            },
+        ),
         collider,
     ));
 }
 
 fn spawn_grass(
+    gpu: &GpuDevice,
     common_resources: &CommonResources,
     entities_texture: engine::ResourceHandle<Texture>,
     mut entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
 ) {
-    entity_spawned.insert((SpriteComponent::new(SpriteComponentDescription {
-        texture: entities_texture,
-        material: common_resources.default_sprite_material.clone(),
-        atlas_offset: [SPRITE_SIZE, 0].into(),
-        atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
-        sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
-        z_layer: 0,
-    }),));
+    entity_spawned.insert((SpriteComponent::new(
+        gpu,
+        SpriteComponentDescription {
+            texture: entities_texture,
+            material: common_resources.default_sprite_material.clone(),
+            atlas_offset: [SPRITE_SIZE, 0].into(),
+            atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
+            sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
+            z_layer: 0,
+        },
+    ),));
 }
 
 fn spawn_star(
+    gpu: &GpuDevice,
     entity: &Entity,
     common_resources: &CommonResources,
     entities_texture: engine::ResourceHandle<Texture>,
@@ -232,14 +255,17 @@ fn spawn_star(
         .build();
     let collider = physics_context.add_collider(collider);
     entity_spawned.insert((
-        SpriteComponent::new(SpriteComponentDescription {
-            texture: entities_texture,
-            material: common_resources.default_sprite_material.clone(),
-            atlas_offset: [SPRITE_SIZE * 3, 0].into(),
-            atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
-            sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
-            z_layer: 0,
-        }),
+        SpriteComponent::new(
+            gpu,
+            SpriteComponentDescription {
+                texture: entities_texture,
+                material: common_resources.default_sprite_material.clone(),
+                atlas_offset: [SPRITE_SIZE * 3, 0].into(),
+                atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
+                sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
+                z_layer: 0,
+            },
+        ),
         collider,
         Star,
         DebugName("Star".to_owned()),
@@ -247,6 +273,7 @@ fn spawn_star(
 }
 
 fn spawn_platform(
+    gpu: &GpuDevice,
     entity: &Entity,
     common_resources: &CommonResources,
     entities_texture: engine::ResourceHandle<Texture>,
@@ -258,14 +285,17 @@ fn spawn_platform(
         .build();
     let collider = physics_context.add_collider(collider);
     entity_spawned.insert((
-        SpriteComponent::new(SpriteComponentDescription {
-            texture: entities_texture,
-            material: common_resources.default_sprite_material.clone(),
-            atlas_offset: [SPRITE_SIZE * 5, 0].into(),
-            atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
-            sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
-            z_layer: 0,
-        }),
+        SpriteComponent::new(
+            gpu,
+            SpriteComponentDescription {
+                texture: entities_texture,
+                material: common_resources.default_sprite_material.clone(),
+                atlas_offset: [SPRITE_SIZE * 5, 0].into(),
+                atlas_size: [SPRITE_SIZE, SPRITE_SIZE].into(),
+                sprite_size: [SPRITE_SIZE as f32, SPRITE_SIZE as f32].into(),
+                z_layer: 0,
+            },
+        ),
         collider,
     ));
 }

@@ -162,7 +162,7 @@ impl App for PlanesApp {
             },
         )?;
 
-        app_state_mut()
+        app_state
             .swapchain_mut()
             .select_present_mode(PresentMode::Mailbox)?;
 
@@ -259,7 +259,7 @@ impl App for PlanesApp {
 
     fn draw<'a>(
         &'a mut self,
-        app_state: &'a AppState,
+        app_state: &'a mut AppState,
         backbuffer: &Backbuffer,
     ) -> anyhow::Result<CommandBuffer> {
         let mut cb = app_state
