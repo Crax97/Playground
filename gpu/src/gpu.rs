@@ -2391,6 +2391,7 @@ impl VkGpu {
             .write()
             .expect("Failed to lock resource map");
         let mut map = resources.get_map_mut::<H>();
+        let id = handle.id();
         if let Some(resource) = map.remove(handle) {
             destroyed_resources
                 .write()
@@ -2399,6 +2400,8 @@ impl VkGpu {
                     resource,
                     H::AssociatedHandle::handle_type(),
                 ));
+        } else {
+            warn!("Attempted to destroy resource of type {:?} with id {} which is not valid (freed earlier?): this will cause a panic in the future", H::AssociatedHandle::handle_type(), id);
         }
     }
 }
