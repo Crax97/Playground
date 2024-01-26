@@ -305,6 +305,12 @@ pub(crate) mod swapchain_2 {
                 image_available_semaphore,
             })
         }
+
+        pub fn destroy(&self, gpu: &dyn Gpu) {
+            gpu.destroy_semaphore(self.render_finished_semaphore);
+            gpu.destroy_semaphore(self.image_available_semaphore);
+            gpu.destroy_fence(self.in_flight_fence);
+        }
     }
     define_pimpl_type!(Swapchain {
         fn acquire_next_image(&mut self) -> anyhow::Result<(ImageHandle, ImageViewHandle)>;
@@ -314,6 +320,7 @@ pub(crate) mod swapchain_2 {
         fn extents(&self) -> Extent2D;
         fn present_format(&self) -> ImageFormat;
         fn get_current_swapchain_frame(&self) -> &SwapchainFrame;
+        fn destroy(&mut self, gpu: &dyn Gpu);
     });
 }
 
@@ -390,7 +397,7 @@ pub trait Gpu: Send + Sync + AsAnyArc + 'static {
 
     fn create_swapchain(&self, window: &Window) -> anyhow::Result<Swapchain>;
 
-    fn on_destroyed(&self);
+    fn destroy(&self);
 }
 
 pub fn make_gpu(config: GpuConfiguration) -> anyhow::Result<Arc<dyn Gpu>> {
@@ -472,7 +479,8 @@ pub struct ImageCreateInfo<'a> {
     pub usage: ImageUsageFlags,
 }
 
-pub struct ImageViewCreateInfo {
+pub struct ImageViewCreateInfo<'a> {
+    pub label: Option<&'a str>,
     pub image: ImageHandle,
     pub view_type: ImageViewType,
     pub format: ImageFormat,
@@ -509,6 +517,7 @@ pub struct BufferImageCopyInfo {
 }
 
 pub struct ShaderModuleCreateInfo<'a> {
+    pub label: Option<&'a str>,
     pub code: &'a [u8],
 }
 

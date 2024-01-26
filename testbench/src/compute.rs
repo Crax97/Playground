@@ -40,6 +40,7 @@ fn main() -> anyhow::Result<()> {
     })?;
 
     let compute_module = gpu.make_shader_module(&ShaderModuleCreateInfo {
+        label: Some("Compute sum"),
         code: bytemuck::cast_slice(COMPUTE_SUM),
     })?;
 

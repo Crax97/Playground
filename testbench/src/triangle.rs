@@ -9,9 +9,9 @@ use engine_macros::glsl;
 use gpu::{
     AttachmentReference, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags, CommandBuffer,
     CullMode, FramebufferColorAttachment, ImageAspectFlags, ImageCreateInfo, ImageFormat,
-    ImageLayout, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, IndexType, InputRate,
-    MemoryDomain, PresentMode, SamplerCreateInfo, SamplerHandle, ShaderModuleHandle, ShaderStage,
-    SubpassDescription, VertexBindingInfo,
+    ImageHandle, ImageLayout, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, IndexType,
+    InputRate, MemoryDomain, PresentMode, SamplerCreateInfo, SamplerHandle, ShaderModuleHandle,
+    ShaderStage, SubpassDescription, VertexBindingInfo,
 };
 use nalgebra::*;
 use winit::event_loop::EventLoop;
@@ -70,6 +70,7 @@ pub struct TriangleApp {
     uv_buffer: BufferHandle,
     index_buffer: BufferHandle,
 
+    david_image: ImageHandle,
     david_image_view: ImageViewHandle,
 
     david_sampler: SamplerHandle,
@@ -96,11 +97,13 @@ impl App for TriangleApp {
         let vertex_module = app_state
             .gpu
             .make_shader_module(&gpu::ShaderModuleCreateInfo {
+                label: Some("Triangle vertex shader"),
                 code: bytemuck::cast_slice(VERTEX_SHADER),
             })?;
         let fragment_module = app_state
             .gpu
             .make_shader_module(&gpu::ShaderModuleCreateInfo {
+                label: Some("Triangle fragment shader"),
                 code: bytemuck::cast_slice(FRAGMENT_SHADER),
             })?;
 
@@ -132,6 +135,7 @@ impl App for TriangleApp {
         )?;
 
         let david_image_view = app_state.gpu.make_image_view(&ImageViewCreateInfo {
+            label: Some("David image view"),
             image: david_image.clone(),
             view_type: gpu::ImageViewType::Type2D,
             format: ImageFormat::Rgba8,
@@ -218,6 +222,7 @@ impl App for TriangleApp {
             triangle_buffer,
             index_buffer,
 
+            david_image,
             david_image_view,
             david_sampler,
 
@@ -344,6 +349,18 @@ impl App for TriangleApp {
 
     fn end_frame(&mut self, _app_state: &AppState) {
         self.time.end_frame();
+    }
+
+    fn on_shutdown(&mut self, app_state: &mut AppState) {
+        let gpu = app_state.gpu();
+        gpu.destroy_buffer(self.triangle_buffer);
+        gpu.destroy_buffer(self.uv_buffer);
+        gpu.destroy_buffer(self.index_buffer);
+        gpu.destroy_image_view(self.david_image_view);
+        gpu.destroy_image(self.david_image);
+        gpu.destroy_sampler(self.david_sampler);
+        gpu.destroy_shader_module(self.fragment_module);
+        gpu.destroy_shader_module(self.vertex_module);
     }
 }
 

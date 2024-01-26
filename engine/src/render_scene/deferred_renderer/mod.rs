@@ -139,14 +139,17 @@ impl DeferredRenderingPipeline {
         }
 
         let screen_quad = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            label: Some("Screen Quad"),
             code: bytemuck::cast_slice(SCREEN_QUAD),
         })?;
 
         let screen_quad_flipped = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            label: Some("Screen Quad Flipped"),
             code: bytemuck::cast_slice(SCREEN_QUAD_FLIPPED),
         })?;
 
         let texture_copy = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            label: Some("Texture Copy"),
             code: bytemuck::cast_slice(TEXTURE_COPY),
         })?;
 
@@ -213,12 +216,14 @@ impl DeferredRenderingPipeline {
 
     pub fn make_2d_combine_shader(gpu: &dyn Gpu) -> anyhow::Result<ShaderModuleHandle> {
         gpu.make_shader_module(&ShaderModuleCreateInfo {
+            label: Some("Combine shader 2D"),
             code: bytemuck::cast_slice(COMBINE_SHADER_2D),
         })
     }
 
     pub fn make_3d_combine_shader(gpu: &dyn Gpu) -> anyhow::Result<ShaderModuleHandle> {
         gpu.make_shader_module(&ShaderModuleCreateInfo {
+            label: Some("Combine shader 3D"),
             code: bytemuck::cast_slice(COMBINE_SHADER_3D),
         })
     }
@@ -1341,5 +1346,25 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
     fn on_resolution_changed(&mut self, new_resolution: Extent2D) {
         self.view_size = new_resolution;
+    }
+
+    fn destroy(&mut self, gpu: &dyn Gpu) {
+        self.cascaded_shadow_map.destroy(gpu);
+        for framebuffer in &self.frame_buffers {
+            gpu.destroy_buffer(framebuffer.light_buffer);
+            gpu.destroy_buffer(framebuffer.camera_buffer);
+        }
+
+        for pass in &self.post_process_stack {
+            pass.destroy(gpu);
+        }
+
+        self.image_allocator.destroy(gpu);
+        self.sampler_allocator.destroy(gpu);
+        gpu.destroy_shader_module(self.screen_quad);
+        gpu.destroy_shader_module(self.screen_quad_flipped);
+        gpu.destroy_shader_module(self.texture_copy);
+        gpu.destroy_shader_module(self.combine_shader);
+        gpu.destroy_sampler(self.gbuffer_nearest_sampler);
     }
 }

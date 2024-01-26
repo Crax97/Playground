@@ -330,6 +330,10 @@ impl App for PlanesApp {
         self.camera.forward = -direction;
         Ok(())
     }
+
+    fn on_shutdown(&mut self, app_state: &mut AppState) {
+        todo!()
+    }
 }
 
 fn main() -> anyhow::Result<()> {

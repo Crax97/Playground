@@ -84,6 +84,7 @@ impl CascadedShadowMap {
         )?;
 
         let shadow_atlas_view = gpu.make_image_view(&ImageViewCreateInfo {
+            label: Some("Shadow atlas view"),
             image: shadow_atlas.clone(),
             view_type: gpu::ImageViewType::Type2D,
             format: gpu::ImageFormat::Depth,
@@ -494,5 +495,15 @@ impl CascadedShadowMap {
             bytemuck::cast_slice(&self.csm_splits),
         )?;
         Ok(())
+    }
+
+    pub(crate) fn destroy(&self, gpu: &dyn Gpu) {
+        gpu.destroy_image_view(self.shadow_atlas_view);
+        gpu.destroy_image(self.shadow_atlas);
+
+        for buffers in &self.csm_buffers {
+            gpu.destroy_buffer(buffers.csm_splits);
+            gpu.destroy_buffer(buffers.shadow_casters);
+        }
     }
 }

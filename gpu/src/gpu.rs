@@ -1580,7 +1580,7 @@ impl VkGpu {
         let shader_info =
             Self::reflect_spirv(code).expect("TOOO: change return type to anyhow::Result");
 
-        let create_info = vk::ShaderModuleCreateInfo {
+        let vk_create_info = vk::ShaderModuleCreateInfo {
             s_type: StructureType::SHADER_MODULE_CREATE_INFO,
             p_next: std::ptr::null(),
             flags: ShaderModuleCreateFlags::empty(),
@@ -1588,8 +1588,12 @@ impl VkGpu {
             p_code,
         };
 
-        let shader =
-            VkShaderModule::create(self.vk_logical_device(), None, &create_info, shader_info)?;
+        let shader = VkShaderModule::create(
+            self.vk_logical_device(),
+            create_info.label.to_owned(),
+            &vk_create_info,
+            shader_info,
+        )?;
 
         Ok(shader)
     }
@@ -2188,7 +2192,7 @@ impl VkGpu {
         };
         VkImageView::create(
             self.vk_logical_device(),
-            None,
+            create_info.label.to_owned(),
             &vk_create_info,
             gpu_view_format,
             create_info.image.clone(),
@@ -2386,14 +2390,16 @@ impl VkGpu {
             .allocated_resources
             .write()
             .expect("Failed to lock resource map");
-        let resource = resources.get_map_mut::<H>().remove(handle);
-        destroyed_resources
-            .write()
-            .expect("Failed to block destroyed resources vec")
-            .push(DestroyedResource::new(
-                resource,
-                H::AssociatedHandle::handle_type(),
-            ));
+        let mut map = resources.get_map_mut::<H>();
+        if let Some(resource) = map.remove(handle) {
+            destroyed_resources
+                .write()
+                .expect("Failed to block destroyed resources vec")
+                .push(DestroyedResource::new(
+                    resource,
+                    H::AssociatedHandle::handle_type(),
+                ));
+        }
     }
 }
 
@@ -2546,7 +2552,7 @@ impl Gpu for VkGpu {
         &self,
         create_info: &crate::SemaphoreCreateInfo,
     ) -> anyhow::Result<SemaphoreHandle> {
-        let semaphore = VkSemaphore::new(self, &create_info.to_vk())?;
+        let semaphore = VkSemaphore::new(self, &create_info.to_vk(), create_info.label)?;
         let handle = SemaphoreHandle::new();
         self.state
             .allocated_resources
@@ -2557,7 +2563,7 @@ impl Gpu for VkGpu {
     }
 
     fn make_fence(&self, create_info: &crate::FenceCreateInfo) -> anyhow::Result<FenceHandle> {
-        let fence = VkFence::new(self, &create_info.to_vk())?;
+        let fence = VkFence::new(self, &create_info.to_vk(), create_info.label)?;
         let handle = FenceHandle::new();
         self.state
             .allocated_resources
@@ -2937,7 +2943,8 @@ impl Gpu for VkGpu {
         Ok(Swapchain { pimpl })
     }
 
-    fn on_destroyed(&self) {
+    fn destroy(&self) {
+        self.destroy_buffer(self.staging_buffer);
         let resources = self
             .state
             .allocated_resources

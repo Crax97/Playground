@@ -638,14 +638,22 @@ impl ToVk for VkFence {
 }
 
 impl VkFence {
-    pub fn new(gpu: &VkGpu, create_info: &vk::FenceCreateInfo) -> VkResult<Self> {
-        Self::create(gpu.vk_logical_device(), None, create_info)
+    pub fn new(
+        gpu: &VkGpu,
+        create_info: &vk::FenceCreateInfo,
+        label: Option<&str>,
+    ) -> VkResult<Self> {
+        Self::create(gpu.vk_logical_device(), label.to_owned(), create_info)
     }
 }
 
 impl VkSemaphore {
-    pub fn new(gpu: &VkGpu, create_info: &vk::SemaphoreCreateInfo) -> VkResult<Self> {
-        Self::create(gpu.vk_logical_device(), None, create_info)
+    pub fn new(
+        gpu: &VkGpu,
+        create_info: &vk::SemaphoreCreateInfo,
+        label: Option<&str>,
+    ) -> VkResult<Self> {
+        Self::create(gpu.vk_logical_device(), label.to_owned(), create_info)
     }
 }
 

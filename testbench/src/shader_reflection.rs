@@ -62,6 +62,7 @@ fn main() -> anyhow::Result<()> {
     })?;
 
     let shader_module = gpu.make_shader_module(&ShaderModuleCreateInfo {
+        label: Some("Shader Reflection test shader"),
         code: bytemuck::cast_slice(SHADER_SOURCE_VS),
     })?;
 

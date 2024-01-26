@@ -46,6 +46,7 @@ pub trait App {
     fn on_startup(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
         Ok(())
     }
+    fn on_shutdown(&mut self, app_state: &mut AppState);
 
     fn begin_frame(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
         Ok(())
@@ -198,10 +199,9 @@ pub fn run<A: App + 'static>(
             ),
         }
     });
+    app.on_shutdown(&mut app_state);
     std::mem::drop(app);
-    std::mem::drop(app_state.swapchain);
-    app_state.gpu.on_destroyed();
-    std::mem::drop(app_state.gpu);
+    std::mem::drop(app_state);
     std::process::exit(exit_code);
 }
 

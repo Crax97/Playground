@@ -63,6 +63,7 @@ impl RenderImageAllocator {
 
                 let view = gpu
                     .make_image_view(&gpu::ImageViewCreateInfo {
+                        label: Some(&(label.to_owned() + " - view")),
                         image: image.clone(),
                         view_type: gpu::ImageViewType::Type2D,
                         format: desc.format,
@@ -88,5 +89,12 @@ impl RenderImageAllocator {
         Self {
             image_allocator: LifetimedCache::new(lifetime),
         }
+    }
+
+    pub(crate) fn destroy(&self, gpu: &dyn Gpu) {
+        self.image_allocator.for_each(|v| {
+            gpu.destroy_image_view(v.view);
+            gpu.destroy_image(v.image);
+        })
     }
 }

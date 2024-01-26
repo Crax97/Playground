@@ -384,6 +384,7 @@ impl App for GLTFViewer {
         });
 
         let depth_draw = app_state.gpu.make_shader_module(&ShaderModuleCreateInfo {
+            label: Some("Depth draw"),
             code: bytemuck::cast_slice(DEPTH_DRAW),
         })?;
 
@@ -663,6 +664,14 @@ impl App for GLTFViewer {
             .paint_frame(output, &app_state.swapchain, &command_buffer);
 
         Ok(command_buffer)
+    }
+
+    fn on_shutdown(&mut self, app_state: &mut AppState) {
+        app_state.gpu().destroy_shader_module(self.depth_draw);
+        self.gltf_loader
+            .scene_mut()
+            .clean_resources(app_state.gpu());
+        self.scene_renderer.destroy(app_state.gpu())
     }
 }
 

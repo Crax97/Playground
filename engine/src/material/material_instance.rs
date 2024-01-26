@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::resource_map::ResourceHandle;
 use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
 
@@ -15,7 +17,7 @@ pub struct MaterialInstanceDescription<'a> {
     pub parameter_buffers: Vec<BufferHandle>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct MaterialInstance {
     pub(crate) owner: ResourceHandle<MasterMaterial>,
     pub(crate) textures: Vec<ResourceHandle<Texture>>,
@@ -60,5 +62,17 @@ impl MaterialInstance {
             },
             MemoryDomain::HostVisible,
         )
+    }
+
+    pub(crate) fn destroy(&self, gpu: &dyn Gpu) {
+        let mut buffers = HashSet::new();
+
+        self.parameter_buffers.iter().for_each(|buf| {
+            buffers.insert(*buf);
+        });
+
+        for buffer in buffers {
+            gpu.destroy_buffer(buffer);
+        }
     }
 }

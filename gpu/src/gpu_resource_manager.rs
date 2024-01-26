@@ -41,9 +41,9 @@ impl<T: HasAssociatedHandle + Clone> AllocatedResourceMap<T> {
     pub fn insert(&mut self, handle: &T::AssociatedHandle, resource: T) {
         self.0.insert(handle.id(), resource);
     }
-    pub fn remove(&mut self, handle: T::AssociatedHandle) -> T {
+    pub fn remove(&mut self, handle: T::AssociatedHandle) -> Option<T> {
         assert!(!handle.is_null());
-        self.0.remove(&handle.id()).expect("Resource not found?")
+        self.0.remove(&handle.id())
     }
     pub fn len(&self) -> usize {
         self.0.len()
@@ -81,7 +81,7 @@ impl GpuResourceMap {
     pub fn remove<T: HasAssociatedHandle + Clone + Send + Sync + 'static>(
         &mut self,
         handle: T::AssociatedHandle,
-    ) -> T {
+    ) -> Option<T> {
         if !self.maps.contains_key(&T::AssociatedHandle::handle_type()) {
             self.maps.insert(
                 T::AssociatedHandle::handle_type(),
@@ -150,6 +150,15 @@ impl<T: Sized + Send + Sync + 'static> LifetimedCache<T> {
             map: RwLock::new(HashMap::new()),
             resource_lifetime,
         }
+    }
+
+    pub fn for_each<F: FnMut(&T)>(&self, f: F) {
+        self.map
+            .read()
+            .expect("Failed to lock map")
+            .values()
+            .map(|v| &v.resource)
+            .for_each(f);
     }
 
     pub fn ensure_existing<C: FnOnce() -> T>(&self, hash: u64, creation_func: C) {

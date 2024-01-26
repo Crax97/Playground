@@ -722,10 +722,10 @@ impl swapchain_2::Impl for VkSwapchain {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-}
 
-impl Drop for VkSwapchain {
-    fn drop(&mut self) {
+    fn destroy(&mut self, gpu: &dyn Gpu) {
+        self.frames_in_flight.iter().for_each(|f| f.destroy(gpu));
+        gpu.destroy_fence(self.next_image_fence);
         {
             let resources = self.state.write_resource_map();
             std::mem::take(&mut self.current_swapchain_image_views)

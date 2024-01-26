@@ -26,25 +26,36 @@ pub fn read_file_to_vk_module<P: AsRef<Path>>(
     gpu: &dyn Gpu,
     path: P,
 ) -> anyhow::Result<ShaderModuleHandle> {
-    info!("Reading path from {:?}", path.as_ref());
-    let input_file = std::fs::read(path)?;
-    let create_info = ShaderModuleCreateInfo { code: &input_file };
-    Ok(gpu.make_shader_module(&create_info)?)
+    let path = path
+        .as_ref()
+        .canonicalize()
+        .expect("Failed to canonicalize path");
+    let path_str = path.to_str().expect("Failed to parse path as str");
+    info!("Reading path from {:?}", path,);
+    let input_file = std::fs::read(&path)?;
+    let create_info = ShaderModuleCreateInfo {
+        label: Some(path_str),
+        code: &input_file,
+    };
+    gpu.make_shader_module(&create_info)
 }
 
 pub fn read_file_to_shader_module<P: AsRef<Path>>(
     gpu: &VkGpu,
     path: P,
 ) -> anyhow::Result<ShaderModuleHandle> {
-    info!(
-        "Reading path from {:?}",
-        path.as_ref()
-            .canonicalize()
-            .expect("Failed to canonicalize path")
-    );
-    let input_file = std::fs::read(path)?;
-    let create_info = ShaderModuleCreateInfo { code: &input_file };
-    Ok(gpu.make_shader_module(&create_info)?)
+    let path = path
+        .as_ref()
+        .canonicalize()
+        .expect("Failed to canonicalize path");
+    let path_str = path.to_str().expect("Failed to parse path as str");
+    info!("Reading path from {:?}", path,);
+    let input_file = std::fs::read(&path)?;
+    let create_info = ShaderModuleCreateInfo {
+        label: Some(path_str),
+        code: &input_file,
+    };
+    gpu.make_shader_module(&create_info)
 }
 
 pub fn load_image_from_path<P: AsRef<Path>>(
@@ -138,7 +149,7 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
     let hdr_image = load_image_from_path(path, cube_image_format)?;
     let hdr_texture = gpu.make_image(
         &ImageCreateInfo {
-            label: None,
+            label: Some("Loaded cubemap image"),
             width: hdr_image.width,
             height: hdr_image.height,
             depth: 1,
@@ -152,6 +163,7 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
         Some(&hdr_image.bytes),
     )?;
     let hdr_texture_view = gpu.make_image_view(&ImageViewCreateInfo {
+        label: Some("Loaded cubemap image view"),
         image: hdr_texture,
         view_type: gpu::ImageViewType::Type2D,
         format: cube_image_format,
@@ -175,6 +187,10 @@ pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
         resource_map,
         &cube_mesh,
     )?;
+
+    gpu.destroy_shader_module(equilateral_fragment);
+    gpu.destroy_image(hdr_texture);
+    gpu.destroy_image_view(hdr_texture_view);
 
     Texture::wrap(backing_image, view)
 }
@@ -221,6 +237,7 @@ fn cubemap_main_loop(
 
     let make_image_view = |i| {
         gpu.make_image_view(&gpu::ImageViewCreateInfo {
+            label: Some(&format!("Cubemap image view #{i}")),
             image: backing_image.clone(),
             view_type: gpu::ImageViewType::Type2D,
             format: cube_image_format,
@@ -406,6 +423,7 @@ fn cubemap_main_loop(
     }
     gpu.wait_device_idle()?;
     let view = gpu.make_image_view(&gpu::ImageViewCreateInfo {
+        label: Some(&format!("Rendered cubemap final result")),
         image: backing_image.clone(),
         view_type: gpu::ImageViewType::Cube,
         format: cube_image_format,
@@ -438,7 +456,11 @@ fn cubemap_main_loop(
             layer_count: 6,
         },
     )?;
+    for view in views {
+        gpu.destroy_image_view(view);
+    }
     gpu.wait_device_idle()?;
+    gpu.destroy_shader_module(vertex_module);
     Ok((backing_image, view))
 }
 
@@ -462,6 +484,7 @@ pub fn generate_irradiance_map(
         resource_map,
         cube_mesh,
     )?;
+    gpu.destroy_shader_module(convolve);
     Texture::wrap(backing_image, view)
 }
 

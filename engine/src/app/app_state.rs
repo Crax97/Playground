@@ -46,6 +46,13 @@ impl AppState {
     }
 }
 
+impl Drop for AppState {
+    fn drop(&mut self) {
+        self.swapchain.destroy(self.gpu.as_ref());
+        self.gpu.destroy();
+    }
+}
+
 /*
     Creates a global AppState, which is going to belong to a single thread.
     The AppState can be only accessed by the thread that ran engine::init()

@@ -23,6 +23,7 @@ pub trait PostProcessPass: 'static {
         post_process_pass: &mut RenderPass,
         resources: &PostProcessResources,
     ) -> anyhow::Result<()>;
+    fn destroy(&self, gpu: &dyn Gpu);
 }
 
 pub struct TonemapPass {
@@ -43,6 +44,7 @@ impl TonemapPass {
         );
         Ok(Self {
             shader_handle: gpu.make_shader_module(&gpu::ShaderModuleCreateInfo {
+                label: Some("Tonemap shader"),
                 code: bytemuck::cast_slice(TONEMAP),
             })?,
         })
@@ -73,6 +75,10 @@ impl PostProcessPass for TonemapPass {
         post_process_pass.set_vertex_shader(resources.screen_quad.clone());
         post_process_pass.set_fragment_shader(self.shader_handle.clone());
         post_process_pass.draw(4, 1, 0, 0)
+    }
+
+    fn destroy(&self, gpu: &dyn Gpu) {
+        gpu.destroy_shader_module(self.shader_handle);
     }
 }
 #[repr(C)]
@@ -121,9 +127,11 @@ impl FxaaPass {
         );
 
         let fxaa_vs = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            label: Some("FXAA VS"),
             code: bytemuck::cast_slice(FXAA_VS),
         })?;
         let fxaa_fs = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            label: Some("FXAA FS"),
             code: bytemuck::cast_slice(FXAA_FS),
         })?;
         Ok(Self { fxaa_vs, fxaa_fs })
@@ -191,5 +199,10 @@ impl PostProcessPass for FxaaPass {
             ShaderStage::ALL_GRAPHICS,
         );
         post_process_pass.draw(3, 1, 0, 0)
+    }
+
+    fn destroy(&self, gpu: &dyn Gpu) {
+        gpu.destroy_shader_module(self.fxaa_vs);
+        gpu.destroy_shader_module(self.fxaa_fs);
     }
 }

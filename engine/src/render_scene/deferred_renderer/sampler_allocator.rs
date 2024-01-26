@@ -31,4 +31,10 @@ impl SamplerAllocator {
             sampler_allocator: LifetimedCache::new(lifetime),
         }
     }
+
+    pub(crate) fn destroy(&self, gpu: &dyn Gpu) {
+        self.sampler_allocator.for_each(|v| {
+            gpu.destroy_sampler(*v);
+        })
+    }
 }

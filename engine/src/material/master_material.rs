@@ -65,7 +65,14 @@ impl Resource for MasterMaterial {
         &self.name
     }
 
-    fn destroyed(&mut self, _gpu: &dyn gpu::Gpu) {}
+    fn destroyed(&mut self, gpu: &dyn gpu::Gpu) {
+        for perm in self.shader_permutations.values() {
+            gpu.destroy_shader_module(perm.vertex_shader);
+            if let Some(f) = perm.fragment_shader {
+                gpu.destroy_shader_module(f);
+            }
+        }
+    }
 }
 
 impl MasterMaterial {

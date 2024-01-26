@@ -267,6 +267,7 @@ impl GltfLoader {
             )?;
 
             let gpu_image_view = gpu.make_image_view(&ImageViewCreateInfo {
+                label: Some(&(label.to_string() + " - View")),
                 image: gpu_image.clone(),
                 view_type: ImageViewType::Type2D,
                 format,

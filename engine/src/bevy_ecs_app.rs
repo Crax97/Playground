@@ -280,15 +280,19 @@ impl BevyEcsApp {
         let black_texture = resource_map.add(black_texture);
 
         let vertex_module = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            label: Some("Default vertex shader"),
             code: bytemuck::cast_slice(DEFAULT_DEFERRED_VS),
         })?;
         let fragment_module = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            label: Some("Default fragment shader"),
             code: bytemuck::cast_slice(DEFAULT_DEFERRED_FS),
         })?;
         let fragment_module_transparency = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            label: Some("Default transparency fragment shader"),
             code: bytemuck::cast_slice(DEFAULT_DEFERRED_TRANSPARENCY_FS),
         })?;
         let fragment_sprite = gpu.make_shader_module(&ShaderModuleCreateInfo {
+            label: Some("Default sprite shader"),
             code: bytemuck::cast_slice(DEFAULT_FRAGMENT_SPRITE),
         })?;
         let default_material = MasterMaterial::new(&crate::MasterMaterialDescription {
@@ -560,6 +564,10 @@ impl App for BevyEcsApp {
         }
 
         Ok(command_buffer)
+    }
+
+    fn on_shutdown(&mut self, app_state: &mut AppState) {
+        todo!()
     }
 }
 

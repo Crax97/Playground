@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::{
     math::shape::BoundingShape,
     render_scene::{BinaryBvh, Bvh},
@@ -254,6 +256,20 @@ impl RenderScene {
     pub fn set_skybox_material(&mut self, new_skybox_material: Option<MaterialInstance>) {
         self.skybox_material = new_skybox_material;
     }
+
+    pub fn clean_resources(&mut self, gpu: &dyn Gpu) {
+        let mut unique_material_instances = HashSet::new();
+        std::mem::take(&mut self.primitives)
+            .into_iter()
+            .for_each(|prim| {
+                prim.materials.into_iter().for_each(|inst| {
+                    unique_material_instances.insert(inst);
+                });
+            });
+        unique_material_instances.into_iter().for_each(|inst| {
+            inst.destroy(gpu);
+        })
+    }
 }
 
 pub struct Backbuffer {
@@ -276,6 +292,7 @@ pub trait RenderingPipeline {
 
     fn on_resolution_changed(&mut self, new_resolution: Extent2D);
 
+    fn destroy(&mut self, gpu: &dyn Gpu);
     fn create_material(
         &mut self,
         gpu: &dyn Gpu,
