@@ -328,7 +328,10 @@ pub trait Gpu: Send + Sync + AsAnyArc + 'static {
     fn update(&self);
 
     fn make_semaphore(&self, create_info: &SemaphoreCreateInfo) -> anyhow::Result<SemaphoreHandle>;
+    fn destroy_semaphore(&self, semaphore: SemaphoreHandle);
+
     fn make_fence(&self, create_info: &FenceCreateInfo) -> anyhow::Result<FenceHandle>;
+    fn destroy_fence(&self, fence: FenceHandle);
 
     fn make_buffer(
         &self,
@@ -342,6 +345,7 @@ pub trait Gpu: Send + Sync + AsAnyArc + 'static {
         offset: u64,
         size: usize,
     ) -> anyhow::Result<Vec<u8>>;
+    fn destroy_buffer(&self, buffer: BufferHandle);
 
     fn make_image(
         &self,
@@ -356,16 +360,21 @@ pub trait Gpu: Send + Sync + AsAnyArc + 'static {
         region: Rect2D,
         layer: u32,
     ) -> anyhow::Result<()>;
+    fn destroy_image(&self, image: ImageHandle);
 
     fn make_image_view(&self, info: &ImageViewCreateInfo) -> anyhow::Result<ImageViewHandle>;
+    fn destroy_image_view(&self, image_view: ImageViewHandle);
 
     fn make_sampler(&self, info: &SamplerCreateInfo) -> anyhow::Result<SamplerHandle>;
-    fn get_shader_info(&self, shader_handle: &ShaderModuleHandle) -> ShaderInfo;
+    fn destroy_sampler(&self, sampler: SamplerHandle);
 
     fn make_shader_module(
         &self,
         info: &ShaderModuleCreateInfo,
     ) -> anyhow::Result<ShaderModuleHandle>;
+    fn get_shader_info(&self, shader_handle: &ShaderModuleHandle) -> ShaderInfo;
+    fn destroy_shader_module(&self, shader_module: ShaderModuleHandle);
+
     fn transition_image_layout(
         &self,
         image: &ImageHandle,

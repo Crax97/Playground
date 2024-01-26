@@ -41,7 +41,10 @@ impl<T: HasAssociatedHandle + Clone> AllocatedResourceMap<T> {
     pub fn insert(&mut self, handle: &T::AssociatedHandle, resource: T) {
         self.0.insert(handle.id(), resource);
     }
-
+    pub fn remove(&mut self, handle: T::AssociatedHandle) -> T {
+        assert!(!handle.is_null());
+        self.0.remove(&handle.id()).expect("Resource not found?")
+    }
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -82,6 +85,7 @@ impl GpuResourceMap {
         assert!(!handle.is_null());
         self.get_map().resolve(handle)
     }
+
     pub fn get_map_mut<T: HasAssociatedHandle + Clone + 'static>(
         &self,
     ) -> RwLockWriteGuard<AllocatedResourceMap<T>> {

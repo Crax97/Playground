@@ -2369,6 +2369,26 @@ impl VkGpu {
 
         Ok(())
     }
+
+    fn destroy_resource<H: HasAssociatedHandle + Clone + std::fmt::Debug + 'static>(
+        &self,
+        handle: H::AssociatedHandle,
+        destroyed_resources: &RwLock<Vec<DestroyedResource<H>>>,
+    ) {
+        let resources = self
+            .state
+            .allocated_resources
+            .write()
+            .expect("Failed to lock resource map");
+        let resource = resources.get_map_mut::<H>().remove(handle);
+        destroyed_resources
+            .write()
+            .expect("Failed to block destroyed resources vec")
+            .push(DestroyedResource::new(
+                resource,
+                H::AssociatedHandle::handle_type(),
+            ));
+    }
 }
 
 impl Gpu for VkGpu {
@@ -2924,5 +2944,42 @@ impl Gpu for VkGpu {
         ensure_map_is_empty(&resources.get_map::<VkBuffer>());
         ensure_map_is_empty(&resources.get_map::<VkSemaphore>());
         ensure_map_is_empty(&resources.get_map::<VkShaderModule>());
+    }
+
+    fn destroy_semaphore(&self, semaphore: SemaphoreHandle) {
+        self.destroy_resource(
+            semaphore,
+            &self.state.destroyed_resources.destroyed_semaphores,
+        );
+    }
+
+    fn destroy_fence(&self, fence: FenceHandle) {
+        self.destroy_resource(fence, &self.state.destroyed_resources.destroyed_fences);
+    }
+
+    fn destroy_buffer(&self, buffer: BufferHandle) {
+        self.destroy_resource(buffer, &self.state.destroyed_resources.destroyed_buffers);
+    }
+
+    fn destroy_image(&self, image: ImageHandle) {
+        self.destroy_resource(image, &self.state.destroyed_resources.destroyed_images);
+    }
+
+    fn destroy_image_view(&self, image_view: ImageViewHandle) {
+        self.destroy_resource(
+            image_view,
+            &self.state.destroyed_resources.destroyed_image_views,
+        );
+    }
+
+    fn destroy_sampler(&self, sampler: SamplerHandle) {
+        self.destroy_resource(sampler, &self.state.destroyed_resources.destroyed_samplers);
+    }
+
+    fn destroy_shader_module(&self, shader_module: ShaderModuleHandle) {
+        self.destroy_resource(
+            shader_module,
+            &self.state.destroyed_resources.destroyed_shader_modules,
+        );
     }
 }
