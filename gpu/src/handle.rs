@@ -1,5 +1,4 @@
-use crate::Context;
-use std::sync::{atomic::AtomicU64, Arc};
+use std::sync::atomic::AtomicU64;
 
 fn next_unique_id() -> u64 {
     static ATOMIC_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -18,7 +17,7 @@ pub enum HandleType {
 }
 
 pub trait Handle: std::fmt::Debug + Send + Sync + 'static {
-    fn new(context: Arc<dyn Context>) -> Self;
+    fn new() -> Self;
     fn null() -> Self;
     fn is_null(&self) -> bool;
     fn is_valid(&self) -> bool {
@@ -30,35 +29,9 @@ pub trait Handle: std::fmt::Debug + Send + Sync + 'static {
 
 macro_rules! define_handle {
     ($st_name:ident, $ty:expr) => {
+        #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash)]
         pub struct $st_name {
-            pub(crate) id: u64,
-            pub(crate) context: Option<Arc<dyn Context>>,
-        }
-
-        impl std::hash::Hash for $st_name {
-            fn hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
-                self.id.hash(hasher)
-            }
-        }
-
-        impl PartialEq for $st_name {
-            fn eq(&self, other: &Self) -> bool {
-                self.id == other.id
-            }
-        }
-
-        impl Eq for $st_name {}
-
-        impl PartialOrd for $st_name {
-            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-                self.id.partial_cmp(&other.id)
-            }
-        }
-
-        impl Ord for $st_name {
-            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                self.id.cmp(&other.id)
-            }
+            id: u64,
         }
 
         impl std::fmt::Debug for $st_name {
@@ -68,18 +41,14 @@ macro_rules! define_handle {
         }
 
         impl Handle for $st_name {
-            fn new(context: Arc<dyn Context>) -> Self {
+            fn new() -> Self {
                 Self {
                     id: next_unique_id(),
-                    context: Some(context),
                 }
             }
 
             fn null() -> Self {
-                Self {
-                    id: 0,
-                    context: None,
-                }
+                Self { id: 0 }
             }
 
             fn is_null(&self) -> bool {
@@ -92,28 +61,6 @@ macro_rules! define_handle {
 
             fn handle_type() -> HandleType {
                 $ty
-            }
-        }
-
-        impl Clone for $st_name {
-            fn clone(&self) -> Self {
-                match &self.context {
-                    Some(context) => {
-                        context.increment_resource_refcount(self.id, Self::handle_type());
-                        Self {
-                            id: self.id,
-                            context: self.context.clone(),
-                        }
-                    }
-                    None => Self::null(),
-                }
-            }
-        }
-        impl Drop for $st_name {
-            fn drop(&mut self) {
-                if let Some(context) = &self.context {
-                    context.decrement_resource_refcount(self.id, Self::handle_type());
-                }
             }
         }
     };

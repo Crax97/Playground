@@ -3,10 +3,7 @@ use std::{
     collections::HashMap,
     hash::Hasher,
     ops::DerefMut,
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        RwLock, RwLockReadGuard, RwLockWriteGuard,
-    },
+    sync::{RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
 use crate::{Handle, HandleType};
@@ -26,17 +23,7 @@ pub mod utils {
     pub(crate) use associate_to_handle;
 }
 
-struct RefCounted<T> {
-    resource: T,
-    ref_count: AtomicU32,
-}
-
-pub trait Context: Send + Sync {
-    fn increment_resource_refcount(&self, id: u64, resource_type: HandleType);
-    fn decrement_resource_refcount(&self, id: u64, resource_type: HandleType);
-}
-
-pub struct AllocatedResourceMap<T>(HashMap<u64, RefCounted<T>>);
+pub struct AllocatedResourceMap<T>(HashMap<u64, T>);
 
 impl<T: HasAssociatedHandle + Clone> AllocatedResourceMap<T> {
     pub fn new() -> AllocatedResourceMap<T> {
@@ -48,40 +35,19 @@ impl<T: HasAssociatedHandle + Clone> AllocatedResourceMap<T> {
             .0
             .get(&handle.id())
             .expect("Failed to resolve resource");
-        res.resource.clone()
+        res.clone()
     }
 
     pub fn insert(&mut self, handle: &T::AssociatedHandle, resource: T) {
-        self.0.insert(
-            handle.id(),
-            RefCounted {
-                resource,
-                ref_count: 1.into(),
-            },
-        );
+        self.0.insert(handle.id(), resource);
     }
 
-    pub fn increment_resource_count(&mut self, id: u64) {
-        self.0
-            .get_mut(&id)
-            .expect("Failed to resolve resource")
-            .ref_count
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }
-    pub fn decrement_resource_count(&mut self, id: u64) {
-        self.0
-            .get_mut(&id)
-            .expect("Failed to resolve resource")
-            .ref_count
-            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 
-    pub fn update(&mut self) -> Vec<T> {
-        let (alive, dead) = std::mem::take(&mut self.0)
-            .into_iter()
-            .partition(|(_, v)| v.ref_count.load(Ordering::Relaxed) > 0);
-        self.0 = alive;
-        dead.values().map(|v| v.resource.clone()).collect()
+    pub fn for_each<F: FnMut(&T)>(&self, f: F) {
+        self.0.values().for_each(f)
     }
 }
 

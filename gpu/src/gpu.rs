@@ -31,7 +31,6 @@ use ash::{
     vk::{PipelineBindPoint, SubpassDescriptionFlags},
 };
 
-use crossbeam::channel::{Receiver, Sender};
 use log::{debug, error, info, trace, warn};
 use raw_window_handle::HasRawDisplayHandle;
 use thiserror::Error;
@@ -41,16 +40,15 @@ use crate::{
     command_buffer_2::CommandBuffer, get_allocation_callbacks, lifetime_cache_constants,
     quick_hash, BeginRenderPassInfo, BufferCreateInfo, BufferHandle, BufferImageCopyInfo,
     CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineState,
-    Context, DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2,
-    DescriptorSetState, Extent2D, FenceHandle, Gpu, GpuConfiguration, GpuResourceMap,
-    GraphicsPipelineState, Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat,
-    ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
-    ImageViewHandle, LogicOp, Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags,
-    PushConstantBlockDescription, QueueType, Rect2D, RenderPassAttachments, SampleCount,
-    SamplerCreateInfo, SamplerHandle, SemaphoreHandle, ShaderAttribute, ShaderModuleCreateInfo,
-    ShaderModuleHandle, SubpassDescription, Swapchain, ToVk, TransitionInfo,
-    UniformVariableDescription, VkCommandBuffer, VkCommandPool, VkFence, VkImageView, VkSemaphore,
-    VkShaderModule, VkSwapchain,
+    DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2, DescriptorSetState,
+    Extent2D, FenceHandle, Gpu, GpuConfiguration, GpuResourceMap, GraphicsPipelineState,
+    Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout,
+    ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, ImageViewHandle, LogicOp,
+    Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags, PushConstantBlockDescription,
+    QueueType, Rect2D, RenderPassAttachments, SampleCount, SamplerCreateInfo, SamplerHandle,
+    SemaphoreHandle, ShaderAttribute, ShaderModuleCreateInfo, ShaderModuleHandle,
+    SubpassDescription, Swapchain, ToVk, TransitionInfo, UniformVariableDescription,
+    VkCommandBuffer, VkCommandPool, VkFence, VkImageView, VkSemaphore, VkShaderModule, VkSwapchain,
 };
 use crate::{
     gpu_resource_manager::{
@@ -172,8 +170,6 @@ pub struct GpuThreadSharedState {
     pub dynamic_rendering: DynamicRendering,
     pub allocated_resources: Arc<RwLock<GpuResourceMap>>,
     pub destroyed_resources: DestroyedResources,
-    pub context: Arc<VkGpuContext>,
-    operations_receiver: Receiver<ResourceOperation>,
 }
 
 impl GpuThreadSharedState {
@@ -963,125 +959,6 @@ impl GpuThreadLocalState {
         })
     }
 }
-
-#[derive(Clone, Copy, Debug)]
-enum ResourceOperation {
-    IncrementRefCount(u64, HandleType),
-    DecrementRefCount(u64, HandleType),
-}
-
-pub struct VkGpuContext {
-    operations_sender: Sender<ResourceOperation>,
-}
-impl Context for VkGpuContext {
-    fn increment_resource_refcount(&self, id: u64, resource_type: HandleType) {
-        self.operations_sender
-            .send(ResourceOperation::IncrementRefCount(id, resource_type))
-            .expect("Failed to send increment")
-    }
-
-    fn decrement_resource_refcount(&self, id: u64, resource_type: HandleType) {
-        self.operations_sender
-            .send(ResourceOperation::DecrementRefCount(id, resource_type))
-            .expect("Failed to send decrement")
-    }
-}
-impl GpuThreadSharedState {
-    fn increment_resource_refcount(&self, id: u64, resource_type: crate::HandleType) {
-        match resource_type {
-            crate::HandleType::Buffer => self
-                .allocated_resources
-                .read()
-                .unwrap()
-                .get_map_mut::<VkBuffer>()
-                .increment_resource_count(id),
-            crate::HandleType::ShaderModule => self
-                .allocated_resources
-                .read()
-                .unwrap()
-                .get_map_mut::<VkShaderModule>()
-                .increment_resource_count(id),
-            crate::HandleType::Image => self
-                .allocated_resources
-                .read()
-                .unwrap()
-                .get_map_mut::<VkImage>()
-                .increment_resource_count(id),
-            crate::HandleType::ImageView => self
-                .allocated_resources
-                .read()
-                .unwrap()
-                .get_map_mut::<VkImageView>()
-                .increment_resource_count(id),
-            crate::HandleType::Sampler => self
-                .allocated_resources
-                .read()
-                .unwrap()
-                .get_map_mut::<VkSampler>()
-                .increment_resource_count(id),
-            crate::HandleType::Semaphore => self
-                .allocated_resources
-                .read()
-                .unwrap()
-                .get_map_mut::<VkSemaphore>()
-                .increment_resource_count(id),
-            crate::HandleType::Fence => self
-                .allocated_resources
-                .read()
-                .unwrap()
-                .get_map_mut::<VkFence>()
-                .increment_resource_count(id),
-        }
-    }
-
-    fn decrement_resource_refcount(&self, id: u64, resource_type: crate::HandleType) {
-        match resource_type {
-            crate::HandleType::Buffer => self
-                .allocated_resources
-                .read()
-                .unwrap()
-                .get_map_mut::<VkBuffer>()
-                .decrement_resource_count(id),
-            crate::HandleType::ShaderModule => self
-                .allocated_resources
-                .read()
-                .unwrap()
-                .get_map_mut::<VkShaderModule>()
-                .decrement_resource_count(id),
-            crate::HandleType::Image => self
-                .allocated_resources
-                .read()
-                .unwrap()
-                .get_map_mut::<VkImage>()
-                .decrement_resource_count(id),
-            crate::HandleType::ImageView => self
-                .allocated_resources
-                .read()
-                .unwrap()
-                .get_map_mut::<VkImageView>()
-                .decrement_resource_count(id),
-            crate::HandleType::Sampler => self
-                .allocated_resources
-                .read()
-                .unwrap()
-                .get_map_mut::<VkSampler>()
-                .decrement_resource_count(id),
-            crate::HandleType::Semaphore => self
-                .allocated_resources
-                .read()
-                .unwrap()
-                .get_map_mut::<VkSemaphore>()
-                .decrement_resource_count(id),
-            crate::HandleType::Fence => self
-                .allocated_resources
-                .read()
-                .unwrap()
-                .get_map_mut::<VkFence>()
-                .decrement_resource_count(id),
-        }
-    }
-}
-
 pub struct VkGpu {
     pub(crate) state: Arc<GpuThreadSharedState>,
     pub(crate) thread_local_state: GpuThreadLocalState,
@@ -1268,8 +1145,6 @@ impl VkGpu {
 
         let dynamic_rendering = Self::create_dynamic_rendering(&instance, &logical_device)?;
 
-        let (operations_sender, operations_receiver) = crossbeam::channel::unbounded();
-
         let state = Arc::new(GpuThreadSharedState {
             entry,
             instance,
@@ -1296,8 +1171,6 @@ impl VkGpu {
             dynamic_rendering,
             allocated_resources: Arc::new(RwLock::new(GpuResourceMap::new())),
             destroyed_resources: DestroyedResources::default(),
-            context: Arc::new(VkGpuContext { operations_sender }),
-            operations_receiver,
         });
 
         let thread_local_state = GpuThreadLocalState::new(state.clone(), Self::MAX_COMMAND_POOLS)?;
@@ -1865,6 +1738,20 @@ impl VkGpu {
         self.state.resolve_resource(handle)
     }
 }
+
+fn ensure_map_is_empty<H: HasAssociatedHandle + Clone + std::fmt::Debug>(
+    map: &AllocatedResourceMap<H>,
+) {
+    if map.len() != 0 {
+        map.for_each(|f| {
+            error!(
+                "Leaked resource of type {:?}: {f:?}",
+                H::AssociatedHandle::handle_type()
+            );
+        });
+    }
+}
+
 fn parse_members(
     members: &[spirv_reflect::types::variable::ReflectBlockVariable],
 ) -> HashMap<String, UniformVariableDescription> {
@@ -1946,7 +1833,7 @@ fn create_staging_buffer(state: &Arc<GpuThreadSharedState>) -> VkResult<BufferHa
         MemoryDomain::HostVisible,
         allocation,
     )?;
-    let handle = BufferHandle::new(state.context.clone());
+    let handle = BufferHandle::new();
     state
         .allocated_resources
         .write()
@@ -2462,19 +2349,6 @@ impl VkGpu {
         });
     }
 
-    fn drain_dead_resources<T: HasAssociatedHandle + Clone + std::fmt::Debug>(
-        &self,
-        map: &mut AllocatedResourceMap<T>,
-        destroyed: &mut Vec<DestroyedResource<T>>,
-    ) {
-        let dead = map.update();
-        destroyed.extend(
-            &mut dead
-                .into_iter()
-                .map(|r| DestroyedResource::new(r, T::AssociatedHandle::handle_type())),
-        );
-    }
-
     fn clear_command_pools(&self, current_pools: usize) -> anyhow::Result<()> {
         let command_pools = &self.thread_local_state.command_pools[current_pools];
         unsafe {
@@ -2499,17 +2373,6 @@ impl VkGpu {
 
 impl Gpu for VkGpu {
     fn update(&self) {
-        for op in self.state.operations_receiver.try_iter() {
-            match op {
-                ResourceOperation::IncrementRefCount(id, resource_type) => {
-                    self.state.increment_resource_refcount(id, resource_type)
-                }
-                ResourceOperation::DecrementRefCount(id, resource_type) => {
-                    self.state.decrement_resource_refcount(id, resource_type)
-                }
-            }
-        }
-
         let device = self.vk_logical_device();
         self.state.descriptor_set_cache.update(|set| unsafe {
             info!("Destroying descriptor set");
@@ -2539,104 +2402,7 @@ impl Gpu for VkGpu {
             info!("Destroying compute pipeline");
             device.destroy_pipeline(p, get_allocation_callbacks());
         });
-        self.drain_dead_resources(
-            &mut self
-                .state
-                .allocated_resources
-                .write()
-                .unwrap()
-                .get_map_mut::<VkSemaphore>(),
-            &mut self
-                .state
-                .destroyed_resources
-                .destroyed_semaphores
-                .write()
-                .unwrap(),
-        );
-        self.drain_dead_resources(
-            &mut self
-                .state
-                .allocated_resources
-                .write()
-                .unwrap()
-                .get_map_mut::<VkFence>(),
-            &mut self
-                .state
-                .destroyed_resources
-                .destroyed_fences
-                .write()
-                .unwrap(),
-        );
-        self.drain_dead_resources(
-            &mut self
-                .state
-                .allocated_resources
-                .write()
-                .unwrap()
-                .get_map_mut::<VkImageView>(),
-            &mut self
-                .state
-                .destroyed_resources
-                .destroyed_image_views
-                .write()
-                .unwrap(),
-        );
-        self.drain_dead_resources(
-            &mut self
-                .state
-                .allocated_resources
-                .write()
-                .unwrap()
-                .get_map_mut::<VkBuffer>(),
-            &mut self
-                .state
-                .destroyed_resources
-                .destroyed_buffers
-                .write()
-                .unwrap(),
-        );
-        self.drain_dead_resources(
-            &mut self
-                .state
-                .allocated_resources
-                .write()
-                .unwrap()
-                .get_map_mut::<VkSampler>(),
-            &mut self
-                .state
-                .destroyed_resources
-                .destroyed_samplers
-                .write()
-                .unwrap(),
-        );
-        self.drain_dead_resources(
-            &mut self
-                .state
-                .allocated_resources
-                .write()
-                .unwrap()
-                .get_map_mut::<VkShaderModule>(),
-            &mut self
-                .state
-                .destroyed_resources
-                .destroyed_shader_modules
-                .write()
-                .unwrap(),
-        );
-        self.drain_dead_resources(
-            &mut self
-                .state
-                .allocated_resources
-                .write()
-                .unwrap()
-                .get_map_mut::<VkImage>(),
-            &mut self
-                .state
-                .destroyed_resources
-                .destroyed_images
-                .write()
-                .unwrap(),
-        );
+
         self.update_cycle_for_deleted_resources(
             &mut self
                 .state
@@ -2755,7 +2521,7 @@ impl Gpu for VkGpu {
         create_info: &crate::SemaphoreCreateInfo,
     ) -> anyhow::Result<SemaphoreHandle> {
         let semaphore = VkSemaphore::new(self, &create_info.to_vk())?;
-        let handle = SemaphoreHandle::new(self.state.context.clone());
+        let handle = SemaphoreHandle::new();
         self.state
             .allocated_resources
             .write()
@@ -2766,7 +2532,7 @@ impl Gpu for VkGpu {
 
     fn make_fence(&self, create_info: &crate::FenceCreateInfo) -> anyhow::Result<FenceHandle> {
         let fence = VkFence::new(self, &create_info.to_vk())?;
-        let handle = FenceHandle::new(self.state.context.clone());
+        let handle = FenceHandle::new();
         self.state
             .allocated_resources
             .write()
@@ -2780,7 +2546,7 @@ impl Gpu for VkGpu {
         info: &ShaderModuleCreateInfo,
     ) -> anyhow::Result<crate::ShaderModuleHandle> {
         let buffer = self.create_shader_module(info)?;
-        let handle = ShaderModuleHandle::new(self.state.context.clone());
+        let handle = ShaderModuleHandle::new();
         self.state
             .allocated_resources
             .write()
@@ -2796,7 +2562,7 @@ impl Gpu for VkGpu {
         memory_domain: MemoryDomain,
     ) -> anyhow::Result<crate::BufferHandle> {
         let buffer = self.create_buffer(buffer_info, memory_domain)?;
-        let handle = BufferHandle::new(self.state.context.clone());
+        let handle = BufferHandle::new();
         self.state
             .allocated_resources
             .write()
@@ -2844,7 +2610,7 @@ impl Gpu for VkGpu {
     ) -> anyhow::Result<ImageHandle> {
         let (image, format) = self.create_image(info, memory_domain)?;
 
-        let handle = ImageHandle::new(self.state.context.clone());
+        let handle = ImageHandle::new();
 
         self.state
             .allocated_resources
@@ -3085,7 +2851,7 @@ impl Gpu for VkGpu {
                 image.extents,
             )
         }?;
-        let handle = ImageViewHandle::new(self.state.context.clone());
+        let handle = ImageViewHandle::new();
         self.state
             .allocated_resources
             .write()
@@ -3096,7 +2862,7 @@ impl Gpu for VkGpu {
 
     fn make_sampler(&self, info: &SamplerCreateInfo) -> anyhow::Result<crate::SamplerHandle> {
         let sampler = self.create_sampler(info)?;
-        let handle = SamplerHandle::new(self.state.context.clone());
+        let handle = SamplerHandle::new();
         self.state
             .allocated_resources
             .write()
@@ -3143,5 +2909,20 @@ impl Gpu for VkGpu {
     fn create_swapchain(&self, window: &Window) -> anyhow::Result<Swapchain> {
         let pimpl = Box::new(VkSwapchain::new(self, window)?);
         Ok(Swapchain { pimpl })
+    }
+
+    fn on_destroyed(&self) {
+        let resources = self
+            .state
+            .allocated_resources
+            .read()
+            .expect("Failed to read allocated resources");
+        ensure_map_is_empty(&resources.get_map::<VkSemaphore>());
+        ensure_map_is_empty(&resources.get_map::<VkFence>());
+        ensure_map_is_empty(&resources.get_map::<VkImageView>());
+        ensure_map_is_empty(&resources.get_map::<VkImage>());
+        ensure_map_is_empty(&resources.get_map::<VkBuffer>());
+        ensure_map_is_empty(&resources.get_map::<VkSemaphore>());
+        ensure_map_is_empty(&resources.get_map::<VkShaderModule>());
     }
 }

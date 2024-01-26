@@ -70,6 +70,7 @@ pub fn app_loop<A: App + 'static>(
         winit::event::Event::WindowEvent { event, .. } => {
             match event {
                 winit::event::WindowEvent::CloseRequested => {
+                    app_state_mut.gpu.on_destroyed();
                     return Ok(ControlFlow::ExitWithCode(0));
                 }
                 winit::event::WindowEvent::Resized(new_size) => {

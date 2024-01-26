@@ -380,6 +380,8 @@ pub trait Gpu: Send + Sync + AsAnyArc + 'static {
     fn start_command_buffer(&self, queue_type: QueueType) -> anyhow::Result<CommandBuffer>;
 
     fn create_swapchain(&self, window: &Window) -> anyhow::Result<Swapchain>;
+
+    fn on_destroyed(&self);
 }
 
 pub fn make_gpu(config: GpuConfiguration) -> anyhow::Result<Arc<dyn Gpu>> {
