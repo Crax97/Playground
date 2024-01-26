@@ -78,6 +78,18 @@ impl GpuResourceMap {
         }
         self.get_map_mut().insert(handle, resource)
     }
+    pub fn remove<T: HasAssociatedHandle + Clone + Send + Sync + 'static>(
+        &mut self,
+        handle: T::AssociatedHandle,
+    ) -> T {
+        if !self.maps.contains_key(&T::AssociatedHandle::handle_type()) {
+            self.maps.insert(
+                T::AssociatedHandle::handle_type(),
+                Box::new(RwLock::new(AllocatedResourceMap::<T>::new())),
+            );
+        }
+        self.get_map_mut().remove(handle)
+    }
     pub fn resolve<T: HasAssociatedHandle + Clone + 'static>(
         &self,
         handle: &T::AssociatedHandle,

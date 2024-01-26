@@ -381,11 +381,17 @@ impl VkSwapchain {
     }
 
     fn recreate_swapchain_images(&mut self) -> VkResult<()> {
+        let mut resources = self.state.write_resource_map();
+        std::mem::take(&mut self.current_swapchain_images)
+            .into_iter()
+            .for_each(|image| {
+                resources.get_map_mut::<VkImage>().remove(image);
+            });
+
         let images = unsafe {
             self.swapchain_extension
                 .get_swapchain_images(self.current_swapchain)
         }?;
-
         self.current_swapchain_images = images
             .iter()
             .map(|i| {
@@ -400,11 +406,7 @@ impl VkSwapchain {
             .map(|img| {
                 info!("Created new swapchain image with id {}", img.inner.as_raw());
                 let handle = <ImageHandle as crate::Handle>::new();
-                self.state
-                    .allocated_resources
-                    .write()
-                    .unwrap()
-                    .insert(&handle, img);
+                resources.insert(&handle, img);
                 handle
             })
             .collect();
@@ -412,19 +414,20 @@ impl VkSwapchain {
     }
 
     fn recreate_swapchain_image_views(&mut self) -> VkResult<()> {
-        self.current_swapchain_image_views.clear();
+        let mut resources = self.state.write_resource_map();
+        std::mem::take(&mut self.current_swapchain_image_views)
+            .into_iter()
+            .for_each(|view| {
+                resources.get_map_mut::<VkImageView>().remove(view);
+            });
+
+        info!("Destroyed old swapchain images");
         self.current_swapchain_image_views
             .resize_with(self.current_swapchain_images.len(), || {
                 <ImageViewHandle as crate::Handle>::null()
             });
         for (i, image) in self.current_swapchain_images.iter().enumerate() {
-            let vk_image = self
-                .state
-                .allocated_resources
-                .write()
-                .unwrap()
-                .resolve::<VkImage>(image)
-                .inner;
+            let vk_image = resources.resolve::<VkImage>(image).inner;
             let view_info = ash::vk::ImageViewCreateInfo {
                 s_type: StructureType::IMAGE_VIEW_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -456,11 +459,7 @@ impl VkSwapchain {
                 self.present_extent,
             )?;
             let view_handle = <ImageViewHandle as crate::Handle>::new();
-            self.state
-                .allocated_resources
-                .write()
-                .unwrap()
-                .insert(&view_handle, view);
+            resources.insert(&view_handle, view);
             self.current_swapchain_image_views[i] = view_handle;
         }
 
@@ -725,6 +724,25 @@ impl swapchain_2::Impl for VkSwapchain {
     }
 }
 
+impl Drop for VkSwapchain {
+    fn drop(&mut self) {
+        {
+            let resources = self.state.write_resource_map();
+            std::mem::take(&mut self.current_swapchain_image_views)
+                .into_iter()
+                .for_each(|view| {
+                    resources.get_map_mut::<VkImageView>().remove(view);
+                });
+            std::mem::take(&mut self.current_swapchain_images)
+                .into_iter()
+                .for_each(|image| {
+                    resources.get_map_mut::<VkImage>().remove(image);
+                });
+        }
+        self.drop_swapchain()
+    }
+}
+
 impl ToVk for PresentMode {
     type Inner = PresentModeKHR;
 
@@ -734,11 +752,5 @@ impl ToVk for PresentMode {
             PresentMode::Fifo => PresentModeKHR::FIFO,
             PresentMode::Mailbox => PresentModeKHR::MAILBOX,
         }
-    }
-}
-
-impl Drop for VkSwapchain {
-    fn drop(&mut self) {
-        self.drop_swapchain()
     }
 }

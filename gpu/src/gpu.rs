@@ -3,7 +3,7 @@ use std::{
     ffi::{c_void, CStr, CString},
     ptr::addr_of_mut,
     ptr::{addr_of, null},
-    sync::{atomic::AtomicUsize, Arc, RwLock, RwLockReadGuard},
+    sync::{atomic::AtomicUsize, Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
 use anyhow::{bail, Result};
@@ -177,6 +177,12 @@ impl GpuThreadSharedState {
         self.allocated_resources
             .read()
             .expect("Failed to RWLock read Gpu Resource Map")
+    }
+
+    pub(crate) fn write_resource_map(&self) -> RwLockWriteGuard<GpuResourceMap> {
+        self.allocated_resources
+            .write()
+            .expect("Failed to lock resource map")
     }
 
     pub(crate) fn resolve_resource<T: HasAssociatedHandle + Clone + 'static>(

@@ -25,12 +25,12 @@ use crate::{
 use crate::resource_map::{ResourceHandle, ResourceMap};
 use gpu::{
     AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, Binding,
-    BufferCreateInfo, BufferUsageFlags, ColorLoadOp, CommandBuffer, CommandBufferSubmitInfo,
-    Extent2D, FragmentStageInfo, FramebufferColorAttachment, Gpu, ImageAspectFlags, ImageFormat,
-    ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewHandle, ImageViewType,
-    IndexType, InputRate, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags, Rect2D,
-    RenderPass, SampleCount, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle,
-    ShaderStage, SubpassDependency, SubpassDescription, VertexBindingInfo, VertexStageInfo,
+    BufferCreateInfo, BufferUsageFlags, ColorLoadOp, CommandBuffer, Extent2D, FragmentStageInfo,
+    FramebufferColorAttachment, Gpu, ImageAspectFlags, ImageFormat, ImageLayout,
+    ImageMemoryBarrier, ImageSubresourceRange, ImageViewHandle, ImageViewType, IndexType,
+    InputRate, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags, Rect2D, RenderPass,
+    SampleCount, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
+    SubpassDependency, SubpassDescription, VertexBindingInfo, VertexStageInfo,
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 

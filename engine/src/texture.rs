@@ -154,4 +154,9 @@ impl Resource for Texture {
     fn get_description(&self) -> &str {
         "Texture"
     }
+
+    fn destroyed(&mut self, gpu: &dyn Gpu) {
+        gpu.destroy_image_view(self.view);
+        gpu.destroy_image(self.image);
+    }
 }

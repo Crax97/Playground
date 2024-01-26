@@ -273,7 +273,7 @@ impl App for GLTFViewer {
         let args = GltfViewerArgs::parse();
         let time = Time::new();
 
-        let mut resource_map = ResourceMap::new();
+        let mut resource_map = ResourceMap::new(app_state.gpu.clone());
         let cube_mesh = utils::load_cube_to_resource_map(app_state.gpu(), &mut resource_map)?;
 
         // TODO: avoid duplicating this module creation

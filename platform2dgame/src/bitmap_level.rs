@@ -29,6 +29,7 @@ impl Resource for BitmapLevel {
     fn get_description(&self) -> &str {
         "Bitmap level"
     }
+    fn destroyed(&mut self, _gpu: &dyn gpu::Gpu) {}
 }
 
 impl ResourceLoader for BitmapLevelLoader {

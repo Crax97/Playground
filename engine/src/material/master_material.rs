@@ -64,6 +64,8 @@ impl Resource for MasterMaterial {
     fn get_description(&self) -> &str {
         &self.name
     }
+
+    fn destroyed(&mut self, _gpu: &dyn gpu::Gpu) {}
 }
 
 impl MasterMaterial {

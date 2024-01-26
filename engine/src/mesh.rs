@@ -141,4 +141,15 @@ impl Resource for Mesh {
     fn get_description(&self) -> &str {
         "Mesh"
     }
+
+    fn destroyed(&mut self, gpu: &dyn Gpu) {
+        for prim in &self.primitives {
+            gpu.destroy_buffer(prim.position_component);
+            gpu.destroy_buffer(prim.normal_component);
+            gpu.destroy_buffer(prim.tangent_component);
+            gpu.destroy_buffer(prim.uv_component);
+            gpu.destroy_buffer(prim.color_component);
+            gpu.destroy_buffer(prim.index_buffer);
+        }
+    }
 }

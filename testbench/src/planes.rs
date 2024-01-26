@@ -59,7 +59,7 @@ impl App for PlanesApp {
     where
         Self: Sized,
     {
-        let mut resource_map = ResourceMap::new();
+        let mut resource_map = ResourceMap::new(app_state.gpu.clone());
         resource_map.install_resource_loader(FileSystemTextureLoader::new(app_state.gpu.clone()));
 
         let cvar_manager = CvarManager::new();

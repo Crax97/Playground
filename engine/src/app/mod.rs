@@ -3,7 +3,7 @@ pub mod egui_support;
 
 mod console;
 
-use std::borrow::Cow;
+use std::{borrow::Cow, mem::ManuallyDrop};
 
 use crate::Backbuffer;
 pub use console::*;
@@ -14,6 +14,7 @@ use winit::{
     dpi::PhysicalSize,
     event::Event,
     event_loop::{ControlFlow, EventLoop},
+    platform::run_return::EventLoopExtRunReturn,
     window::Window,
 };
 
@@ -70,7 +71,7 @@ pub fn app_loop<A: App + 'static>(
         winit::event::Event::WindowEvent { event, .. } => {
             match event {
                 winit::event::WindowEvent::CloseRequested => {
-                    app_state_mut.gpu.on_destroyed();
+                    // app_state_mut.gpu.on_destroyed();
                     return Ok(ControlFlow::ExitWithCode(0));
                 }
                 winit::event::WindowEvent::Resized(new_size) => {
@@ -175,24 +176,25 @@ pub fn create_app<A: App + 'static>() -> anyhow::Result<(A, EventLoop<()>)> {
     Ok((A::create(app_state_mut(), &event_loop, window)?, event_loop))
 }
 
-pub fn run<A: App + 'static>(app: A, event_loop: EventLoop<()>) -> anyhow::Result<()> {
-    let app = Box::new(app);
-    let app = Box::leak(app);
-
+pub fn run<A: App + 'static>(mut app: A, mut event_loop: EventLoop<()>) -> anyhow::Result<()> {
     trace!("Created app");
-
     app.on_startup(app_state_mut())?;
-    event_loop.run(move |event, _, control_flow| match app_loop(app, event) {
-        Ok(flow) => {
-            *control_flow = flow;
-        }
-        Err(e) => panic!(
-            "Backtrace: {}\nDuring app loop: {}",
-            e.backtrace(),
-            e.chain()
-                .fold(String::new(), |s, e| s + &e.to_string() + "\n"),
-        ),
-    })
+    let exit_code =
+        event_loop.run_return(|event, _, control_flow| match app_loop(&mut app, event) {
+            Ok(flow) => {
+                *control_flow = flow;
+            }
+            Err(e) => panic!(
+                "Backtrace: {}\nDuring app loop: {}",
+                e.backtrace(),
+                e.chain()
+                    .fold(String::new(), |s, e| s + &e.to_string() + "\n"),
+            ),
+        });
+    let app = ManuallyDrop::new(app);
+    std::mem::drop(ManuallyDrop::into_inner(app));
+    app_state_mut().gpu().on_destroyed();
+    std::process::exit(exit_code);
 }
 
 pub fn bootstrap<A: App + 'static>() -> anyhow::Result<()> {
