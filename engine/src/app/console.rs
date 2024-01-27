@@ -83,7 +83,7 @@ impl Console {
         cvar_manager: &mut CvarManager,
     ) {
         let command = command.into();
-        let commands = command.split(" ").collect::<Vec<_>>();
+        let commands = command.split(' ').collect::<Vec<_>>();
         if commands.len() > 1 {
             match cvar_manager.set_named(commands[0], commands[1]) {
                 Ok(()) => {}
@@ -92,12 +92,18 @@ impl Console {
         } else {
             let cvar = cvar_manager.get_named::<String>(&command);
             match cvar {
-                Ok(value) => self.add_message(format!("{}", value)),
+                Ok(value) => self.add_message(value.to_string()),
                 Err(e) => {
                     self.add_message(format!("Error with previous command: {}", e));
                 }
             }
         }
+    }
+}
+
+impl Default for Console {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

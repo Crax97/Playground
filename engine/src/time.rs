@@ -53,3 +53,9 @@ impl Time {
         self.frame_counter
     }
 }
+
+impl Default for Time {
+    fn default() -> Self {
+        Self::new()
+    }
+}

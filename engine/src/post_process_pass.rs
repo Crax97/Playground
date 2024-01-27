@@ -64,16 +64,16 @@ impl PostProcessPass for TonemapPass {
             0,
             &[Binding {
                 ty: gpu::DescriptorBindingType::ImageView {
-                    image_view_handle: resources.previous_pass_result.clone(),
-                    sampler_handle: resources.sampler.clone(),
+                    image_view_handle: *resources.previous_pass_result,
+                    sampler_handle: *resources.sampler,
                     layout: ImageLayout::ShaderReadOnly,
                 },
                 binding_stage: ShaderStage::FRAGMENT,
                 location: 0,
             }],
         );
-        post_process_pass.set_vertex_shader(resources.screen_quad.clone());
-        post_process_pass.set_fragment_shader(self.shader_handle.clone());
+        post_process_pass.set_vertex_shader(*resources.screen_quad);
+        post_process_pass.set_fragment_shader(self.shader_handle);
         post_process_pass.draw(4, 1, 0, 0)
     }
 
@@ -152,8 +152,8 @@ impl PostProcessPass for FxaaPass {
             0,
             &[Binding {
                 ty: gpu::DescriptorBindingType::ImageView {
-                    image_view_handle: resources.previous_pass_result.clone(),
-                    sampler_handle: resources.sampler.clone(),
+                    image_view_handle: *resources.previous_pass_result,
+                    sampler_handle: *resources.sampler,
                     layout: ImageLayout::ShaderReadOnly,
                 },
                 binding_stage: ShaderStage::FRAGMENT,
@@ -190,8 +190,8 @@ impl PostProcessPass for FxaaPass {
             iterations: iterations as _,
         };
 
-        post_process_pass.set_vertex_shader(self.fxaa_vs.clone());
-        post_process_pass.set_fragment_shader(self.fxaa_fs.clone());
+        post_process_pass.set_vertex_shader(self.fxaa_vs);
+        post_process_pass.set_fragment_shader(self.fxaa_fs);
         post_process_pass.push_constants(
             0,
             0,

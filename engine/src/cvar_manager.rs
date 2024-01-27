@@ -25,6 +25,7 @@ pub enum CvarError {
     GenericError(Box<dyn Error + 'static>),
 }
 
+#[allow(dead_code)]
 pub struct Cvar {
     ty: CvarType,
     flags: CvarFlags,
@@ -159,7 +160,7 @@ impl CvarManager {
             .expect("Cvar ID not valid! This could be a bug with the CvarManager")
             .ty
             .set_from_str(&value.to_string())
-            .map_err(|e| CvarError::GenericError(e))?;
+            .map_err(CvarError::GenericError)?;
         Ok(())
     }
 
@@ -224,7 +225,7 @@ impl CvarManager {
     }
 
     pub fn cvar_names(&self) -> impl Iterator<Item = &str> {
-        self.cvar_id_map.keys().into_iter().map(|s| *s)
+        self.cvar_id_map.keys().copied()
     }
 }
 

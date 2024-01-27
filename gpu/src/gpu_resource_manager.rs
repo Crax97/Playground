@@ -48,9 +48,18 @@ impl<T: HasAssociatedHandle + Clone> AllocatedResourceMap<T> {
     pub fn len(&self) -> usize {
         self.0.len()
     }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 
     pub fn for_each<F: FnMut(&T)>(&self, f: F) {
         self.0.values().for_each(f)
+    }
+}
+
+impl<T: HasAssociatedHandle + Clone> Default for AllocatedResourceMap<T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -70,24 +79,18 @@ impl GpuResourceMap {
         resource: T,
     ) {
         assert!(!handle.is_null());
-        if !self.maps.contains_key(&T::AssociatedHandle::handle_type()) {
-            self.maps.insert(
-                T::AssociatedHandle::handle_type(),
-                Box::new(RwLock::new(AllocatedResourceMap::<T>::new())),
-            );
-        }
+        self.maps
+            .entry(T::AssociatedHandle::handle_type())
+            .or_insert_with(|| Box::new(RwLock::new(AllocatedResourceMap::<T>::new())));
         self.get_map_mut().insert(handle, resource)
     }
     pub fn remove<T: HasAssociatedHandle + Clone + Send + Sync + 'static>(
         &mut self,
         handle: T::AssociatedHandle,
     ) -> Option<T> {
-        if !self.maps.contains_key(&T::AssociatedHandle::handle_type()) {
-            self.maps.insert(
-                T::AssociatedHandle::handle_type(),
-                Box::new(RwLock::new(AllocatedResourceMap::<T>::new())),
-            );
-        }
+        self.maps
+            .entry(T::AssociatedHandle::handle_type())
+            .or_insert_with(|| Box::new(RwLock::new(AllocatedResourceMap::<T>::new())));
         self.get_map_mut().remove(handle)
     }
     pub fn resolve<T: HasAssociatedHandle + Clone + 'static>(
@@ -121,6 +124,12 @@ impl GpuResourceMap {
             .unwrap();
 
         map.read().unwrap()
+    }
+}
+
+impl Default for GpuResourceMap {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -163,18 +172,14 @@ impl<T: Sized + Send + Sync + 'static> LifetimedCache<T> {
 
     pub fn ensure_existing<C: FnOnce() -> T>(&self, hash: u64, creation_func: C) {
         let mut map = self.map.write().unwrap();
-        if map.contains_key(&hash) {
-            map.get_mut(&hash)
-                .map(|l| l.current_lifetime = self.resource_lifetime);
-        } else {
+        if let std::collections::hash_map::Entry::Vacant(e) = map.entry(hash) {
             let resource = creation_func();
-            map.insert(
-                hash,
-                Lifetimed {
-                    resource,
-                    current_lifetime: self.resource_lifetime,
-                },
-            );
+            e.insert(Lifetimed {
+                resource,
+                current_lifetime: self.resource_lifetime,
+            });
+        } else if let Some(lifetimed) = map.get_mut(&hash) {
+            lifetimed.current_lifetime = self.resource_lifetime;
         }
     }
 

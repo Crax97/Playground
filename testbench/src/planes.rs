@@ -18,7 +18,6 @@ use gpu::{
     ImageSubresourceRange, PipelineBarrierInfo, PipelineStageFlags, PresentMode, ShaderStage,
 };
 use nalgebra::*;
-use winit::window::Window;
 use winit::{event::ElementState, event_loop::EventLoop};
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -31,7 +30,6 @@ const SPEED: f32 = 0.1;
 const ROTATION_SPEED: f32 = 3.0;
 const MIN_DELTA: f32 = 1.0;
 pub struct PlanesApp {
-    window: Window,
     camera: Camera,
     forward_movement: f32,
     rotation_movement: f32,
@@ -51,11 +49,7 @@ impl App for PlanesApp {
         Cow::Borrowed("planes")
     }
 
-    fn create(
-        app_state: &mut AppState,
-        _: &EventLoop<()>,
-        window: winit::window::Window,
-    ) -> anyhow::Result<Self>
+    fn create(app_state: &mut AppState, _: &EventLoop<()>) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
@@ -121,7 +115,8 @@ impl App for PlanesApp {
             }],
         };
 
-        let egui_integration = EguiSupport::new(&window, &app_state.gpu, &app_state.swapchain)?;
+        let egui_integration =
+            EguiSupport::new(&app_state.window, &app_state.gpu, &app_state.swapchain)?;
         let mesh = Mesh::new(app_state.gpu(), &mesh_data)?;
         let mesh = resource_map.add(mesh);
 
@@ -209,7 +204,6 @@ impl App for PlanesApp {
         });
 
         Ok(Self {
-            window,
             egui_integration,
             camera,
             forward_movement,
@@ -265,7 +259,7 @@ impl App for PlanesApp {
         let mut cb = app_state
             .gpu
             .start_command_buffer(gpu::QueueType::Graphics)?;
-        let mut render = self.scene_renderer.render(
+        self.scene_renderer.render(
             app_state.gpu(),
             &mut cb,
             &self.camera,
@@ -286,7 +280,7 @@ impl App for PlanesApp {
                 new_layout: ImageLayout::PresentSrc,
                 src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
                 dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-                image: backbuffer.image.clone(),
+                image: backbuffer.image,
                 subresource_range: ImageSubresourceRange {
                     aspect_mask: ImageAspectFlags::COLOR,
                     base_mip_level: 0,

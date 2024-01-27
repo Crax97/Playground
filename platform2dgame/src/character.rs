@@ -119,28 +119,34 @@ pub fn player_movement_system(
     let forward = vector![player_character.current_state.facing_forward_x, 0.0];
     let surface_check_distance = player_character.surface_check_distance;
 
-    if let Some(_) = physics.cast_shape(
-        Isometry2::translation(transform.position.x, transform.position.y),
-        forward,
-        shape.0.as_ref(),
-        surface_check_distance,
-        true,
-        QueryFilter::new()
-            .exclude_sensors()
-            .exclude_collider(player_collider.as_ref().clone()),
-    ) {
+    if physics
+        .cast_shape(
+            Isometry2::translation(transform.position.x, transform.position.y),
+            forward,
+            shape.0.as_ref(),
+            surface_check_distance,
+            true,
+            QueryFilter::new()
+                .exclude_sensors()
+                .exclude_collider(*player_collider.as_ref()),
+        )
+        .is_some()
+    {
         player_character.current_state.against_wall = true;
     }
-    if let Some(_) = physics.cast_shape(
-        Isometry2::translation(transform.position.x, transform.position.y),
-        vector![0.0, -1.0],
-        shape.0.as_ref(),
-        surface_check_distance,
-        true,
-        QueryFilter::new()
-            .exclude_sensors()
-            .exclude_collider(player_collider.as_ref().clone()),
-    ) {
+    if physics
+        .cast_shape(
+            Isometry2::translation(transform.position.x, transform.position.y),
+            vector![0.0, -1.0],
+            shape.0.as_ref(),
+            surface_check_distance,
+            true,
+            QueryFilter::new()
+                .exclude_sensors()
+                .exclude_collider(*player_collider.as_ref()),
+        )
+        .is_some()
+    {
         player_character.current_state.grounded = true;
     }
 }
@@ -175,7 +181,7 @@ fn move_and_slide(
         true,
         QueryFilter::new()
             .exclude_sensors()
-            .exclude_collider(player_collider.as_ref().clone()),
+            .exclude_collider(*player_collider.as_ref()),
     ) {
         if toi.status == TOIStatus::Penetrating {
             println!("Penetrating");

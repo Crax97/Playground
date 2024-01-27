@@ -32,7 +32,7 @@ pub struct GameState {
 }
 
 fn main() -> anyhow::Result<()> {
-    let mut app = BevyEcsApp::new()?;
+    let mut app = BevyEcsApp::create()?;
     let shader = DeferredRenderingPipeline::make_2d_combine_shader(app.state.gpu())?;
     app.renderer().set_combine_shader(shader);
 

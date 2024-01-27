@@ -82,7 +82,7 @@ impl TiledTexture2DPacker {
             });
         }
 
-        return Ok(Self {
+        Ok(Self {
             tile_size,
             sections: vec![TiledTexture2DSection {
                 x: 0,
@@ -90,7 +90,7 @@ impl TiledTexture2DPacker {
                 width,
                 height,
             }],
-        });
+        })
     }
 
     pub fn allocate(
@@ -114,7 +114,7 @@ impl TiledTexture2DPacker {
         let s = self.find_min_containing_section(width, height)?;
         let (s, r) = s.resize_splitted_with_rest(width, height);
         if !r.is_empty() {
-            self.sections.extend(r.into_iter());
+            self.sections.extend(r);
             self.sections.sort();
         }
 

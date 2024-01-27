@@ -14,11 +14,10 @@ use egui::mutex::RwLock;
 use engine_macros::glsl;
 use gpu::{CommandBuffer, Gpu, Offset2D, Rect2D, ShaderModuleCreateInfo, ShaderStage};
 use nalgebra::vector;
-use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop, window::Window};
+use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop};
 
 use crate::{
     app::{app_state::AppState, App},
-    components::EngineWindow,
     input::InputState,
     loaders::FileSystemTextureLoader,
     physics::PhysicsContext2D,
@@ -140,7 +139,7 @@ pub struct CommonResources {
 }
 
 impl BevyEcsApp {
-    pub fn new() -> anyhow::Result<BevyEcsAppWithLoop> {
+    pub fn create() -> anyhow::Result<BevyEcsAppWithLoop> {
         let (app, evt_loop, state) = crate::app::create_app::<Self>()?;
 
         Ok(BevyEcsAppWithLoop {
@@ -302,7 +301,7 @@ impl BevyEcsApp {
             parameters_visibility: ShaderStage::FRAGMENT,
             vertex_info: &gpu::VertexStageInfo {
                 entry_point: "main",
-                module: vertex_module.clone(),
+                module: vertex_module,
             },
             fragment_info: &gpu::FragmentStageInfo {
                 entry_point: "main",
@@ -326,7 +325,7 @@ impl BevyEcsApp {
                 parameters_visibility: ShaderStage::FRAGMENT,
                 vertex_info: &gpu::VertexStageInfo {
                     entry_point: "main",
-                    module: vertex_module.clone(),
+                    module: vertex_module,
                 },
                 fragment_info: &gpu::FragmentStageInfo {
                     entry_point: "main",
@@ -394,7 +393,6 @@ impl App for BevyEcsApp {
     fn create(
         app_state: &mut crate::app::app_state::AppState,
         _event_loop: &winit::event_loop::EventLoop<()>,
-        window: Window,
     ) -> anyhow::Result<Self>
     where
         Self: Sized,
@@ -425,7 +423,6 @@ impl App for BevyEcsApp {
             resource_map,
             cvar_manager,
             default_resources,
-            window,
             app_state,
         );
 
@@ -566,7 +563,7 @@ impl App for BevyEcsApp {
         Ok(command_buffer)
     }
 
-    fn on_shutdown(&mut self, app_state: &mut AppState) {
+    fn on_shutdown(&mut self, _app_state: &mut AppState) {
         todo!()
     }
 }
@@ -576,14 +573,12 @@ fn setup_world_resources(
     resource_map: ResourceMap,
     cvar_manager: CvarManager,
     default_resources: CommonResources,
-    window: Window,
     app_state: &mut AppState,
 ) {
     world.insert_resource(resource_map);
     world.insert_resource(cvar_manager);
     world.insert_resource(default_resources);
     world.insert_resource(InputState::new());
-    world.insert_resource(EngineWindow(window));
     world.insert_resource(Time::new());
     world.insert_resource(GpuDevice(app_state.gpu.clone()));
 }

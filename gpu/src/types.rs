@@ -909,7 +909,7 @@ impl VkImageView {
         self.inner
     }
     pub fn owner_image_handle(&self) -> ImageHandle {
-        self.owner_image.clone()
+        self.owner_image
     }
 
     pub fn format(&self) -> ImageFormat {

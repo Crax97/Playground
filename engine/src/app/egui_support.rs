@@ -54,7 +54,7 @@ impl EguiSupport {
             gpu.graphics_queue_family_index(),
             gpu.graphics_queue(),
             swapchain.swapchain_extension.clone(),
-            swapchain.current_swapchain.clone(),
+            swapchain.current_swapchain,
             swapchain.present_format,
         );
         Ok(Self { integration })
@@ -139,7 +139,7 @@ impl EguiSupport {
         self.integration.update_swapchain(
             swapchain.extents().width,
             swapchain.extents().height,
-            swapchain.current_swapchain.clone(),
+            swapchain.current_swapchain,
             swapchain.present_format,
         );
     }

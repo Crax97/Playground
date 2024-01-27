@@ -124,7 +124,7 @@ impl EditorUi for Collider2DHandle {
             .get_mut(self.0)
             .expect("Failed to find Collider 2D");
 
-        let mut position = collider_2d.position().clone();
+        let mut position = *collider_2d.position();
         let mut changed_pos = false;
         egui::Grid::new("Collider2D").show(ui, |ui| {
             ui.label("Position");

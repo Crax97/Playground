@@ -238,7 +238,7 @@ fn cubemap_main_loop(
     let make_image_view = |i| {
         gpu.make_image_view(&gpu::ImageViewCreateInfo {
             label: Some(&format!("Cubemap image view #{i}")),
-            image: backing_image.clone(),
+            image: backing_image,
             view_type: gpu::ImageViewType::Type2D,
             format: cube_image_format,
             components: gpu::ComponentMapping::default(),
@@ -302,7 +302,7 @@ fn cubemap_main_loop(
     for (i, view) in views.iter().enumerate() {
         let mvp = povs[i].projection * povs[i].view;
         let views = vec![FramebufferColorAttachment {
-            image_view: view.clone(),
+            image_view: *view,
             load_op: gpu::ColorLoadOp::DontCare,
             store_op: gpu::AttachmentStoreOp::Store,
             initial_layout: gpu::ImageLayout::ColorAttachment,
@@ -332,8 +332,8 @@ fn cubemap_main_loop(
                 }],
                 dependencies: &[],
             });
-            render_pass_command.set_vertex_shader(vertex_module.clone());
-            render_pass_command.set_fragment_shader(fragment_shader_to_apply.clone());
+            render_pass_command.set_vertex_shader(vertex_module);
+            render_pass_command.set_fragment_shader(fragment_shader_to_apply);
 
             render_pass_command.set_cull_mode(gpu::CullMode::None);
             render_pass_command.set_viewport(gpu::Viewport {
@@ -349,8 +349,8 @@ fn cubemap_main_loop(
                 0,
                 &[Binding {
                     ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: input_texture_view.clone(),
-                        sampler_handle: skybox_sampler.clone(),
+                        image_view_handle: *input_texture_view,
+                        sampler_handle: skybox_sampler,
                         layout: gpu::ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: ShaderStage::FRAGMENT,
@@ -359,13 +359,13 @@ fn cubemap_main_loop(
             );
 
             render_pass_command.set_index_buffer(
-                mesh.primitives[0].index_buffer.clone(),
+                mesh.primitives[0].index_buffer,
                 gpu::IndexType::Uint32,
                 0,
             );
             render_pass_command.set_vertex_buffers(&[
                 VertexBindingInfo {
-                    handle: mesh.primitives[0].position_component.clone(),
+                    handle: mesh.primitives[0].position_component,
                     location: 0,
                     offset: 0,
                     stride: std::mem::size_of::<Vector3<f32>>() as _,
@@ -373,7 +373,7 @@ fn cubemap_main_loop(
                     input_rate: InputRate::PerVertex,
                 },
                 VertexBindingInfo {
-                    handle: mesh.primitives[0].color_component.clone(),
+                    handle: mesh.primitives[0].color_component,
                     location: 1,
                     offset: 0,
                     stride: std::mem::size_of::<Vector3<f32>>() as _,
@@ -381,7 +381,7 @@ fn cubemap_main_loop(
                     input_rate: InputRate::PerVertex,
                 },
                 VertexBindingInfo {
-                    handle: mesh.primitives[0].normal_component.clone(),
+                    handle: mesh.primitives[0].normal_component,
                     location: 2,
                     offset: 0,
                     stride: std::mem::size_of::<Vector3<f32>>() as _,
@@ -389,7 +389,7 @@ fn cubemap_main_loop(
                     input_rate: InputRate::PerVertex,
                 },
                 VertexBindingInfo {
-                    handle: mesh.primitives[0].tangent_component.clone(),
+                    handle: mesh.primitives[0].tangent_component,
                     location: 3,
                     offset: 0,
                     stride: std::mem::size_of::<Vector3<f32>>() as _,
@@ -397,7 +397,7 @@ fn cubemap_main_loop(
                     input_rate: InputRate::PerVertex,
                 },
                 VertexBindingInfo {
-                    handle: mesh.primitives[0].uv_component.clone(),
+                    handle: mesh.primitives[0].uv_component,
                     location: 4,
                     offset: 0,
                     stride: std::mem::size_of::<Vector2<f32>>() as _,
@@ -423,8 +423,8 @@ fn cubemap_main_loop(
     }
     gpu.wait_device_idle()?;
     let view = gpu.make_image_view(&gpu::ImageViewCreateInfo {
-        label: Some(&format!("Rendered cubemap final result")),
-        image: backing_image.clone(),
+        label: Some("Rendered cubemap final result"),
+        image: backing_image,
         view_type: gpu::ImageViewType::Cube,
         format: cube_image_format,
         components: gpu::ComponentMapping::default(),

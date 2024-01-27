@@ -85,7 +85,7 @@ impl CascadedShadowMap {
 
         let shadow_atlas_view = gpu.make_image_view(&ImageViewCreateInfo {
             label: Some("Shadow atlas view"),
-            image: shadow_atlas.clone(),
+            image: shadow_atlas,
             view_type: gpu::ImageViewType::Type2D,
             format: gpu::ImageFormat::Depth,
             components: ComponentMapping {
@@ -165,7 +165,7 @@ impl CascadedShadowMap {
                     label: Some("CSM Shadow Atlas Emit"),
                     color_attachments: &[],
                     depth_attachment: Some(FramebufferDepthAttachment {
-                        image_view: self.shadow_atlas_view.clone(),
+                        image_view: self.shadow_atlas_view,
                         load_op: gpu::DepthLoadOp::Clear(1.0),
                         store_op: gpu::AttachmentStoreOp::Store,
                         initial_layout: gpu::ImageLayout::Undefined,

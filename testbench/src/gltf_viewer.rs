@@ -19,10 +19,7 @@ use gpu::{
     CommandBuffer, Extent2D, ImageFormat, Offset2D, PipelineBarrierInfo, PipelineStageFlags,
     PresentMode, Rect2D, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
 };
-use winit::{
-    dpi::{PhysicalPosition, Position},
-    window::Window,
-};
+use winit::dpi::{PhysicalPosition, Position};
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::input::key::Key;
@@ -77,7 +74,6 @@ pub struct GLTFViewer {
     cvar_manager: CvarManager,
     resource_map: ResourceMap,
     time: Time,
-    window: Window,
     egui_support: EguiSupport,
 
     depth_draw: ShaderModuleHandle,
@@ -259,11 +255,7 @@ impl App for GLTFViewer {
         ))
     }
 
-    fn create(
-        app_state: &mut AppState,
-        _event_loop: &EventLoop<()>,
-        window: Window,
-    ) -> anyhow::Result<Self>
+    fn create(app_state: &mut AppState, _event_loop: &EventLoop<()>) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
@@ -362,7 +354,8 @@ impl App for GLTFViewer {
             .swapchain_mut()
             .select_present_mode(PresentMode::Immediate)?;
 
-        let egui_support = EguiSupport::new(&window, &app_state.gpu, &app_state.swapchain)?;
+        let egui_support =
+            EguiSupport::new(&app_state.window, &app_state.gpu, &app_state.swapchain)?;
 
         gltf_loader.scene_mut().add_light(Light {
             ty: LightType::Directional {
@@ -398,7 +391,6 @@ impl App for GLTFViewer {
             cvar_manager,
             resource_map,
             time,
-            window,
             egui_support,
             depth_draw,
         })
@@ -432,16 +424,16 @@ impl App for GLTFViewer {
         })
     }
 
-    fn begin_frame(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
+    fn begin_frame(&mut self, app_state: &mut AppState) -> anyhow::Result<()> {
         self.time.begin_frame();
-        self.egui_support.begin_frame(&self.window);
+        self.egui_support.begin_frame(&app_state.window);
         Ok(())
     }
 
-    fn update(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
+    fn update(&mut self, app_state: &mut AppState) -> anyhow::Result<()> {
         let fps = 1.0 / self.time.delta_frame();
         let win_name = format!("GLTF Viewer : {} FPS", fps);
-        self.window.set_title(&win_name);
+        app_state.window.set_title(&win_name);
         self.console.update(&self.input);
         self.egui_support
             .paint_console(&mut self.console, &mut self.cvar_manager);
@@ -578,14 +570,16 @@ impl App for GLTFViewer {
         }
 
         if self.input.is_mouse_button_just_pressed(MouseButton::Right) {
-            self.window
+            app_state
+                .window
                 .set_cursor_grab(winit::window::CursorGrabMode::Confined)?;
-            self.window.set_cursor_visible(false);
+            app_state.window.set_cursor_visible(false);
         }
         if self.input.is_mouse_button_just_released(MouseButton::Right) {
-            self.window
+            app_state
+                .window
                 .set_cursor_grab(winit::window::CursorGrabMode::None)?;
-            self.window.set_cursor_visible(true);
+            app_state.window.set_cursor_visible(true);
         }
 
         if self
@@ -593,9 +587,10 @@ impl App for GLTFViewer {
             .is_mouse_button_pressed(winit::event::MouseButton::Right)
         {
             self.camera.update(&self.input, self.time.delta_frame());
-            let window_size = self.window.inner_size();
+            let window_size = app_state.window.inner_size();
 
-            self.window
+            app_state
+                .window
                 .set_cursor_position(Position::Physical(PhysicalPosition {
                     x: window_size.width as i32 / 2,
                     y: window_size.height as i32 / 2,
@@ -641,7 +636,7 @@ impl App for GLTFViewer {
             &self.cvar_manager,
         )?;
         // write_image_to_swapchain(backbuffer);
-        let output = self.egui_support.end_frame(&self.window);
+        let output = self.egui_support.end_frame(&app_state.window);
         self.scene_renderer.draw_textured_quad(
             &mut command_buffer,
             &backbuffer.image_view,

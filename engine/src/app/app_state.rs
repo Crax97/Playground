@@ -6,23 +6,12 @@ use winit::{dpi::PhysicalSize, window::Window};
 pub struct AppState {
     pub gpu: Arc<dyn Gpu>,
     pub swapchain: Swapchain,
-    pub needs_new_swapchain: bool,
-    pub current_window_size: PhysicalSize<u32>,
+    pub window: Window,
+    pub(crate) needs_new_swapchain: bool,
+    pub(crate) current_window_size: PhysicalSize<u32>,
 }
 
 impl AppState {
-    pub fn new(gpu: Arc<dyn Gpu>, window: &Window) -> Self {
-        let swapchain = gpu
-            .create_swapchain(window)
-            .expect("Failed to create swapchain");
-        Self {
-            gpu,
-            swapchain,
-            needs_new_swapchain: false,
-            current_window_size: window.inner_size(),
-        }
-    }
-
     pub fn begin_frame(&mut self) -> anyhow::Result<()> {
         self.gpu.update();
         Ok(())
@@ -57,7 +46,7 @@ impl Drop for AppState {
     Creates a global AppState, which is going to belong to a single thread.
     The AppState can be only accessed by the thread that ran engine::init()
 */
-pub fn init(app_name: &str, window: &winit::window::Window) -> anyhow::Result<AppState> {
+pub fn init(app_name: &str, window: winit::window::Window) -> anyhow::Result<AppState> {
     let enable_debug_utilities = if cfg!(debug_assertions) {
         true
     } else {
@@ -70,7 +59,16 @@ pub fn init(app_name: &str, window: &winit::window::Window) -> anyhow::Result<Ap
         pipeline_cache_path: Some("pipeline_cache.pso"),
         window: Some(&window),
     })?;
-
-    let app_state = AppState::new(gpu, &window);
+    let swapchain = gpu
+        .create_swapchain(&window)
+        .expect("Failed to create swapchain");
+    let size = window.inner_size();
+    let app_state = AppState {
+        window,
+        gpu,
+        swapchain,
+        current_window_size: size,
+        needs_new_swapchain: false,
+    };
     Ok(app_state)
 }

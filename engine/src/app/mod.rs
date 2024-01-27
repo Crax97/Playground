@@ -15,18 +15,13 @@ use winit::{
     event::Event,
     event_loop::{ControlFlow, EventLoop},
     platform::run_return::EventLoopExtRunReturn,
-    window::Window,
 };
 
 use app_state::AppState;
 pub trait App {
     fn window_name(&self, app_state: &AppState) -> Cow<str>;
 
-    fn create(
-        app_state: &mut AppState,
-        event_loop: &EventLoop<()>,
-        window: Window,
-    ) -> anyhow::Result<Self>
+    fn create(app_state: &mut AppState, event_loop: &EventLoop<()>) -> anyhow::Result<Self>
     where
         Self: Sized;
 
@@ -94,7 +89,7 @@ pub fn app_loop<A: App + 'static>(
                 app_state.swapchain_mut().recreate_swapchain()?;
 
                 app_state.needs_new_swapchain = false;
-                app.on_resized(&app_state, sz);
+                app.on_resized(app_state, sz);
             }
 
             if sz.width > 0 && sz.height > 0 {
@@ -133,7 +128,7 @@ fn draw_app(app_state_mut: &mut AppState, app: &mut dyn App) -> Result<(), anyho
         app_state_mut.swapchain_mut().acquire_next_image()?;
     let backbuffer = Backbuffer {
         size: swapchain_extents,
-        format: swapchain_format.into(),
+        format: swapchain_format,
         image: swapchain_image,
         image_view: swapchain_image_view,
     };
@@ -171,12 +166,8 @@ pub fn create_app<A: App + 'static>() -> anyhow::Result<(A, EventLoop<()>, AppSt
         .with_title("Winit App")
         .build(&event_loop)?;
 
-    let mut state = crate::app::app_state::init("Winit App", &window)?;
-    Ok((
-        A::create(&mut state, &event_loop, window)?,
-        event_loop,
-        state,
-    ))
+    let mut state = crate::app::app_state::init("Winit App", window)?;
+    Ok((A::create(&mut state, &event_loop)?, event_loop, state))
 }
 
 pub fn run<A: App + 'static>(
@@ -186,22 +177,29 @@ pub fn run<A: App + 'static>(
 ) -> anyhow::Result<()> {
     trace!("Created app");
     app.on_startup(&mut app_state)?;
+    let mut errored = false;
     let exit_code = event_loop.run_return(|event, _, control_flow| {
         match app_loop(&mut app, &mut app_state, event) {
             Ok(flow) => {
                 *control_flow = flow;
             }
-            Err(e) => panic!(
-                "Backtrace: {}\nDuring app loop: {}",
-                e.backtrace(),
-                e.chain()
-                    .fold(String::new(), |s, e| s + &e.to_string() + "\n"),
-            ),
+            Err(e) => {
+                errored = true;
+                panic!(
+                    "Backtrace: {}\nDuring app loop: {}",
+                    e.backtrace(),
+                    e.chain()
+                        .fold(String::new(), |s, e| s + &e.to_string() + "\n"),
+                );
+            }
         }
     });
-    app.on_shutdown(&mut app_state);
-    std::mem::drop(app);
-    std::mem::drop(app_state);
+    if !errored {
+        app.on_shutdown(&mut app_state);
+        std::mem::drop(app);
+        std::mem::drop(app_state);
+    }
+
     std::process::exit(exit_code);
 }
 

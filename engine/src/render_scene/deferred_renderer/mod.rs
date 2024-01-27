@@ -513,42 +513,42 @@ impl DeferredRenderingPipeline {
                     label: Some("Main pass"),
                     color_attachments: &[
                         FramebufferColorAttachment {
-                            image_view: position_component.view.clone(),
+                            image_view: position_component.view,
                             load_op: ColorLoadOp::Clear([0.0; 4]),
                             store_op: AttachmentStoreOp::Store,
                             initial_layout: ImageLayout::Undefined,
                             final_layout: ImageLayout::ShaderReadOnly,
                         },
                         FramebufferColorAttachment {
-                            image_view: normal_component.view.clone(),
+                            image_view: normal_component.view,
                             load_op: ColorLoadOp::Clear([0.5; 4]),
                             store_op: AttachmentStoreOp::Store,
                             initial_layout: ImageLayout::Undefined,
                             final_layout: ImageLayout::ShaderReadOnly,
                         },
                         FramebufferColorAttachment {
-                            image_view: diffuse_component.view.clone(),
+                            image_view: diffuse_component.view,
                             load_op: ColorLoadOp::Clear([0.0; 4]),
                             store_op: AttachmentStoreOp::Store,
                             initial_layout: ImageLayout::Undefined,
                             final_layout: ImageLayout::ShaderReadOnly,
                         },
                         FramebufferColorAttachment {
-                            image_view: emissive_component.view.clone(),
+                            image_view: emissive_component.view,
                             load_op: ColorLoadOp::Clear([0.0; 4]),
                             store_op: AttachmentStoreOp::Store,
                             initial_layout: ImageLayout::Undefined,
                             final_layout: ImageLayout::ShaderReadOnly,
                         },
                         FramebufferColorAttachment {
-                            image_view: pbr_component.view.clone(),
+                            image_view: pbr_component.view,
                             load_op: ColorLoadOp::Clear([0.0; 4]),
                             store_op: AttachmentStoreOp::Store,
                             initial_layout: ImageLayout::Undefined,
                             final_layout: ImageLayout::ShaderReadOnly,
                         },
                         FramebufferColorAttachment {
-                            image_view: final_scene_image.view.clone(),
+                            image_view: final_scene_image.view,
                             load_op: ColorLoadOp::Clear([0.0; 4]),
                             store_op: AttachmentStoreOp::Store,
                             initial_layout: ImageLayout::Undefined,
@@ -556,7 +556,7 @@ impl DeferredRenderingPipeline {
                         },
                     ],
                     depth_attachment: Some(gpu::FramebufferDepthAttachment {
-                        image_view: depth_component.view.clone(),
+                        image_view: depth_component.view,
                         load_op: gpu::DepthLoadOp::Clear(1.0),
                         store_op: AttachmentStoreOp::Store,
                         initial_layout: ImageLayout::Undefined,
@@ -653,8 +653,8 @@ impl DeferredRenderingPipeline {
                 &[
                     Binding {
                         ty: gpu::DescriptorBindingType::ImageView {
-                            image_view_handle: self.cascaded_shadow_map.shadow_atlas_view.clone(),
-                            sampler_handle: self.gbuffer_nearest_sampler.clone(),
+                            image_view_handle: self.cascaded_shadow_map.shadow_atlas_view,
+                            sampler_handle: self.gbuffer_nearest_sampler,
                             layout: ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
@@ -662,7 +662,7 @@ impl DeferredRenderingPipeline {
                     },
                     Binding {
                         ty: gpu::DescriptorBindingType::StorageBuffer {
-                            handle: csm_buffers.shadow_casters.clone(),
+                            handle: csm_buffers.shadow_casters,
                             offset: 0,
                             range: gpu::WHOLE_SIZE as _,
                         },
@@ -677,9 +677,8 @@ impl DeferredRenderingPipeline {
                                         .as_ref()
                                         .unwrap_or(&self.default_irradiance_map),
                                 )
-                                .view
-                                .clone(),
-                            sampler_handle: self.gbuffer_nearest_sampler.clone(),
+                                .view,
+                            sampler_handle: self.gbuffer_nearest_sampler,
                             layout: ImageLayout::ShaderReadOnly,
                         },
                         binding_stage: ShaderStage::FRAGMENT,
@@ -687,7 +686,7 @@ impl DeferredRenderingPipeline {
                     },
                     Binding {
                         ty: gpu::DescriptorBindingType::StorageBuffer {
-                            handle: current_buffers.camera_buffer.clone(),
+                            handle: current_buffers.camera_buffer,
                             offset: 0,
                             range: gpu::WHOLE_SIZE as usize,
                         },
@@ -696,7 +695,7 @@ impl DeferredRenderingPipeline {
                     },
                     Binding {
                         ty: gpu::DescriptorBindingType::StorageBuffer {
-                            handle: current_buffers.light_buffer.clone(),
+                            handle: current_buffers.light_buffer,
                             offset: 0,
                             range: gpu::WHOLE_SIZE as usize,
                         },
@@ -705,7 +704,7 @@ impl DeferredRenderingPipeline {
                     },
                     Binding {
                         ty: gpu::DescriptorBindingType::StorageBuffer {
-                            handle: csm_buffers.csm_splits.clone(),
+                            handle: csm_buffers.csm_splits,
                             offset: 0,
                             range: gpu::WHOLE_SIZE as usize,
                         },
@@ -720,8 +719,8 @@ impl DeferredRenderingPipeline {
             render_pass.set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
             render_pass.set_enable_depth_test(false);
             render_pass.set_depth_write_enabled(false);
-            render_pass.set_vertex_shader(self.screen_quad.clone());
-            render_pass.set_fragment_shader(self.combine_shader.clone());
+            render_pass.set_vertex_shader(self.screen_quad);
+            render_pass.set_fragment_shader(self.combine_shader);
             render_pass.draw(4, 1, 0, 0)?;
         }
 
@@ -760,7 +759,7 @@ impl DeferredRenderingPipeline {
             graphics_command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
                 label: Some("Copy to backbuffer"),
                 color_attachments: &[FramebufferColorAttachment {
-                    image_view: destination.clone(),
+                    image_view: *destination,
                     load_op: ColorLoadOp::DontCare,
                     store_op: AttachmentStoreOp::Store,
                     initial_layout: ImageLayout::Undefined,
@@ -793,8 +792,8 @@ impl DeferredRenderingPipeline {
             0,
             &[Binding {
                 ty: gpu::DescriptorBindingType::ImageView {
-                    image_view_handle: source.clone(),
-                    sampler_handle: self.gbuffer_nearest_sampler.clone(),
+                    image_view_handle: *source,
+                    sampler_handle: self.gbuffer_nearest_sampler,
                     layout: gpu::ImageLayout::ShaderReadOnly,
                 },
                 binding_stage: ShaderStage::FRAGMENT,
@@ -803,9 +802,9 @@ impl DeferredRenderingPipeline {
         );
 
         let screen_quad = if flip_render_target {
-            self.screen_quad_flipped.clone()
+            self.screen_quad_flipped
         } else {
-            self.screen_quad.clone()
+            self.screen_quad
         };
 
         present_render_pass.set_front_face(gpu::FrontFace::ClockWise);
@@ -814,8 +813,7 @@ impl DeferredRenderingPipeline {
         present_render_pass.set_enable_depth_test(false);
         present_render_pass.set_depth_write_enabled(false);
         present_render_pass.set_vertex_shader(screen_quad);
-        present_render_pass
-            .set_fragment_shader(override_shader.unwrap_or(self.texture_copy.clone()));
+        present_render_pass.set_fragment_shader(override_shader.unwrap_or(self.texture_copy));
 
         callback(&mut present_render_pass);
 
@@ -888,14 +886,14 @@ impl DeferredRenderingPipeline {
                         label: Some("Post Process"),
                         color_attachments: &[
                             FramebufferColorAttachment {
-                                image_view: post_process_backbuffer_1.view.clone(),
+                                image_view: post_process_backbuffer_1.view,
                                 load_op: ColorLoadOp::Clear([0.0; 4]),
                                 store_op: AttachmentStoreOp::Store,
                                 initial_layout: ImageLayout::ShaderReadOnly,
                                 final_layout: ImageLayout::ColorAttachment,
                             },
                             FramebufferColorAttachment {
-                                image_view: post_process_backbuffer_2.view.clone(),
+                                image_view: post_process_backbuffer_2.view,
                                 load_op: ColorLoadOp::Clear([0.0; 4]),
                                 store_op: AttachmentStoreOp::Store,
                                 initial_layout: ImageLayout::Undefined,
@@ -955,7 +953,7 @@ impl DeferredRenderingPipeline {
                     new_layout: ImageLayout::ShaderReadOnly,
                     src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
                     dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-                    image: final_color_output.image.clone(),
+                    image: final_color_output.image,
                     subresource_range: ImageSubresourceRange {
                         aspect_mask: ImageAspectFlags::COLOR,
                         base_mip_level: 0,
@@ -975,7 +973,7 @@ impl DeferredRenderingPipeline {
     }
 
     pub fn get_shadow_texture(&self, _gpu: &dyn Gpu) -> ImageViewHandle {
-        self.cascaded_shadow_map.shadow_atlas_view.clone()
+        self.cascaded_shadow_map.shadow_atlas_view
     }
 
     fn get_gbuffer(&self, gpu: &dyn Gpu) -> GBuffer {
@@ -1007,7 +1005,7 @@ impl DeferredRenderingPipeline {
             diffuse_component,
             emissive_component,
             pbr_component,
-            gbuffer_sampler: self.gbuffer_nearest_sampler.clone(),
+            gbuffer_sampler: self.gbuffer_nearest_sampler,
             viewport_size: self.view_size,
         }
     }
@@ -1088,16 +1086,16 @@ fn bind_master_material(
     let permutation = master
         .get_permutation(pipeline_target)
         .expect("failed to fetch permutation {pipeline_target:?}");
-    render_pass.set_vertex_shader(permutation.vertex_shader.clone());
+    render_pass.set_vertex_shader(permutation.vertex_shader);
     if let Some(fragment_shader) = &permutation.fragment_shader {
-        render_pass.set_fragment_shader(fragment_shader.clone());
+        render_pass.set_fragment_shader(*fragment_shader);
     }
     render_pass.bind_resources(
         0,
         &[
             Binding {
                 ty: gpu::DescriptorBindingType::StorageBuffer {
-                    handle: frame_buffers.camera_buffer.clone(),
+                    handle: frame_buffers.camera_buffer,
                     offset: 0,
                     range: gpu::WHOLE_SIZE as _,
                 },
@@ -1106,7 +1104,7 @@ fn bind_master_material(
             },
             Binding {
                 ty: gpu::DescriptorBindingType::UniformBuffer {
-                    handle: frame_buffers.light_buffer.clone(),
+                    handle: frame_buffers.light_buffer,
                     offset: 0,
                     range: 100 * size_of::<ObjectDrawInfo>(),
                 },
@@ -1128,7 +1126,7 @@ fn draw_mesh_primitive(
     sampler_allocator: &SamplerAllocator,
     camera_index: u32,
 ) -> anyhow::Result<()> {
-    render_pass.set_index_buffer(primitive.index_buffer.clone(), IndexType::Uint32, 0);
+    render_pass.set_index_buffer(primitive.index_buffer, IndexType::Uint32, 0);
 
     let mut user_bindings = vec![];
     user_bindings.extend(
@@ -1144,7 +1142,7 @@ fn draw_mesh_primitive(
 
                 Binding {
                     ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: tex.view.clone(),
+                        image_view_handle: tex.view,
                         sampler_handle,
                         layout: gpu::ImageLayout::ShaderReadOnly,
                     },
@@ -1156,7 +1154,7 @@ fn draw_mesh_primitive(
     for user_buffer in &material.parameter_buffers {
         user_bindings.push(Binding {
             ty: gpu::DescriptorBindingType::UniformBuffer {
-                handle: user_buffer.clone(),
+                handle: *user_buffer,
                 offset: 0,
                 range: gpu::WHOLE_SIZE as _,
             },
@@ -1167,7 +1165,7 @@ fn draw_mesh_primitive(
 
     render_pass.set_vertex_buffers(&[
         VertexBindingInfo {
-            handle: primitive.position_component.clone(),
+            handle: primitive.position_component,
             location: 0,
             offset: 0,
             stride: std::mem::size_of::<Vector3<f32>>() as _,
@@ -1175,7 +1173,7 @@ fn draw_mesh_primitive(
             input_rate: InputRate::PerVertex,
         },
         VertexBindingInfo {
-            handle: primitive.color_component.clone(),
+            handle: primitive.color_component,
             location: 1,
             offset: 0,
             stride: std::mem::size_of::<Vector3<f32>>() as _,
@@ -1183,7 +1181,7 @@ fn draw_mesh_primitive(
             input_rate: InputRate::PerVertex,
         },
         VertexBindingInfo {
-            handle: primitive.normal_component.clone(),
+            handle: primitive.normal_component,
             location: 2,
             offset: 0,
             stride: std::mem::size_of::<Vector3<f32>>() as _,
@@ -1191,7 +1189,7 @@ fn draw_mesh_primitive(
             input_rate: InputRate::PerVertex,
         },
         VertexBindingInfo {
-            handle: primitive.tangent_component.clone(),
+            handle: primitive.tangent_component,
             location: 3,
             offset: 0,
             stride: std::mem::size_of::<Vector3<f32>>() as _,
@@ -1199,7 +1197,7 @@ fn draw_mesh_primitive(
             input_rate: InputRate::PerVertex,
         },
         VertexBindingInfo {
-            handle: primitive.uv_component.clone(),
+            handle: primitive.uv_component,
             location: 4,
             offset: 0,
             stride: std::mem::size_of::<Vector2<f32>>() as _,
@@ -1330,7 +1328,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             material_parameters: material_description.material_parameters,
             vertex_info: &VertexStageInfo {
                 entry_point: "main",
-                module: material_description.vertex_module.clone(),
+                module: material_description.vertex_module,
             },
             fragment_info: &FragmentStageInfo {
                 entry_point: "main",
