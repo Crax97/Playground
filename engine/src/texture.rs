@@ -92,7 +92,7 @@ impl Texture {
         )?;
         let rgba_view = gpu.make_image_view(&gpu::ImageViewCreateInfo {
             label: Some(&(label.unwrap_or("Texture image").to_owned() + " - RGBA View")),
-            image: image.clone(),
+            image,
             view_type,
             format,
             components: ComponentMapping::default(),

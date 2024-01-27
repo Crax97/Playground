@@ -140,7 +140,7 @@ pub struct CommonResources {
 }
 
 impl BevyEcsApp {
-    pub fn new() -> anyhow::Result<BevyEcsAppWithLoop> {
+    pub fn create() -> anyhow::Result<BevyEcsAppWithLoop> {
         let (app, evt_loop, state) = crate::app::create_app::<Self>()?;
 
         Ok(BevyEcsAppWithLoop {
@@ -302,7 +302,7 @@ impl BevyEcsApp {
             parameters_visibility: ShaderStage::FRAGMENT,
             vertex_info: &gpu::VertexStageInfo {
                 entry_point: "main",
-                module: vertex_module.clone(),
+                module: vertex_module,
             },
             fragment_info: &gpu::FragmentStageInfo {
                 entry_point: "main",
@@ -326,7 +326,7 @@ impl BevyEcsApp {
                 parameters_visibility: ShaderStage::FRAGMENT,
                 vertex_info: &gpu::VertexStageInfo {
                     entry_point: "main",
-                    module: vertex_module.clone(),
+                    module: vertex_module,
                 },
                 fragment_info: &gpu::FragmentStageInfo {
                     entry_point: "main",
@@ -566,7 +566,7 @@ impl App for BevyEcsApp {
         Ok(command_buffer)
     }
 
-    fn on_shutdown(&mut self, app_state: &mut AppState) {
+    fn on_shutdown(&mut self, _app_state: &mut AppState) {
         todo!()
     }
 }

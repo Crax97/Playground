@@ -474,7 +474,7 @@ impl GpuThreadSharedState {
                     pool_index,
                 }
             },
-            || vec![],
+            Vec::new,
         )
     }
 
@@ -498,7 +498,7 @@ impl GpuThreadSharedState {
             } => buffer_descriptors.push((
                 b.location,
                 DescriptorBufferInfo {
-                    buffer: self.resolve_resource::<VkBuffer>(&handle).inner,
+                    buffer: self.resolve_resource::<VkBuffer>(handle).inner,
                     offset: *offset,
                     range: if *range as vk::DeviceSize == crate::WHOLE_SIZE {
                         vk::WHOLE_SIZE
@@ -515,7 +515,7 @@ impl GpuThreadSharedState {
             } => buffer_descriptors.push((
                 b.location,
                 DescriptorBufferInfo {
-                    buffer: self.resolve_resource::<VkBuffer>(&handle).inner,
+                    buffer: self.resolve_resource::<VkBuffer>(handle).inner,
                     offset: *offset,
                     range: if *range as vk::DeviceSize == crate::WHOLE_SIZE {
                         vk::WHOLE_SIZE
@@ -532,9 +532,9 @@ impl GpuThreadSharedState {
             } => image_descriptors.push((
                 b.location,
                 DescriptorImageInfo {
-                    sampler: self.resolve_resource::<VkSampler>(&sampler_handle).inner,
+                    sampler: self.resolve_resource::<VkSampler>(sampler_handle).inner,
                     image_view: self
-                        .resolve_resource::<VkImageView>(&image_view_handle)
+                        .resolve_resource::<VkImageView>(image_view_handle)
                         .inner,
                     image_layout: layout.to_vk(),
                 },
@@ -548,7 +548,7 @@ impl GpuThreadSharedState {
                 DescriptorImageInfo {
                     sampler: vk::Sampler::null(),
                     image_view: self
-                        .resolve_resource::<VkImageView>(&image_view_handle)
+                        .resolve_resource::<VkImageView>(image_view_handle)
                         .inner,
                     image_layout: layout.to_vk(),
                 },
@@ -783,7 +783,7 @@ impl GpuThreadSharedState {
             .iter()
             .map(|s| unsafe {
                 assert!(
-                    s.resolve_attachments.len() == 0
+                    s.resolve_attachments.is_empty()
                         || s.resolve_attachments.len() == s.color_attachments.len()
                 );
                 let p_input_attachments = all_inputs.as_ptr().add(cur_input);
@@ -807,7 +807,7 @@ impl GpuThreadSharedState {
                     p_input_attachments,
                     color_attachment_count: s.color_attachments.len() as _,
                     p_color_attachments,
-                    p_resolve_attachments: if s.resolve_attachments.len() > 0 {
+                    p_resolve_attachments: if !s.resolve_attachments.is_empty() {
                         p_resolve_attachments
                     } else {
                         std::ptr::null()
@@ -824,7 +824,7 @@ impl GpuThreadSharedState {
             .map(|d| d.to_vk())
             .collect::<Vec<_>>();
 
-        assert!(subpasses.len() > 0);
+        assert!(!subpasses.is_empty());
 
         let create_info = vk::RenderPassCreateInfo {
             s_type: StructureType::RENDER_PASS_CREATE_INFO,
@@ -1194,7 +1194,7 @@ impl VkGpu {
         configuration: &GpuConfiguration,
         instance_extensions: &[String],
     ) -> VkResult<Instance> {
-        const ENGINE_NAME: &'static str = "PlaygroundEngine";
+        const ENGINE_NAME: &str = "PlaygroundEngine";
         let vk_layer_khronos_validation = CString::new(KHRONOS_VALIDATION_LAYER).unwrap();
         let vk_layer_khronos_validation = vk_layer_khronos_validation.as_ptr();
 
@@ -1650,9 +1650,10 @@ impl VkGpu {
             Err(e) => anyhow::bail!(e.to_string()),
         };
 
-        let mut info = ShaderInfo::default();
-
-        info.entry_point = spirv_module.get_entry_point_name();
+        let mut info = ShaderInfo {
+            entry_point: spirv_module.get_entry_point_name(),
+            ..Default::default()
+        };
 
         for input in spirv_module
             .enumerate_input_variables(None)
@@ -1752,7 +1753,7 @@ impl VkGpu {
 fn ensure_map_is_empty<H: HasAssociatedHandle + Clone + std::fmt::Debug>(
     map: &AllocatedResourceMap<H>,
 ) {
-    if map.len() != 0 {
+    if !map.is_empty() {
         map.for_each(|f| {
             error!(
                 "Leaked resource of type {:?}: {f:?}",
@@ -1960,13 +1961,13 @@ impl VkGpu {
 
     pub fn write_image_data(
         &self,
-        image: &ImageHandle,
+        image: ImageHandle,
         data: &[u8],
         offset: Offset2D,
         extent: Extent2D,
         layer: u32,
     ) -> VkResult<()> {
-        let vk_image = self.resolve_resource::<VkImage>(image);
+        let vk_image = self.resolve_resource::<VkImage>(&image);
         self.transition_image_layout_impl(
             image,
             TransitionInfo {
@@ -1990,10 +1991,10 @@ impl VkGpu {
 
         let staging_buffer = self.resolve_resource::<VkBuffer>(&self.staging_buffer);
         if data.len() < staging_buffer.size() {
-            staging_buffer.write_data(0, &data);
+            staging_buffer.write_data(0, data);
             self.copy_buffer_to_image(&BufferImageCopyInfo {
-                source: self.staging_buffer.clone(),
-                dest: image.clone(),
+                source: self.staging_buffer,
+                dest: image,
                 dest_layout: ImageLayout::TransferDst,
                 image_offset: Offset3D {
                     x: offset.x,
@@ -2009,7 +2010,7 @@ impl VkGpu {
                 buffer_row_length: 0,
                 buffer_image_height: 0,
                 mip_level: 0,
-                base_layer: layer as u32,
+                base_layer: layer,
                 num_layers: 1,
             })?;
         } else {
@@ -2042,8 +2043,8 @@ impl VkGpu {
                 written += written_this_iteration;
             }
             self.copy_buffer_to_image(&BufferImageCopyInfo {
-                source: self.staging_buffer.clone(),
-                dest: image.clone(),
+                source: self.staging_buffer,
+                dest: image,
                 dest_layout: ImageLayout::TransferDst,
                 image_offset: Offset3D {
                     x: offset.x,
@@ -2059,7 +2060,7 @@ impl VkGpu {
                 buffer_row_length: 0,
                 buffer_image_height: 0,
                 mip_level: 0,
-                base_layer: layer as u32,
+                base_layer: layer,
                 num_layers: 1,
             })?;
         }
@@ -2158,7 +2159,7 @@ impl VkGpu {
                 width: create_info.width,
                 height: create_info.height,
             },
-            format.into(),
+            format,
         )?;
 
         Ok((image, format))
@@ -2168,7 +2169,7 @@ impl VkGpu {
         let image = self.resolve_resource::<VkImage>(&create_info.image);
         let vk_image = image.inner;
 
-        let gpu_view_format: ImageFormat = create_info.format.into();
+        let gpu_view_format: ImageFormat = create_info.format;
         let format = if gpu_view_format == image.format {
             create_info.format
         } else {
@@ -2195,7 +2196,7 @@ impl VkGpu {
             create_info.label.to_owned(),
             &vk_create_info,
             gpu_view_format,
-            create_info.image.clone(),
+            create_info.image,
             image.extents,
         )
     }
@@ -2221,7 +2222,7 @@ impl VkGpu {
 
     pub fn transition_image_layout_impl(
         &self,
-        image: &ImageHandle,
+        image: ImageHandle,
         old_layout: TransitionInfo,
         new_layout: TransitionInfo,
         subresource_range: ImageSubresourceRange,
@@ -2241,7 +2242,7 @@ impl VkGpu {
 
     pub fn transition_image_layout_in_command_buffer(
         &self,
-        image: &ImageHandle,
+        image: ImageHandle,
         command_buffer: &mut crate::VkCommandBuffer,
         old_layout: TransitionInfo,
         new_layout: TransitionInfo,
@@ -2254,7 +2255,7 @@ impl VkGpu {
             new_layout: new_layout.layout,
             src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
             dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-            image: image.clone(),
+            image,
             subresource_range,
         };
         command_buffer.pipeline_barrier(&PipelineBarrierInfo {
@@ -2660,7 +2661,7 @@ impl Gpu for VkGpu {
                 let offset = i as usize * layer_size;
 
                 self.write_image_data(
-                    &handle,
+                    handle,
                     &data[offset..offset + layer_size],
                     Offset2D { x: 0, y: 0 },
                     Extent2D {
@@ -2688,7 +2689,7 @@ impl Gpu for VkGpu {
 
                 write_layered_image(&rgba_data)?;
             } else {
-                write_layered_image(&data)?;
+                write_layered_image(data)?;
             }
         } else {
             self.transition_image_layout(
@@ -2723,12 +2724,11 @@ impl Gpu for VkGpu {
         region: Rect2D,
         layer: u32,
     ) -> anyhow::Result<()> {
-        let image: &ImageHandle = &handle;
         let offset = region.offset;
         let extent = region.extent;
-        let vk_image = self.resolve_resource::<VkImage>(image);
+        let vk_image = self.resolve_resource::<VkImage>(handle);
         self.transition_image_layout(
-            image,
+            handle,
             TransitionInfo {
                 layout: ImageLayout::Undefined,
                 access_mask: AccessFlags::empty(),
@@ -2750,10 +2750,10 @@ impl Gpu for VkGpu {
 
         let staging_buffer = self.resolve_resource::<VkBuffer>(&self.staging_buffer);
         if data.len() < staging_buffer.size() {
-            staging_buffer.write_data(0, &data);
+            staging_buffer.write_data(0, data);
             self.copy_buffer_to_image(&BufferImageCopyInfo {
-                source: self.staging_buffer.clone(),
-                dest: image.clone(),
+                source: self.staging_buffer,
+                dest: *handle,
                 dest_layout: ImageLayout::TransferDst,
                 image_offset: Offset3D {
                     x: offset.x,
@@ -2769,7 +2769,7 @@ impl Gpu for VkGpu {
                 buffer_row_length: 0,
                 buffer_image_height: 0,
                 mip_level: 0,
-                base_layer: layer as u32,
+                base_layer: layer,
                 num_layers: 1,
             })?;
         } else {
@@ -2802,8 +2802,8 @@ impl Gpu for VkGpu {
                 written += written_self_iteration;
             }
             self.copy_buffer_to_image(&BufferImageCopyInfo {
-                source: self.staging_buffer.clone(),
-                dest: image.clone(),
+                source: self.staging_buffer,
+                dest: *handle,
                 dest_layout: ImageLayout::TransferDst,
                 image_offset: Offset3D {
                     x: offset.x,
@@ -2819,12 +2819,12 @@ impl Gpu for VkGpu {
                 buffer_row_length: 0,
                 buffer_image_height: 0,
                 mip_level: 0,
-                base_layer: layer as u32,
+                base_layer: layer,
                 num_layers: 1,
             })?;
         }
         self.transition_image_layout(
-            image,
+            handle,
             TransitionInfo {
                 layout: ImageLayout::TransferDst,
                 access_mask: AccessFlags::TRANSFER_WRITE,
@@ -2852,10 +2852,9 @@ impl Gpu for VkGpu {
     ) -> anyhow::Result<crate::ImageViewHandle> {
         let image = self.resolve_resource::<VkImage>(&info.image);
         let view = {
-            let ref this = self;
-            let create_info: &ImageViewCreateInfo = &info;
+            let create_info: &ImageViewCreateInfo = info;
 
-            let gpu_view_format: ImageFormat = create_info.format.into();
+            let gpu_view_format: ImageFormat = create_info.format;
             let format = if gpu_view_format == image.format {
                 create_info.format
             } else {
@@ -2878,11 +2877,11 @@ impl Gpu for VkGpu {
                 subresource_range: create_info.subresource_range.to_vk(),
             };
             VkImageView::create(
-                this.vk_logical_device(),
+                self.vk_logical_device(),
                 None,
                 &vk_create_info,
                 gpu_view_format,
-                info.image.clone(),
+                info.image,
                 image.extents,
             )
         }?;
@@ -2920,7 +2919,7 @@ impl Gpu for VkGpu {
         new_layout: TransitionInfo,
         subresource_range: ImageSubresourceRange,
     ) -> anyhow::Result<()> {
-        self.transition_image_layout_impl(image, old_layout, new_layout, subresource_range)?;
+        self.transition_image_layout_impl(*image, old_layout, new_layout, subresource_range)?;
         Ok(())
     }
 

@@ -136,7 +136,7 @@ impl App for TriangleApp {
 
         let david_image_view = app_state.gpu.make_image_view(&ImageViewCreateInfo {
             label: Some("David image view"),
-            image: david_image.clone(),
+            image: david_image,
             view_type: gpu::ImageViewType::Type2D,
             format: ImageFormat::Rgba8,
             components: gpu::ComponentMapping::default(),
@@ -240,7 +240,7 @@ impl App for TriangleApp {
         let mut command_buffer = gpu.start_command_buffer(gpu::QueueType::Graphics)?;
         {
             let color_attachments = vec![FramebufferColorAttachment {
-                image_view: backbuffer.image_view.clone(),
+                image_view: backbuffer.image_view,
                 load_op: gpu::ColorLoadOp::Clear([0.3, 0.0, 0.3, 1.0]),
                 store_op: gpu::AttachmentStoreOp::Store,
                 initial_layout: gpu::ImageLayout::Undefined,
@@ -285,11 +285,11 @@ impl App for TriangleApp {
                 * Matrix4::new_rotation(vector![0.0, self.y_rotation, 0.0]);
             let mvp = projection * view * model;
 
-            pass.set_vertex_shader(self.vertex_module.clone());
-            pass.set_fragment_shader(self.fragment_module.clone());
+            pass.set_vertex_shader(self.vertex_module);
+            pass.set_fragment_shader(self.fragment_module);
             pass.set_vertex_buffers(&[
                 VertexBindingInfo {
-                    handle: self.triangle_buffer.clone(),
+                    handle: self.triangle_buffer,
                     location: 0,
                     offset: 0,
                     stride: std::mem::size_of::<[f32; 3]>() as _,
@@ -297,7 +297,7 @@ impl App for TriangleApp {
                     input_rate: InputRate::PerVertex,
                 },
                 VertexBindingInfo {
-                    handle: self.uv_buffer.clone(),
+                    handle: self.uv_buffer,
                     location: 1,
                     offset: 0,
                     stride: std::mem::size_of::<[f32; 2]>() as _,
@@ -305,13 +305,13 @@ impl App for TriangleApp {
                     input_rate: InputRate::PerVertex,
                 },
             ]);
-            pass.set_index_buffer(self.index_buffer.clone(), IndexType::Uint32, 0);
+            pass.set_index_buffer(self.index_buffer, IndexType::Uint32, 0);
             pass.bind_resources(
                 0,
                 &[Binding {
                     ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: self.david_image_view.clone(),
-                        sampler_handle: self.david_sampler.clone(),
+                        image_view_handle: self.david_image_view,
+                        sampler_handle: self.david_sampler,
                         layout: gpu::ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: ShaderStage::FRAGMENT,

@@ -268,7 +268,7 @@ impl GltfLoader {
 
             let gpu_image_view = gpu.make_image_view(&ImageViewCreateInfo {
                 label: Some(&(label.to_string() + " - View")),
-                image: gpu_image.clone(),
+                image: gpu_image,
                 view_type: ImageViewType::Type2D,
                 format,
                 components: ComponentMapping::default(),
@@ -297,8 +297,8 @@ impl GltfLoader {
         let mut all_textures = vec![];
         for texture in document.textures() {
             all_textures.push(resource_map.add(Texture {
-                image: allocated_images[texture.source().index()].clone(),
-                view: allocated_image_views[texture.source().index()].clone(),
+                image: allocated_images[texture.source().index()],
+                view: allocated_image_views[texture.source().index()],
                 sampler_settings: allocated_samplers[texture.sampler().index().unwrap_or(0)],
             }))
         }

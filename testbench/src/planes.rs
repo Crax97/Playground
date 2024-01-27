@@ -286,7 +286,7 @@ impl App for PlanesApp {
                 new_layout: ImageLayout::PresentSrc,
                 src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
                 dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-                image: backbuffer.image.clone(),
+                image: backbuffer.image,
                 subresource_range: ImageSubresourceRange {
                     aspect_mask: ImageAspectFlags::COLOR,
                     base_mip_level: 0,

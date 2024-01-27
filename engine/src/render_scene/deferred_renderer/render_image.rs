@@ -64,7 +64,7 @@ impl RenderImageAllocator {
                 let view = gpu
                     .make_image_view(&gpu::ImageViewCreateInfo {
                         label: Some(&(label.to_owned() + " - view")),
-                        image: image.clone(),
+                        image,
                         view_type: gpu::ImageViewType::Type2D,
                         format: desc.format,
                         components: gpu::ComponentMapping::default(),

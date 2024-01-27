@@ -68,9 +68,9 @@ pub fn init(app_name: &str, window: &winit::window::Window) -> anyhow::Result<Ap
         app_name,
         enable_debug_utilities,
         pipeline_cache_path: Some("pipeline_cache.pso"),
-        window: Some(&window),
+        window: Some(window),
     })?;
 
-    let app_state = AppState::new(gpu, &window);
+    let app_state = AppState::new(gpu, window);
     Ok(app_state)
 }

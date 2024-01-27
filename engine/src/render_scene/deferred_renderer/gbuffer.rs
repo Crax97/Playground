@@ -27,7 +27,7 @@ impl GBuffer {
             &[
                 Binding {
                     ty: gpu::DescriptorBindingType::InputAttachment {
-                        image_view_handle: self.position_component.view.clone(),
+                        image_view_handle: self.position_component.view,
                         layout: ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: ShaderStage::FRAGMENT,
@@ -35,7 +35,7 @@ impl GBuffer {
                 },
                 Binding {
                     ty: gpu::DescriptorBindingType::InputAttachment {
-                        image_view_handle: self.normal_component.view.clone(),
+                        image_view_handle: self.normal_component.view,
                         layout: ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: ShaderStage::FRAGMENT,
@@ -43,7 +43,7 @@ impl GBuffer {
                 },
                 Binding {
                     ty: gpu::DescriptorBindingType::InputAttachment {
-                        image_view_handle: self.diffuse_component.view.clone(),
+                        image_view_handle: self.diffuse_component.view,
                         layout: ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: ShaderStage::FRAGMENT,
@@ -51,7 +51,7 @@ impl GBuffer {
                 },
                 Binding {
                     ty: gpu::DescriptorBindingType::InputAttachment {
-                        image_view_handle: self.emissive_component.view.clone(),
+                        image_view_handle: self.emissive_component.view,
                         layout: ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: ShaderStage::FRAGMENT,
@@ -59,7 +59,7 @@ impl GBuffer {
                 },
                 Binding {
                     ty: gpu::DescriptorBindingType::InputAttachment {
-                        image_view_handle: self.pbr_component.view.clone(),
+                        image_view_handle: self.pbr_component.view,
                         layout: ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: ShaderStage::FRAGMENT,
@@ -76,8 +76,8 @@ impl GBuffer {
             &[
                 Binding {
                     ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: self.position_component.view.clone(),
-                        sampler_handle: self.gbuffer_sampler.clone(),
+                        image_view_handle: self.position_component.view,
+                        sampler_handle: self.gbuffer_sampler,
                         layout: ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: ShaderStage::FRAGMENT,
@@ -85,8 +85,8 @@ impl GBuffer {
                 },
                 Binding {
                     ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: self.normal_component.view.clone(),
-                        sampler_handle: self.gbuffer_sampler.clone(),
+                        image_view_handle: self.normal_component.view,
+                        sampler_handle: self.gbuffer_sampler,
                         layout: ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: ShaderStage::FRAGMENT,
@@ -94,8 +94,8 @@ impl GBuffer {
                 },
                 Binding {
                     ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: self.diffuse_component.view.clone(),
-                        sampler_handle: self.gbuffer_sampler.clone(),
+                        image_view_handle: self.diffuse_component.view,
+                        sampler_handle: self.gbuffer_sampler,
                         layout: ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: ShaderStage::FRAGMENT,
@@ -103,8 +103,8 @@ impl GBuffer {
                 },
                 Binding {
                     ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: self.emissive_component.view.clone(),
-                        sampler_handle: self.gbuffer_sampler.clone(),
+                        image_view_handle: self.emissive_component.view,
+                        sampler_handle: self.gbuffer_sampler,
                         layout: ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: ShaderStage::FRAGMENT,
@@ -112,8 +112,8 @@ impl GBuffer {
                 },
                 Binding {
                     ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: self.pbr_component.view.clone(),
-                        sampler_handle: self.gbuffer_sampler.clone(),
+                        image_view_handle: self.pbr_component.view,
+                        sampler_handle: self.gbuffer_sampler,
                         layout: ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: ShaderStage::FRAGMENT,

@@ -724,10 +724,7 @@ impl ImageFormat {
         }
     }
     pub fn is_color(&self) -> bool {
-        match self {
-            ImageFormat::Depth | ImageFormat::Undefined => false,
-            _ => true,
-        }
+        !matches!(self, ImageFormat::Depth | ImageFormat::Undefined)
     }
 
     pub fn is_depth(&self) -> bool {

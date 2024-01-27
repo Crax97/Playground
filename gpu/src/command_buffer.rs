@@ -223,7 +223,7 @@ impl GraphicsPipelineState {
     }
 
     pub(crate) fn dynamic_state(&self) -> vk::PipelineDynamicStateCreateInfo {
-        static DYNAMIC_STATES: &'static [vk::DynamicState] = &[
+        static DYNAMIC_STATES: &[vk::DynamicState] = &[
             vk::DynamicState::VIEWPORT,
             vk::DynamicState::SCISSOR,
             vk::DynamicState::DEPTH_BIAS,
@@ -524,7 +524,7 @@ impl VkCommandBuffer {
             let signal_semaphores: Vec<_> = submit_info
                 .signal_semaphores
                 .iter()
-                .map(|s| self.state.resolve_resource::<VkSemaphore>(&s).inner)
+                .map(|s| self.state.resolve_resource::<VkSemaphore>(s).inner)
                 .collect();
 
             let stage_masks: Vec<_> = submit_info.wait_stages.iter().map(|v| v.to_vk()).collect();
@@ -543,7 +543,7 @@ impl VkCommandBuffer {
                     p_signal_semaphores: signal_semaphores.as_ptr(),
                 }],
                 if let Some(fence) = &submit_info.fence {
-                    self.state.resolve_resource::<VkFence>(&fence).inner
+                    self.state.resolve_resource::<VkFence>(fence).inner
                 } else {
                     vk::Fence::null()
                 },
@@ -685,7 +685,7 @@ impl command_buffer_2::Impl for VkCommandBuffer {
             let signal_semaphores: Vec<_> = submit_info
                 .signal_semaphores
                 .iter()
-                .map(|s| self.state.resolve_resource::<VkSemaphore>(&s).inner)
+                .map(|s| self.state.resolve_resource::<VkSemaphore>(s).inner)
                 .collect();
 
             let stage_masks: Vec<_> = submit_info.wait_stages.iter().map(|v| v.to_vk()).collect();
@@ -704,7 +704,7 @@ impl command_buffer_2::Impl for VkCommandBuffer {
                     p_signal_semaphores: signal_semaphores.as_ptr(),
                 }],
                 if let Some(fence) = &submit_info.fence {
-                    self.state.resolve_resource::<VkFence>(&fence).inner
+                    self.state.resolve_resource::<VkFence>(fence).inner
                 } else {
                     vk::Fence::null()
                 },
@@ -816,15 +816,14 @@ impl VkCommandBuffer {
 impl Drop for VkCommandBuffer {
     fn drop(&mut self) {
         if !self.command_buffer_state.borrow().has_been_submitted {
-            warn!("CommandBuffer::submit has not been called!");
-            return;
+            warn!("CommandBuffer::submit has not been called!")
         }
     }
 }
 
 impl VkRenderPassCommand {
     fn new(command_buffer: &mut VkCommandBuffer, render_pass_info: &BeginRenderPassInfo) -> Self {
-        assert!(render_pass_info.subpasses.len() > 0);
+        assert!(!render_pass_info.subpasses.is_empty());
         let render_pass = command_buffer.state.get_render_pass(
             &Self::get_attachments(&command_buffer.state, render_pass_info),
             render_pass_info.label,
@@ -832,7 +831,7 @@ impl VkRenderPassCommand {
 
         let framebuffer = command_buffer
             .state
-            .get_framebuffer(&render_pass_info, render_pass);
+            .get_framebuffer(render_pass_info, render_pass);
 
         let mut clear_colors = render_pass_info
             .color_attachments
@@ -1033,9 +1032,7 @@ impl VkRenderPassCommand {
                 self.command_buffer_state.borrow();
 
         validate!(
-            !self.pipeline_state.early_discard_enabled
-                || (self.pipeline_state.early_discard_enabled
-                    && self.pipeline_state.fragment_shader.is_valid()),
+            !self.pipeline_state.early_discard_enabled || self.pipeline_state.fragment_shader.is_valid(),
             "Primitive early discard is enabled, but no valid fragment shader has been set"
         );
         validate!(
@@ -1055,8 +1052,8 @@ impl VkRenderPassCommand {
         state: &GpuThreadSharedState,
         render_pass_info: &BeginRenderPassInfo<'_>,
     ) -> RenderPassAttachments {
-        let mut attachments = RenderPassAttachments::default();
-        attachments.color_attachments = render_pass_info
+         RenderPassAttachments {
+            color_attachments: render_pass_info
             .color_attachments
             .iter()
             .map(|att| RenderPassAttachment {
@@ -1070,7 +1067,7 @@ impl VkRenderPassCommand {
                 stencil_store_op: AttachmentStoreOp::DontCare,
                 initial_layout: att.initial_layout,
                 final_layout: att.final_layout,
-                /// TODO: Add blend state to framebuffer attachments
+                // TODO: Add blend state to framebuffer attachments
                 blend_state: BlendState {
                     blend_enable: true,
                     src_color_blend_factor: BlendMode::One,
@@ -1082,43 +1079,44 @@ impl VkRenderPassCommand {
                     color_write_mask: ColorComponentFlags::RGBA,
                 },
             })
-            .collect();
-        attachments.depth_attachment =
-            render_pass_info
-                .depth_attachment
-                .as_ref()
-                .map(|att| RenderPassAttachment {
-                    format: state
-                        .resolve_resource::<VkImageView>(&att.image_view)
-                        .format,
-                    samples: SampleCount::Sample1,
-                    load_op: match att.load_op {
-                        DepthLoadOp::DontCare => ColorLoadOp::DontCare,
-                        DepthLoadOp::Load => ColorLoadOp::Load,
-                        DepthLoadOp::Clear(_) => ColorLoadOp::Clear([0.0; 4]),
-                    },
-                    store_op: att.store_op,
-                    stencil_load_op: StencilLoadOp::DontCare,
-                    stencil_store_op: AttachmentStoreOp::DontCare,
-                    initial_layout: att.initial_layout,
-                    final_layout: att.final_layout,
-                    /// TODO: Add blend state to framebuffer attachments
-                    blend_state: BlendState {
-                        blend_enable: true,
-                        src_color_blend_factor: BlendMode::One,
-                        dst_color_blend_factor: BlendMode::OneMinusSrcAlpha,
-                        color_blend_op: BlendOp::Add,
-                        src_alpha_blend_factor: BlendMode::One,
-                        dst_alpha_blend_factor: BlendMode::OneMinusSrcAlpha,
-                        alpha_blend_op: BlendOp::Add,
-                        color_write_mask: ColorComponentFlags::RGBA,
-                    },
-                });
+            .collect(),
+        depth_attachment :
+                    render_pass_info
+                        .depth_attachment
+                        .as_ref()
+                        .map(|att| RenderPassAttachment {
+                            format: state
+                                .resolve_resource::<VkImageView>(&att.image_view)
+                                .format,
+                            samples: SampleCount::Sample1,
+                            load_op: match att.load_op {
+                                DepthLoadOp::DontCare => ColorLoadOp::DontCare,
+                                DepthLoadOp::Load => ColorLoadOp::Load,
+                                DepthLoadOp::Clear(_) => ColorLoadOp::Clear([0.0; 4]),
+                            },
+                            store_op: att.store_op,
+                            stencil_load_op: StencilLoadOp::DontCare,
+                            stencil_store_op: AttachmentStoreOp::DontCare,
+                            initial_layout: att.initial_layout,
+                            final_layout: att.final_layout,
+                            // TODO: Add blend state to framebuffer attachments
+                            blend_state: BlendState {
+                                blend_enable: true,
+                                src_color_blend_factor: BlendMode::One,
+                                dst_color_blend_factor: BlendMode::OneMinusSrcAlpha,
+                                color_blend_op: BlendOp::Add,
+                                src_alpha_blend_factor: BlendMode::One,
+                                dst_alpha_blend_factor: BlendMode::OneMinusSrcAlpha,
+                                alpha_blend_op: BlendOp::Add,
+                                color_write_mask: ColorComponentFlags::RGBA,
+                            },
+                    }),
+        subpasses : render_pass_info.subpasses.to_vec(),
+        dependencies : render_pass_info.dependencies.to_vec(),
+        ..Default::default()
+        }
 
-        attachments.subpasses = render_pass_info.subpasses.to_vec();
-        attachments.dependencies = render_pass_info.dependencies.to_vec();
-        attachments
-    }
+        }
     fn find_matching_graphics_pipeline(
         &self,
         layout: vk::PipelineLayout,
@@ -1223,7 +1221,7 @@ impl render_pass::Impl for VkRenderPassCommand {
         self.subpass_label.take();
         if let Some(ref label) = self.subpasses[self.pipeline_state.current_subpass as usize].label
         {
-            self.subpass_label = Some(self.begin_debug_region(&label, SUBPASS_LABEL_COLOR));
+            self.subpass_label = Some(self.begin_debug_region(label, SUBPASS_LABEL_COLOR));
         }
         unsafe {
             self.state

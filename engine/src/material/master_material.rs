@@ -130,7 +130,7 @@ impl MasterMaterial {
         pipelines.insert(
             PipelineTarget::DepthOnly,
             ShaderPermutation {
-                vertex_shader: description.vertex_info.module.clone(),
+                vertex_shader: description.vertex_info.module,
                 fragment_shader: None,
             },
         );
@@ -138,8 +138,8 @@ impl MasterMaterial {
         pipelines.insert(
             PipelineTarget::ColorAndDepth,
             ShaderPermutation {
-                vertex_shader: description.vertex_info.module.clone(),
-                fragment_shader: Some(description.fragment_info.module.clone()),
+                vertex_shader: description.vertex_info.module,
+                fragment_shader: Some(description.fragment_info.module),
             },
         );
         Ok(pipelines)
@@ -151,8 +151,8 @@ impl MasterMaterial {
         pipelines.insert(
             PipelineTarget::PostProcess,
             ShaderPermutation {
-                vertex_shader: description.vertex_info.module.clone(),
-                fragment_shader: Some(description.fragment_info.module.clone()),
+                vertex_shader: description.vertex_info.module,
+                fragment_shader: Some(description.fragment_info.module),
             },
         );
 

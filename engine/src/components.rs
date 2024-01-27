@@ -263,7 +263,7 @@ pub fn rendering_system_2d(
     for (sprite_component, transform) in sprites.iter() {
         let material_instance = MaterialInstance {
             owner: sprite_component.material.clone(),
-            parameter_buffers: vec![sprite_component.parameter_buffer.clone()],
+            parameter_buffers: vec![sprite_component.parameter_buffer],
             textures: vec![sprite_component.texture.clone()],
         };
         let correct_scale = [

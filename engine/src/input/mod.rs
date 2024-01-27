@@ -134,8 +134,8 @@ impl InputState {
 
     pub fn end_frame(&mut self) {
         self.last_button_state = self.pointer_button_state.clone();
-        self.last_key_states = self.key_states.clone();
-        self.last_modifiers = self.current_modifiers.clone();
+        self.last_key_states = self.key_states;
+        self.last_modifiers = self.current_modifiers;
         self.current_wheel_delta = 0.0;
     }
 
@@ -264,6 +264,12 @@ impl InputState {
 
     fn update_modifiers_state(&mut self, modifiers: &ModifiersState) {
         self.current_modifiers = modifiers.bits().into();
+    }
+}
+
+impl Default for InputState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

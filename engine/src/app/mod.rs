@@ -94,7 +94,7 @@ pub fn app_loop<A: App + 'static>(
                 app_state.swapchain_mut().recreate_swapchain()?;
 
                 app_state.needs_new_swapchain = false;
-                app.on_resized(&app_state, sz);
+                app.on_resized(app_state, sz);
             }
 
             if sz.width > 0 && sz.height > 0 {
@@ -133,7 +133,7 @@ fn draw_app(app_state_mut: &mut AppState, app: &mut dyn App) -> Result<(), anyho
         app_state_mut.swapchain_mut().acquire_next_image()?;
     let backbuffer = Backbuffer {
         size: swapchain_extents,
-        format: swapchain_format.into(),
+        format: swapchain_format,
         image: swapchain_image,
         image_view: swapchain_image_view,
     };

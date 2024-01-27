@@ -79,7 +79,7 @@ fn main() -> anyhow::Result<()> {
                 Binding {
                     location: 0,
                     ty: gpu::DescriptorBindingType::UniformBuffer {
-                        handle: input_buffer.clone(),
+                        handle: input_buffer,
                         offset: 0,
                         range: gpu::WHOLE_SIZE as _,
                     },
@@ -88,7 +88,7 @@ fn main() -> anyhow::Result<()> {
                 Binding {
                     location: 1,
                     ty: gpu::DescriptorBindingType::StorageBuffer {
-                        handle: output_buffer.clone(),
+                        handle: output_buffer,
                         offset: 0,
                         range: gpu::WHOLE_SIZE as _,
                     },
