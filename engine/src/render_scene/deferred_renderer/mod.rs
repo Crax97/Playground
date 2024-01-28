@@ -857,22 +857,31 @@ impl DeferredRenderingPipeline {
             })
             .collect::<Vec<_>>();
 
-        let mut dependencies = self
-            .post_process_stack
+        let mut dependencies = Vec::with_capacity(self.post_process_stack.len() + 1);
+        dependencies.push(SubpassDependency {
+            src_subpass: SubpassDependency::EXTERNAL,
+            dst_subpass: 0,
+            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+            dst_stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+            src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
+            dst_access_mask: AccessFlags::empty(),
+        });
+        self.post_process_stack
             .iter()
             .enumerate()
-            .map(|(i, _)| SubpassDependency {
-                src_subpass: i as u32,
-                dst_subpass: i as u32 + 1,
-                src_stage_mask: PipelineStageFlags::FRAGMENT_SHADER
-                    | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER
-                    | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                src_access_mask: AccessFlags::SHADER_READ | AccessFlags::COLOR_ATTACHMENT_WRITE,
-                dst_access_mask: AccessFlags::SHADER_READ | AccessFlags::COLOR_ATTACHMENT_WRITE,
-            })
-            .collect::<Vec<_>>();
-        dependencies.pop();
+            .take(self.post_process_stack.len() - 1)
+            .for_each(|(i, _)| {
+                dependencies.push(SubpassDependency {
+                    src_subpass: i as u32,
+                    dst_subpass: i as u32 + 1,
+                    src_stage_mask: PipelineStageFlags::FRAGMENT_SHADER
+                        | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER
+                        | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    src_access_mask: AccessFlags::SHADER_READ | AccessFlags::COLOR_ATTACHMENT_WRITE,
+                    dst_access_mask: AccessFlags::SHADER_READ | AccessFlags::COLOR_ATTACHMENT_WRITE,
+                })
+            });
 
         let final_color_output = {
             let final_color_output = {
