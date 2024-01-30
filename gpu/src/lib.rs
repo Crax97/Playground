@@ -5,6 +5,7 @@ mod gpu_resource_manager;
 mod handle;
 mod swapchain;
 mod types;
+mod vk_staging_buffer;
 
 pub use crate::gpu::*;
 pub use allocator::*;
@@ -191,8 +192,6 @@ pub mod command_buffer_2 {
         fn bind_resources(&mut self, set: u32, bindings: &[Binding]);
         fn bind_resources_2(&mut self, set: u32, bindings: &[Binding2]);
         fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo);
-        fn submit(&mut self, submit_info: &CommandBufferSubmitInfo) -> anyhow::Result<()>;
-
         fn insert_debug_label(&self, label: &str, color: [f32; 4]);
     });
 
@@ -340,61 +339,23 @@ pub mod compute_pass {
 }
 
 pub(crate) mod swapchain_2 {
-    use crate::{
-        Extent2D, FenceCreateFlags, FenceCreateInfo, FenceHandle, Gpu, ImageFormat, ImageHandle,
-        ImageViewHandle, PresentMode, SemaphoreCreateInfo, SemaphoreHandle,
-    };
-    pub struct SwapchainFrame {
-        pub in_flight_fence: FenceHandle,
-        pub render_finished_semaphore: SemaphoreHandle,
-        pub image_available_semaphore: SemaphoreHandle,
-    }
-    impl SwapchainFrame {
-        pub fn new(gpu: &dyn Gpu) -> anyhow::Result<Self> {
-            let in_flight_fence = gpu.make_fence(&FenceCreateInfo {
-                flags: FenceCreateFlags::SIGNALED,
-                label: Some("In Flight Fence"),
-            })?;
 
-            let render_finished_semaphore = gpu.make_semaphore(&SemaphoreCreateInfo {
-                label: Some("render finished semaphore"),
-                ..Default::default()
-            })?;
-
-            let image_available_semaphore = gpu.make_semaphore(&SemaphoreCreateInfo {
-                label: Some("image finished semaphore"),
-                ..Default::default()
-            })?;
-            Ok(Self {
-                in_flight_fence,
-                render_finished_semaphore,
-                image_available_semaphore,
-            })
-        }
-
-        pub fn destroy(&self, gpu: &dyn Gpu) {
-            gpu.destroy_semaphore(self.render_finished_semaphore);
-            gpu.destroy_semaphore(self.image_available_semaphore);
-            gpu.destroy_fence(self.in_flight_fence);
-        }
-    }
+    use crate::{Extent2D, Gpu, ImageFormat, ImageHandle, ImageViewHandle, PresentMode};
     define_pimpl_type!(Swapchain {
         fn acquire_next_image(&mut self) -> anyhow::Result<(ImageHandle, ImageViewHandle)>;
+
         fn present(&self) -> anyhow::Result<bool>;
         fn recreate_swapchain(&mut self) -> anyhow::Result<()>;
         fn select_present_mode(&mut self, present_mode: PresentMode) -> anyhow::Result<()>;
         fn extents(&self) -> Extent2D;
         fn present_format(&self) -> ImageFormat;
-        fn get_current_swapchain_frame(&self) -> &SwapchainFrame;
         fn destroy(&mut self, gpu: &dyn Gpu);
     });
 }
 
 pub use self::{
-    command_buffer_2::CommandBuffer,
-    compute_pass::ComputePass,
-    render_pass::RenderPass,
-    swapchain_2::{Swapchain, SwapchainFrame},
+    command_buffer_2::CommandBuffer, compute_pass::ComputePass, render_pass::RenderPass,
+    swapchain_2::Swapchain,
 };
 
 pub trait Gpu: Send + Sync + AsAnyArc + 'static {
@@ -462,6 +423,9 @@ pub trait Gpu: Send + Sync + AsAnyArc + 'static {
     fn start_command_buffer(&self, queue_type: QueueType) -> anyhow::Result<CommandBuffer>;
 
     fn create_swapchain(&self, window: &Window) -> anyhow::Result<Swapchain>;
+
+    fn submit_work(&self);
+    fn end_frame(&self);
 
     fn destroy(&self);
 }

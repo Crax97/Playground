@@ -413,13 +413,6 @@ fn cubemap_main_loop(
             );
             render_pass_command.draw_indexed(mesh.primitives[0].index_count, 1, 0, 0, 0)?;
         }
-        command_buffer.submit(&gpu::CommandBufferSubmitInfo {
-            wait_semaphores: &[],
-            wait_stages: &[],
-            signal_semaphores: &[],
-            fence: None,
-        })?;
-        gpu.wait_device_idle()?;
     }
     gpu.wait_device_idle()?;
     let view = gpu.make_image_view(&gpu::ImageViewCreateInfo {

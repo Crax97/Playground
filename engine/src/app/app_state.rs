@@ -18,7 +18,9 @@ impl AppState {
     }
 
     pub fn end_frame(&mut self) -> anyhow::Result<()> {
+        self.gpu.submit_work();
         self.swapchain.present()?;
+        self.gpu.end_frame();
         Ok(())
     }
 

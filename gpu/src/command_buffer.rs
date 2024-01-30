@@ -1,12 +1,13 @@
 use std::cell::RefCell;
 use std::ffi::CString;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use ash::vk::{
-    self, ClearColorValue, ClearDepthStencilValue, ClearValue, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags, ImageMemoryBarrier2, ImageView, PipelineBindPoint, PipelineInputAssemblyStateCreateFlags, RenderingAttachmentInfo, RenderingInfo, StructureType, SubmitInfo
+    self, AccessFlags2, ClearColorValue, ClearDepthStencilValue, ClearValue, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags, DependencyInfo, ImageMemoryBarrier2, ImageView, PipelineBindPoint, PipelineInputAssemblyStateCreateFlags, PipelineStageFlags2, RenderingAttachmentInfo, RenderingInfo, StructureType, SubmitInfo
 };
 use ash::{extensions::ext::DebugUtils, prelude::VkResult};
+use crossbeam::epoch::Pointable;
 use log::warn;
 
 use crate::*;
@@ -19,8 +20,6 @@ const SUBPASS_LABEL_COLOR: [f32; 4] = [0.373, 0.792, 0.988, 1.0];
 struct VkCommandBufferState {
     inner_command_buffer: vk::CommandBuffer,
     has_recorded_anything: bool,
-    has_been_submitted: bool,
-    target_queue: vk::Queue,
     descriptor_state: DescriptorSetState,
     push_constant_data: Vec<Vec<u8>>,
 }
@@ -114,6 +113,113 @@ pub(crate) struct GraphicsPipelineState2 {
     pub(crate) primitive_topology: PrimitiveTopology,
     pub(crate) polygon_mode: PolygonMode,
     pub(crate) color_output_enabled: bool,
+    pub(crate) color_attachments: Vec<ColorAttachment>,
+}
+
+impl GraphicsPipelineState2 {
+    pub(crate) fn input_assembly_state(&self) -> vk::PipelineInputAssemblyStateCreateInfo {
+        vk::PipelineInputAssemblyStateCreateInfo {
+            s_type: StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: PipelineInputAssemblyStateCreateFlags::empty(),
+            topology: self.primitive_topology.to_vk(),
+            primitive_restart_enable: vk::FALSE,
+        }
+    }
+
+    pub(crate) fn get_vertex_inputs_description(
+        &self,
+    ) -> (
+        Vec<vk::VertexInputBindingDescription>,
+        Vec<vk::VertexInputAttributeDescription>,
+    ) {
+        let mut inputs = vec![];
+        let mut attributes = vec![];
+
+        for (index, input) in self.vertex_inputs.iter().enumerate() {
+            inputs.push(vk::VertexInputBindingDescription {
+                binding: index as _,
+                stride: input.stride,
+                input_rate: input.input_rate.to_vk(),
+            });
+        }
+        for (index, input) in self.vertex_inputs.iter().enumerate() {
+            attributes.push(vk::VertexInputAttributeDescription {
+                location: input.location,
+                binding: index as _,
+                format: input.format.to_vk(),
+                offset: input.offset,
+            });
+        }
+
+        (inputs, attributes)
+    }
+
+    pub(crate) fn rasterization_state(&self) -> vk::PipelineRasterizationStateCreateInfo {
+        vk::PipelineRasterizationStateCreateInfo {
+            s_type: StructureType::PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineRasterizationStateCreateFlags::empty(),
+            depth_clamp_enable: self.depth_clamp_enabled.to_vk(),
+            rasterizer_discard_enable: self.early_discard_enabled.to_vk(),
+            polygon_mode: vk::PolygonMode::FILL,
+            cull_mode: self.cull_mode.to_vk(),
+            front_face: self.front_face.to_vk(),
+            depth_bias_enable: vk::TRUE,
+            depth_bias_constant_factor: 0.0,
+            depth_bias_clamp: 0.0,
+            depth_bias_slope_factor: 0.0,
+            line_width: 1.0,
+        }
+    }
+
+    pub(crate) fn multisample_state(&self) -> vk::PipelineMultisampleStateCreateInfo {
+        vk::PipelineMultisampleStateCreateInfo {
+            s_type: StructureType::PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineMultisampleStateCreateFlags::empty(),
+            rasterization_samples: SampleCount::Sample1.to_vk(),
+            sample_shading_enable: vk::FALSE,
+            min_sample_shading: 0.0,
+            p_sample_mask: std::ptr::null(),
+            alpha_to_coverage_enable: vk::FALSE,
+            alpha_to_one_enable: vk::FALSE,
+        }
+    }
+
+    pub(crate) fn depth_stencil_state(&self) -> vk::PipelineDepthStencilStateCreateInfo {
+        vk::PipelineDepthStencilStateCreateInfo {
+            s_type: StructureType::PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineDepthStencilStateCreateFlags::empty(),
+            depth_test_enable: self.enable_depth_test.to_vk(),
+            depth_write_enable: self.depth_write_enabled.to_vk(),
+            depth_compare_op: self.depth_compare_op.to_vk(),
+            depth_bounds_test_enable: false.to_vk(),
+            stencil_test_enable: false.to_vk(),
+            front: StencilOpState::default().to_vk(),
+            back: StencilOpState::default().to_vk(),
+            min_depth_bounds: 0.0,
+            max_depth_bounds: 1.0,
+        }
+    }
+
+    pub(crate) fn dynamic_state(&self) -> vk::PipelineDynamicStateCreateInfo {
+        static DYNAMIC_STATES: &[vk::DynamicState] = &[
+            vk::DynamicState::VIEWPORT,
+            vk::DynamicState::SCISSOR,
+            vk::DynamicState::DEPTH_BIAS,
+            vk::DynamicState::DEPTH_BIAS_ENABLE,
+            vk::DynamicState::DEPTH_TEST_ENABLE,
+        ];
+        vk::PipelineDynamicStateCreateInfo {
+            s_type: StructureType::PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineDynamicStateCreateFlags::empty(),
+            dynamic_state_count: DYNAMIC_STATES.len() as _,
+            p_dynamic_states: DYNAMIC_STATES.as_ptr() as *const _,
+        }
+    }
 }
 
 impl GraphicsPipelineState {
@@ -350,43 +456,17 @@ impl DescriptorSetLayoutDescription {
 
 impl VkCommandBuffer {
     pub(crate) fn new(
-        gpu: &VkGpu,
-        command_pool: &VkCommandPool,
-        target_queue: QueueType,
+        state: Arc<GpuThreadSharedState>,
+        command_buffer: vk::CommandBuffer,
     ) -> VkResult<Self> {
-        assert_eq!(command_pool.associated_queue, target_queue);
-
-        let device = gpu.vk_logical_device();
-        let inner_command_buffer = unsafe {
-            device.allocate_command_buffers(&CommandBufferAllocateInfo {
-                s_type: StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
-                p_next: std::ptr::null(),
-                command_pool: command_pool.inner,
-                level: CommandBufferLevel::PRIMARY,
-                command_buffer_count: 1,
-            })
-        }?[0];
-
-        unsafe {
-            device.begin_command_buffer(
-                inner_command_buffer,
-                &CommandBufferBeginInfo {
-                    s_type: StructureType::COMMAND_BUFFER_BEGIN_INFO,
-                    p_next: std::ptr::null(),
-                    flags: CommandBufferUsageFlags::ONE_TIME_SUBMIT,
-                    p_inheritance_info: std::ptr::null(),
-                },
-            )
-        }?;
+    
 
         Ok(Self {
-            state: gpu.state.clone(),
-            vk_command_buffer: inner_command_buffer,
+            state,
+            vk_command_buffer: command_buffer,
             command_buffer_state: Rc::new(RefCell::new(VkCommandBufferState {
-                inner_command_buffer,
+                inner_command_buffer: command_buffer,
                 has_recorded_anything: false,
-                has_been_submitted: false,
-                target_queue: target_queue.get_vk_queue(gpu),
                 descriptor_state: DescriptorSetState::default(),
                 push_constant_data: vec![],
             })),
@@ -429,6 +509,12 @@ impl VkCommandBuffer {
         self.command_buffer_state.borrow_mut().has_recorded_anything = true;
         let source = self.state.resolve_resource::<VkBuffer>(&info.source).inner;
         let image = self.state.resolve_resource::<VkImage>(&info.dest).inner;
+        let image_subresource = vk::ImageSubresourceLayers {
+                        aspect_mask: ImageAspectFlags::COLOR.to_vk(),
+                        mip_level: info.mip_level,
+                        layer_count: info.num_layers,
+                        base_array_layer: info.base_layer,
+                    };
         unsafe {
             self.state.logical_device.cmd_copy_buffer_to_image(
                 self.command_buffer_state.borrow().inner_command_buffer,
@@ -439,19 +525,20 @@ impl VkCommandBuffer {
                     buffer_offset: info.buffer_offset,
                     buffer_row_length: info.buffer_row_length,
                     buffer_image_height: info.buffer_image_height,
-                    image_subresource: vk::ImageSubresourceLayers {
-                        aspect_mask: ImageAspectFlags::COLOR.to_vk(),
-                        mip_level: info.mip_level,
-                        layer_count: info.num_layers,
-                        base_array_layer: info.base_layer,
-                    },
+                    image_subresource ,
                     image_offset: info.image_offset.to_vk(),
                     image_extent: info.image_extent.to_vk(),
                 }],
             );
-
-            Ok(())
         }
+
+        // self.state.mutate_resource::<VkImage, _>(&info.dest, |image| {
+        //     image.layout = info.dest_layout.to_vk();
+        //     image.current_stage_mask = PipelineStageFlags2::TRANSFER;
+        //     image.current_access_mask = AccessFlags2::TRANSFER_WRITE;
+        // });
+    
+        Ok(())
     }
 
     pub fn push_constants(
@@ -550,57 +637,6 @@ impl VkCommandBuffer {
         };
     }
 
-    pub fn submit(&mut self, submit_info: &CommandBufferSubmitInfo) -> VkResult<()> {
-        let mut state = self.command_buffer_state.borrow_mut();
-        state.has_been_submitted = true;
-        if !state.has_recorded_anything {
-            return Ok(());
-        }
-
-        let device = &self.state.logical_device;
-        unsafe {
-            device
-                .end_command_buffer(state.inner_command_buffer)
-                .expect("Failed to end inner command buffer");
-            let target_queue = state.target_queue;
-
-            let wait_semaphores: Vec<_> = submit_info
-                .wait_semaphores
-                .iter()
-                .map(|s| self.state.resolve_resource::<VkSemaphore>(s).inner)
-                .collect();
-
-            let signal_semaphores: Vec<_> = submit_info
-                .signal_semaphores
-                .iter()
-                .map(|s| self.state.resolve_resource::<VkSemaphore>(s).inner)
-                .collect();
-
-            let stage_masks: Vec<_> = submit_info.wait_stages.iter().map(|v| v.to_vk()).collect();
-
-            device.queue_submit(
-                target_queue,
-                &[SubmitInfo {
-                    s_type: StructureType::SUBMIT_INFO,
-                    p_next: std::ptr::null(),
-                    wait_semaphore_count: wait_semaphores.len() as _,
-                    p_wait_semaphores: wait_semaphores.as_ptr(),
-                    p_wait_dst_stage_mask: stage_masks.as_ptr(),
-                    command_buffer_count: 1,
-                    p_command_buffers: [state.inner_command_buffer].as_ptr(),
-                    signal_semaphore_count: signal_semaphores.len() as _,
-                    p_signal_semaphores: signal_semaphores.as_ptr(),
-                }],
-                if let Some(fence) = &submit_info.fence {
-                    self.state.resolve_resource::<VkFence>(fence).inner
-                } else {
-                    vk::Fence::null()
-                },
-            )?;
-            Ok(())
-        }
-    }
-
     pub fn vk_command_buffer(&self) -> vk::CommandBuffer {
         self.vk_command_buffer
     }
@@ -622,7 +658,7 @@ impl CommandBufferPassBegin for VkCommandBuffer {
         &mut self,
         info: &BeginRenderPassInfo2,
     ) -> Box<dyn render_pass_2::Impl> {
-        Box::new(VkRenderPass2::new(self, &self.state, info))
+        Box::new(VkRenderPass2::new(self, self.state.clone(), info))
     }
 }
 
@@ -718,57 +754,6 @@ impl command_buffer_2::Impl for VkCommandBuffer {
         };
     }
 
-    fn submit(&mut self, submit_info: &CommandBufferSubmitInfo) -> anyhow::Result<()> {
-        let mut state = self.command_buffer_state.borrow_mut();
-        state.has_been_submitted = true;
-        if !state.has_recorded_anything {
-            return Ok(());
-        }
-
-        let device = &self.state.logical_device;
-        unsafe {
-            device
-                .end_command_buffer(state.inner_command_buffer)
-                .expect("Failed to end inner command buffer");
-            let target_queue = state.target_queue;
-
-            let wait_semaphores: Vec<_> = submit_info
-                .wait_semaphores
-                .iter()
-                .map(|s| self.state.resolve_resource::<VkSemaphore>(s).inner)
-                .collect();
-
-            let signal_semaphores: Vec<_> = submit_info
-                .signal_semaphores
-                .iter()
-                .map(|s| self.state.resolve_resource::<VkSemaphore>(s).inner)
-                .collect();
-
-            let stage_masks: Vec<_> = submit_info.wait_stages.iter().map(|v| v.to_vk()).collect();
-
-            device.queue_submit(
-                target_queue,
-                &[SubmitInfo {
-                    s_type: StructureType::SUBMIT_INFO,
-                    p_next: std::ptr::null(),
-                    wait_semaphore_count: wait_semaphores.len() as _,
-                    p_wait_semaphores: wait_semaphores.as_ptr(),
-                    p_wait_dst_stage_mask: stage_masks.as_ptr(),
-                    command_buffer_count: 1,
-                    p_command_buffers: [state.inner_command_buffer].as_ptr(),
-                    signal_semaphore_count: signal_semaphores.len() as _,
-                    p_signal_semaphores: signal_semaphores.as_ptr(),
-                }],
-                if let Some(fence) = &submit_info.fence {
-                    self.state.resolve_resource::<VkFence>(fence).inner
-                } else {
-                    vk::Fence::null()
-                },
-            )?;
-            Ok(())
-        }
-    }
-
     fn insert_debug_label(&self, label: &str, color: [f32; 4]) {
         if let Some(debug_utils) = &self.state.debug_utilities {
             unsafe {
@@ -791,7 +776,26 @@ impl command_buffer_2::Impl for VkCommandBuffer {
     }
 
     fn bind_resources_2(&mut self, set:u32, bindings: &[Binding2],) {
-        todo!()
+        let mut state = self.command_buffer_state.borrow_mut();
+        if state.descriptor_state.sets.len() <= (set as _) {
+            state
+                .descriptor_state
+                .sets
+                .resize(set as usize + 1, DescriptorSetInfo2::default());
+        }
+
+        state.descriptor_state.sets[set as usize].bindings = bindings.iter().enumerate().map(|(i, b)| Binding {
+            ty: match b.ty {
+                DescriptorBindingType2::UniformBuffer { handle, offset, range } => DescriptorBindingType::UniformBuffer { handle, offset, range: range as usize },
+                DescriptorBindingType2::StorageBuffer { handle, offset, range } => DescriptorBindingType::StorageBuffer { handle, offset, range: range as usize },
+                DescriptorBindingType2::ImageView { image_view_handle, sampler_handle } => { 
+                    DescriptorBindingType::ImageView { image_view_handle: image_view_handle, sampler_handle, layout: ImageLayout::ShaderReadOnly }
+                },
+            },
+            binding_stage: b.binding_stage,
+            location: i as _,
+        }).collect();
+        
     }
 }
 // Debug utilities
@@ -869,14 +873,6 @@ impl VkCommandBuffer {
                     self.command_buffer_state.borrow().inner_command_buffer,
                 )
             }),
-        }
-    }
-}
-
-impl Drop for VkCommandBuffer {
-    fn drop(&mut self) {
-        if !self.command_buffer_state.borrow().has_been_submitted {
-            warn!("CommandBuffer::submit has not been called!")
         }
     }
 }
@@ -1451,13 +1447,15 @@ pub(crate) struct VkRenderPass2 {
     device: ash::Device,
     command_buffer: vk::CommandBuffer,
     pipeline_state: GraphicsPipelineState2,
-    
+    gpu_state: Arc<GpuThreadSharedState>,
+    command_buffer_state: Rc<RefCell<VkCommandBufferState>>,
+    viewport_area: Viewport,
 }
 
 impl VkRenderPass2 {
-    pub(crate) fn new(command_buffer: &VkCommandBuffer, state: &GpuThreadSharedState, info: &BeginRenderPassInfo2) -> Self {
+    pub(crate) fn new(command_buffer: &VkCommandBuffer, state: Arc<GpuThreadSharedState>, info: &BeginRenderPassInfo2) -> Self {
         let device = state.logical_device.clone();
-        Self::insert_pipeline_transitions(command_buffer.vk_command_buffer, state, info);
+        Self::insert_pipeline_transitions(command_buffer.vk_command_buffer, &state, info);
         let color_attachments = info.color_attachments.iter()
             .map(|attachment| {
                 RenderingAttachmentInfo::builder()
@@ -1499,13 +1497,28 @@ impl VkRenderPass2 {
                 .color_attachments(&color_attachments)
                 .depth_attachment(&depth_attachment)
                 .render_area(info.render_area.to_vk())
+                .layer_count(1)
                 .build()
             );
         };
+
         Self {
                 device,
                 command_buffer: command_buffer.vk_command_buffer,
-                pipeline_state: GraphicsPipelineState2::default(),
+                pipeline_state: GraphicsPipelineState2 {
+                    color_attachments: info.color_attachments.to_vec(),
+                    ..Default::default()
+                },
+                gpu_state: state,
+                command_buffer_state: command_buffer.command_buffer_state.clone(),
+                viewport_area: Viewport {
+                    x: info.render_area.offset.x as f32,
+                    y: info.render_area.offset.y as f32,
+                    width: info.render_area.extent.width as f32,
+                    height: info.render_area.extent.height as f32,
+                    min_depth: 0.0,
+                    max_depth: 1.0,
+                }
         }
     }
 
@@ -1581,8 +1594,8 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
         self.pipeline_state.fragment_shader = fragment_shader;
     }
 
-    fn set_vertex_buffers(&mut self,bindings:&[VertexBindingInfo],) {
-        todo!()
+    fn set_vertex_buffers(&mut self, bindings: &[VertexBindingInfo],) {
+        self.pipeline_state.vertex_inputs = bindings.to_vec();
     }
 
     fn set_color_output_enabled(&mut self,color_output_enabled:bool,) {
@@ -1633,16 +1646,173 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
         self.pipeline_state.early_discard_enabled = allow_early_discard;
     }
 
-    fn set_index_buffer(&self,index_buffer:BufferHandle,index_type:IndexType,offset:usize,) {
-        todo!()
+    fn set_index_buffer(&self, index_buffer:BufferHandle, index_type:IndexType, offset:usize,) {
+        assert!(!index_buffer.is_null());
+        let index_buffer = self
+            .gpu_state
+            .allocated_resources()
+            .resolve::<VkBuffer>(&index_buffer);
+        let device = &self.gpu_state.logical_device;
+        unsafe {
+            device.cmd_bind_index_buffer(
+                self.command_buffer,
+                index_buffer.inner,
+                offset as _,
+                index_type.to_vk(),
+            );
+        }
     }
 
     fn draw_indexed(&mut self,num_indices:u32,instances:u32,first_index:u32,vertex_offset:i32,first_instance:u32,) -> anyhow::Result<()>  {
-        todo!()
+        self.prepare_draw()?;
+        unsafe {
+            self.gpu_state.logical_device.cmd_draw_indexed(
+                self.command_buffer,
+                num_indices,
+                instances,
+                first_index,
+                vertex_offset,
+                first_instance,
+            );
+        }
+        Ok(())
     }
 
     fn draw(&mut self,num_vertices:u32,instances:u32,first_vertex:u32,first_instance:u32,) -> anyhow::Result<()>  {
-        todo!()
+        self.prepare_draw()?;
+        unsafe {
+            self.gpu_state.logical_device.cmd_draw(
+                self.command_buffer,
+                num_vertices,
+                instances,
+                first_vertex,
+                first_instance,
+            );
+        }
+        Ok(())
+    }
+
+}
+
+impl VkRenderPass2 {
+    fn prepare_draw(&mut self) -> anyhow::Result<()> {
+        #[cfg(debug_assertions)]
+        // self.validate_state()?;
+
+        let mut state = self.command_buffer_state.borrow_mut();
+        // self.has_draw_command = true;
+        state.has_recorded_anything = true;
+
+        let layout = self.find_matching_pipeline_layout(&state.descriptor_state);
+        let pipeline = self.find_matching_graphics_pipeline(layout);
+        let device = &self.gpu_state.logical_device;
+        {
+            unsafe {
+                for (idx, constant_range) in state
+                    .descriptor_state
+                    .push_constant_range
+                    .iter()
+                    .enumerate()
+                {
+                    device.cmd_push_constants(
+                        self.command_buffer,
+                        layout,
+                        constant_range.stage_flags.to_vk(),
+                        constant_range.offset,
+                        &state.push_constant_data[idx],
+                    );
+                }
+                if !self.pipeline_state.vertex_inputs.is_empty() {
+                    let buffers = self
+                        .pipeline_state
+                        .vertex_inputs
+                        .iter()
+                        .map(|b| {
+                            self.gpu_state
+                                .allocated_resources()
+                                .resolve::<VkBuffer>(&b.handle)
+                                .inner
+                        })
+                        .collect::<Vec<_>>();
+                    let offsets = self
+                        .pipeline_state
+                        .vertex_inputs
+                        .iter()
+                        .map(|_| 0)
+                        .collect::<Vec<_>>();
+                    device.cmd_bind_vertex_buffers(self.command_buffer, 0, &buffers, &offsets);
+                }
+            }
+        }
+
+        if !state.descriptor_state.sets.is_empty() {
+            let descriptors = self.find_matching_descriptor_sets(&state.descriptor_state);
+            unsafe {
+                device.cmd_bind_descriptor_sets(
+                    self.command_buffer,
+                    PipelineBindPoint::GRAPHICS,
+                    layout,
+                    0,
+                    &descriptors,
+                    &[],
+                );
+            }
+        }
+
+        unsafe {
+            device.cmd_bind_pipeline(self.command_buffer, PipelineBindPoint::GRAPHICS, pipeline);
+        }
+        
+        let scissor = match self.pipeline_state.scissor_area {
+            Some(scissor) => scissor,
+            None => Rect2D {
+                offset: Offset2D { x: 0, y: 0 },
+                extent: Extent2D { width: self.viewport_area.width as u32, height: self.viewport_area.height as u32 },
+            },
+        };
+        let (depth_constant, depth_clamp, depth_slope) = {
+            (0.0, 0.0, 0.0)
+        };
+        unsafe {
+            device.cmd_set_depth_bias_enable(self.command_buffer, true);
+            device.cmd_set_depth_bias(
+                self.command_buffer,
+                depth_constant,
+                depth_clamp,
+                depth_slope,
+            );
+            device.cmd_set_viewport(self.command_buffer, 0, &[self.viewport_area.to_vk()]);
+            device.cmd_set_scissor(self.command_buffer, 0, &[scissor.to_vk()]);
+            device.cmd_set_depth_test_enable(
+                self.command_buffer,
+                self.pipeline_state.enable_depth_test,
+            );
+        }
+        Ok(())
+    }
+
+    fn find_matching_pipeline_layout(
+        &self,
+        descriptor_state: &DescriptorSetState,
+    ) -> vk::PipelineLayout {
+        self.gpu_state.get_pipeline_layout(descriptor_state)
+    }
+
+    fn find_matching_descriptor_sets(
+        &self,
+        descriptor_state: &DescriptorSetState,
+    ) -> Vec<vk::DescriptorSet> {
+        self.gpu_state.get_descriptor_sets(descriptor_state)
+    }
+    
+    fn find_matching_graphics_pipeline(
+        &self,
+        layout: vk::PipelineLayout,
+    ) -> vk::Pipeline {
+        self.gpu_state.get_graphics_pipeline_dynamic(
+            &self.pipeline_state,
+            layout,
+        )
     }
 
 }

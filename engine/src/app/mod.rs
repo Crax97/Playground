@@ -132,14 +132,7 @@ fn draw_app(app_state_mut: &mut AppState, app: &mut dyn App) -> Result<(), anyho
         image: swapchain_image,
         image_view: swapchain_image_view,
     };
-    let mut command_buffer = app.draw(app_state_mut, &backbuffer)?;
-    let frame = app_state_mut.swapchain.get_current_swapchain_frame();
-    command_buffer.submit(&CommandBufferSubmitInfo {
-        wait_semaphores: &[&frame.image_available_semaphore],
-        wait_stages: &[PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
-        signal_semaphores: &[&frame.render_finished_semaphore],
-        fence: Some(&frame.in_flight_fence),
-    })?;
+    app.draw(app_state_mut, &backbuffer)?;
     Ok(())
 }
 

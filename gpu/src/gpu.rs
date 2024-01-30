@@ -3,27 +3,33 @@ use std::{
     ffi::{c_void, CStr, CString},
     ptr::addr_of_mut,
     ptr::{addr_of, null},
-    sync::{atomic::AtomicUsize, Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    sync::{
+        atomic::{AtomicBool, AtomicUsize},
+        Arc, RwLock, RwLockReadGuard, RwLockWriteGuard,
+    },
 };
 
 use anyhow::{bail, Result};
 use ash::vk::{
-    CommandPoolResetFlags, ImageMemoryBarrier2, PhysicalDeviceDynamicRenderingFeaturesKHR,
-    PhysicalDeviceFeatures2KHR,
+    AccessFlags2, CommandBufferBeginInfo, CommandBufferResetFlags, Fence, ImageMemoryBarrier2,
+    ObjectType, PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR,
+    PhysicalDeviceSynchronization2Features, PipelineStageFlags2, SemaphoreCreateFlags,
+    TaggedStructure,
 };
 use ash::{
     extensions::ext::DebugUtils,
     prelude::*,
     vk::{
-        make_api_version, ApplicationInfo, BufferCreateFlags, DebugUtilsMessageSeverityFlagsEXT,
-        DebugUtilsMessageTypeFlagsEXT, DebugUtilsMessengerCreateFlagsEXT,
-        DebugUtilsMessengerCreateInfoEXT, DebugUtilsObjectNameInfoEXT, DescriptorBufferInfo,
+        make_api_version, ApplicationInfo, BufferCreateFlags, CommandBufferAllocateInfo,
+        CommandBufferLevel, DebugUtilsMessageSeverityFlagsEXT, DebugUtilsMessageTypeFlagsEXT,
+        DebugUtilsMessengerCreateFlagsEXT, DebugUtilsMessengerCreateInfoEXT,
+        DebugUtilsObjectNameInfoEXT, DependencyFlags, DependencyInfo, DescriptorBufferInfo,
         DescriptorImageInfo, DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags,
         DeviceQueueCreateInfo, Extent3D, FormatFeatureFlags, Handle, ImageCreateFlags, ImageTiling,
         ImageType, ImageViewCreateFlags, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap,
         MemoryHeapFlags, PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties,
         PhysicalDeviceType, PipelineCacheCreateFlags, Queue, QueueFlags, ShaderModuleCreateFlags,
-        SharingMode, StructureType, WriteDescriptorSet, API_VERSION_1_3,
+        SharingMode, StructureType, SubmitInfo, WriteDescriptorSet, API_VERSION_1_3,
     },
     *,
 };
@@ -39,17 +45,18 @@ use winit::window::Window;
 
 use crate::{
     command_buffer_2::CommandBuffer, get_allocation_callbacks, lifetime_cache_constants,
-    quick_hash, BeginRenderPassInfo, BufferCreateInfo, BufferHandle, BufferImageCopyInfo,
-    CommandBufferSubmitInfo, CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineState,
-    DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2, DescriptorSetState,
-    Extent2D, FenceHandle, Gpu, GpuConfiguration, GpuResourceMap, GraphicsPipelineState,
-    Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout,
-    ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, ImageViewHandle, LogicOp,
-    Offset2D, Offset3D, PipelineBarrierInfo, PipelineStageFlags, PushConstantBlockDescription,
-    QueueType, Rect2D, RenderPassAttachments, SampleCount, SamplerCreateInfo, SamplerHandle,
-    SemaphoreHandle, ShaderAttribute, ShaderModuleCreateInfo, ShaderModuleHandle,
-    SubpassDescription, Swapchain, ToVk, TransitionInfo, UniformVariableDescription,
-    VkCommandBuffer, VkCommandPool, VkFence, VkImageView, VkSemaphore, VkShaderModule, VkSwapchain,
+    quick_hash, utils, vk_staging_buffer::VkStagingBuffer, BeginRenderPassInfo, BufferCreateInfo,
+    BufferHandle, BufferImageCopyInfo, CommandPoolCreateFlags, CommandPoolCreateInfo,
+    ComputePipelineState, DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2,
+    DescriptorSetState, Extent2D, FenceHandle, Gpu, GpuConfiguration, GpuResourceMap,
+    GraphicsPipelineState, GraphicsPipelineState2, Handle as GpuHandle, HandleType,
+    ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier,
+    ImageSubresourceRange, ImageViewCreateInfo, ImageViewHandle, LogicOp, Offset2D, Offset3D,
+    PipelineBarrierInfo, PipelineStageFlags, PushConstantBlockDescription, QueueType, Rect2D,
+    RenderPassAttachments, SampleCount, SamplerCreateInfo, SamplerHandle, SemaphoreHandle,
+    ShaderAttribute, ShaderModuleCreateInfo, ShaderModuleHandle, SubpassDescription, Swapchain,
+    ToVk, TransitionInfo, UniformVariableDescription, VkCommandBuffer, VkCommandPool, VkFence,
+    VkImageView, VkSemaphore, VkShaderModule, VkSwapchain,
 };
 use crate::{
     gpu_resource_manager::{
@@ -142,6 +149,26 @@ pub struct DestroyedResources {
     destroyed_fences: RwLock<Vec<DestroyedResource<VkFence>>>,
 }
 
+pub struct PrimaryCommandBufferInfo {
+    pub command_pool: VkCommandPool,
+    pub command_buffer: vk::CommandBuffer,
+    pub was_started: AtomicBool,
+    pub wait_semaphore: vk::Semaphore,
+}
+
+pub struct InFlightFrame {
+    pub graphics_command_buffer: PrimaryCommandBufferInfo,
+    pub async_compute_command_buffer: PrimaryCommandBufferInfo,
+    pub transfer_command_buffer: PrimaryCommandBufferInfo,
+
+    pub render_finished_semaphore: vk::Semaphore,
+}
+
+#[derive(Default)]
+pub struct SwapchainSharedInfo {
+    pub current_image: RwLock<Option<ImageHandle>>,
+}
+
 /*
  * All the state that can be shared across threads
  * */
@@ -166,14 +193,25 @@ pub struct GpuThreadSharedState {
     pub(crate) descriptor_set_cache: LifetimedCache<DescriptorSetAllocation>,
     pub(crate) render_pass_cache: LifetimedCache<vk::RenderPass>,
     pub(crate) framebuffer_cache: LifetimedCache<vk::Framebuffer>,
+
     features: SupportedFeatures,
     messenger: Option<vk::DebugUtilsMessengerEXT>,
     pub dynamic_rendering: DynamicRendering,
     pub allocated_resources: Arc<RwLock<GpuResourceMap>>,
     pub destroyed_resources: DestroyedResources,
-}
 
+    pub swapchain_shared: SwapchainSharedInfo,
+
+    command_pools: Vec<InFlightFrame>,
+    current_command_pools: AtomicUsize,
+}
 impl GpuThreadSharedState {
+    pub fn current_frame(&self) -> &InFlightFrame {
+        &self.command_pools[self
+            .current_command_pools
+            .load(std::sync::atomic::Ordering::Relaxed)]
+    }
+
     pub(crate) fn allocated_resources(&self) -> RwLockReadGuard<'_, GpuResourceMap> {
         self.allocated_resources
             .read()
@@ -236,6 +274,59 @@ impl GpuThreadSharedState {
         });
         barrier
     }
+
+    pub(crate) fn transition_image(
+        &self,
+        cmd_buf: vk::CommandBuffer,
+        image: ImageHandle,
+        subresource_range: vk::ImageSubresourceRange,
+        new_layout: vk::ImageLayout,
+        dst_stage_mask: vk::PipelineStageFlags2,
+        dst_access_mask: vk::AccessFlags2,
+    ) {
+        let vk_image = self.resolve_resource::<VkImage>(&image);
+        let barrier = ImageMemoryBarrier2 {
+            s_type: StructureType::IMAGE_MEMORY_BARRIER_2,
+            p_next: std::ptr::null(),
+            src_stage_mask: vk_image.current_stage_mask,
+            src_access_mask: vk_image.current_access_mask,
+            dst_stage_mask,
+            dst_access_mask,
+            old_layout: vk_image.layout,
+            new_layout,
+            src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            image: vk_image.inner,
+            subresource_range,
+        };
+
+        unsafe {
+            self.logical_device.cmd_pipeline_barrier2(
+                cmd_buf,
+                &DependencyInfo {
+                    s_type: StructureType::DEPENDENCY_INFO,
+                    p_next: std::ptr::null(),
+                    dependency_flags: DependencyFlags::BY_REGION,
+                    memory_barrier_count: 0,
+                    p_memory_barriers: std::ptr::null(),
+                    buffer_memory_barrier_count: 0,
+                    p_buffer_memory_barriers: std::ptr::null(),
+                    image_memory_barrier_count: 1,
+                    p_image_memory_barriers: addr_of!(barrier),
+                },
+            );
+            self.logical_device
+                .queue_wait_idle(self.graphics_queue)
+                .unwrap();
+        }
+
+        self.mutate_resource::<VkImage, _>(&image, |image| {
+            image.layout = new_layout;
+            image.current_stage_mask = dst_stage_mask;
+            image.current_access_mask = dst_access_mask;
+        });
+    }
+
     fn create_graphics_pipeline(
         &self,
         pipeline_state: &GraphicsPipelineState,
@@ -347,6 +438,143 @@ impl GpuThreadSharedState {
         info!("Created a new graphics pipeline");
         pipeline[0]
     }
+    fn create_graphics_pipeline_dynamic(
+        &self,
+        pipeline_state: &GraphicsPipelineState2,
+        layout: vk::PipelineLayout,
+    ) -> vk::Pipeline {
+        assert!(pipeline_state.vertex_shader.is_valid());
+        let mut stages = vec![];
+        let main_name = std::ffi::CString::new("main").unwrap();
+        let vertex_shader = self.resolve_resource::<VkShaderModule>(&pipeline_state.vertex_shader);
+        stages.push(vk::PipelineShaderStageCreateInfo {
+            s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineShaderStageCreateFlags::empty(),
+            stage: vk::ShaderStageFlags::VERTEX,
+            module: vertex_shader.inner,
+            p_name: main_name.as_ptr(),
+            p_specialization_info: std::ptr::null(),
+        });
+        if !pipeline_state.fragment_shader.is_null() {
+            let fragment_shader =
+                self.resolve_resource::<VkShaderModule>(&pipeline_state.fragment_shader);
+            stages.push(vk::PipelineShaderStageCreateInfo {
+                s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+                p_next: std::ptr::null(),
+                flags: vk::PipelineShaderStageCreateFlags::empty(),
+                stage: vk::ShaderStageFlags::FRAGMENT,
+                module: fragment_shader.inner,
+                p_name: main_name.as_ptr(),
+                p_specialization_info: std::ptr::null(),
+            });
+        }
+
+        let (vertex_input_bindings, vertex_attribute_descriptions) =
+            pipeline_state.get_vertex_inputs_description();
+
+        let vertex_input_state = vk::PipelineVertexInputStateCreateInfo {
+            s_type: StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineVertexInputStateCreateFlags::empty(),
+            vertex_binding_description_count: vertex_input_bindings.len() as _,
+            p_vertex_binding_descriptions: vertex_input_bindings.as_ptr() as *const _,
+            vertex_attribute_description_count: vertex_attribute_descriptions.len() as _,
+            p_vertex_attribute_descriptions: vertex_attribute_descriptions.as_ptr() as *const _,
+        };
+
+        let input_assembly_state = pipeline_state.input_assembly_state();
+        let rasterization_state = pipeline_state.rasterization_state();
+        let multisample_state = pipeline_state.multisample_state();
+        let depth_stencil_state = pipeline_state.depth_stencil_state();
+
+        let color_attachments = pipeline_state
+            .color_attachments
+            .iter()
+            .map(|_| {
+                vk::PipelineColorBlendAttachmentState::builder()
+                    .color_write_mask(
+                        vk::ColorComponentFlags::R
+                            | vk::ColorComponentFlags::G
+                            | vk::ColorComponentFlags::B
+                            | vk::ColorComponentFlags::A,
+                    )
+                    .blend_enable(false)
+                    .src_color_blend_factor(vk::BlendFactor::ZERO)
+                    .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+                    .build()
+            })
+            .collect::<Vec<_>>();
+        let color_blend_state = vk::PipelineColorBlendStateCreateInfo {
+            s_type: StructureType::PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineColorBlendStateCreateFlags::empty(),
+            logic_op_enable: false.to_vk(),
+            logic_op: LogicOp::Clear.to_vk(),
+            attachment_count: color_attachments.len() as _,
+            p_attachments: color_attachments.as_ptr(),
+            blend_constants: [0.0; 4],
+        };
+        let viewport_state = vk::PipelineViewportStateCreateInfo {
+            s_type: StructureType::PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::PipelineViewportStateCreateFlags::empty(),
+            viewport_count: 1,
+            p_viewports: std::ptr::null(),
+            scissor_count: 1,
+            p_scissors: std::ptr::null(),
+        };
+        let dynamic_state = pipeline_state.dynamic_state();
+
+        let color_formats = pipeline_state
+            .color_attachments
+            .iter()
+            .map(|attach| {
+                self.resolve_resource::<VkImageView>(&attach.image_view)
+                    .format
+                    .to_vk()
+            })
+            .collect::<Vec<_>>();
+        let depth_format = ImageFormat::Undefined.to_vk();
+        let stencil_format = ImageFormat::Undefined.to_vk();
+        let pipeline_rendering_create_info = vk::PipelineRenderingCreateInfo::builder()
+            .color_attachment_formats(&color_formats)
+            .depth_attachment_format(depth_format)
+            .stencil_attachment_format(stencil_format)
+            .build();
+
+        let create_info = vk::GraphicsPipelineCreateInfo {
+            s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
+            p_next: addr_of!(pipeline_rendering_create_info) as *const c_void,
+            flags: vk::PipelineCreateFlags::empty(),
+            stage_count: stages.len() as _,
+            p_stages: stages.as_ptr() as *const _,
+            p_vertex_input_state: addr_of!(vertex_input_state),
+            p_input_assembly_state: addr_of!(input_assembly_state),
+            p_tessellation_state: std::ptr::null(),
+            p_viewport_state: addr_of!(viewport_state), // It's part of the dynamic state
+            p_rasterization_state: addr_of!(rasterization_state),
+            p_multisample_state: addr_of!(multisample_state),
+            p_depth_stencil_state: addr_of!(depth_stencil_state),
+            p_color_blend_state: addr_of!(color_blend_state),
+            p_dynamic_state: addr_of!(dynamic_state),
+            layout,
+            render_pass: vk::RenderPass::null(),
+            subpass: 0,
+            base_pipeline_handle: vk::Pipeline::null(),
+            base_pipeline_index: 0,
+        };
+        let pipeline = unsafe {
+            self.logical_device.create_graphics_pipelines(
+                self.vk_pipeline_cache,
+                &[create_info],
+                get_allocation_callbacks(),
+            )
+        }
+        .expect("Failed to create pipelines");
+        info!("Created a new graphics pipeline");
+        pipeline[0]
+    }
     pub(crate) fn get_graphics_pipeline(
         &self,
         pipeline_state: &GraphicsPipelineState,
@@ -356,6 +584,15 @@ impl GpuThreadSharedState {
     ) -> vk::Pipeline {
         self.graphics_pipeline_cache.get(&pipeline_state, || {
             self.create_graphics_pipeline(pipeline_state, render_pass, subpass_description, layout)
+        })
+    }
+    pub(crate) fn get_graphics_pipeline_dynamic(
+        &self,
+        pipeline_state: &GraphicsPipelineState2,
+        layout: vk::PipelineLayout,
+    ) -> vk::Pipeline {
+        self.graphics_pipeline_cache.get(&pipeline_state, || {
+            self.create_graphics_pipeline_dynamic(pipeline_state, layout)
         })
     }
 
@@ -945,74 +1182,9 @@ impl Drop for GpuThreadSharedState {
         }
     }
 }
-pub struct CommandPools {
-    pub graphics_command_pool: VkCommandPool,
-    pub async_compute_command_pool: VkCommandPool,
-    pub transfer_command_pool: VkCommandPool,
-}
-/*
- * All the stuff that should be specific for a thread should go here
- * e.g since command pools cannot be shared across threads, each thread should have its own command
- * pool
- * */
-pub struct GpuThreadLocalState {
-    command_pools: Vec<CommandPools>,
-    current_command_pools: AtomicUsize,
-    max_command_pools: usize,
-}
-
-impl GpuThreadLocalState {
-    pub fn new(
-        shared_state: Arc<GpuThreadSharedState>,
-        max_command_pools: usize,
-    ) -> VkResult<Self> {
-        let mut command_pools = Vec::with_capacity(max_command_pools);
-        for _ in 0..max_command_pools {
-            let graphics_command_pool = VkCommandPool::new(
-                shared_state.logical_device.clone(),
-                &shared_state.queue_families,
-                &CommandPoolCreateInfo {
-                    queue_type: QueueType::Graphics,
-                    flags: CommandPoolCreateFlags::empty(),
-                },
-            )?;
-
-            let async_compute_command_pool = VkCommandPool::new(
-                shared_state.logical_device.clone(),
-                &shared_state.queue_families,
-                &CommandPoolCreateInfo {
-                    queue_type: QueueType::AsyncCompute,
-                    flags: CommandPoolCreateFlags::empty(),
-                },
-            )?;
-
-            let transfer_command_pool = VkCommandPool::new(
-                shared_state.logical_device.clone(),
-                &shared_state.queue_families,
-                &CommandPoolCreateInfo {
-                    queue_type: QueueType::Transfer,
-                    flags: CommandPoolCreateFlags::empty(),
-                },
-            )?;
-            let command_pool = CommandPools {
-                graphics_command_pool,
-                async_compute_command_pool,
-                transfer_command_pool,
-            };
-            command_pools.push(command_pool);
-        }
-
-        Ok(Self {
-            command_pools,
-            current_command_pools: AtomicUsize::new(0),
-            max_command_pools,
-        })
-    }
-}
 pub struct VkGpu {
     pub(crate) state: Arc<GpuThreadSharedState>,
-    pub(crate) thread_local_state: GpuThreadLocalState,
-    pub(crate) staging_buffer: BufferHandle,
+    pub(crate) staging_buffer: RwLock<VkStagingBuffer>,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -1085,7 +1257,8 @@ impl QueueFamilies {
 }
 
 impl VkGpu {
-    pub const MAX_COMMAND_POOLS: usize = crate::constants::MAX_FRAMES_IN_FLIGHT + 1;
+    const MB_64: u64 = 1024 * 1024 * 64;
+
     pub fn new(configuration: GpuConfiguration) -> Result<Self> {
         let entry = unsafe { Entry::load()? };
 
@@ -1194,7 +1367,143 @@ impl VkGpu {
             Self::create_pipeline_cache(&logical_device, configuration.pipeline_cache_path)?;
 
         let dynamic_rendering = Self::create_dynamic_rendering(&instance, &logical_device)?;
+        let mut command_pools = Vec::with_capacity(crate::constants::MAX_FRAMES_IN_FLIGHT);
+        for _ in 0..crate::constants::MAX_FRAMES_IN_FLIGHT {
+            let graphics_command_pool = VkCommandPool::new(
+                logical_device.clone(),
+                &queue_families,
+                &CommandPoolCreateInfo {
+                    queue_type: QueueType::Graphics,
+                    flags: CommandPoolCreateFlags::empty(),
+                },
+            )?;
 
+            let primary_graphics_command_buffer = unsafe {
+                logical_device
+                    .allocate_command_buffers(&CommandBufferAllocateInfo {
+                        s_type: StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
+                        p_next: std::ptr::null(),
+                        command_pool: graphics_command_pool.inner,
+                        level: CommandBufferLevel::PRIMARY,
+                        command_buffer_count: 1,
+                    })
+                    .unwrap()
+            }[0];
+
+            let async_compute_command_pool = VkCommandPool::new(
+                logical_device.clone(),
+                &queue_families,
+                &CommandPoolCreateInfo {
+                    queue_type: QueueType::AsyncCompute,
+                    flags: CommandPoolCreateFlags::empty(),
+                },
+            )?;
+            let primary_async_compute_command_buffer = unsafe {
+                logical_device
+                    .allocate_command_buffers(&CommandBufferAllocateInfo {
+                        s_type: StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
+                        p_next: std::ptr::null(),
+                        command_pool: async_compute_command_pool.inner,
+                        level: CommandBufferLevel::PRIMARY,
+                        command_buffer_count: 1,
+                    })
+                    .unwrap()
+            }[0];
+
+            let transfer_command_pool = VkCommandPool::new(
+                logical_device.clone(),
+                &queue_families,
+                &CommandPoolCreateInfo {
+                    queue_type: QueueType::Transfer,
+                    flags: CommandPoolCreateFlags::empty(),
+                },
+            )?;
+            let primary_transfer_command_buffer = unsafe {
+                logical_device
+                    .allocate_command_buffers(&CommandBufferAllocateInfo {
+                        s_type: StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
+                        p_next: std::ptr::null(),
+                        command_pool: transfer_command_pool.inner,
+                        level: CommandBufferLevel::PRIMARY,
+                        command_buffer_count: 1,
+                    })
+                    .unwrap()
+            }[0];
+
+            if let Some(utils) = &debug_utilities {
+                let graphics_name = CString::new("Primary Graphics Command Buffer").unwrap();
+                let transfer_name = CString::new("Primary Transfer Command Buffer").unwrap();
+                let compute_name = CString::new("Primary Async Compute Command Buffer").unwrap();
+
+                unsafe {
+                    utils.set_debug_utils_object_name(
+                        logical_device.handle(),
+                        &DebugUtilsObjectNameInfoEXT {
+                            s_type: DebugUtilsObjectNameInfoEXT::STRUCTURE_TYPE,
+                            p_next: std::ptr::null(),
+                            object_type: ObjectType::COMMAND_BUFFER,
+                            object_handle: primary_graphics_command_buffer.as_raw(),
+                            p_object_name: graphics_name.as_ptr(),
+                        },
+                    )?;
+
+                    utils.set_debug_utils_object_name(
+                        logical_device.handle(),
+                        &DebugUtilsObjectNameInfoEXT {
+                            s_type: DebugUtilsObjectNameInfoEXT::STRUCTURE_TYPE,
+                            p_next: std::ptr::null(),
+                            object_type: ObjectType::COMMAND_BUFFER,
+                            object_handle: primary_transfer_command_buffer.as_raw(),
+                            p_object_name: transfer_name.as_ptr(),
+                        },
+                    )?;
+
+                    utils.set_debug_utils_object_name(
+                        logical_device.handle(),
+                        &DebugUtilsObjectNameInfoEXT {
+                            s_type: DebugUtilsObjectNameInfoEXT::STRUCTURE_TYPE,
+                            p_next: std::ptr::null(),
+                            object_type: ObjectType::COMMAND_BUFFER,
+                            object_handle: primary_async_compute_command_buffer.as_raw(),
+                            p_object_name: compute_name.as_ptr(),
+                        },
+                    )?;
+                };
+            }
+            let command_pool = InFlightFrame {
+                graphics_command_buffer: PrimaryCommandBufferInfo {
+                    command_pool: graphics_command_pool,
+                    command_buffer: primary_graphics_command_buffer,
+                    was_started: AtomicBool::new(false),
+                    wait_semaphore: make_semaphore(&logical_device),
+                },
+
+                transfer_command_buffer: PrimaryCommandBufferInfo {
+                    command_pool: transfer_command_pool,
+                    command_buffer: primary_transfer_command_buffer,
+                    was_started: AtomicBool::new(false),
+                    wait_semaphore: make_semaphore(&logical_device),
+                },
+
+                async_compute_command_buffer: PrimaryCommandBufferInfo {
+                    command_pool: async_compute_command_pool,
+                    command_buffer: primary_async_compute_command_buffer,
+                    was_started: AtomicBool::new(false),
+                    wait_semaphore: make_semaphore(&logical_device),
+                },
+                render_finished_semaphore: make_semaphore(&logical_device),
+            };
+            command_pools.push(command_pool);
+        }
+
+        let staging_buffer = RwLock::new(VkStagingBuffer::new(
+            &logical_device,
+            physical_device.physical_device,
+            &instance,
+            Self::MB_64,
+            queue_families.graphics_family.index,
+            graphics_queue,
+        )?);
         let state = Arc::new(GpuThreadSharedState {
             entry,
             instance,
@@ -1221,14 +1530,13 @@ impl VkGpu {
             dynamic_rendering,
             allocated_resources: Arc::new(RwLock::new(GpuResourceMap::new())),
             destroyed_resources: DestroyedResources::default(),
+            command_pools,
+            swapchain_shared: SwapchainSharedInfo::default(),
+            current_command_pools: AtomicUsize::new(0),
         });
 
-        let thread_local_state = GpuThreadLocalState::new(state.clone(), Self::MAX_COMMAND_POOLS)?;
-
-        let staging_buffer = create_staging_buffer(&state)?;
         Ok(VkGpu {
             state,
-            thread_local_state,
             staging_buffer,
         })
     }
@@ -1402,8 +1710,13 @@ impl VkGpu {
             dynamic_rendering: vk::TRUE,
         };
 
+        let mut synchronization2 = PhysicalDeviceSynchronization2Features {
+            s_type: StructureType::PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES,
+            p_next: addr_of_mut!(dynamic_state_features).cast::<c_void>(),
+            synchronization2: true.to_vk(),
+        };
         let device_features_2 = PhysicalDeviceFeatures2KHR {
-            p_next: addr_of_mut!(dynamic_state_features).cast(),
+            p_next: addr_of_mut!(synchronization2).cast(),
             s_type: StructureType::PHYSICAL_DEVICE_FEATURES_2_KHR,
             features: device_features,
         };
@@ -1509,27 +1822,30 @@ impl VkGpu {
     }
 
     pub fn graphics_command_pool(&self) -> &VkCommandPool {
-        &self.thread_local_state.command_pools[self
-            .thread_local_state
+        &self.state.command_pools[self
+            .state
             .current_command_pools
             .load(std::sync::atomic::Ordering::Relaxed)]
-        .graphics_command_pool
+        .graphics_command_buffer
+        .command_pool
     }
 
     pub fn async_compute_command_pool(&self) -> &VkCommandPool {
-        &self.thread_local_state.command_pools[self
-            .thread_local_state
+        &self.state.command_pools[self
+            .state
             .current_command_pools
             .load(std::sync::atomic::Ordering::Relaxed)]
-        .async_compute_command_pool
+        .async_compute_command_buffer
+        .command_pool
     }
 
     pub fn transfer_command_pool(&self) -> &VkCommandPool {
-        &self.thread_local_state.command_pools[self
-            .thread_local_state
+        &self.state.command_pools[self
+            .state
             .current_command_pools
             .load(std::sync::atomic::Ordering::Relaxed)]
-        .transfer_command_pool
+        .transfer_command_buffer
+        .command_pool
     }
 
     pub fn queue_families(&self) -> QueueFamilies {
@@ -1792,6 +2108,46 @@ impl VkGpu {
     ) -> H {
         self.state.resolve_resource(handle)
     }
+
+    fn ensure_any_swapchain_image_is_presentable(&self, graphics_buffer: vk::CommandBuffer) {
+        let image = self
+            .state
+            .swapchain_shared
+            .current_image
+            .read()
+            .unwrap()
+            .unwrap();
+
+        self.state.transition_image(
+            graphics_buffer,
+            image,
+            vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+            vk::ImageLayout::PRESENT_SRC_KHR,
+            vk::PipelineStageFlags2::ALL_GRAPHICS,
+            vk::AccessFlags2::empty(),
+        )
+    }
+}
+
+fn make_semaphore(logical_device: &Device) -> vk::Semaphore {
+    unsafe {
+        logical_device
+            .create_semaphore(
+                &vk::SemaphoreCreateInfo {
+                    s_type: StructureType::SEMAPHORE_CREATE_INFO,
+                    p_next: std::ptr::null(),
+                    flags: SemaphoreCreateFlags::empty(),
+                },
+                get_allocation_callbacks(),
+            )
+            .unwrap()
+    }
 }
 
 fn ensure_map_is_empty<H: HasAssociatedHandle + Clone + std::fmt::Debug>(
@@ -1849,52 +2205,6 @@ fn find_supported_features(
         trace!("Selected physical device supports RGB Images");
     }
     supported_features
-}
-
-fn create_staging_buffer(state: &Arc<GpuThreadSharedState>) -> VkResult<BufferHandle> {
-    let mb_64 = 1024 * 1024 * 64;
-    let create_info: vk::BufferCreateInfo = vk::BufferCreateInfo {
-        s_type: StructureType::BUFFER_CREATE_INFO,
-        p_next: std::ptr::null(),
-        flags: BufferCreateFlags::empty(),
-        size: mb_64 as u64,
-        usage: vk::BufferUsageFlags::TRANSFER_SRC,
-        sharing_mode: SharingMode::CONCURRENT,
-        queue_family_index_count: state.queue_families.indices.len() as _,
-        p_queue_family_indices: state.queue_families.indices.as_ptr(),
-    };
-
-    let buffer = unsafe { state.logical_device.create_buffer(&create_info, None) }?;
-    let memory_requirements =
-        unsafe { state.logical_device.get_buffer_memory_requirements(buffer) };
-    let allocation_requirements = AllocationRequirements {
-        memory_requirements,
-        memory_domain: MemoryDomain::HostVisible,
-    };
-    let allocation = state
-        .gpu_memory_allocator
-        .write()
-        .unwrap()
-        .allocate(allocation_requirements)?;
-    unsafe {
-        state
-            .logical_device
-            .bind_buffer_memory(buffer, allocation.device_memory, 0)
-    }?;
-
-    let buffer = VkBuffer::create(
-        Some("Staging buffer"),
-        buffer,
-        MemoryDomain::HostVisible,
-        allocation,
-    )?;
-    let handle = BufferHandle::new();
-    state
-        .allocated_resources
-        .write()
-        .unwrap()
-        .insert(&handle, buffer);
-    Ok(handle)
 }
 
 impl VkGpu {
@@ -1996,9 +2306,25 @@ impl VkGpu {
         if buffer.memory_domain.contains(MemoryDomain::HostVisible) {
             buffer.write_data(offset, data);
         } else {
-            let staging_buffer = self.resolve_resource::<VkBuffer>(&self.staging_buffer);
-            staging_buffer.write_data(0, data);
-            self.copy_buffer(&staging_buffer, buffer, offset, std::mem::size_of_val(data))?;
+            let staging_buffer = self
+                .make_buffer(
+                    &BufferCreateInfo {
+                        label: Some("copy op"),
+                        size: data.len(),
+                        usage: crate::BufferUsageFlags::TRANSFER_SRC,
+                    },
+                    MemoryDomain::HostVisible,
+                )
+                .expect("Failed to write data");
+            let staging_vk_buffer = self.resolve_resource(&staging_buffer);
+            self.write_buffer_data_with_offset(&staging_vk_buffer, 0, data)?;
+            self.copy_buffer(
+                &staging_vk_buffer,
+                buffer,
+                offset,
+                std::mem::size_of_val(data),
+            )?;
+            self.destroy_buffer(staging_buffer);
         }
         Ok(())
     }
@@ -2011,123 +2337,124 @@ impl VkGpu {
         extent: Extent2D,
         layer: u32,
     ) -> VkResult<()> {
-        let vk_image = self.resolve_resource::<VkImage>(&image);
-        self.transition_image_layout_impl(
-            image,
-            TransitionInfo {
-                layout: ImageLayout::Undefined,
-                access_mask: AccessFlags::empty(),
-                stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-            },
-            TransitionInfo {
-                layout: ImageLayout::TransferDst,
-                access_mask: AccessFlags::TRANSFER_WRITE,
-                stage_mask: PipelineStageFlags::TRANSFER,
-            },
-            ImageSubresourceRange {
-                aspect_mask: vk_image.format().aspect_mask(),
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: layer,
-                layer_count: 1,
-            },
-        )?;
+        todo!();
+        // let vk_image = self.resolve_resource::<VkImage>(&image);
+        // self.transition_image_layout_impl(
+        //     image,
+        //     TransitionInfo {
+        //         layout: ImageLayout::Undefined,
+        //         access_mask: AccessFlags::empty(),
+        //         stage_mask: PipelineStageFlags::TOP_OF_PIPE,
+        //     },
+        //     TransitionInfo {
+        //         layout: ImageLayout::TransferDst,
+        //         access_mask: AccessFlags::TRANSFER_WRITE,
+        //         stage_mask: PipelineStageFlags::TRANSFER,
+        //     },
+        //     ImageSubresourceRange {
+        //         aspect_mask: vk_image.format().aspect_mask(),
+        //         base_mip_level: 0,
+        //         level_count: 1,
+        //         base_array_layer: layer,
+        //         layer_count: 1,
+        //     },
+        // )?;
 
-        let staging_buffer = self.resolve_resource::<VkBuffer>(&self.staging_buffer);
-        if data.len() < staging_buffer.size() {
-            staging_buffer.write_data(0, data);
-            self.copy_buffer_to_image(&BufferImageCopyInfo {
-                source: self.staging_buffer,
-                dest: image,
-                dest_layout: ImageLayout::TransferDst,
-                image_offset: Offset3D {
-                    x: offset.x,
-                    y: offset.y,
-                    z: 0,
-                },
-                image_extent: crate::Extent3D {
-                    width: extent.width,
-                    height: extent.height,
-                    depth: 1,
-                },
-                buffer_offset: 0,
-                buffer_row_length: 0,
-                buffer_image_height: 0,
-                mip_level: 0,
-                base_layer: layer,
-                num_layers: 1,
-            })?;
-        } else {
-            let intermediary_buffer = self.create_buffer(
-                &BufferCreateInfo {
-                    label: None,
-                    size: data.len(),
-                    usage: crate::BufferUsageFlags::TRANSFER_DST
-                        | crate::BufferUsageFlags::TRANSFER_SRC,
-                },
-                MemoryDomain::DeviceLocal,
-            )?;
-            let mut written = 0;
-            let staging_buffer = self.resolve_resource::<VkBuffer>(&self.staging_buffer);
-            while written < data.len() {
-                let remain = data.len() - written;
-                let written_this_iteration = if remain > staging_buffer.size() {
-                    staging_buffer.size()
-                } else {
-                    remain
-                };
-                staging_buffer.write_data(0, &data[written..written + written_this_iteration]);
-                self.copy_buffer(
-                    &staging_buffer,
-                    &intermediary_buffer,
-                    written as _,
-                    written_this_iteration,
-                )?;
+        // let staging_buffer = self.resolve_resource::<VkBuffer>(&self.staging_buffer);
+        // if data.len() < staging_buffer.size() {
+        //     staging_buffer.write_data(0, data);
+        //     self.copy_buffer_to_image(&BufferImageCopyInfo {
+        //         source: self.staging_buffer,
+        //         dest: image,
+        //         dest_layout: ImageLayout::TransferDst,
+        //         image_offset: Offset3D {
+        //             x: offset.x,
+        //             y: offset.y,
+        //             z: 0,
+        //         },
+        //         image_extent: crate::Extent3D {
+        //             width: extent.width,
+        //             height: extent.height,
+        //             depth: 1,
+        //         },
+        //         buffer_offset: 0,
+        //         buffer_row_length: 0,
+        //         buffer_image_height: 0,
+        //         mip_level: 0,
+        //         base_layer: layer,
+        //         num_layers: 1,
+        //     })?;
+        // } else {
+        //     let intermediary_buffer = self.create_buffer(
+        //         &BufferCreateInfo {
+        //             label: None,
+        //             size: data.len(),
+        //             usage: crate::BufferUsageFlags::TRANSFER_DST
+        //                 | crate::BufferUsageFlags::TRANSFER_SRC,
+        //         },
+        //         MemoryDomain::DeviceLocal,
+        //     )?;
+        //     let mut written = 0;
+        //     let staging_buffer = self.resolve_resource::<VkBuffer>(&self.staging_buffer);
+        //     while written < data.len() {
+        //         let remain = data.len() - written;
+        //         let written_this_iteration = if remain > staging_buffer.size() {
+        //             staging_buffer.size()
+        //         } else {
+        //             remain
+        //         };
+        //         staging_buffer.write_data(0, &data[written..written + written_this_iteration]);
+        //         self.copy_buffer(
+        //             &staging_buffer,
+        //             &intermediary_buffer,
+        //             written as _,
+        //             written_this_iteration,
+        //         )?;
 
-                written += written_this_iteration;
-            }
-            self.copy_buffer_to_image(&BufferImageCopyInfo {
-                source: self.staging_buffer,
-                dest: image,
-                dest_layout: ImageLayout::TransferDst,
-                image_offset: Offset3D {
-                    x: offset.x,
-                    y: offset.y,
-                    z: 0,
-                },
-                image_extent: crate::Extent3D {
-                    width: extent.width,
-                    height: extent.height,
-                    depth: 1,
-                },
-                buffer_offset: 0,
-                buffer_row_length: 0,
-                buffer_image_height: 0,
-                mip_level: 0,
-                base_layer: layer,
-                num_layers: 1,
-            })?;
-        }
-        self.transition_image_layout_impl(
-            image,
-            TransitionInfo {
-                layout: ImageLayout::TransferDst,
-                access_mask: AccessFlags::TRANSFER_WRITE,
-                stage_mask: PipelineStageFlags::TRANSFER,
-            },
-            TransitionInfo {
-                layout: ImageLayout::ShaderReadOnly,
-                access_mask: AccessFlags::SHADER_READ,
-                stage_mask: PipelineStageFlags::FRAGMENT_SHADER | PipelineStageFlags::VERTEX_SHADER,
-            },
-            ImageSubresourceRange {
-                aspect_mask: vk_image.format().aspect_mask(),
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: layer,
-                layer_count: 1,
-            },
-        )?;
+        //         written += written_this_iteration;
+        //     }
+        //     self.copy_buffer_to_image(&BufferImageCopyInfo {
+        //         source: self.staging_buffer,
+        //         dest: image,
+        //         dest_layout: ImageLayout::TransferDst,
+        //         image_offset: Offset3D {
+        //             x: offset.x,
+        //             y: offset.y,
+        //             z: 0,
+        //         },
+        //         image_extent: crate::Extent3D {
+        //             width: extent.width,
+        //             height: extent.height,
+        //             depth: 1,
+        //         },
+        //         buffer_offset: 0,
+        //         buffer_row_length: 0,
+        //         buffer_image_height: 0,
+        //         mip_level: 0,
+        //         base_layer: layer,
+        //         num_layers: 1,
+        //     })?;
+        // }
+        // self.transition_image_layout_impl(
+        //     image,
+        //     TransitionInfo {
+        //         layout: ImageLayout::TransferDst,
+        //         access_mask: AccessFlags::TRANSFER_WRITE,
+        //         stage_mask: PipelineStageFlags::TRANSFER,
+        //     },
+        //     TransitionInfo {
+        //         layout: ImageLayout::ShaderReadOnly,
+        //         access_mask: AccessFlags::SHADER_READ,
+        //         stage_mask: PipelineStageFlags::FRAGMENT_SHADER | PipelineStageFlags::VERTEX_SHADER,
+        //     },
+        //     ImageSubresourceRange {
+        //         aspect_mask: vk_image.format().aspect_mask(),
+        //         base_mip_level: 0,
+        //         level_count: 1,
+        //         base_array_layer: layer,
+        //         layer_count: 1,
+        //     },
+        // )?;
         Ok(())
     }
 
@@ -2258,8 +2585,6 @@ impl VkGpu {
         let mut command_buffer = self.create_command_buffer(QueueType::Transfer)?;
 
         command_buffer.copy_buffer(source_buffer, dest_buffer, dest_offset, size)?;
-        command_buffer.submit(&CommandBufferSubmitInfo::default())?;
-        self.wait_queue_idle(QueueType::Transfer)?;
 
         Ok(())
     }
@@ -2280,8 +2605,7 @@ impl VkGpu {
             new_layout,
             subresource_range,
         );
-        command_buffer.submit(&crate::CommandBufferSubmitInfo::default())?;
-        self.wait_queue_idle(QueueType::Graphics)
+        Ok(())
     }
 
     pub fn transition_image_layout_in_command_buffer(
@@ -2313,8 +2637,6 @@ impl VkGpu {
     pub fn copy_buffer_to_image(&self, info: &BufferImageCopyInfo) -> VkResult<()> {
         let mut command_buffer = self.create_command_buffer(QueueType::Transfer)?;
         command_buffer.copy_buffer_to_image(info)?;
-        command_buffer.submit(&CommandBufferSubmitInfo::default())?;
-        self.wait_queue_idle(QueueType::Transfer)?;
 
         Ok(())
     }
@@ -2355,12 +2677,33 @@ impl VkGpu {
     }
 
     pub fn create_command_buffer(&self, queue_type: QueueType) -> VkResult<VkCommandBuffer> {
-        let command_pool = match queue_type {
-            QueueType::Graphics => self.graphics_command_pool(),
-            QueueType::AsyncCompute => self.async_compute_command_pool(),
-            QueueType::Transfer => self.transfer_command_pool(),
+        let pool = &self.state.command_pools[self
+            .state
+            .current_command_pools
+            .load(std::sync::atomic::Ordering::Relaxed)];
+        let primary_buffer = match queue_type {
+            QueueType::Graphics => &pool.graphics_command_buffer,
+            QueueType::AsyncCompute => &pool.async_compute_command_buffer,
+            QueueType::Transfer => &pool.transfer_command_buffer,
         };
-        VkCommandBuffer::new(self, command_pool, queue_type)
+
+        if !primary_buffer
+            .was_started
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            primary_buffer
+                .was_started
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            unsafe {
+                self.vk_logical_device()
+                    .begin_command_buffer(
+                        primary_buffer.command_buffer,
+                        &CommandBufferBeginInfo::builder().build(),
+                    )
+                    .unwrap()
+            };
+        }
+        VkCommandBuffer::new(self.state.clone(), primary_buffer.command_buffer)
     }
 
     pub fn save_pipeline_cache_impl(&self, path: &str) -> VkResult<()> {
@@ -2404,22 +2747,36 @@ impl VkGpu {
         });
     }
 
-    fn clear_command_pools(&self, current_pools: usize) -> anyhow::Result<()> {
-        let command_pools = &self.thread_local_state.command_pools[current_pools];
+    fn clear_in_flight_frame_state(&self, current_pools: usize) -> anyhow::Result<()> {
+        let command_pools = &self.state.command_pools[current_pools];
+        let device = &self.state.logical_device;
         unsafe {
-            self.vk_logical_device().reset_command_pool(
-                command_pools.async_compute_command_pool.inner,
-                CommandPoolResetFlags::RELEASE_RESOURCES,
+            device.reset_command_buffer(
+                command_pools.graphics_command_buffer.command_buffer,
+                CommandBufferResetFlags::RELEASE_RESOURCES,
             )?;
 
-            self.vk_logical_device().reset_command_pool(
-                command_pools.transfer_command_pool.inner,
-                CommandPoolResetFlags::RELEASE_RESOURCES,
+            device.reset_command_buffer(
+                command_pools.transfer_command_buffer.command_buffer,
+                CommandBufferResetFlags::RELEASE_RESOURCES,
             )?;
-            self.vk_logical_device().reset_command_pool(
-                command_pools.graphics_command_pool.inner,
-                CommandPoolResetFlags::RELEASE_RESOURCES,
+            device.reset_command_buffer(
+                command_pools.async_compute_command_buffer.command_buffer,
+                CommandBufferResetFlags::RELEASE_RESOURCES,
             )?;
+
+            command_pools
+                .graphics_command_buffer
+                .was_started
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            command_pools
+                .async_compute_command_buffer
+                .was_started
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            command_pools
+                .transfer_command_buffer
+                .was_started
+                .store(false, std::sync::atomic::Ordering::Relaxed);
         }
 
         Ok(())
@@ -2582,18 +2939,6 @@ impl Gpu for VkGpu {
                 }
             },
         );
-
-        let next_command_pools = (self
-            .thread_local_state
-            .current_command_pools
-            .load(std::sync::atomic::Ordering::Relaxed)
-            + 1)
-            % self.thread_local_state.max_command_pools;
-        self.thread_local_state
-            .current_command_pools
-            .store(next_command_pools, std::sync::atomic::Ordering::Relaxed);
-        self.clear_command_pools(next_command_pools)
-            .expect("Failed to clear the command pools");
     }
 
     fn make_semaphore(
@@ -2771,123 +3116,35 @@ impl Gpu for VkGpu {
         let offset = region.offset;
         let extent = region.extent;
         let vk_image = self.resolve_resource::<VkImage>(handle);
-        self.transition_image_layout(
-            handle,
-            TransitionInfo {
-                layout: ImageLayout::Undefined,
-                access_mask: AccessFlags::empty(),
-                stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-            },
-            TransitionInfo {
-                layout: ImageLayout::TransferDst,
-                access_mask: AccessFlags::TRANSFER_WRITE,
-                stage_mask: PipelineStageFlags::TRANSFER,
-            },
-            ImageSubresourceRange {
-                aspect_mask: vk_image.format().aspect_mask(),
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: layer,
-                layer_count: 1,
-            },
-        )?;
 
-        let staging_buffer = self.resolve_resource::<VkBuffer>(&self.staging_buffer);
-        if data.len() < staging_buffer.size() {
-            staging_buffer.write_data(0, data);
-            self.copy_buffer_to_image(&BufferImageCopyInfo {
-                source: self.staging_buffer,
-                dest: *handle,
-                dest_layout: ImageLayout::TransferDst,
-                image_offset: Offset3D {
+        let device = &self.state.logical_device;
+
+        self.staging_buffer
+            .write()
+            .expect("Failed to lock staging buffer")
+            .write_image(
+                device,
+                vk_image.inner,
+                vk::Offset3D {
                     x: offset.x,
                     y: offset.y,
-                    z: 0,
+                    z: layer as i32,
                 },
-                image_extent: crate::Extent3D {
+                vk::Extent3D {
                     width: extent.width,
                     height: extent.height,
                     depth: 1,
                 },
-                buffer_offset: 0,
-                buffer_row_length: 0,
-                buffer_image_height: 0,
-                mip_level: 0,
-                base_layer: layer,
-                num_layers: 1,
-            })?;
-        } else {
-            let intermediary_buffer = self.create_buffer(
-                &BufferCreateInfo {
-                    label: None,
-                    size: data.len(),
-                    usage: crate::BufferUsageFlags::TRANSFER_DST
-                        | crate::BufferUsageFlags::TRANSFER_SRC,
+                vk_image.format.texel_size_bytes(),
+                vk::ImageSubresourceLayers {
+                    aspect_mask: vk_image.format.aspect_mask().to_vk(),
+                    mip_level: 0,
+                    base_array_layer: layer,
+                    layer_count: 1,
                 },
-                MemoryDomain::DeviceLocal,
-            )?;
-            let mut written = 0;
-            let staging_buffer = self.resolve_resource::<VkBuffer>(&self.staging_buffer);
-            while written < data.len() {
-                let remain = data.len() - written;
-                let written_self_iteration = if remain > staging_buffer.size() {
-                    staging_buffer.size()
-                } else {
-                    remain
-                };
-                staging_buffer.write_data(0, &data[written..written + written_self_iteration]);
-                self.copy_buffer(
-                    &staging_buffer,
-                    &intermediary_buffer,
-                    written as _,
-                    written_self_iteration,
-                )?;
-
-                written += written_self_iteration;
-            }
-            self.copy_buffer_to_image(&BufferImageCopyInfo {
-                source: self.staging_buffer,
-                dest: *handle,
-                dest_layout: ImageLayout::TransferDst,
-                image_offset: Offset3D {
-                    x: offset.x,
-                    y: offset.y,
-                    z: 0,
-                },
-                image_extent: crate::Extent3D {
-                    width: extent.width,
-                    height: extent.height,
-                    depth: 1,
-                },
-                buffer_offset: 0,
-                buffer_row_length: 0,
-                buffer_image_height: 0,
-                mip_level: 0,
-                base_layer: layer,
-                num_layers: 1,
-            })?;
-        }
-        self.transition_image_layout(
-            handle,
-            TransitionInfo {
-                layout: ImageLayout::TransferDst,
-                access_mask: AccessFlags::TRANSFER_WRITE,
-                stage_mask: PipelineStageFlags::TRANSFER,
-            },
-            TransitionInfo {
-                layout: ImageLayout::ShaderReadOnly,
-                access_mask: AccessFlags::SHADER_READ,
-                stage_mask: PipelineStageFlags::FRAGMENT_SHADER | PipelineStageFlags::VERTEX_SHADER,
-            },
-            ImageSubresourceRange {
-                aspect_mask: vk_image.format().aspect_mask(),
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: layer,
-                layer_count: 1,
-            },
-        )?;
-        Ok(())
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                data,
+            )
     }
 
     fn make_image_view(
@@ -2990,18 +3247,18 @@ impl Gpu for VkGpu {
     }
 
     fn destroy(&self) {
-        self.destroy_buffer(self.staging_buffer);
+        self.staging_buffer
+            .write()
+            .expect("Failed to lock staging buffer")
+            .destroy(&self.state.logical_device);
         let resources = self
             .state
             .allocated_resources
             .read()
             .expect("Failed to read allocated resources");
-        ensure_map_is_empty(&resources.get_map::<VkSemaphore>());
-        ensure_map_is_empty(&resources.get_map::<VkFence>());
         ensure_map_is_empty(&resources.get_map::<VkImageView>());
         ensure_map_is_empty(&resources.get_map::<VkImage>());
         ensure_map_is_empty(&resources.get_map::<VkBuffer>());
-        ensure_map_is_empty(&resources.get_map::<VkSemaphore>());
         ensure_map_is_empty(&resources.get_map::<VkShaderModule>());
     }
 
@@ -3040,5 +3297,105 @@ impl Gpu for VkGpu {
             shader_module,
             &self.state.destroyed_resources.destroyed_shader_modules,
         );
+    }
+
+    fn submit_work(&self) {
+        let pool = self.state.current_frame();
+        let has_transfer_work = pool
+            .transfer_command_buffer
+            .was_started
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let has_graphics_work = pool
+            .graphics_command_buffer
+            .was_started
+            .load(std::sync::atomic::Ordering::Relaxed);
+
+        let device = self.vk_logical_device();
+        let transfer_buffer = pool.transfer_command_buffer.command_buffer;
+        let graphics_buffer = pool.graphics_command_buffer.command_buffer;
+
+        self.staging_buffer
+            .write()
+            .expect("Failed to lock staging buffer")
+            .flush_operations(&self.state.logical_device)
+            .unwrap();
+
+        unsafe {
+            if has_transfer_work {
+                device.end_command_buffer(transfer_buffer).unwrap();
+
+                device
+                    .queue_submit(
+                        self.state.transfer_queue,
+                        &[SubmitInfo {
+                            s_type: SubmitInfo::STRUCTURE_TYPE,
+                            p_next: std::ptr::null(),
+                            wait_semaphore_count: 0,
+                            p_wait_semaphores: std::ptr::null(),
+                            p_wait_dst_stage_mask: std::ptr::null(),
+                            command_buffer_count: 1,
+                            p_command_buffers: addr_of!(
+                                pool.transfer_command_buffer.command_buffer
+                            ),
+
+                            signal_semaphore_count: 1,
+                            p_signal_semaphores: addr_of!(
+                                pool.transfer_command_buffer.wait_semaphore
+                            ),
+                        }],
+                        Fence::null(),
+                    )
+                    .unwrap();
+            }
+            if has_graphics_work {
+                self.ensure_any_swapchain_image_is_presentable(graphics_buffer);
+
+                device.end_command_buffer(graphics_buffer).unwrap();
+
+                let all_graphics = vk::PipelineStageFlags::ALL_GRAPHICS;
+                device
+                    .queue_submit(
+                        self.state.graphics_queue,
+                        &[SubmitInfo {
+                            s_type: SubmitInfo::STRUCTURE_TYPE,
+                            p_next: std::ptr::null(),
+                            wait_semaphore_count: if has_transfer_work { 1 } else { 0 },
+                            p_wait_semaphores: if has_transfer_work {
+                                addr_of!(pool.transfer_command_buffer.wait_semaphore)
+                            } else {
+                                std::ptr::null()
+                            },
+                            p_wait_dst_stage_mask: if has_transfer_work {
+                                addr_of!(all_graphics)
+                            } else {
+                                std::ptr::null()
+                            },
+                            command_buffer_count: 1,
+                            p_command_buffers: addr_of!(
+                                pool.graphics_command_buffer.command_buffer
+                            ),
+
+                            signal_semaphore_count: 1,
+                            p_signal_semaphores: addr_of!(pool.render_finished_semaphore),
+                        }],
+                        Fence::null(),
+                    )
+                    .unwrap();
+            }
+        }
+    }
+
+    fn end_frame(&self) {
+        let next_command_pools = (self
+            .state
+            .current_command_pools
+            .load(std::sync::atomic::Ordering::Relaxed)
+            + 1)
+            % crate::constants::MAX_FRAMES_IN_FLIGHT;
+        self.state
+            .current_command_pools
+            .store(next_command_pools, std::sync::atomic::Ordering::Relaxed);
+        self.clear_in_flight_frame_state(next_command_pools)
+            .expect("Failed to clear the command pools");
     }
 }
