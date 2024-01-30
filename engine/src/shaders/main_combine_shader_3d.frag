@@ -234,8 +234,12 @@ vec2 rotate(vec2 v, float a) {
 	return m * v;
 }
 
-// returns 1.0 if pixel is in shadow, 0 otherwise
-float sample_shadow_atlas(vec3 light_pos, ShadowMap shadow_map) {
+float find_search_width(float light_size, float receiver_distance, vec3 view_position) {
+    const float NEAR = 0.1;
+    return light_size * (receiver_distance - NEAR) / view_position.z;
+}
+
+vec3 compute_sample_location(vec3 light_pos, ShadowMap shadow_map) {
     vec2 texture_size = textureSize(shadow_atlas, 0);
     vec2 texel_size = 1.0 / texture_size;
 
@@ -244,7 +248,34 @@ float sample_shadow_atlas(vec3 light_pos, ShadowMap shadow_map) {
     light_pos.xy = shadow_map_offset + light_pos.xy * shadow_map_size;
     light_pos.x = clamp(light_pos.x, shadow_map_offset.x, shadow_map_offset.x + shadow_map_size.x);
     light_pos.y = clamp(light_pos.y, shadow_map_offset.y, shadow_map_offset.y + shadow_map_size.y);
+    
+    return light_pos;
+}
 
+float find_blocker_distance(LightInfo light_info, ShadowMap shadow_map, vec3 light_pos, vec3 eye_position) {
+    int blockers = 0;
+    float blocker_distances_sum = 0.0;
+    float search_width = find_search_width(light_info.position_radius.w, light_pos.z, eye_position);
+    const int NUM_BLOCKER_SAMPLES = 4;
+    for (int i = 0; i < NUM_BLOCKER_SAMPLES; i ++) {
+        vec3 sample_loc = compute_sample_location(light_pos + vec3(random_direction_disk(light_pos.xy) / search_width, 0.0), shadow_map);
+        float compare_z = sample_loc.z;
+        float stored_z = texture(shadow_atlas, sample_loc.xy).r;
+        if (compare_z > stored_z) {
+            blockers +=1;
+            blocker_distances_sum += stored_z;
+        } 
+    }
+    if (blockers > 0) {
+        return blocker_distances_sum / blockers;
+    } else {
+        return -1.0;
+    }
+}
+
+// returns 1.0 if pixel is in shadow, 0 otherwise
+float sample_shadow_atlas(vec3 light_pos, ShadowMap shadow_map) {
+    light_pos = compute_sample_location(light_pos, shadow_map);
     float compare_z = light_pos.z; 
     float stored_z = texture(shadow_atlas, light_pos.xy).r;
     return compare_z > stored_z ? 1.0 : 0.0;
@@ -279,7 +310,30 @@ ShadowMap select_point_light_face(int first_shadow_map, vec3 direction) {
     return shadow_maps.casters[first_shadow_map + sam.face_index];
 }
 
-float is_fragment_lit(vec2 uv, LightInfo light_info, vec3 pixel_pos) {
+float pcf(FragmentInfo frag_info, vec3 light_proj, ShadowMap caster, float penumbra_size) {
+    const int NUM_SAMPLES = 16;
+    float accum = 0.0;
+    for (int i = 0; i < NUM_SAMPLES; i ++) {
+        light_proj.xy += rotate(poisson_disk[i], random(frag_info.position)) * penumbra_size;
+        accum += sample_shadow_atlas(light_proj, caster);
+    }
+    return accum / NUM_SAMPLES;
+}
+
+float is_in_shadow(FragmentInfo frag_info, LightInfo light_info, vec3 light_proj, ShadowMap caster, vec3 eye_position) {
+    const int do_pcf = 1;
+
+    if (do_pcf == 1) {
+        float blocker_distance = find_blocker_distance(light_info, caster, light_proj, eye_position);
+        float penumbra_size = (light_proj.z - blocker_distance) / blocker_distance;
+        penumbra_size = penumbra_size * light_info.position_radius.w * 0.001 / light_proj.z;
+        return 1.0 - pcf(frag_info, light_proj, caster, penumbra_size);
+    } else {
+        return 1.0 - sample_shadow_atlas(light_proj, caster);
+    }
+}
+
+float is_fragment_lit(vec2 uv, FragmentInfo frag_info, LightInfo light_info, vec3 pixel_pos) {
     int light_type = light_info.type_shadow_map_csmsplit_idx[0];
     int light_shadow_map = light_info.type_shadow_map_csmsplit_idx[1];
     int base_split = light_info.type_shadow_map_csmsplit_idx[2];
@@ -310,7 +364,7 @@ float is_fragment_lit(vec2 uv, LightInfo light_info, vec3 pixel_pos) {
         return 1.0;
     }
 
-    float in_shadow = 1.0 - sample_shadow_atlas(light_proj, caster);
+    float in_shadow = is_in_shadow(frag_info, light_info, light_proj, caster, per_frame_data.camera.eye.xyz);
     return in_shadow;
 }
 
@@ -322,7 +376,7 @@ vec3 lit_fragment(FragmentInfo frag_info, vec2 uv) {
     for (uint i = 0; i < light_data.light_count; i ++) {
         LightInfo light_info = light_data.lights[i];
 
-        float is_lit = is_fragment_lit(uv, light_info, frag_info.position);
+        float is_lit = is_fragment_lit(uv, frag_info, light_info, frag_info.position);
         vec3 light_dir_unnorm = get_unnormalized_light_direction(light_info, frag_info.position);
         float light_dist = length(light_dir_unnorm);
         vec3 light_dir = -light_dir_unnorm / light_dist;

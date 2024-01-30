@@ -130,7 +130,7 @@ impl CascadedShadowMap {
         }
         Ok(Self {
             num_cascades: 4,
-            csm_split_lambda: 0.55,
+            csm_split_lambda: 0.05,
             z_mult: 1.5,
             debug_csm_splits: false,
 
@@ -432,15 +432,14 @@ impl CascadedShadowMap {
                     // Compute texel snapping factor
                     // https://johanmedestrom.wordpress.com/2016/03/18/opengl-cascaded-shadow-maps/
                     let shadow_matrix = light_ortho * view_matrix;
-                    let origin = shadow_matrix * vector![0.0, 0.0, 0.0, 1.0];
-                    let origin = origin * (allocation.width as f32) / 2.0;
-
-                    let rounded_origin = origin.map(|v| v.round());
-                    let offset = rounded_origin - origin;
-                    let mut offset = offset * 2.0 / (allocation.width as f32);
-                    offset.z = 0.0;
-                    offset.w = 0.0;
-                    light_ortho.set_column(3, &(light_ortho.column(3) + offset));
+                    let shadow_origin = shadow_matrix * vector![0.0, 0.0, 0.0, 1.0];
+                    let shadow_origin = shadow_origin * (allocation.width as f32) / 2.0;
+                    let rounded_origin = shadow_origin.map(|v| v.round());
+                    let round_offset = rounded_origin - shadow_origin;
+                    let mut round_offset = round_offset * 2.0 / (allocation.width as f32);
+                    round_offset.z = 0.0;
+                    round_offset.w = 0.0;
+                    light_ortho.set_column(3, &(light_ortho.column(3) + round_offset));
 
                     povs.push(PointOfViewData {
                         eye: point![l.position.x, l.position.y, l.position.z, 0.0],

@@ -363,7 +363,7 @@ impl App for GLTFViewer {
                 size: vector![50.0, 50.0],
             },
             position: Default::default(),
-            radius: 1000.0,
+            radius: 1.0,
             color: vector![1.0, 1.0, 1.0],
 
             intensity: 10.0,
