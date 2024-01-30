@@ -4,9 +4,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use ash::vk::{
-    self, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel,
-    CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags, PipelineBindPoint,
-    PipelineInputAssemblyStateCreateFlags, StructureType, SubmitInfo,
+    self, ClearColorValue, ClearDepthStencilValue, ClearValue, CommandBufferAllocateInfo, CommandBufferBeginInfo, CommandBufferLevel, CommandBufferUsageFlags, DebugUtilsLabelEXT, DependencyFlags, ImageMemoryBarrier2, ImageView, PipelineBindPoint, PipelineInputAssemblyStateCreateFlags, RenderingAttachmentInfo, RenderingInfo, StructureType, SubmitInfo
 };
 use ash::{extensions::ext::DebugUtils, prelude::VkResult};
 use log::warn;
@@ -94,6 +92,28 @@ pub(crate) struct GraphicsPipelineState {
     pub(crate) color_output_enabled: bool,
 
     pub(crate) current_subpass: u32,
+}
+
+#[derive(Hash, Default)]
+pub(crate) struct GraphicsPipelineState2 {
+    pub(crate) fragment_shader: ShaderModuleHandle,
+    pub(crate) vertex_shader: ShaderModuleHandle,
+    pub(crate) scissor_area: Option<Rect2D>,
+    pub(crate) front_face: FrontFace,
+    pub(crate) cull_mode: CullMode,
+    // If vulkan complains about a missing shader frament shader, check that these two bastards are
+    // enabled
+    pub(crate) enable_depth_test: bool,
+    pub(crate) depth_clamp_enabled: bool,
+    pub(crate) depth_write_enabled: bool,
+
+    pub(crate) early_discard_enabled: bool,
+
+    pub(crate) depth_compare_op: CompareOp,
+    pub(crate) vertex_inputs: Vec<VertexBindingInfo>,
+    pub(crate) primitive_topology: PrimitiveTopology,
+    pub(crate) polygon_mode: PolygonMode,
+    pub(crate) color_output_enabled: bool,
 }
 
 impl GraphicsPipelineState {
@@ -265,6 +285,35 @@ pub enum DescriptorBindingType {
 }
 
 impl Default for DescriptorBindingType {
+    fn default() -> Self {
+        Self::UniformBuffer {
+            handle: BufferHandle::null(),
+            offset: 0,
+            range: 0,
+        }
+    }
+}
+
+#[derive(Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
+pub enum DescriptorBindingType2 {
+    UniformBuffer {
+        handle: BufferHandle,
+        offset: u64,
+        range: u64,
+    },
+
+    StorageBuffer {
+        handle: BufferHandle,
+        offset: u64,
+        range: u64,
+    },
+    ImageView {
+        image_view_handle: ImageViewHandle,
+        sampler_handle: SamplerHandle,
+    },
+}
+
+impl Default for DescriptorBindingType2 {
     fn default() -> Self {
         Self::UniformBuffer {
             handle: BufferHandle::null(),
@@ -568,6 +617,13 @@ impl CommandBufferPassBegin for VkCommandBuffer {
     fn create_compute_pass_impl(&mut self) -> Box<dyn compute_pass::Impl> {
         Box::new(self.begin_compute_pass())
     }
+
+    fn create_render_pass_2_impl(
+        &mut self,
+        info: &BeginRenderPassInfo2,
+    ) -> Box<dyn render_pass_2::Impl> {
+        Box::new(VkRenderPass2::new(self, &self.state, info))
+    }
 }
 
 impl command_buffer_2::Impl for VkCommandBuffer {
@@ -732,6 +788,10 @@ impl command_buffer_2::Impl for VkCommandBuffer {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn bind_resources_2(&mut self, set:u32, bindings: &[Binding2],) {
+        todo!()
     }
 }
 // Debug utilities
@@ -1384,5 +1444,213 @@ impl compute_pass::Impl for VkComputePassCommand {
             );
         }
         state.has_recorded_anything = true;
+    }
+}
+
+pub(crate) struct VkRenderPass2 {
+    device: ash::Device,
+    command_buffer: vk::CommandBuffer,
+    pipeline_state: GraphicsPipelineState2,
+    
+}
+
+impl VkRenderPass2 {
+    pub(crate) fn new(command_buffer: &VkCommandBuffer, state: &GpuThreadSharedState, info: &BeginRenderPassInfo2) -> Self {
+        let device = state.logical_device.clone();
+        Self::insert_pipeline_transitions(command_buffer.vk_command_buffer, state, info);
+        let color_attachments = info.color_attachments.iter()
+            .map(|attachment| {
+                RenderingAttachmentInfo::builder()
+                    .image_view(state.resolve_resource::<VkImageView>(&attachment.image_view).inner)
+                    .clear_value(match attachment.load_op {
+                        ColorLoadOp::DontCare => ClearValue::default(),
+                        ColorLoadOp::Load => ClearValue::default(),
+                        ColorLoadOp::Clear(value) => ClearValue{ color: ClearColorValue {float32: value }},
+                    })
+                    .load_op(attachment.load_op.to_vk())
+                    .store_op(attachment.store_op.to_vk())
+                    .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                    .build()
+            }).collect::<Vec<_>>();
+            let depth_attachment = if let Some(attach) = info.depth_attachment {
+                RenderingAttachmentInfo::builder()
+                    .image_view(state.resolve_resource::<VkImageView>(&attach.image_view).inner)
+                    .image_layout(match attach.load_op {
+                        DepthLoadOp::DontCare |
+                        DepthLoadOp::Clear(_) => vk::ImageLayout::UNDEFINED,
+                        DepthLoadOp::Load => match attach.store_op {
+                            AttachmentStoreOp::DontCare => vk::ImageLayout::DEPTH_READ_ONLY_OPTIMAL,
+                            AttachmentStoreOp::Store => vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+                        },
+                    })
+                    .clear_value(match attach.load_op {
+                        DepthLoadOp::DontCare |
+                        DepthLoadOp::Load => ClearValue::default(),
+                        DepthLoadOp::Clear(value) => ClearValue {depth_stencil: ClearDepthStencilValue { depth: value, stencil: 0 }},
+                    })
+                    .load_op(attach.load_op.to_vk())
+                    .store_op(attach.store_op.to_vk())
+                    .build()
+            } else {
+                RenderingAttachmentInfo::default()
+            };
+            unsafe {
+                state.dynamic_rendering.cmd_begin_rendering(command_buffer.vk_command_buffer, &RenderingInfo::builder()
+                .color_attachments(&color_attachments)
+                .depth_attachment(&depth_attachment)
+                .render_area(info.render_area.to_vk())
+                .build()
+            );
+        };
+        Self {
+                device,
+                command_buffer: command_buffer.vk_command_buffer,
+                pipeline_state: GraphicsPipelineState2::default(),
+        }
+    }
+
+    fn insert_pipeline_transitions(command_buffer: vk::CommandBuffer, state: &GpuThreadSharedState, info: &BeginRenderPassInfo2<'_>) {
+        let device = state.logical_device.clone();
+        let mut image_layout_transitions = vec![];
+
+        record_necessary_color_attachment_transitions(info, state, &mut image_layout_transitions);
+
+        if let Some(attach) = info.depth_attachment {
+            let vk_image_view = state.resolve_resource::<VkImageView>(&attach.image_view);
+            let vk_image = state.resolve_resource::<VkImage>(&vk_image_view.owner_image);
+            if vk_image.layout != vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL {
+                image_layout_transitions.push(ImageMemoryBarrier2 {
+                    s_type: StructureType::IMAGE_MEMORY_BARRIER_2,
+                    p_next: std::ptr::null(),
+                    src_stage_mask: vk_image.current_stage_mask,
+                    src_access_mask: vk_image.current_access_mask,
+                    dst_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+                    dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+                    old_layout: vk_image.layout,
+                    new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                    src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                    dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                    image: vk_image.inner,
+                    subresource_range: vk_image_view.whole_subresource(),
+                })
+            }
+        }
+
+        unsafe {
+            device.cmd_pipeline_barrier2(command_buffer, &vk::DependencyInfo {
+                s_type: vk::StructureType::DEPENDENCY_INFO,
+                p_next: std::ptr::null(),
+                dependency_flags: vk::DependencyFlags::BY_REGION,
+                memory_barrier_count: 0,
+                p_memory_barriers: std::ptr::null(),
+                buffer_memory_barrier_count: 0,
+                p_buffer_memory_barriers: std::ptr::null(),
+                image_memory_barrier_count: image_layout_transitions.len() as _,
+                p_image_memory_barriers: image_layout_transitions.as_ptr(),
+            });
+        }
+    }
+}
+
+fn record_necessary_color_attachment_transitions(info: &BeginRenderPassInfo2<'_>, state: &GpuThreadSharedState, image_layout_transitions: &mut Vec<ImageMemoryBarrier2>) {
+    info.color_attachments.iter().for_each(|attach| {
+        let vk_image_view = state.resolve_resource::<VkImageView>(&attach.image_view);
+        let vk_image = state.resolve_resource::<VkImage>(&vk_image_view.owner_image);
+        if vk_image.layout != vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL {
+            let barrier = state.record_image_transition(vk_image_view.owner_image, 
+                vk_image_view.whole_subresource(),
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+                vk::AccessFlags2::COLOR_ATTACHMENT_WRITE
+            );
+            image_layout_transitions.push(barrier);
+        }
+    });
+}
+
+impl crate::render_pass_2::Impl for VkRenderPass2 {
+    fn set_primitive_topology(&mut self, new_topology:PrimitiveTopology,) {
+        todo!()
+    }
+
+    fn set_vertex_shader(&mut self, vertex_shader:ShaderModuleHandle,) {
+        self.pipeline_state.vertex_shader = vertex_shader;
+    }
+
+    fn set_fragment_shader(&mut self, fragment_shader:ShaderModuleHandle,) {
+        self.pipeline_state.fragment_shader = fragment_shader;
+    }
+
+    fn set_vertex_buffers(&mut self,bindings:&[VertexBindingInfo],) {
+        todo!()
+    }
+
+    fn set_color_output_enabled(&mut self,color_output_enabled:bool,) {
+        self.pipeline_state.color_output_enabled = color_output_enabled;
+    }
+
+    fn set_viewport(&mut self,viewport:Viewport,) {
+        todo!()
+    }
+
+    fn set_depth_bias(&mut self,constant:f32,slope:f32,) {
+        todo!()
+    }
+
+    fn set_front_face(&mut self,front_face:FrontFace,) {
+        self.pipeline_state.front_face = front_face;
+    }
+
+    fn set_polygon_mode(&mut self,polygon_mode:PolygonMode,) {
+        self.pipeline_state.polygon_mode = polygon_mode;
+    }
+
+    fn set_cull_mode(&mut self,cull_mode:CullMode,) {
+        self.pipeline_state.cull_mode = cull_mode;
+    }
+
+    fn set_enable_depth_test(&mut self,enable_depth_test:bool,) {
+        self.pipeline_state.enable_depth_test = enable_depth_test;
+    }
+
+    fn set_enable_depth_clamp(&mut self,enable_depth_clamp:bool,) {
+        self.pipeline_state.depth_clamp_enabled = enable_depth_clamp;
+    }
+
+    fn set_depth_write_enabled(&mut self,depth_write_enabled:bool,) {
+        self.pipeline_state.depth_write_enabled = depth_write_enabled;
+    }
+
+    fn set_depth_compare_op(&mut self,depth_compare_op:CompareOp,) {
+        self.pipeline_state.depth_compare_op = depth_compare_op;
+    }
+
+    fn set_color_attachment_blend_state(&mut self,attachment:usize,blend_state:PipelineColorBlendAttachmentState,) {
+        todo!()
+    }
+
+    fn set_early_discard_enabled(&mut self,allow_early_discard:bool,) {
+        self.pipeline_state.early_discard_enabled = allow_early_discard;
+    }
+
+    fn set_index_buffer(&self,index_buffer:BufferHandle,index_type:IndexType,offset:usize,) {
+        todo!()
+    }
+
+    fn draw_indexed(&mut self,num_indices:u32,instances:u32,first_index:u32,vertex_offset:i32,first_instance:u32,) -> anyhow::Result<()>  {
+        todo!()
+    }
+
+    fn draw(&mut self,num_vertices:u32,instances:u32,first_vertex:u32,first_instance:u32,) -> anyhow::Result<()>  {
+        todo!()
+    }
+
+}
+
+impl Drop for VkRenderPass2 {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.cmd_end_rendering(self.command_buffer);
+        }
     }
 }

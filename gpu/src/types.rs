@@ -798,6 +798,10 @@ pub struct VkImage {
     pub(super) allocation: Option<MemoryAllocation>,
     pub(super) extents: Extent2D,
     pub(super) format: ImageFormat,
+
+    pub(super) layout: vk::ImageLayout,
+    pub(super) current_access_mask: vk::AccessFlags2,
+    pub(super) current_stage_mask: vk::PipelineStageFlags2,
 }
 impl std::fmt::Debug for VkImage {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -818,6 +822,9 @@ impl VkImage {
             allocation: Some(allocation),
             extents,
             format,
+            layout: vk::ImageLayout::UNDEFINED,
+            current_access_mask: vk::AccessFlags2::empty(),
+            current_stage_mask: vk::PipelineStageFlags2::empty(),
         })
     }
 
@@ -834,6 +841,9 @@ impl VkImage {
             allocation: None,
             extents,
             format,
+            layout: vk::ImageLayout::UNDEFINED,
+            current_access_mask: vk::AccessFlags2::empty(),
+            current_stage_mask: vk::PipelineStageFlags2::empty(),
         }
     }
 
@@ -888,6 +898,16 @@ impl VkImageView {
             owner_image,
             extents,
         })
+    }
+
+    pub(crate) fn whole_subresource(&self) -> vk::ImageSubresourceRange {
+        vk::ImageSubresourceRange {
+            aspect_mask: self.format.aspect_mask().to_vk(),
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
+        }
     }
 }
 impl Deref for VkImageView {

@@ -63,6 +63,12 @@ macro_rules! define_handle {
                 $ty
             }
         }
+
+        impl Default for $st_name {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
     };
 }
 

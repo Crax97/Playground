@@ -38,6 +38,13 @@ impl<T: HasAssociatedHandle + Clone> AllocatedResourceMap<T> {
         res.clone()
     }
 
+    pub fn mutate<F: FnMut(&mut T)>(&mut self, handle: &T::AssociatedHandle, mut op: F) {
+        let res = self
+            .0
+            .get_mut(&handle.id())
+            .expect("Failed to resolve resource");
+        op(res)
+    }
     pub fn insert(&mut self, handle: &T::AssociatedHandle, resource: T) {
         self.0.insert(handle.id(), resource);
     }
@@ -99,6 +106,15 @@ impl GpuResourceMap {
     ) -> T {
         assert!(!handle.is_null());
         self.get_map().resolve(handle)
+    }
+
+    pub fn mutate<T: HasAssociatedHandle + Clone + 'static, F: FnMut(&mut T)>(
+        &mut self,
+        handle: &T::AssociatedHandle,
+        op: F,
+    ) {
+        assert!(!handle.is_null());
+        self.get_map_mut().mutate(handle, op)
     }
 
     pub fn get_map_mut<T: HasAssociatedHandle + Clone + 'static>(

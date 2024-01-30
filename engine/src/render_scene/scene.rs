@@ -7,7 +7,7 @@ use crate::{
     CvarManager, Frustum,
 };
 use bevy_ecs::system::Resource;
-use gpu::{CommandBuffer, Extent2D, Gpu, ImageFormat, ImageHandle, ImageViewHandle};
+use gpu::{CommandBuffer, Extent2D, Gpu, ImageFormat, ImageHandle, ImageViewHandle, Rect2D};
 use nalgebra::{vector, Matrix4, Point3, Vector2, Vector3};
 
 #[repr(C)]
@@ -277,6 +277,15 @@ pub struct Backbuffer {
     pub format: ImageFormat,
     pub image: ImageHandle,
     pub image_view: ImageViewHandle,
+}
+
+impl Backbuffer {
+    pub fn whole_area(&self) -> Rect2D {
+        Rect2D {
+            offset: Default::default(),
+            extent: self.size,
+        }
+    }
 }
 
 pub trait RenderingPipeline {

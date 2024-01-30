@@ -7,11 +7,11 @@ use engine::app::{app_state::*, bootstrap, App};
 use engine::{Backbuffer, Time};
 use engine_macros::glsl;
 use gpu::{
-    AttachmentReference, Binding, BufferCreateInfo, BufferHandle, BufferUsageFlags, CommandBuffer,
-    CullMode, FramebufferColorAttachment, ImageAspectFlags, ImageCreateInfo, ImageFormat,
-    ImageHandle, ImageLayout, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, IndexType,
-    InputRate, MemoryDomain, PresentMode, SamplerCreateInfo, SamplerHandle, ShaderModuleHandle,
-    ShaderStage, SubpassDescription, VertexBindingInfo,
+    AttachmentReference, Binding, Binding2, BufferCreateInfo, BufferHandle, BufferUsageFlags,
+    ColorAttachment, CommandBuffer, CullMode, FramebufferColorAttachment, ImageAspectFlags,
+    ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout, ImageUsageFlags, ImageViewCreateInfo,
+    ImageViewHandle, IndexType, InputRate, MemoryDomain, PresentMode, SamplerCreateInfo,
+    SamplerHandle, ShaderModuleHandle, ShaderStage, SubpassDescription, VertexBindingInfo,
 };
 use nalgebra::*;
 use winit::event_loop::EventLoop;
@@ -239,35 +239,16 @@ impl App for TriangleApp {
         let gpu = &app_state.gpu;
         let mut command_buffer = gpu.start_command_buffer(gpu::QueueType::Graphics)?;
         {
-            let color_attachments = vec![FramebufferColorAttachment {
-                image_view: backbuffer.image_view,
-                load_op: gpu::ColorLoadOp::Clear([0.3, 0.0, 0.3, 1.0]),
-                store_op: gpu::AttachmentStoreOp::Store,
-                initial_layout: gpu::ImageLayout::Undefined,
-                final_layout: gpu::ImageLayout::PresentSrc,
-            }];
-
-            let mut pass = command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
-                color_attachments: &color_attachments,
+            let mut pass = command_buffer.start_render_pass_2(&gpu::BeginRenderPassInfo2 {
+                label: Some("Triangle rendering"),
+                color_attachments: &[ColorAttachment {
+                    image_view: backbuffer.image_view,
+                    load_op: gpu::ColorLoadOp::Clear([0.3, 0.0, 0.3, 1.0]),
+                    store_op: gpu::AttachmentStoreOp::Store,
+                }],
                 depth_attachment: None,
                 stencil_attachment: None,
-                render_area: gpu::Rect2D {
-                    offset: gpu::Offset2D::default(),
-                    extent: backbuffer.size,
-                },
-                label: Some("Triangle rendering"),
-                subpasses: &[SubpassDescription {
-                    label: Some("Main pass".to_owned()),
-                    input_attachments: vec![],
-                    color_attachments: vec![AttachmentReference {
-                        attachment: 0,
-                        layout: ImageLayout::ColorAttachment,
-                    }],
-                    resolve_attachments: vec![],
-                    depth_stencil_attachment: None,
-                    preserve_attachments: vec![],
-                }],
-                dependencies: &[],
+                render_area: backbuffer.whole_area(),
             });
 
             let projection = Matrix4::<f32>::new_perspective(
@@ -306,17 +287,12 @@ impl App for TriangleApp {
                 },
             ]);
             pass.set_index_buffer(self.index_buffer, IndexType::Uint32, 0);
-            pass.bind_resources(
+            pass.bind_resources_2(
                 0,
-                &[Binding {
-                    ty: gpu::DescriptorBindingType::ImageView {
-                        image_view_handle: self.david_image_view,
-                        sampler_handle: self.david_sampler,
-                        layout: gpu::ImageLayout::ShaderReadOnly,
-                    },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: 0,
-                }],
+                &[Binding2::image_view(
+                    self.david_image_view,
+                    self.david_sampler,
+                )],
             );
             pass.set_cull_mode(CullMode::None);
             pass.push_constants(

@@ -8,7 +8,8 @@ use std::{
 
 use anyhow::{bail, Result};
 use ash::vk::{
-    CommandPoolResetFlags, PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR,
+    CommandPoolResetFlags, ImageMemoryBarrier2, PhysicalDeviceDynamicRenderingFeaturesKHR,
+    PhysicalDeviceFeatures2KHR,
 };
 use ash::{
     extensions::ext::DebugUtils,
@@ -178,7 +179,11 @@ impl GpuThreadSharedState {
             .read()
             .expect("Failed to RWLock read Gpu Resource Map")
     }
-
+    pub(crate) fn allocated_resources_mut(&self) -> RwLockWriteGuard<'_, GpuResourceMap> {
+        self.allocated_resources
+            .write()
+            .expect("Failed to RWLock read Gpu Resource Map")
+    }
     pub(crate) fn write_resource_map(&self) -> RwLockWriteGuard<GpuResourceMap> {
         self.allocated_resources
             .write()
@@ -192,6 +197,45 @@ impl GpuThreadSharedState {
         self.allocated_resources().resolve(source)
     }
 
+    pub(crate) fn mutate_resource<T: HasAssociatedHandle + Clone + 'static, F: FnMut(&mut T)>(
+        &self,
+        source: &T::AssociatedHandle,
+        op: F,
+    ) {
+        self.allocated_resources_mut().mutate(source, op)
+    }
+
+    pub(crate) fn record_image_transition(
+        &self,
+        image: ImageHandle,
+        subresource_range: vk::ImageSubresourceRange,
+        new_layout: vk::ImageLayout,
+        dst_stage_mask: vk::PipelineStageFlags2,
+        dst_access_mask: vk::AccessFlags2,
+    ) -> ImageMemoryBarrier2 {
+        let vk_image = self.resolve_resource::<VkImage>(&image);
+        let barrier = ImageMemoryBarrier2 {
+            s_type: StructureType::IMAGE_MEMORY_BARRIER_2,
+            p_next: std::ptr::null(),
+            src_stage_mask: vk_image.current_stage_mask,
+            src_access_mask: vk_image.current_access_mask,
+            dst_stage_mask,
+            dst_access_mask,
+            old_layout: vk_image.layout,
+            new_layout,
+            src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            image: vk_image.inner,
+            subresource_range,
+        };
+
+        self.mutate_resource::<VkImage, _>(&image, |image| {
+            image.layout = new_layout;
+            image.current_stage_mask = dst_stage_mask;
+            image.current_access_mask = dst_access_mask;
+        });
+        barrier
+    }
     fn create_graphics_pipeline(
         &self,
         pipeline_state: &GraphicsPipelineState,

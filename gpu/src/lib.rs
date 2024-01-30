@@ -46,6 +46,10 @@ impl<T: 'static> AsAnyArc for T {
 pub trait CommandBufferPassBegin {
     fn create_render_pass_impl(&mut self, info: &BeginRenderPassInfo)
         -> Box<dyn render_pass::Impl>;
+    fn create_render_pass_2_impl(
+        &mut self,
+        info: &BeginRenderPassInfo2,
+    ) -> Box<dyn render_pass_2::Impl>;
 
     fn create_compute_pass_impl(&mut self) -> Box<dyn compute_pass::Impl>;
 }
@@ -177,13 +181,15 @@ macro_rules! define_pass_type {
 
 pub mod command_buffer_2 {
     use crate::{
-        compute_pass::ComputePass, render_pass::RenderPass, BeginRenderPassInfo, Binding,
-        CommandBufferPassBegin, CommandBufferSubmitInfo, PipelineBarrierInfo, ShaderStage,
+        compute_pass::ComputePass, render_pass::RenderPass, render_pass_2::RenderPass2,
+        BeginRenderPassInfo, BeginRenderPassInfo2, Binding, Binding2, CommandBufferPassBegin,
+        CommandBufferSubmitInfo, PipelineBarrierInfo, ShaderStage,
     };
 
     define_pimpl_type!(CommandBuffer : CommandBufferPassBegin {
         fn push_constants(&mut self, index: u32, offset: u32, data: &[u8], shader_stage: ShaderStage);
         fn bind_resources(&mut self, set: u32, bindings: &[Binding]);
+        fn bind_resources_2(&mut self, set: u32, bindings: &[Binding2]);
         fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo);
         fn submit(&mut self, submit_info: &CommandBufferSubmitInfo) -> anyhow::Result<()>;
 
@@ -194,6 +200,14 @@ pub mod command_buffer_2 {
         pub fn start_render_pass<'c>(&'c mut self, info: &BeginRenderPassInfo) -> RenderPass<'c> {
             let inner = self.pimpl.create_render_pass_impl(info);
             RenderPass {
+                pimpl: inner,
+                parent: self,
+            }
+        }
+
+        pub fn start_render_pass_2<'c>(&'c mut self, info: &BeginRenderPassInfo2) -> RenderPass2 {
+            let inner = self.pimpl.create_render_pass_2_impl(info);
+            RenderPass2 {
                 pimpl: inner,
                 parent: self,
             }
@@ -234,6 +248,58 @@ pub mod render_pass {
      fn set_depth_compare_op(&mut self, depth_compare_op: CompareOp);
      fn set_color_attachment_blend_state(&mut self, attachment: usize, blend_state: PipelineColorBlendAttachmentState);
      fn advance_to_next_subpass(&mut self);
+    /* If enabled, fragments may be discarded after the vertex shader stage,
+    before any fragment shader is executed.
+    When enabled, a valid fragment shader must be set */
+     fn set_early_discard_enabled(&mut self, allow_early_discard: bool);
+
+     fn draw_indexed(
+        &mut self,
+        num_indices: u32,
+        instances: u32,
+        first_index: u32,
+        vertex_offset: i32,
+        first_instance: u32
+    ) -> anyhow::Result<()> ;
+
+     fn draw(
+        &mut self,
+        num_vertices: u32,
+        instances: u32,
+        first_vertex: u32,
+        first_instance: u32
+    ) -> anyhow::Result<()> ;
+
+     fn set_index_buffer(
+        &self,
+        index_buffer: BufferHandle,
+        index_type: IndexType,
+        offset: usize
+    ) ;
+    });
+}
+pub mod render_pass_2 {
+
+    use crate::{
+        BufferHandle, CompareOp, CullMode, FrontFace, IndexType, PipelineColorBlendAttachmentState,
+        PolygonMode, PrimitiveTopology, ShaderModuleHandle, VertexBindingInfo, Viewport,
+    };
+    define_pass_type!(RenderPass2 {
+     fn set_primitive_topology(&mut self, new_topology: PrimitiveTopology);
+     fn set_vertex_shader(&mut self, vertex_shader: ShaderModuleHandle);
+     fn set_fragment_shader(&mut self, fragment_shader: ShaderModuleHandle);
+     fn set_vertex_buffers(&mut self, bindings: &[VertexBindingInfo]);
+     fn set_color_output_enabled(&mut self, color_output_enabled: bool);
+     fn set_viewport(&mut self, viewport: Viewport);
+     fn set_depth_bias(&mut self, constant: f32, slope: f32);
+     fn set_front_face(&mut self, front_face: FrontFace);
+     fn set_polygon_mode(&mut self, polygon_mode: PolygonMode);
+     fn set_cull_mode(&mut self, cull_mode: CullMode);
+     fn set_enable_depth_test(&mut self, enable_depth_test: bool);
+     fn set_enable_depth_clamp(&mut self, enable_depth_clamp: bool);
+     fn set_depth_write_enabled(&mut self, depth_write_enabled: bool);
+     fn set_depth_compare_op(&mut self, depth_compare_op: CompareOp);
+     fn set_color_attachment_blend_state(&mut self, attachment: usize, blend_state: PipelineColorBlendAttachmentState);
     /* If enabled, fragments may be discarded after the vertex shader stage,
     before any fragment shader is executed.
     When enabled, a valid fragment shader must be set */
@@ -1493,6 +1559,36 @@ pub struct BeginRenderPassInfo<'a> {
     pub dependencies: &'a [SubpassDependency],
 }
 
+#[derive(Clone, Copy, Hash)]
+pub struct DepthAttachment {
+    pub image_view: ImageViewHandle,
+    pub load_op: DepthLoadOp,
+    pub store_op: AttachmentStoreOp,
+}
+
+#[derive(Clone, Copy, Hash)]
+pub struct ColorAttachment {
+    pub image_view: ImageViewHandle,
+    pub load_op: ColorLoadOp,
+    pub store_op: AttachmentStoreOp,
+}
+
+#[derive(Clone, Copy, Hash)]
+pub struct StencilAttachment {
+    pub image_view: ImageViewHandle,
+    pub load_op: StencilLoadOp,
+    pub store_op: AttachmentStoreOp,
+}
+
+#[derive(Clone, Hash)]
+pub struct BeginRenderPassInfo2<'a> {
+    pub label: Option<&'a str>,
+    pub color_attachments: &'a [ColorAttachment],
+    pub depth_attachment: Option<DepthAttachment>,
+    pub stencil_attachment: Option<StencilAttachment>,
+    pub render_area: Rect2D,
+}
+
 #[derive(Clone, Hash, Default)]
 pub struct RenderPassAttachments {
     pub color_attachments: Vec<RenderPassAttachment>,
@@ -1518,6 +1614,46 @@ pub struct Binding {
     pub ty: DescriptorBindingType,
     pub binding_stage: ShaderStage,
     pub location: u32,
+}
+
+#[derive(Default, Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
+pub struct Binding2 {
+    pub ty: DescriptorBindingType2,
+    pub binding_stage: ShaderStage,
+}
+
+impl Binding2 {
+    pub fn image_view(view: ImageViewHandle, sampler: SamplerHandle) -> Self {
+        Self {
+            ty: DescriptorBindingType2::ImageView {
+                image_view_handle: view,
+                sampler_handle: sampler,
+            },
+            binding_stage: ShaderStage::ALL_GRAPHICS,
+        }
+    }
+
+    pub fn whole_uniform_buffer(buffer: BufferHandle) -> Self {
+        Self {
+            ty: DescriptorBindingType2::UniformBuffer {
+                handle: buffer,
+                offset: 0,
+                range: WHOLE_SIZE,
+            },
+            binding_stage: ShaderStage::ALL_GRAPHICS,
+        }
+    }
+
+    pub fn whole_storage_buffer(buffer: BufferHandle) -> Self {
+        Self {
+            ty: DescriptorBindingType2::StorageBuffer {
+                handle: buffer,
+                offset: 0,
+                range: WHOLE_SIZE,
+            },
+            binding_stage: ShaderStage::ALL_GRAPHICS,
+        }
+    }
 }
 
 #[derive(Default, Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
