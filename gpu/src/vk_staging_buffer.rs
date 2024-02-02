@@ -43,7 +43,6 @@ struct ImageToTransition {
 
 pub struct VkStagingBuffer {
     copy_command_pool: vk::CommandPool,
-    copy_command_buffer: vk::CommandBuffer,
 
     backing_buffer: vk::Buffer,
     memory_allocation: vk::DeviceMemory,
@@ -53,7 +52,8 @@ pub struct VkStagingBuffer {
     images_to_transition: Vec<ImageToTransition>,
     persistent_pointer: AtomicPtr<c_void>,
     queue: vk::Queue,
-    wait_fence: vk::Fence,
+    image_transition_done_fence: vk::Fence,
+    write_done_fence: vk::Fence,
 }
 
 impl VkStagingBuffer {
@@ -74,13 +74,6 @@ impl VkStagingBuffer {
                 },
                 get_allocation_callbacks(),
             )?;
-            let copy_command_buffer =
-                device.allocate_command_buffers(&vk::CommandBufferAllocateInfo {
-                    command_pool: copy_command_pool,
-                    command_buffer_count: 1,
-                    level: vk::CommandBufferLevel::PRIMARY,
-                    ..Default::default()
-                })?[0];
 
             let queues = [queue_family_index];
             let backing_buffer = device.create_buffer(
@@ -132,11 +125,14 @@ impl VkStagingBuffer {
                 vk::MemoryMapFlags::empty(),
             )?;
 
-            let wait_fence = device.create_fence(
+            let write_done_fence = device.create_fence(
                 &FenceCreateInfo::builder().build(),
                 get_allocation_callbacks(),
             )?;
-
+            let image_transition_done_fence = device.create_fence(
+                &FenceCreateInfo::builder().build(),
+                get_allocation_callbacks(),
+            )?;
             Ok(Self {
                 backing_buffer,
                 memory_allocation,
@@ -147,9 +143,9 @@ impl VkStagingBuffer {
                 current_offset: 0,
                 persistent_pointer: AtomicPtr::new(persistent_pointer),
                 copy_command_pool,
-                copy_command_buffer,
                 queue,
-                wait_fence,
+                image_transition_done_fence,
+                write_done_fence,
             })
         }
     }
@@ -247,134 +243,9 @@ impl VkStagingBuffer {
             return Ok(());
         }
         unsafe {
-            device.begin_command_buffer(
-                self.copy_command_buffer,
-                &CommandBufferBeginInfo::builder().build(),
-            )?;
-            {
-                let pre_copy_barriers = std::mem::take(&mut self.images_to_transition)
-                    .iter()
-                    .map(
-                        |ImageToTransition { image, subresource }| vk::ImageMemoryBarrier2 {
-                            dst_stage_mask: vk::PipelineStageFlags2::TRANSFER,
-                            dst_access_mask: vk::AccessFlags2::MEMORY_WRITE,
-                            old_layout: vk::ImageLayout::UNDEFINED,
-                            new_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                            src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                            dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                            image: *image,
-                            subresource_range: *subresource,
-                            ..Default::default()
-                        },
-                    )
-                    .collect::<Vec<_>>();
-                device.cmd_pipeline_barrier2(
-                    self.copy_command_buffer,
-                    &vk::DependencyInfo {
-                        dependency_flags: vk::DependencyFlags::BY_REGION,
-                        memory_barrier_count: 0,
-                        p_memory_barriers: std::ptr::null(),
-                        buffer_memory_barrier_count: 0,
-                        p_buffer_memory_barriers: std::ptr::null(),
-                        image_memory_barrier_count: pre_copy_barriers.len() as _,
-                        p_image_memory_barriers: pre_copy_barriers.as_ptr(),
-                        ..Default::default()
-                    },
-                );
-            }
-            let mut images_to_transition = vec![];
-            for operation in std::mem::take(&mut self.operations) {
-                match operation {
-                    BufferOperation::CopyBuffer {
-                        dest_buffer,
-                        dest_offset,
-                        src_offset,
-                        size,
-                    } => {
-                        device.cmd_copy_buffer(
-                            self.copy_command_buffer,
-                            self.backing_buffer,
-                            dest_buffer,
-                            &[vk::BufferCopy {
-                                src_offset,
-                                dst_offset: dest_offset,
-                                size,
-                            }],
-                        );
-                    }
-                    BufferOperation::CopyImage {
-                        image,
-                        image_subresource,
-                        image_offset,
-                        image_extent,
-                        final_layout,
+            self.transition_to_transfer_images(device)?;
 
-                        src_offset,
-                    } => {
-                        device.cmd_copy_buffer_to_image(
-                            self.copy_command_buffer,
-                            self.backing_buffer,
-                            image,
-                            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                            &[vk::BufferImageCopy {
-                                buffer_offset: src_offset,
-                                buffer_row_length: 0,
-                                buffer_image_height: 0,
-                                image_subresource,
-                                image_offset,
-                                image_extent,
-                            }],
-                        );
-                        images_to_transition.push(vk::ImageMemoryBarrier2 {
-                            src_stage_mask: vk::PipelineStageFlags2::TRANSFER,
-                            src_access_mask: vk::AccessFlags2::MEMORY_WRITE,
-                            dst_stage_mask: vk::PipelineStageFlags2::FRAGMENT_SHADER,
-                            dst_access_mask: vk::AccessFlags2::SHADER_READ,
-                            old_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                            new_layout: final_layout,
-                            src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                            dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                            image,
-                            subresource_range: vk::ImageSubresourceRange {
-                                aspect_mask: image_subresource.aspect_mask,
-                                base_mip_level: image_subresource.mip_level,
-                                level_count: 1,
-                                base_array_layer: image_subresource.base_array_layer,
-                                layer_count: image_subresource.layer_count,
-                            },
-                            ..Default::default()
-                        });
-                    }
-                }
-
-                device.cmd_pipeline_barrier2(
-                    self.copy_command_buffer,
-                    &vk::DependencyInfo {
-                        dependency_flags: vk::DependencyFlags::BY_REGION,
-                        memory_barrier_count: 0,
-                        p_memory_barriers: std::ptr::null(),
-                        buffer_memory_barrier_count: 0,
-                        p_buffer_memory_barriers: std::ptr::null(),
-                        image_memory_barrier_count: images_to_transition.len() as _,
-                        p_image_memory_barriers: images_to_transition.as_ptr(),
-                        ..Default::default()
-                    },
-                );
-            }
-            device.end_command_buffer(self.copy_command_buffer)?;
-            let command_buffers = [self.copy_command_buffer];
-
-            device.queue_submit(
-                self.queue,
-                &[vk::SubmitInfo {
-                    p_command_buffers: command_buffers.as_ptr(),
-                    command_buffer_count: 1,
-                    ..Default::default()
-                }],
-                self.wait_fence,
-            )?;
-
-            device.wait_for_fences(&[self.wait_fence], true, u64::MAX)?;
+            self.write_resources(device)?;
 
             device.reset_command_pool(
                 self.copy_command_pool,
@@ -382,6 +253,185 @@ impl VkStagingBuffer {
             )?;
             self.current_offset = 0;
             Ok(())
+        }
+    }
+
+    unsafe fn write_resources(&mut self, device: &ash::Device) -> Result<(), anyhow::Error> {
+        let copy_command_buffer = self.create_command_buffer(device)?;
+        device.begin_command_buffer(
+            copy_command_buffer,
+            &CommandBufferBeginInfo::builder()
+                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
+                .build(),
+        )?;
+        let mut images_to_transition = vec![];
+        let operations = std::mem::take(&mut self.operations);
+        for operation in operations {
+            match operation {
+                BufferOperation::CopyBuffer {
+                    dest_buffer,
+                    dest_offset,
+                    src_offset,
+                    size,
+                } => {
+                    device.cmd_copy_buffer(
+                        copy_command_buffer,
+                        self.backing_buffer,
+                        dest_buffer,
+                        &[vk::BufferCopy {
+                            src_offset,
+                            dst_offset: dest_offset,
+                            size,
+                        }],
+                    );
+                }
+                BufferOperation::CopyImage {
+                    image,
+                    image_subresource,
+                    image_offset,
+                    image_extent,
+                    final_layout,
+
+                    src_offset,
+                } => {
+                    device.cmd_copy_buffer_to_image(
+                        copy_command_buffer,
+                        self.backing_buffer,
+                        image,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        &[vk::BufferImageCopy {
+                            buffer_offset: src_offset,
+                            buffer_row_length: 0,
+                            buffer_image_height: 0,
+                            image_subresource,
+                            image_offset,
+                            image_extent,
+                        }],
+                    );
+                    images_to_transition.push(vk::ImageMemoryBarrier2 {
+                        src_stage_mask: vk::PipelineStageFlags2::TRANSFER,
+                        src_access_mask: vk::AccessFlags2::MEMORY_WRITE,
+                        dst_stage_mask: vk::PipelineStageFlags2::FRAGMENT_SHADER,
+                        dst_access_mask: vk::AccessFlags2::SHADER_READ,
+                        old_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        new_layout: final_layout,
+                        src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                        dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                        image,
+                        subresource_range: vk::ImageSubresourceRange {
+                            aspect_mask: image_subresource.aspect_mask,
+                            base_mip_level: image_subresource.mip_level,
+                            level_count: 1,
+                            base_array_layer: image_subresource.base_array_layer,
+                            layer_count: image_subresource.layer_count,
+                        },
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+        if !images_to_transition.is_empty() {
+            device.cmd_pipeline_barrier2(
+                copy_command_buffer,
+                &vk::DependencyInfo {
+                    dependency_flags: vk::DependencyFlags::BY_REGION,
+                    memory_barrier_count: 0,
+                    p_memory_barriers: std::ptr::null(),
+                    buffer_memory_barrier_count: 0,
+                    p_buffer_memory_barriers: std::ptr::null(),
+                    image_memory_barrier_count: images_to_transition.len() as _,
+                    p_image_memory_barriers: images_to_transition.as_ptr(),
+                    ..Default::default()
+                },
+            );
+        }
+        device.end_command_buffer(copy_command_buffer)?;
+        let command_buffers = [copy_command_buffer];
+
+        device.queue_submit(
+            self.queue,
+            &[vk::SubmitInfo {
+                p_command_buffers: command_buffers.as_ptr(),
+                command_buffer_count: 1,
+                ..Default::default()
+            }],
+            self.write_done_fence,
+        )?;
+
+        device.wait_for_fences(&[self.write_done_fence], true, u64::MAX)?;
+        device.free_command_buffers(self.copy_command_pool, &[copy_command_buffer]);
+        Ok(())
+    }
+
+    unsafe fn transition_to_transfer_images(
+        &mut self,
+        device: &ash::Device,
+    ) -> Result<(), anyhow::Error> {
+        if self.images_to_transition.len() > 0 {
+            let image_transition_command_buffer = self.create_command_buffer(device)?;
+            device.begin_command_buffer(
+                image_transition_command_buffer,
+                &CommandBufferBeginInfo::builder()
+                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
+                    .build(),
+            )?;
+            let image_to_transition = std::mem::take(&mut self.images_to_transition);
+            let pre_copy_barriers = image_to_transition
+                .iter()
+                .map(
+                    |ImageToTransition { image, subresource }| vk::ImageMemoryBarrier2 {
+                        dst_stage_mask: vk::PipelineStageFlags2::TRANSFER,
+                        dst_access_mask: vk::AccessFlags2::MEMORY_WRITE,
+                        old_layout: vk::ImageLayout::UNDEFINED,
+                        new_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                        src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                        dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                        image: *image,
+                        subresource_range: *subresource,
+                        ..Default::default()
+                    },
+                )
+                .collect::<Vec<_>>();
+            device.cmd_pipeline_barrier2(
+                image_transition_command_buffer,
+                &vk::DependencyInfo {
+                    dependency_flags: vk::DependencyFlags::BY_REGION,
+                    memory_barrier_count: 0,
+                    p_memory_barriers: std::ptr::null(),
+                    buffer_memory_barrier_count: 0,
+                    p_buffer_memory_barriers: std::ptr::null(),
+                    image_memory_barrier_count: pre_copy_barriers.len() as _,
+                    p_image_memory_barriers: pre_copy_barriers.as_ptr(),
+                    ..Default::default()
+                },
+            );
+            device.end_command_buffer(image_transition_command_buffer)?;
+            let command_buffers = [image_transition_command_buffer];
+            device.queue_submit(
+                self.queue,
+                &[vk::SubmitInfo {
+                    p_command_buffers: command_buffers.as_ptr(),
+                    command_buffer_count: 1,
+                    ..Default::default()
+                }],
+                self.image_transition_done_fence,
+            )?;
+
+            device.wait_for_fences(&[self.image_transition_done_fence], true, u64::MAX)?;
+            device.free_command_buffers(self.copy_command_pool, &[image_transition_command_buffer]);
+        }
+        Ok(())
+    }
+
+    fn create_command_buffer(&self, device: &ash::Device) -> anyhow::Result<vk::CommandBuffer> {
+        unsafe {
+            let buffers = device.allocate_command_buffers(&vk::CommandBufferAllocateInfo {
+                command_pool: self.copy_command_pool,
+                command_buffer_count: 1,
+                level: vk::CommandBufferLevel::PRIMARY,
+                ..Default::default()
+            })?[0];
+            Ok(buffers)
         }
     }
 }

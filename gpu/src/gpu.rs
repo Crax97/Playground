@@ -2306,25 +2306,11 @@ impl VkGpu {
         if buffer.memory_domain.contains(MemoryDomain::HostVisible) {
             buffer.write_data(offset, data);
         } else {
-            let staging_buffer = self
-                .make_buffer(
-                    &BufferCreateInfo {
-                        label: Some("copy op"),
-                        size: data.len(),
-                        usage: crate::BufferUsageFlags::TRANSFER_SRC,
-                    },
-                    MemoryDomain::HostVisible,
-                )
-                .expect("Failed to write data");
-            let staging_vk_buffer = self.resolve_resource(&staging_buffer);
-            self.write_buffer_data_with_offset(&staging_vk_buffer, 0, data)?;
-            self.copy_buffer(
-                &staging_vk_buffer,
-                buffer,
-                offset,
-                std::mem::size_of_val(data),
-            )?;
-            self.destroy_buffer(staging_buffer);
+            self.staging_buffer
+                .write()
+                .expect("Failed to lock staging buffer")
+                .write_buffer(&self.state.logical_device, buffer.inner, offset, data)
+                .expect("Write buffer");
         }
         Ok(())
     }
