@@ -1773,6 +1773,13 @@ impl VkRenderPass2 {
         let (depth_constant, depth_clamp, depth_slope) = {
             (0.0, 0.0, 0.0)
         };
+        let viewport = vk::Viewport {
+            width: self.viewport_area.width,
+            height: -self.viewport_area.height,
+            x: 0.0,
+            y: self.viewport_area.height,
+            ..self.viewport_area.to_vk()
+        };
         unsafe {
             device.cmd_set_depth_bias_enable(self.command_buffer, true);
             device.cmd_set_depth_bias(
@@ -1781,7 +1788,7 @@ impl VkRenderPass2 {
                 depth_clamp,
                 depth_slope,
             );
-            device.cmd_set_viewport(self.command_buffer, 0, &[self.viewport_area.to_vk()]);
+            device.cmd_set_viewport(self.command_buffer, 0, &[viewport]);
             device.cmd_set_scissor(self.command_buffer, 0, &[scissor.to_vk()]);
             device.cmd_set_depth_test_enable(
                 self.command_buffer,
