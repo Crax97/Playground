@@ -7,7 +7,7 @@ use std::borrow::Cow;
 
 use crate::Backbuffer;
 pub use console::*;
-use gpu::{CommandBuffer, CommandBufferSubmitInfo, PipelineStageFlags};
+use gpu::CommandBuffer;
 
 use log::{info, trace};
 use winit::{
@@ -85,12 +85,6 @@ pub fn app_loop<A: App + 'static>(
         winit::event::Event::Resumed => {}
         winit::event::Event::MainEventsCleared => {
             let sz = app_state.current_window_size;
-            if app_state.needs_new_swapchain && sz.width > 0 && sz.height > 0 {
-                app_state.swapchain_mut().recreate_swapchain()?;
-
-                app_state.needs_new_swapchain = false;
-                app.on_resized(app_state, sz);
-            }
 
             if sz.width > 0 && sz.height > 0 {
                 update_app(app, app_state)?;
@@ -108,6 +102,15 @@ pub fn app_loop<A: App + 'static>(
 }
 
 fn update_app(app: &mut dyn App, app_state_mut: &mut AppState) -> anyhow::Result<()> {
+    let sz = app_state_mut.current_window_size;
+    if app_state_mut.needs_new_swapchain && sz.width > 0 && sz.height > 0 {
+        app_state_mut.swapchain_mut().recreate_swapchain()?;
+
+        app_state_mut.needs_new_swapchain = false;
+        app.on_resized(app_state_mut, sz);
+        return Ok(());
+    }
+
     app_state_mut.begin_frame()?;
     app.begin_frame(app_state_mut)?;
 

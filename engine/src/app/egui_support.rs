@@ -131,7 +131,7 @@ impl EguiSupport {
     }
 
     pub fn swapchain_updated(&mut self, swapchain: &Swapchain) {
-        let swapchain = swapchain
+        let vk_swapchain = swapchain
             .pimpl
             .as_any()
             .downcast_ref::<VkSwapchain>()
@@ -139,8 +139,8 @@ impl EguiSupport {
         self.integration.update_swapchain(
             swapchain.extents().width,
             swapchain.extents().height,
-            swapchain.current_swapchain,
-            swapchain.present_format,
+            vk_swapchain.current_swapchain,
+            vk_swapchain.present_format,
         );
     }
 

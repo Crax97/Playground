@@ -66,7 +66,7 @@ macro_rules! define_handle {
 
         impl Default for $st_name {
             fn default() -> Self {
-                Self::new()
+                Self::null()
             }
         }
     };

@@ -1,6 +1,7 @@
 use std::ops::Deref;
 
 use super::gpu::*;
+use crate::vk::render_graph::AttachmentFlags;
 use crate::{
     Extent2D, Filter, IndexType, Offset2D, PipelineBindPoint, Rect2D, SamplerAddressMode,
     SamplerCreateInfo, StencilOp, StencilOpState, *,
@@ -660,7 +661,6 @@ impl VkSemaphore {
 pub struct VkCommandPool {
     device: ash::Device,
     pub inner: vk::CommandPool,
-    pub(super) associated_queue: QueueType,
 }
 
 impl Drop for VkCommandPool {
@@ -692,11 +692,7 @@ impl VkCommandPool {
             )?
         };
 
-        Ok(Self {
-            inner,
-            device,
-            associated_queue: create_info.queue_type,
-        })
+        Ok(Self { inner, device })
     }
 }
 
@@ -727,10 +723,6 @@ impl VkBuffer {
             memory_domain,
             allocation,
         })
-    }
-
-    pub(crate) fn size(&self) -> usize {
-        self.allocation.size as _
     }
 }
 impl Deref for VkBuffer {
@@ -798,10 +790,6 @@ pub struct VkImage {
     pub(super) allocation: Option<MemoryAllocation>,
     pub(super) extents: Extent2D,
     pub(super) format: ImageFormat,
-
-    pub(super) layout: vk::ImageLayout,
-    pub(super) current_access_mask: vk::AccessFlags2,
-    pub(super) current_stage_mask: vk::PipelineStageFlags2,
 }
 impl std::fmt::Debug for VkImage {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -822,9 +810,6 @@ impl VkImage {
             allocation: Some(allocation),
             extents,
             format,
-            layout: vk::ImageLayout::UNDEFINED,
-            current_access_mask: vk::AccessFlags2::empty(),
-            current_stage_mask: vk::PipelineStageFlags2::empty(),
         })
     }
 
@@ -841,9 +826,6 @@ impl VkImage {
             allocation: None,
             extents,
             format,
-            layout: vk::ImageLayout::UNDEFINED,
-            current_access_mask: vk::AccessFlags2::empty(),
-            current_stage_mask: vk::PipelineStageFlags2::empty(),
         }
     }
 
@@ -863,6 +845,13 @@ impl Deref for VkImage {
     }
 }
 
+bitflags! {
+    #[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug, Default)]
+    pub struct VkImageViewFlags: u32 {
+        const SWAPCHAIN_IMAGE = 1;
+    }
+}
+
 #[derive(Clone)]
 pub struct VkImageView {
     pub(super) inner: vk::ImageView,
@@ -870,6 +859,7 @@ pub struct VkImageView {
     pub(super) format: ImageFormat,
     pub(super) owner_image: ImageHandle,
     pub(super) extents: Extent2D,
+    pub(super) flags: VkImageViewFlags,
 }
 
 impl std::fmt::Debug for VkImageView {
@@ -885,6 +875,7 @@ impl VkImageView {
         format: ImageFormat,
         owner_image: ImageHandle,
         extents: Extent2D,
+        flags: VkImageViewFlags,
     ) -> VkResult<Self> {
         let inner = {
             |device: &ash::Device| unsafe {
@@ -897,17 +888,8 @@ impl VkImageView {
             format,
             owner_image,
             extents,
+            flags,
         })
-    }
-
-    pub(crate) fn whole_subresource(&self) -> vk::ImageSubresourceRange {
-        vk::ImageSubresourceRange {
-            aspect_mask: self.format.aspect_mask().to_vk(),
-            base_mip_level: 0,
-            level_count: 1,
-            base_array_layer: 0,
-            layer_count: 1,
-        }
     }
 }
 impl Deref for VkImageView {
@@ -1467,5 +1449,20 @@ impl<'a> ToVk for FenceCreateInfo<'a> {
             p_next: std::ptr::null(),
             flags: self.flags.to_vk(),
         }
+    }
+}
+
+impl From<VkImageViewFlags> for AttachmentFlags {
+    fn from(value: VkImageViewFlags) -> Self {
+        let mut result = Self::empty();
+
+        case!(
+            value,
+            result,
+            VkImageViewFlags::SWAPCHAIN_IMAGE,
+            Self::SWAPCHAIN_IMAGE
+        );
+
+        result
     }
 }

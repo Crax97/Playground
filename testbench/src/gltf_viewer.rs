@@ -16,8 +16,8 @@ use engine::post_process_pass::TonemapPass;
 use engine_macros::glsl;
 use fps_camera::FpsCamera;
 use gpu::{
-    CommandBuffer, Extent2D, ImageFormat, Offset2D, PipelineBarrierInfo, PipelineStageFlags,
-    PresentMode, Rect2D, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
+    CommandBuffer, Extent2D, ImageFormat, Offset2D, PresentMode, Rect2D, ShaderModuleCreateInfo,
+    ShaderModuleHandle, ShaderStage,
 };
 use winit::dpi::{PhysicalPosition, Position};
 
@@ -649,14 +649,8 @@ impl App for GLTFViewer {
             None,
         )?;
 
-        command_buffer.pipeline_barrier(&PipelineBarrierInfo {
-            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            dst_stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-            ..Default::default()
-        });
-
-        self.egui_support
-            .paint_frame(output, &app_state.swapchain, &command_buffer);
+        // self.egui_support
+        //     .paint_frame(output, &app_state.swapchain, &command_buffer);
 
         Ok(command_buffer)
     }

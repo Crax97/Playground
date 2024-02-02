@@ -1,7 +1,7 @@
 use engine_macros::*;
 use gpu::{
-    Binding, BufferCreateInfo, BufferUsageFlags, CommandBufferSubmitInfo, Gpu, GpuConfiguration,
-    MemoryDomain, PipelineStageFlags, QueueType, ShaderModuleCreateInfo, ShaderStage, VkGpu,
+    Binding, BufferCreateInfo, BufferUsageFlags, Gpu, GpuConfiguration, MemoryDomain, QueueType,
+    ShaderModuleCreateInfo, ShaderStage, VkGpu,
 };
 use std::mem::{size_of, size_of_val};
 
@@ -99,13 +99,6 @@ fn main() -> anyhow::Result<()> {
 
         compute_pass.dispatch(1, 1, 1);
     }
-
-    command_buffer.submit(&CommandBufferSubmitInfo {
-        wait_semaphores: &[],
-        wait_stages: &[PipelineStageFlags::ALL_COMMANDS],
-        signal_semaphores: &[],
-        fence: Some(&wait_fence),
-    })?;
 
     gpu.wait_for_fences(&[&wait_fence], true, 10000000)
         .expect("Fence not triggered!");

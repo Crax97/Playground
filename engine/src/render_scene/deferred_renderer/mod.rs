@@ -24,13 +24,11 @@ use crate::{
 
 use crate::resource_map::{ResourceHandle, ResourceMap};
 use gpu::{
-    AccessFlags, AttachmentReference, AttachmentStoreOp, BeginRenderPassInfo, Binding,
-    BufferCreateInfo, BufferUsageFlags, ColorLoadOp, CommandBuffer, Extent2D, FragmentStageInfo,
-    FramebufferColorAttachment, Gpu, ImageAspectFlags, ImageFormat, ImageLayout,
-    ImageMemoryBarrier, ImageSubresourceRange, ImageViewHandle, ImageViewType, IndexType,
-    InputRate, MemoryDomain, Offset2D, PipelineBarrierInfo, PipelineStageFlags, Rect2D, RenderPass,
-    SampleCount, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
-    SubpassDependency, SubpassDescription, VertexBindingInfo, VertexStageInfo,
+    render_pass_2::RenderPass2, AttachmentStoreOp, BeginRenderPassInfo2, Binding2,
+    BufferCreateInfo, BufferUsageFlags, ColorAttachment, ColorLoadOp, CommandBuffer,
+    DepthAttachment, Extent2D, FragmentStageInfo, Gpu, ImageFormat, ImageViewHandle, ImageViewType,
+    IndexType, InputRate, MemoryDomain, Offset2D, Rect2D, SampleCount, SamplerHandle,
+    ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage, VertexBindingInfo, VertexStageInfo,
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 
@@ -246,7 +244,7 @@ impl DeferredRenderingPipeline {
         primitives: &Vec<&ScenePrimitive>,
         resource_map: &ResourceMap,
         pipeline_target: PipelineTarget,
-        render_pass: &mut RenderPass,
+        render_pass: &mut RenderPass2,
         camera_index: u32,
         frame_buffers: &FrameBuffers,
         sampler_allocator: &SamplerAllocator,
@@ -289,7 +287,7 @@ impl DeferredRenderingPipeline {
     fn draw_skybox(
         gpu: &dyn Gpu,
         camera_location: &Point3<f32>,
-        render_pass: &mut RenderPass,
+        render_pass: &mut RenderPass2,
         skybox_mesh: &Mesh,
         skybox_material: &MaterialInstance,
         skybox_master: &MasterMaterial,
@@ -355,373 +353,216 @@ impl DeferredRenderingPipeline {
         } = gbuffer;
 
         {
-            let early_z_enabled_descriptions: &[SubpassDescription] = &[
-                SubpassDescription {
-                    label: Some("Z Pass".to_owned()),
-                    input_attachments: vec![],
-                    color_attachments: vec![],
-                    resolve_attachments: vec![],
-                    depth_stencil_attachment: Some(AttachmentReference {
-                        attachment: 6,
-                        layout: ImageLayout::DepthStencilAttachment,
-                    }),
-                    preserve_attachments: vec![],
-                },
-                SubpassDescription {
-                    label: Some("GBuffer output".to_owned()),
-                    input_attachments: vec![],
-                    color_attachments: vec![
-                        AttachmentReference {
-                            attachment: 0,
-                            layout: ImageLayout::ColorAttachment,
-                        },
-                        AttachmentReference {
-                            attachment: 1,
-                            layout: ImageLayout::ColorAttachment,
-                        },
-                        AttachmentReference {
-                            attachment: 2,
-                            layout: ImageLayout::ColorAttachment,
-                        },
-                        AttachmentReference {
-                            attachment: 3,
-                            layout: ImageLayout::ColorAttachment,
-                        },
-                        AttachmentReference {
-                            attachment: 4,
-                            layout: ImageLayout::ColorAttachment,
-                        },
-                    ],
-                    resolve_attachments: vec![],
-                    depth_stencil_attachment: Some(AttachmentReference {
-                        attachment: 6,
-                        layout: ImageLayout::DepthStencilReadOnly,
-                    }),
-                    preserve_attachments: vec![],
-                },
-                SubpassDescription {
-                    label: Some("Gbuffer Combine".to_owned()),
-                    input_attachments: vec![
-                        AttachmentReference {
-                            attachment: 0,
-                            layout: ImageLayout::ShaderReadOnly,
-                        },
-                        AttachmentReference {
-                            attachment: 1,
-                            layout: ImageLayout::ShaderReadOnly,
-                        },
-                        AttachmentReference {
-                            attachment: 2,
-                            layout: ImageLayout::ShaderReadOnly,
-                        },
-                        AttachmentReference {
-                            attachment: 3,
-                            layout: ImageLayout::ShaderReadOnly,
-                        },
-                        AttachmentReference {
-                            attachment: 4,
-                            layout: ImageLayout::ShaderReadOnly,
-                        },
-                    ],
-                    color_attachments: vec![AttachmentReference {
-                        attachment: 5,
-                        layout: ImageLayout::ColorAttachment,
-                    }],
-                    resolve_attachments: vec![],
-                    depth_stencil_attachment: None,
-                    preserve_attachments: vec![],
-                },
-            ];
-            let early_z_disabled_descriptions: &[SubpassDescription] = &[SubpassDescription {
-                label: Some("GBuffer output".to_owned()),
-                input_attachments: vec![],
-                color_attachments: vec![
-                    AttachmentReference {
-                        attachment: 0,
-                        layout: ImageLayout::ColorAttachment,
-                    },
-                    AttachmentReference {
-                        attachment: 1,
-                        layout: ImageLayout::ColorAttachment,
-                    },
-                    AttachmentReference {
-                        attachment: 2,
-                        layout: ImageLayout::ColorAttachment,
-                    },
-                    AttachmentReference {
-                        attachment: 3,
-                        layout: ImageLayout::ColorAttachment,
-                    },
-                    AttachmentReference {
-                        attachment: 4,
-                        layout: ImageLayout::ColorAttachment,
-                    },
-                ],
-                resolve_attachments: vec![],
-                depth_stencil_attachment: Some(AttachmentReference {
-                    attachment: 6,
-                    layout: ImageLayout::DepthStencilAttachment,
-                }),
-                preserve_attachments: vec![],
-            }];
-            let early_z_enabled_dependencies: &[SubpassDependency] = &[
-                SubpassDependency {
-                    src_subpass: SubpassDependency::EXTERNAL,
-                    dst_subpass: 0,
-                    src_stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-                    dst_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS
-                        .union(PipelineStageFlags::LATE_FRAGMENT_TESTS),
-                    src_access_mask: AccessFlags::empty(),
-                    dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                },
-                SubpassDependency {
-                    src_subpass: 0,
-                    dst_subpass: 1,
-                    src_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS
-                        .union(PipelineStageFlags::LATE_FRAGMENT_TESTS),
-                    dst_stage_mask: PipelineStageFlags::EARLY_FRAGMENT_TESTS
-                        .union(PipelineStageFlags::LATE_FRAGMENT_TESTS)
-                        .union(PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT),
-                    src_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                    dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
-                        .union(AccessFlags::COLOR_ATTACHMENT_WRITE),
-                },
-                SubpassDependency {
-                    src_subpass: 1,
-                    dst_subpass: 2,
-                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                    dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
-                    src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                    dst_access_mask: AccessFlags::SHADER_READ,
-                },
-            ];
-
-            let early_z_disabled_dependencies: &[SubpassDependency] = &[SubpassDependency {
-                src_subpass: SubpassDependency::EXTERNAL,
-                dst_subpass: 0,
-                src_stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-                dst_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
-                    .union(PipelineStageFlags::EARLY_FRAGMENT_TESTS)
-                    .union(PipelineStageFlags::LATE_FRAGMENT_TESTS),
-                src_access_mask: AccessFlags::empty(),
-                dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE
-                    .union(AccessFlags::COLOR_ATTACHMENT_WRITE),
-            }];
-
-            let mut render_pass =
-                graphics_command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
-                    label: Some("Main pass"),
-                    color_attachments: &[
-                        FramebufferColorAttachment {
-                            image_view: position_component.view,
-                            load_op: ColorLoadOp::Clear([0.0; 4]),
-                            store_op: AttachmentStoreOp::Store,
-                            initial_layout: ImageLayout::Undefined,
-                            final_layout: ImageLayout::ShaderReadOnly,
-                        },
-                        FramebufferColorAttachment {
-                            image_view: normal_component.view,
-                            load_op: ColorLoadOp::Clear([0.5; 4]),
-                            store_op: AttachmentStoreOp::Store,
-                            initial_layout: ImageLayout::Undefined,
-                            final_layout: ImageLayout::ShaderReadOnly,
-                        },
-                        FramebufferColorAttachment {
-                            image_view: diffuse_component.view,
-                            load_op: ColorLoadOp::Clear([0.0; 4]),
-                            store_op: AttachmentStoreOp::Store,
-                            initial_layout: ImageLayout::Undefined,
-                            final_layout: ImageLayout::ShaderReadOnly,
-                        },
-                        FramebufferColorAttachment {
-                            image_view: emissive_component.view,
-                            load_op: ColorLoadOp::Clear([0.0; 4]),
-                            store_op: AttachmentStoreOp::Store,
-                            initial_layout: ImageLayout::Undefined,
-                            final_layout: ImageLayout::ShaderReadOnly,
-                        },
-                        FramebufferColorAttachment {
-                            image_view: pbr_component.view,
-                            load_op: ColorLoadOp::Clear([0.0; 4]),
-                            store_op: AttachmentStoreOp::Store,
-                            initial_layout: ImageLayout::Undefined,
-                            final_layout: ImageLayout::ShaderReadOnly,
-                        },
-                        FramebufferColorAttachment {
-                            image_view: final_scene_image.view,
-                            load_op: ColorLoadOp::Clear([0.0; 4]),
-                            store_op: AttachmentStoreOp::Store,
-                            initial_layout: ImageLayout::Undefined,
-                            final_layout: ImageLayout::ShaderReadOnly,
-                        },
-                    ],
-                    depth_attachment: Some(gpu::FramebufferDepthAttachment {
-                        image_view: depth_component.view,
-                        load_op: gpu::DepthLoadOp::Clear(1.0),
-                        store_op: AttachmentStoreOp::Store,
-                        initial_layout: ImageLayout::Undefined,
-                        final_layout: ImageLayout::DepthStencilReadOnly,
-                    }),
-                    stencil_attachment: None,
-                    render_area: gpu::Rect2D {
-                        offset: gpu::Offset2D::default(),
-                        extent: render_size,
-                    },
-                    subpasses: if self.early_z_pass_enabled {
-                        early_z_enabled_descriptions
-                    } else {
-                        early_z_disabled_descriptions
-                    },
-                    dependencies: if self.early_z_pass_enabled {
-                        early_z_enabled_dependencies
-                    } else {
-                        early_z_disabled_dependencies
-                    },
-                });
-
             if self.early_z_pass_enabled {
-                render_pass.set_cull_mode(gpu::CullMode::Back);
-                render_pass.set_depth_compare_op(gpu::CompareOp::LessEqual);
+                let mut early_z =
+                    graphics_command_buffer.start_render_pass_2(&BeginRenderPassInfo2 {
+                        label: Some("Early Z"),
+                        color_attachments: &[],
+                        depth_attachment: Some(DepthAttachment {
+                            image_view: gbuffer.depth_component.view,
+                            load_op: gpu::DepthLoadOp::Clear(1.0),
+                            store_op: AttachmentStoreOp::Store,
+                        }),
+                        stencil_attachment: None,
+                        render_area: Rect2D {
+                            extent: render_size,
+                            ..Default::default()
+                        },
+                    });
+                early_z.set_cull_mode(gpu::CullMode::Back);
+                early_z.set_depth_compare_op(gpu::CompareOp::LessEqual);
 
-                render_pass.set_color_output_enabled(false);
-                render_pass.set_enable_depth_test(true);
-                render_pass.set_depth_write_enabled(true);
+                early_z.set_color_output_enabled(false);
+                early_z.set_enable_depth_test(true);
+                early_z.set_depth_write_enabled(true);
                 Self::main_render_loop(
                     gpu,
                     primitives,
                     resource_map,
                     PipelineTarget::DepthOnly,
-                    &mut render_pass,
+                    &mut early_z,
                     0,
                     current_buffers,
                     &self.sampler_allocator,
                 )
                 .context("Early Z Pass")?;
-
-                render_pass.advance_to_next_subpass();
             }
+            {
+                let mut gbuffer_output =
+                    graphics_command_buffer.start_render_pass_2(&gpu::BeginRenderPassInfo2 {
+                        label: Some("GBuffer Output pass"),
+                        color_attachments: &[
+                            ColorAttachment {
+                                image_view: position_component.view,
+                                load_op: ColorLoadOp::Clear([0.0; 4]),
+                                store_op: AttachmentStoreOp::Store,
+                            },
+                            ColorAttachment {
+                                image_view: normal_component.view,
+                                load_op: ColorLoadOp::Clear([0.5; 4]),
+                                store_op: AttachmentStoreOp::Store,
+                            },
+                            ColorAttachment {
+                                image_view: diffuse_component.view,
+                                load_op: ColorLoadOp::Clear([0.0; 4]),
+                                store_op: AttachmentStoreOp::Store,
+                            },
+                            ColorAttachment {
+                                image_view: emissive_component.view,
+                                load_op: ColorLoadOp::Clear([0.0; 4]),
+                                store_op: AttachmentStoreOp::Store,
+                            },
+                            ColorAttachment {
+                                image_view: pbr_component.view,
+                                load_op: ColorLoadOp::Clear([0.0; 4]),
+                                store_op: AttachmentStoreOp::Store,
+                            },
+                        ],
+                        depth_attachment: Some(gpu::DepthAttachment {
+                            image_view: depth_component.view,
+                            load_op: if self.early_z_pass_enabled {
+                                gpu::DepthLoadOp::Load
+                            } else {
+                                gpu::DepthLoadOp::Clear(1.0)
+                            },
+                            store_op: AttachmentStoreOp::Store,
+                        }),
+                        stencil_attachment: None,
+                        render_area: gpu::Rect2D {
+                            offset: gpu::Offset2D::default(),
+                            extent: render_size,
+                        },
+                    });
 
-            if let Some(material) = scene.get_skybox_material() {
-                let cube_mesh = resource_map.get(&self.cube_mesh);
-                let skybox_master = resource_map.get(&material.owner);
-                bind_master_material(
-                    skybox_master,
-                    PipelineTarget::ColorAndDepth,
-                    &mut render_pass,
-                    current_buffers,
-                );
-                Self::draw_skybox(
+                if let Some(material) = scene.get_skybox_material() {
+                    let cube_mesh = resource_map.get(&self.cube_mesh);
+                    let skybox_master = resource_map.get(&material.owner);
+                    bind_master_material(
+                        skybox_master,
+                        PipelineTarget::ColorAndDepth,
+                        &mut gbuffer_output,
+                        current_buffers,
+                    );
+                    Self::draw_skybox(
+                        gpu,
+                        &pov.location,
+                        &mut gbuffer_output,
+                        cube_mesh,
+                        material,
+                        skybox_master,
+                        resource_map,
+                        &self.sampler_allocator,
+                    )?;
+                }
+
+                gbuffer_output.set_front_face(gpu::FrontFace::CounterClockWise);
+                gbuffer_output.set_enable_depth_test(true);
+                gbuffer_output.set_depth_write_enabled(!self.early_z_pass_enabled);
+                gbuffer_output.set_color_output_enabled(true);
+                gbuffer_output.set_cull_mode(gpu::CullMode::Back);
+                gbuffer_output.set_depth_compare_op(if self.early_z_pass_enabled {
+                    gpu::CompareOp::Equal
+                } else {
+                    gpu::CompareOp::LessEqual
+                });
+                Self::main_render_loop(
                     gpu,
-                    &pov.location,
-                    &mut render_pass,
-                    cube_mesh,
-                    material,
-                    skybox_master,
+                    primitives,
                     resource_map,
+                    PipelineTarget::ColorAndDepth,
+                    &mut gbuffer_output,
+                    0,
+                    current_buffers,
                     &self.sampler_allocator,
-                )?;
+                )
+                .context("Gbuffer output pass")?;
             }
+            {
+                // Combine
+                let mut combine_pass =
+                    graphics_command_buffer.start_render_pass_2(&gpu::BeginRenderPassInfo2 {
+                        label: Some("GBuffer Combine pass"),
+                        color_attachments: &[ColorAttachment {
+                            image_view: final_scene_image.view,
+                            load_op: ColorLoadOp::Clear([0.0; 4]),
+                            store_op: AttachmentStoreOp::Store,
+                        }],
+                        depth_attachment: None,
+                        stencil_attachment: None,
+                        render_area: gpu::Rect2D {
+                            extent: render_size,
+                            ..Default::default()
+                        },
+                    });
+                let csm_buffers = &self.cascaded_shadow_map.csm_buffers[self.in_flight_frame];
+                gbuffer.bind_as_shader_resource(&mut combine_pass, 0);
+                combine_pass.bind_resources_2(
+                    1,
+                    &[
+                        Binding2 {
+                            ty: gpu::DescriptorBindingType2::ImageView {
+                                image_view_handle: self.cascaded_shadow_map.shadow_atlas_view,
+                                sampler_handle: self.gbuffer_nearest_sampler,
+                            },
+                            binding_stage: ShaderStage::FRAGMENT,
+                        },
+                        Binding2 {
+                            ty: gpu::DescriptorBindingType2::StorageBuffer {
+                                handle: csm_buffers.shadow_casters,
+                                offset: 0,
+                                range: gpu::WHOLE_SIZE as _,
+                            },
+                            binding_stage: ShaderStage::FRAGMENT,
+                        },
+                        Binding2 {
+                            ty: gpu::DescriptorBindingType2::ImageView {
+                                image_view_handle: resource_map
+                                    .get(
+                                        self.irradiance_map
+                                            .as_ref()
+                                            .unwrap_or(&self.default_irradiance_map),
+                                    )
+                                    .view,
+                                sampler_handle: self.gbuffer_nearest_sampler,
+                            },
+                            binding_stage: ShaderStage::FRAGMENT,
+                        },
+                        Binding2 {
+                            ty: gpu::DescriptorBindingType2::StorageBuffer {
+                                handle: current_buffers.camera_buffer,
+                                offset: 0,
+                                range: gpu::WHOLE_SIZE,
+                            },
+                            binding_stage: ShaderStage::FRAGMENT,
+                        },
+                        Binding2 {
+                            ty: gpu::DescriptorBindingType2::StorageBuffer {
+                                handle: current_buffers.light_buffer,
+                                offset: 0,
+                                range: gpu::WHOLE_SIZE,
+                            },
+                            binding_stage: ShaderStage::FRAGMENT,
+                        },
+                        Binding2 {
+                            ty: gpu::DescriptorBindingType2::StorageBuffer {
+                                handle: csm_buffers.csm_splits,
+                                offset: 0,
+                                range: gpu::WHOLE_SIZE,
+                            },
+                            binding_stage: ShaderStage::FRAGMENT,
+                        },
+                    ],
+                );
 
-            render_pass.set_front_face(gpu::FrontFace::CounterClockWise);
-            render_pass.set_enable_depth_test(true);
-            render_pass.set_depth_write_enabled(!self.early_z_pass_enabled);
-            render_pass.set_color_output_enabled(true);
-            render_pass.set_cull_mode(gpu::CullMode::Back);
-            render_pass.set_depth_compare_op(if self.early_z_pass_enabled {
-                gpu::CompareOp::Equal
-            } else {
-                gpu::CompareOp::LessEqual
-            });
-            Self::main_render_loop(
-                gpu,
-                primitives,
-                resource_map,
-                PipelineTarget::ColorAndDepth,
-                &mut render_pass,
-                0,
-                current_buffers,
-                &self.sampler_allocator,
-            )
-            .context("Gbuffer output pass")?;
-            render_pass.advance_to_next_subpass();
-
-            // Combine
-            let csm_buffers = &self.cascaded_shadow_map.csm_buffers[self.in_flight_frame];
-            gbuffer.bind_as_input_attachments(&mut render_pass, 0, 0);
-            render_pass.bind_resources(
-                1,
-                &[
-                    Binding {
-                        ty: gpu::DescriptorBindingType::ImageView {
-                            image_view_handle: self.cascaded_shadow_map.shadow_atlas_view,
-                            sampler_handle: self.gbuffer_nearest_sampler,
-                            layout: ImageLayout::ShaderReadOnly,
-                        },
-                        binding_stage: ShaderStage::FRAGMENT,
-                        location: 0,
-                    },
-                    Binding {
-                        ty: gpu::DescriptorBindingType::StorageBuffer {
-                            handle: csm_buffers.shadow_casters,
-                            offset: 0,
-                            range: gpu::WHOLE_SIZE as _,
-                        },
-                        binding_stage: ShaderStage::FRAGMENT,
-                        location: 1,
-                    },
-                    Binding {
-                        ty: gpu::DescriptorBindingType::ImageView {
-                            image_view_handle: resource_map
-                                .get(
-                                    self.irradiance_map
-                                        .as_ref()
-                                        .unwrap_or(&self.default_irradiance_map),
-                                )
-                                .view,
-                            sampler_handle: self.gbuffer_nearest_sampler,
-                            layout: ImageLayout::ShaderReadOnly,
-                        },
-                        binding_stage: ShaderStage::FRAGMENT,
-                        location: 2,
-                    },
-                    Binding {
-                        ty: gpu::DescriptorBindingType::StorageBuffer {
-                            handle: current_buffers.camera_buffer,
-                            offset: 0,
-                            range: gpu::WHOLE_SIZE as usize,
-                        },
-                        binding_stage: ShaderStage::FRAGMENT,
-                        location: 3,
-                    },
-                    Binding {
-                        ty: gpu::DescriptorBindingType::StorageBuffer {
-                            handle: current_buffers.light_buffer,
-                            offset: 0,
-                            range: gpu::WHOLE_SIZE as usize,
-                        },
-                        binding_stage: ShaderStage::FRAGMENT,
-                        location: 4,
-                    },
-                    Binding {
-                        ty: gpu::DescriptorBindingType::StorageBuffer {
-                            handle: csm_buffers.csm_splits,
-                            offset: 0,
-                            range: gpu::WHOLE_SIZE as usize,
-                        },
-                        binding_stage: ShaderStage::FRAGMENT,
-                        location: 5,
-                    },
-                ],
-            );
-
-            render_pass.set_front_face(gpu::FrontFace::ClockWise);
-            render_pass.set_cull_mode(gpu::CullMode::None);
-            render_pass.set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
-            render_pass.set_enable_depth_test(false);
-            render_pass.set_depth_write_enabled(false);
-            render_pass.set_vertex_shader(self.screen_quad);
-            render_pass.set_fragment_shader(self.combine_shader);
-            render_pass.draw(4, 1, 0, 0)?;
+                combine_pass.set_front_face(gpu::FrontFace::ClockWise);
+                combine_pass.set_cull_mode(gpu::CullMode::None);
+                combine_pass.set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
+                combine_pass.set_enable_depth_test(false);
+                combine_pass.set_depth_write_enabled(false);
+                combine_pass.set_vertex_shader(self.screen_quad);
+                combine_pass.set_fragment_shader(self.combine_shader);
+                combine_pass.draw(4, 1, 0, 0)?;
+            }
         }
 
         Ok(())
@@ -745,7 +586,7 @@ impl DeferredRenderingPipeline {
             |_| (),
         )
     }
-    pub fn draw_textured_quad_with_callback<F: FnMut(&mut RenderPass)>(
+    pub fn draw_textured_quad_with_callback<F: FnMut(&mut RenderPass2)>(
         &self,
         graphics_command_buffer: &mut CommandBuffer,
         destination: &ImageViewHandle,
@@ -756,48 +597,25 @@ impl DeferredRenderingPipeline {
         mut callback: F,
     ) -> anyhow::Result<()> {
         let mut present_render_pass =
-            graphics_command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
+            graphics_command_buffer.start_render_pass_2(&gpu::BeginRenderPassInfo2 {
                 label: Some("Copy to backbuffer"),
-                color_attachments: &[FramebufferColorAttachment {
+                color_attachments: &[ColorAttachment {
                     image_view: *destination,
                     load_op: ColorLoadOp::DontCare,
                     store_op: AttachmentStoreOp::Store,
-                    initial_layout: ImageLayout::Undefined,
-                    final_layout: ImageLayout::ColorAttachment,
                 }],
                 depth_attachment: None,
                 stencil_attachment: None,
                 render_area: viewport,
-                subpasses: &[SubpassDescription {
-                    label: None,
-                    input_attachments: vec![],
-                    color_attachments: vec![AttachmentReference {
-                        attachment: 0,
-                        layout: ImageLayout::ColorAttachment,
-                    }],
-                    resolve_attachments: vec![],
-                    depth_stencil_attachment: None,
-                    preserve_attachments: vec![],
-                }],
-                dependencies: &[SubpassDependency {
-                    src_subpass: SubpassDependency::EXTERNAL,
-                    dst_subpass: 0,
-                    src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                    dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
-                    src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                    dst_access_mask: AccessFlags::SHADER_READ,
-                }],
             });
-        present_render_pass.bind_resources(
+        present_render_pass.bind_resources_2(
             0,
-            &[Binding {
-                ty: gpu::DescriptorBindingType::ImageView {
+            &[Binding2 {
+                ty: gpu::DescriptorBindingType2::ImageView {
                     image_view_handle: *source,
                     sampler_handle: self.gbuffer_nearest_sampler,
-                    layout: gpu::ImageLayout::ShaderReadOnly,
                 },
                 binding_stage: ShaderStage::FRAGMENT,
-                location: 0,
             }],
         );
 
@@ -833,103 +651,44 @@ impl DeferredRenderingPipeline {
             return Ok(color_output);
         }
 
-        let subpasses = self
-            .post_process_stack
-            .iter()
-            .enumerate()
-            .map(|(i, pass)| SubpassDescription {
-                label: Some(pass.name()),
-                input_attachments: if i == 0 {
-                    vec![]
-                } else {
-                    vec![AttachmentReference {
-                        attachment: (i as u32) % 2,
-                        layout: ImageLayout::ShaderReadOnly,
-                    }]
-                },
-                color_attachments: vec![AttachmentReference {
-                    attachment: (i + 1) as u32 % 2,
-                    layout: ImageLayout::ColorAttachment,
-                }],
-                resolve_attachments: vec![],
-                depth_stencil_attachment: None,
-                preserve_attachments: vec![],
-            })
-            .collect::<Vec<_>>();
-
-        let mut dependencies = Vec::with_capacity(self.post_process_stack.len() + 1);
-        dependencies.push(SubpassDependency {
-            src_subpass: SubpassDependency::EXTERNAL,
-            dst_subpass: 0,
-            src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            dst_stage_mask: PipelineStageFlags::TOP_OF_PIPE,
-            src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-            dst_access_mask: AccessFlags::empty(),
-        });
-        self.post_process_stack
-            .iter()
-            .enumerate()
-            .take(self.post_process_stack.len() - 1)
-            .for_each(|(i, _)| {
-                dependencies.push(SubpassDependency {
-                    src_subpass: i as u32,
-                    dst_subpass: i as u32 + 1,
-                    src_stage_mask: PipelineStageFlags::FRAGMENT_SHADER
-                        | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                    dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER
-                        | PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                    src_access_mask: AccessFlags::SHADER_READ | AccessFlags::COLOR_ATTACHMENT_WRITE,
-                    dst_access_mask: AccessFlags::SHADER_READ | AccessFlags::COLOR_ATTACHMENT_WRITE,
-                })
-            });
+        let post_process_backbuffer_1 = color_output;
+        let post_process_backbuffer_2 = self.image_allocator.get(gpu, "post_process2", &color_desc);
+        let mut current_postprocess = 0;
 
         let final_color_output = {
             let final_color_output = {
-                let post_process_backbuffer_1 = color_output;
-                let post_process_backbuffer_2 =
-                    self.image_allocator.get(gpu, "post_process2", &color_desc);
-
-                let mut current_postprocess = 0;
-                let mut post_process_pass =
-                    graphics_command_buffer.start_render_pass(&BeginRenderPassInfo {
-                        label: Some("Post Process"),
-                        color_attachments: &[
-                            FramebufferColorAttachment {
-                                image_view: post_process_backbuffer_1.view,
-                                load_op: ColorLoadOp::Clear([0.0; 4]),
-                                store_op: AttachmentStoreOp::Store,
-                                initial_layout: ImageLayout::ShaderReadOnly,
-                                final_layout: ImageLayout::ColorAttachment,
-                            },
-                            FramebufferColorAttachment {
-                                image_view: post_process_backbuffer_2.view,
-                                load_op: ColorLoadOp::Clear([0.0; 4]),
-                                store_op: AttachmentStoreOp::Store,
-                                initial_layout: ImageLayout::Undefined,
-                                final_layout: ImageLayout::ColorAttachment,
-                            },
-                        ],
-                        depth_attachment: None,
-                        stencil_attachment: None,
-                        render_area: Rect2D {
-                            offset: Offset2D::default(),
-                            extent: render_size,
-                        },
-                        subpasses: &subpasses,
-                        dependencies: &dependencies,
-                    });
-                post_process_pass.set_cull_mode(gpu::CullMode::None);
-                post_process_pass.set_enable_depth_test(false);
-                post_process_pass.set_depth_write_enabled(false);
-                post_process_pass.set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
-
                 for pass in &self.post_process_stack {
-                    let previous_pass_result = if current_postprocess == 0 {
-                        &post_process_backbuffer_1.view
+                    let (pass_color_target, previous_pass_result) = if current_postprocess == 0 {
+                        (
+                            post_process_backbuffer_2.view,
+                            &post_process_backbuffer_1.view,
+                        )
                     } else {
-                        &post_process_backbuffer_2.view
+                        (
+                            post_process_backbuffer_1.view,
+                            &post_process_backbuffer_2.view,
+                        )
                     };
 
+                    let mut post_process_pass =
+                        graphics_command_buffer.start_render_pass_2(&BeginRenderPassInfo2 {
+                            label: Some("Post Process"),
+                            color_attachments: &[ColorAttachment {
+                                image_view: pass_color_target,
+                                load_op: ColorLoadOp::Clear([0.0; 4]),
+                                store_op: AttachmentStoreOp::Store,
+                            }],
+                            depth_attachment: None,
+                            stencil_attachment: None,
+                            render_area: Rect2D {
+                                offset: Offset2D::default(),
+                                extent: render_size,
+                            },
+                        });
+                    post_process_pass.set_cull_mode(gpu::CullMode::None);
+                    post_process_pass.set_enable_depth_test(false);
+                    post_process_pass.set_depth_write_enabled(false);
+                    post_process_pass.set_primitive_topology(gpu::PrimitiveTopology::TriangleStrip);
                     pass.apply(
                         &mut post_process_pass,
                         &PostProcessResources {
@@ -941,7 +700,6 @@ impl DeferredRenderingPipeline {
                         },
                     )?;
                     current_postprocess = (current_postprocess + 1) % 2;
-                    post_process_pass.advance_to_next_subpass();
                 }
 
                 if current_postprocess == 0 {
@@ -950,28 +708,7 @@ impl DeferredRenderingPipeline {
                     post_process_backbuffer_2
                 }
             };
-            graphics_command_buffer.pipeline_barrier(&PipelineBarrierInfo {
-                src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                dst_stage_mask: PipelineStageFlags::FRAGMENT_SHADER,
-                memory_barriers: &[],
-                buffer_memory_barriers: &[],
-                image_memory_barriers: &[ImageMemoryBarrier {
-                    src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                    dst_access_mask: AccessFlags::SHADER_READ,
-                    old_layout: ImageLayout::ColorAttachment,
-                    new_layout: ImageLayout::ShaderReadOnly,
-                    src_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-                    dst_queue_family_index: gpu::QUEUE_FAMILY_IGNORED,
-                    image: final_color_output.image,
-                    subresource_range: ImageSubresourceRange {
-                        aspect_mask: ImageAspectFlags::COLOR,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1,
-                    },
-                }],
-            });
+
             final_color_output
         };
         Ok(final_color_output)
@@ -1089,7 +826,7 @@ impl DeferredRenderingPipeline {
 fn bind_master_material(
     master: &MasterMaterial,
     pipeline_target: PipelineTarget,
-    render_pass: &mut RenderPass,
+    render_pass: &mut RenderPass2,
     frame_buffers: &FrameBuffers,
 ) {
     let permutation = master
@@ -1099,26 +836,24 @@ fn bind_master_material(
     if let Some(fragment_shader) = &permutation.fragment_shader {
         render_pass.set_fragment_shader(*fragment_shader);
     }
-    render_pass.bind_resources(
+    render_pass.bind_resources_2(
         0,
         &[
-            Binding {
-                ty: gpu::DescriptorBindingType::StorageBuffer {
+            Binding2 {
+                ty: gpu::DescriptorBindingType2::StorageBuffer {
                     handle: frame_buffers.camera_buffer,
                     offset: 0,
                     range: gpu::WHOLE_SIZE as _,
                 },
                 binding_stage: ShaderStage::ALL_GRAPHICS,
-                location: 0,
             },
-            Binding {
-                ty: gpu::DescriptorBindingType::UniformBuffer {
+            Binding2 {
+                ty: gpu::DescriptorBindingType2::UniformBuffer {
                     handle: frame_buffers.light_buffer,
                     offset: 0,
-                    range: 100 * size_of::<ObjectDrawInfo>(),
+                    range: (100 * size_of::<ObjectDrawInfo>()) as u64,
                 },
                 binding_stage: ShaderStage::ALL_GRAPHICS,
-                location: 1,
             },
         ],
     );
@@ -1126,7 +861,7 @@ fn bind_master_material(
 
 fn draw_mesh_primitive(
     gpu: &dyn Gpu,
-    render_pass: &mut RenderPass,
+    render_pass: &mut RenderPass2,
     material: &MaterialInstance,
     master: &MasterMaterial,
     primitive: &MeshPrimitive,
@@ -1149,26 +884,23 @@ fn draw_mesh_primitive(
 
                 let sampler_handle = sampler_allocator.get(gpu, &tex.sampler_settings);
 
-                Binding {
-                    ty: gpu::DescriptorBindingType::ImageView {
+                Binding2 {
+                    ty: gpu::DescriptorBindingType2::ImageView {
                         image_view_handle: tex.view,
                         sampler_handle,
-                        layout: gpu::ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: tex_info.shader_stage,
-                    location: i as _,
                 }
             }),
     );
     for user_buffer in &material.parameter_buffers {
-        user_bindings.push(Binding {
-            ty: gpu::DescriptorBindingType::UniformBuffer {
+        user_bindings.push(Binding2 {
+            ty: gpu::DescriptorBindingType2::UniformBuffer {
                 handle: *user_buffer,
                 offset: 0,
                 range: gpu::WHOLE_SIZE as _,
             },
             binding_stage: master.parameter_shader_stages,
-            location: master.texture_inputs.len() as u32,
         });
     }
 
@@ -1214,7 +946,7 @@ fn draw_mesh_primitive(
             input_rate: InputRate::PerVertex,
         },
     ]);
-    render_pass.bind_resources(1, &user_bindings);
+    render_pass.bind_resources_2(1, &user_bindings);
     render_pass.push_constants(
         0,
         0,

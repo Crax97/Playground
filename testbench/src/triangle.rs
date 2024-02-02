@@ -7,11 +7,10 @@ use engine::app::{app_state::*, bootstrap, App};
 use engine::{Backbuffer, Time};
 use engine_macros::glsl;
 use gpu::{
-    AttachmentReference, Binding, Binding2, BufferCreateInfo, BufferHandle, BufferUsageFlags,
-    ColorAttachment, CommandBuffer, CullMode, FramebufferColorAttachment, ImageAspectFlags,
-    ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout, ImageUsageFlags, ImageViewCreateInfo,
-    ImageViewHandle, IndexType, InputRate, MemoryDomain, PresentMode, SamplerCreateInfo,
-    SamplerHandle, ShaderModuleHandle, ShaderStage, SubpassDescription, VertexBindingInfo,
+    Binding2, BufferCreateInfo, BufferHandle, BufferUsageFlags, ColorAttachment, CommandBuffer,
+    CullMode, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle, ImageUsageFlags,
+    ImageViewCreateInfo, ImageViewHandle, IndexType, InputRate, MemoryDomain, PresentMode,
+    SamplerCreateInfo, SamplerHandle, ShaderModuleHandle, ShaderStage, VertexBindingInfo,
 };
 use nalgebra::*;
 use winit::event_loop::EventLoop;

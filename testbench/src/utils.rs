@@ -15,11 +15,11 @@ pub struct LoadedImage {
 }
 
 use gpu::{
-    AccessFlags, AttachmentReference, BeginRenderPassInfo, Binding, ComponentMapping, Extent2D,
-    FramebufferColorAttachment, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle,
-    ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, InputRate,
-    MemoryDomain, Offset2D, PipelineStageFlags, Rect2D, SamplerCreateInfo, ShaderModuleCreateInfo,
-    ShaderModuleHandle, ShaderStage, SubpassDescription, VertexBindingInfo, VkGpu,
+    AccessFlags, BeginRenderPassInfo2, Binding2, ColorAttachment, ComponentMapping, Extent2D, Gpu,
+    ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle, ImageSubresourceRange,
+    ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, InputRate, MemoryDomain, Offset2D,
+    PipelineStageFlags, Rect2D, SamplerCreateInfo, ShaderModuleCreateInfo, ShaderModuleHandle,
+    ShaderStage, VertexBindingInfo, VkGpu,
 };
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
@@ -301,37 +301,24 @@ fn cubemap_main_loop(
     let mesh = resource_map.get(cube_mesh);
     for (i, view) in views.iter().enumerate() {
         let mvp = povs[i].projection * povs[i].view;
-        let views = vec![FramebufferColorAttachment {
+        let views = vec![ColorAttachment {
             image_view: *view,
             load_op: gpu::ColorLoadOp::DontCare,
             store_op: gpu::AttachmentStoreOp::Store,
-            initial_layout: gpu::ImageLayout::ColorAttachment,
-            final_layout: gpu::ImageLayout::ColorAttachment,
         }];
         let mut command_buffer = gpu.start_command_buffer(gpu::QueueType::Graphics)?;
         {
-            let mut render_pass_command = command_buffer.start_render_pass(&BeginRenderPassInfo {
-                color_attachments: &views,
-                depth_attachment: None,
-                stencil_attachment: None,
-                render_area: Rect2D {
-                    offset: Offset2D::default(),
-                    extent: size,
-                },
-                label: Some("Cubemap main loop"),
-                subpasses: &[SubpassDescription {
-                    label: None,
-                    input_attachments: vec![],
-                    color_attachments: vec![AttachmentReference {
-                        attachment: 0,
-                        layout: gpu::ImageLayout::ColorAttachment,
-                    }],
-                    resolve_attachments: vec![],
-                    depth_stencil_attachment: None,
-                    preserve_attachments: vec![],
-                }],
-                dependencies: &[],
-            });
+            let mut render_pass_command =
+                command_buffer.start_render_pass_2(&BeginRenderPassInfo2 {
+                    color_attachments: &views,
+                    depth_attachment: None,
+                    stencil_attachment: None,
+                    render_area: Rect2D {
+                        offset: Offset2D::default(),
+                        extent: size,
+                    },
+                    label: Some("Cubemap main loop"),
+                });
             render_pass_command.set_vertex_shader(vertex_module);
             render_pass_command.set_fragment_shader(fragment_shader_to_apply);
 
@@ -345,16 +332,14 @@ fn cubemap_main_loop(
                 max_depth: 1.0,
             });
 
-            render_pass_command.bind_resources(
+            render_pass_command.bind_resources_2(
                 0,
-                &[Binding {
-                    ty: gpu::DescriptorBindingType::ImageView {
+                &[Binding2 {
+                    ty: gpu::DescriptorBindingType2::ImageView {
                         image_view_handle: *input_texture_view,
                         sampler_handle: skybox_sampler,
-                        layout: gpu::ImageLayout::ShaderReadOnly,
                     },
                     binding_stage: ShaderStage::FRAGMENT,
-                    location: 0,
                 }],
             );
 

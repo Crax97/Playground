@@ -5,6 +5,7 @@ mod gpu_resource_manager;
 mod handle;
 mod swapchain;
 mod types;
+mod vk;
 mod vk_staging_buffer;
 
 pub use crate::gpu::*;
@@ -45,8 +46,6 @@ impl<T: 'static> AsAnyArc for T {
     }
 }
 pub trait CommandBufferPassBegin {
-    fn create_render_pass_impl(&mut self, info: &BeginRenderPassInfo)
-        -> Box<dyn render_pass::Impl>;
     fn create_render_pass_2_impl(
         &mut self,
         info: &BeginRenderPassInfo2,
@@ -182,28 +181,17 @@ macro_rules! define_pass_type {
 
 pub mod command_buffer_2 {
     use crate::{
-        compute_pass::ComputePass, render_pass::RenderPass, render_pass_2::RenderPass2,
-        BeginRenderPassInfo, BeginRenderPassInfo2, Binding, Binding2, CommandBufferPassBegin,
-        CommandBufferSubmitInfo, PipelineBarrierInfo, ShaderStage,
+        compute_pass::ComputePass, render_pass_2::RenderPass2, BeginRenderPassInfo2, Binding,
+        CommandBufferPassBegin, ShaderStage,
     };
 
     define_pimpl_type!(CommandBuffer : CommandBufferPassBegin {
         fn push_constants(&mut self, index: u32, offset: u32, data: &[u8], shader_stage: ShaderStage);
         fn bind_resources(&mut self, set: u32, bindings: &[Binding]);
-        fn bind_resources_2(&mut self, set: u32, bindings: &[Binding2]);
-        fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo);
         fn insert_debug_label(&self, label: &str, color: [f32; 4]);
     });
 
     impl CommandBuffer {
-        pub fn start_render_pass<'c>(&'c mut self, info: &BeginRenderPassInfo) -> RenderPass<'c> {
-            let inner = self.pimpl.create_render_pass_impl(info);
-            RenderPass {
-                pimpl: inner,
-                parent: self,
-            }
-        }
-
         pub fn start_render_pass_2<'c>(&'c mut self, info: &BeginRenderPassInfo2) -> RenderPass2 {
             let inner = self.pimpl.create_render_pass_2_impl(info);
             RenderPass2 {
@@ -225,63 +213,13 @@ pub mod command_buffer_2 {
         }
     }
 }
-pub mod render_pass {
-    use crate::{
-        BufferHandle, CompareOp, CullMode, FrontFace, IndexType, PipelineColorBlendAttachmentState,
-        PolygonMode, PrimitiveTopology, ShaderModuleHandle, VertexBindingInfo, Viewport,
-    };
-    define_pass_type!(RenderPass {
-     fn set_primitive_topology(&mut self, new_topology: PrimitiveTopology);
-     fn set_vertex_shader(&mut self, vertex_shader: ShaderModuleHandle);
-     fn set_fragment_shader(&mut self, fragment_shader: ShaderModuleHandle);
-     fn set_vertex_buffers(&mut self, bindings: &[VertexBindingInfo]);
-     fn set_color_output_enabled(&mut self, color_output_enabled: bool);
-     fn set_viewport(&mut self, viewport: Viewport);
-     fn set_depth_bias(&mut self, constant: f32, slope: f32);
-     fn set_front_face(&mut self, front_face: FrontFace);
-     fn set_polygon_mode(&mut self, polygon_mode: PolygonMode);
-     fn set_cull_mode(&mut self, cull_mode: CullMode);
-     fn set_enable_depth_test(&mut self, enable_depth_test: bool);
-     fn set_enable_depth_clamp(&mut self, enable_depth_clamp: bool);
-     fn set_depth_write_enabled(&mut self, depth_write_enabled: bool);
-     fn set_depth_compare_op(&mut self, depth_compare_op: CompareOp);
-     fn set_color_attachment_blend_state(&mut self, attachment: usize, blend_state: PipelineColorBlendAttachmentState);
-     fn advance_to_next_subpass(&mut self);
-    /* If enabled, fragments may be discarded after the vertex shader stage,
-    before any fragment shader is executed.
-    When enabled, a valid fragment shader must be set */
-     fn set_early_discard_enabled(&mut self, allow_early_discard: bool);
 
-     fn draw_indexed(
-        &mut self,
-        num_indices: u32,
-        instances: u32,
-        first_index: u32,
-        vertex_offset: i32,
-        first_instance: u32
-    ) -> anyhow::Result<()> ;
-
-     fn draw(
-        &mut self,
-        num_vertices: u32,
-        instances: u32,
-        first_vertex: u32,
-        first_instance: u32
-    ) -> anyhow::Result<()> ;
-
-     fn set_index_buffer(
-        &self,
-        index_buffer: BufferHandle,
-        index_type: IndexType,
-        offset: usize
-    ) ;
-    });
-}
 pub mod render_pass_2 {
 
     use crate::{
-        BufferHandle, CompareOp, CullMode, FrontFace, IndexType, PipelineColorBlendAttachmentState,
-        PolygonMode, PrimitiveTopology, ShaderModuleHandle, VertexBindingInfo, Viewport,
+        Binding2, BufferHandle, CompareOp, CullMode, FrontFace, IndexType,
+        PipelineColorBlendAttachmentState, PolygonMode, PrimitiveTopology, ShaderModuleHandle,
+        VertexBindingInfo, Viewport,
     };
     define_pass_type!(RenderPass2 {
      fn set_primitive_topology(&mut self, new_topology: PrimitiveTopology);
@@ -304,6 +242,8 @@ pub mod render_pass_2 {
     When enabled, a valid fragment shader must be set */
      fn set_early_discard_enabled(&mut self, allow_early_discard: bool);
 
+    fn bind_resources_2(&mut self, set: u32, bindings: &[Binding2]);
+
      fn draw_indexed(
         &mut self,
         num_indices: u32,
@@ -322,7 +262,7 @@ pub mod render_pass_2 {
     ) -> anyhow::Result<()> ;
 
      fn set_index_buffer(
-        &self,
+        &mut self,
         index_buffer: BufferHandle,
         index_type: IndexType,
         offset: usize
@@ -354,8 +294,7 @@ pub(crate) mod swapchain_2 {
 }
 
 pub use self::{
-    command_buffer_2::CommandBuffer, compute_pass::ComputePass, render_pass::RenderPass,
-    swapchain_2::Swapchain,
+    command_buffer_2::CommandBuffer, compute_pass::ComputePass, swapchain_2::Swapchain,
 };
 
 pub trait Gpu: Send + Sync + AsAnyArc + 'static {
@@ -1054,14 +993,6 @@ pub enum QueueType {
     Transfer,
 }
 impl QueueType {
-    fn get_vk_queue(&self, gpu: &VkGpu) -> ash::vk::Queue {
-        match self {
-            QueueType::Graphics => gpu.state.graphics_queue,
-            QueueType::AsyncCompute => gpu.state.async_compute_queue,
-            QueueType::Transfer => gpu.state.transfer_queue,
-        }
-    }
-
     fn get_vk_queue_index(&self, families: &QueueFamilies) -> u32 {
         match self {
             QueueType::Graphics => families.graphics_family.index,

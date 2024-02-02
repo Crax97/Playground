@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use engine_macros::glsl;
 use gpu::{
-    Binding, Extent2D, Gpu, ImageLayout, ImageViewHandle, RenderPass, SamplerHandle,
+    render_pass_2::RenderPass2, Binding2, Extent2D, Gpu, ImageViewHandle, SamplerHandle,
     ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
 };
 use nalgebra::{vector, Vector2};
@@ -20,7 +20,7 @@ pub trait PostProcessPass: 'static {
     fn name(&self) -> String;
     fn apply(
         &self,
-        post_process_pass: &mut RenderPass,
+        post_process_pass: &mut RenderPass2,
         resources: &PostProcessResources,
     ) -> anyhow::Result<()>;
     fn destroy(&self, gpu: &dyn Gpu);
@@ -57,19 +57,17 @@ impl PostProcessPass for TonemapPass {
     }
     fn apply(
         &self,
-        post_process_pass: &mut RenderPass,
+        post_process_pass: &mut RenderPass2,
         resources: &PostProcessResources,
     ) -> anyhow::Result<()> {
-        post_process_pass.bind_resources(
+        post_process_pass.bind_resources_2(
             0,
-            &[Binding {
-                ty: gpu::DescriptorBindingType::ImageView {
+            &[Binding2 {
+                ty: gpu::DescriptorBindingType2::ImageView {
                     image_view_handle: *resources.previous_pass_result,
                     sampler_handle: *resources.sampler,
-                    layout: ImageLayout::ShaderReadOnly,
                 },
                 binding_stage: ShaderStage::FRAGMENT,
-                location: 0,
             }],
         );
         post_process_pass.set_vertex_shader(*resources.screen_quad);
@@ -145,19 +143,17 @@ impl PostProcessPass for FxaaPass {
 
     fn apply(
         &self,
-        post_process_pass: &mut RenderPass,
+        post_process_pass: &mut RenderPass2,
         resources: &PostProcessResources,
     ) -> anyhow::Result<()> {
-        post_process_pass.bind_resources(
+        post_process_pass.bind_resources_2(
             0,
-            &[Binding {
-                ty: gpu::DescriptorBindingType::ImageView {
+            &[Binding2 {
+                ty: gpu::DescriptorBindingType2::ImageView {
                     image_view_handle: *resources.previous_pass_result,
                     sampler_handle: *resources.sampler,
-                    layout: ImageLayout::ShaderReadOnly,
                 },
                 binding_stage: ShaderStage::FRAGMENT,
-                location: 0,
             }],
         );
         let rcp_frame = vector![

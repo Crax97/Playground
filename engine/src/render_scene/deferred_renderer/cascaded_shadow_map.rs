@@ -1,10 +1,8 @@
 use bytemuck::{Pod, Zeroable};
 use gpu::{
-    AccessFlags, AttachmentReference, BufferCreateInfo, BufferHandle, BufferUsageFlags,
-    ComponentMapping, Extent2D, FramebufferDepthAttachment, Gpu, ImageAspectFlags, ImageCreateInfo,
-    ImageHandle, ImageLayout, ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo,
-    ImageViewHandle, MemoryDomain, PipelineStageFlags, Rect2D, SubpassDependency,
-    SubpassDescription, Viewport,
+    BufferCreateInfo, BufferHandle, BufferUsageFlags, ComponentMapping, DepthAttachment, Extent2D,
+    Gpu, ImageAspectFlags, ImageCreateInfo, ImageHandle, ImageSubresourceRange, ImageUsageFlags,
+    ImageViewCreateInfo, ImageViewHandle, MemoryDomain, Rect2D, Viewport,
 };
 use nalgebra::{point, vector, Matrix4, Point3};
 
@@ -161,15 +159,13 @@ impl CascadedShadowMap {
     ) -> anyhow::Result<()> {
         {
             let mut shadow_atlas_pass =
-                command_buffer.start_render_pass(&gpu::BeginRenderPassInfo {
+                command_buffer.start_render_pass_2(&gpu::BeginRenderPassInfo2 {
                     label: Some("CSM Shadow Atlas Emit"),
                     color_attachments: &[],
-                    depth_attachment: Some(FramebufferDepthAttachment {
+                    depth_attachment: Some(DepthAttachment {
                         image_view: self.shadow_atlas_view,
                         load_op: gpu::DepthLoadOp::Clear(1.0),
                         store_op: gpu::AttachmentStoreOp::Store,
-                        initial_layout: gpu::ImageLayout::Undefined,
-                        final_layout: gpu::ImageLayout::ShaderReadOnly,
                     }),
                     stencil_attachment: None,
                     render_area: Rect2D {
@@ -179,25 +175,6 @@ impl CascadedShadowMap {
                             height: SHADOW_ATLAS_HEIGHT,
                         },
                     },
-                    subpasses: &[SubpassDescription {
-                        label: None,
-                        input_attachments: vec![],
-                        color_attachments: vec![],
-                        resolve_attachments: vec![],
-                        depth_stencil_attachment: Some(AttachmentReference {
-                            attachment: 0,
-                            layout: ImageLayout::DepthStencilAttachment,
-                        }),
-                        preserve_attachments: vec![],
-                    }],
-                    dependencies: &[SubpassDependency {
-                        src_subpass: SubpassDependency::EXTERNAL,
-                        dst_subpass: 0,
-                        src_stage_mask: PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-                        dst_stage_mask: PipelineStageFlags::LATE_FRAGMENT_TESTS,
-                        src_access_mask: AccessFlags::COLOR_ATTACHMENT_WRITE,
-                        dst_access_mask: AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
-                    }],
                 });
 
             for shadow_map in &self.shadow_maps {

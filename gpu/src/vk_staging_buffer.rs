@@ -7,14 +7,7 @@ use ash::vk::{
 };
 
 use crate::get_allocation_callbacks;
-/*
-                            buffer_offset: src_offset,
-                            buffer_row_length: todo!(),
-                            buffer_image_height: todo!(),
-                            image_subresource: todo!(),
-                            image_offset: todo!(),
-                            image_extent: todo!(),
-*/
+
 pub enum BufferOperation {
     CopyBuffer {
         dest_buffer: vk::Buffer,
@@ -33,12 +26,40 @@ pub enum BufferOperation {
     },
 }
 
-const fn assume_send_sync<T: Send + Sync>() {}
-const _TEST: () = assume_send_sync::<VkStagingBuffer>();
-
 struct ImageToTransition {
     image: vk::Image,
     subresource: vk::ImageSubresourceRange,
+}
+
+struct VkImageMemoryBarrier2Clean {
+    pub src_stage_mask: vk::PipelineStageFlags2,
+    pub src_access_mask: vk::AccessFlags2,
+    pub dst_stage_mask: vk::PipelineStageFlags2,
+    pub dst_access_mask: vk::AccessFlags2,
+    pub old_layout: vk::ImageLayout,
+    pub new_layout: vk::ImageLayout,
+    pub src_queue_family_index: u32,
+    pub dst_queue_family_index: u32,
+    pub image: vk::Image,
+    pub subresource_range: vk::ImageSubresourceRange,
+}
+
+impl From<VkImageMemoryBarrier2Clean> for vk::ImageMemoryBarrier2 {
+    fn from(value: VkImageMemoryBarrier2Clean) -> Self {
+        Self {
+            src_stage_mask: value.src_stage_mask,
+            src_access_mask: value.src_access_mask,
+            dst_stage_mask: value.dst_stage_mask,
+            dst_access_mask: value.dst_access_mask,
+            old_layout: value.old_layout,
+            new_layout: value.new_layout,
+            src_queue_family_index: value.src_queue_family_index,
+            dst_queue_family_index: value.dst_queue_family_index,
+            image: value.image,
+            subresource_range: value.subresource_range,
+            ..Default::default()
+        }
+    }
 }
 
 pub struct VkStagingBuffer {
@@ -50,6 +71,7 @@ pub struct VkStagingBuffer {
     total_size: u64,
     current_offset: u64,
     images_to_transition: Vec<ImageToTransition>,
+    images_to_final_layout: Vec<VkImageMemoryBarrier2Clean>,
     persistent_pointer: AtomicPtr<c_void>,
     queue: vk::Queue,
     image_transition_done_fence: vk::Fence,
@@ -138,6 +160,7 @@ impl VkStagingBuffer {
                 memory_allocation,
                 operations: vec![],
                 images_to_transition: vec![],
+                images_to_final_layout: vec![],
 
                 total_size: backbuffer_size,
                 current_offset: 0,
@@ -220,7 +243,7 @@ impl VkStagingBuffer {
             image_subresource,
             image_offset: dest_offset,
             image_extent: dest_extent,
-            final_layout: final_layout,
+            final_layout,
             src_offset: self.current_offset,
         });
         self.images_to_transition.push(ImageToTransition {
@@ -233,7 +256,7 @@ impl VkStagingBuffer {
                 layer_count: image_subresource.layer_count,
             },
         });
-        self.current_offset += expected_data_size as u64;
+        self.current_offset += expected_data_size;
 
         Ok(())
     }
@@ -256,6 +279,32 @@ impl VkStagingBuffer {
         }
     }
 
+    pub fn flush_final_layout_transitions(
+        &mut self,
+        device: &ash::Device,
+        command_buffer: vk::CommandBuffer,
+    ) {
+        let images_to_transition = std::mem::take(&mut self.images_to_final_layout)
+            .into_iter()
+            .map(|v| v.into())
+            .collect::<Vec<_>>();
+        if !images_to_transition.is_empty() {
+            unsafe {
+                device.cmd_pipeline_barrier2(
+                    command_buffer,
+                    &vk::DependencyInfo {
+                        dependency_flags: vk::DependencyFlags::BY_REGION,
+                        buffer_memory_barrier_count: 0,
+                        p_buffer_memory_barriers: std::ptr::null(),
+                        image_memory_barrier_count: images_to_transition.len() as _,
+                        p_image_memory_barriers: images_to_transition.as_ptr(),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+    }
+
     unsafe fn write_resources(&mut self, device: &ash::Device) -> Result<(), anyhow::Error> {
         let copy_command_buffer = self.create_command_buffer(device)?;
         device.begin_command_buffer(
@@ -264,7 +313,6 @@ impl VkStagingBuffer {
                 .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
                 .build(),
         )?;
-        let mut images_to_transition = vec![];
         let operations = std::mem::take(&mut self.operations);
         for operation in operations {
             match operation {
@@ -308,43 +356,31 @@ impl VkStagingBuffer {
                             image_extent,
                         }],
                     );
-                    images_to_transition.push(vk::ImageMemoryBarrier2 {
-                        src_stage_mask: vk::PipelineStageFlags2::TRANSFER,
-                        src_access_mask: vk::AccessFlags2::MEMORY_WRITE,
-                        dst_stage_mask: vk::PipelineStageFlags2::FRAGMENT_SHADER,
-                        dst_access_mask: vk::AccessFlags2::SHADER_READ,
-                        old_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                        new_layout: final_layout,
-                        src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                        dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                        image,
-                        subresource_range: vk::ImageSubresourceRange {
-                            aspect_mask: image_subresource.aspect_mask,
-                            base_mip_level: image_subresource.mip_level,
-                            level_count: 1,
-                            base_array_layer: image_subresource.base_array_layer,
-                            layer_count: image_subresource.layer_count,
-                        },
-                        ..Default::default()
-                    });
+                    self.images_to_final_layout
+                        .push(VkImageMemoryBarrier2Clean {
+                            src_stage_mask: vk::PipelineStageFlags2::TRANSFER,
+                            src_access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+                            dst_stage_mask: vk::PipelineStageFlags2::FRAGMENT_SHADER,
+                            dst_access_mask: vk::AccessFlags2::SHADER_READ,
+                            old_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                            new_layout: final_layout,
+                            src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                            dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                            image,
+                            subresource_range: vk::ImageSubresourceRange {
+                                aspect_mask: image_subresource.aspect_mask,
+                                base_mip_level: image_subresource.mip_level,
+                                level_count: 1,
+                                base_array_layer: image_subresource.base_array_layer,
+                                layer_count: image_subresource.layer_count,
+                            },
+                        });
                 }
             }
         }
-        if !images_to_transition.is_empty() {
-            device.cmd_pipeline_barrier2(
-                copy_command_buffer,
-                &vk::DependencyInfo {
-                    dependency_flags: vk::DependencyFlags::BY_REGION,
-                    memory_barrier_count: 0,
-                    p_memory_barriers: std::ptr::null(),
-                    buffer_memory_barrier_count: 0,
-                    p_buffer_memory_barriers: std::ptr::null(),
-                    image_memory_barrier_count: images_to_transition.len() as _,
-                    p_image_memory_barriers: images_to_transition.as_ptr(),
-                    ..Default::default()
-                },
-            );
-        }
+
+        self.flush_final_layout_transitions(device, copy_command_buffer);
+
         device.end_command_buffer(copy_command_buffer)?;
         let command_buffers = [copy_command_buffer];
 
@@ -353,12 +389,14 @@ impl VkStagingBuffer {
             &[vk::SubmitInfo {
                 p_command_buffers: command_buffers.as_ptr(),
                 command_buffer_count: 1,
+
                 ..Default::default()
             }],
             self.write_done_fence,
         )?;
 
         device.wait_for_fences(&[self.write_done_fence], true, u64::MAX)?;
+        device.reset_fences(&[self.write_done_fence])?;
         device.free_command_buffers(self.copy_command_pool, &[copy_command_buffer]);
         Ok(())
     }
@@ -418,6 +456,7 @@ impl VkStagingBuffer {
             )?;
 
             device.wait_for_fences(&[self.image_transition_done_fence], true, u64::MAX)?;
+            device.reset_fences(&[self.image_transition_done_fence])?;
             device.free_command_buffers(self.copy_command_pool, &[image_transition_command_buffer]);
         }
         Ok(())
