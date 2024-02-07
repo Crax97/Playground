@@ -10,7 +10,7 @@ use ash::{extensions::ext::DebugUtils, prelude::VkResult};
 
 use crate::vk::render_graph::{
     self, AttachmentMode, DrawCommand, DrawCommandType, DynamicState, GraphicsPassInfo,
-    GraphicsSubpass, IndexBuffer, PushConstant, RenderGraphImage, ShaderInput,
+    GraphicsSubpass, IndexBuffer, PushConstant, RenderGraphImage, ShaderInput, VertexBuffer,
 };
 use crate::*;
 
@@ -902,6 +902,7 @@ pub(crate) struct VkRenderPass2 {
     current_color_attachments: Vec<ColorAttachment>,
     uses_depth_attachment: bool,
     current_subpass: usize,
+    vertex_offsets: Vec<u64>,
 }
 
 impl VkRenderPass2 {
@@ -929,6 +930,7 @@ impl VkRenderPass2 {
         let stencil_attachment: Option<AttachmentMode> = None;
 
         Self {
+            vertex_offsets: vec![],
             pipeline_state: GraphicsPipelineState2 {
                 color_attachments: info.color_attachments.to_vec(),
                 depth_format: if info.depth_attachment.is_some() {
@@ -1028,8 +1030,10 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
         self.pipeline_state.fragment_shader = fragment_shader;
     }
 
-    fn set_vertex_buffers(&mut self, bindings: &[VertexBindingInfo]) {
+    fn set_vertex_buffers(&mut self, bindings: &[VertexBindingInfo], offsets: &[u64]) {
+        assert!(bindings.len() == offsets.len());
         self.pipeline_state.vertex_inputs = bindings.to_vec();
+        self.vertex_offsets = offsets.to_vec();
     }
 
     fn set_color_output_enabled(&mut self, color_output_enabled: bool) {
@@ -1253,10 +1257,13 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
                     .pipeline_state
                     .vertex_inputs
                     .iter()
-                    .map(|buffer| {
-                        self.gpu_state
+                    .zip(self.vertex_offsets.iter())
+                    .map(|(buffer, &offset)| {
+                        let buffer = self
+                            .gpu_state
                             .resolve_resource::<VkBuffer>(&buffer.handle)
-                            .inner
+                            .inner;
+                        VertexBuffer { buffer, offset }
                     })
                     .collect(),
                 index_buffer: self.pipeline_state.index_buffer,
@@ -1355,10 +1362,13 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
                     .pipeline_state
                     .vertex_inputs
                     .iter()
-                    .map(|buffer| {
-                        self.gpu_state
+                    .zip(self.vertex_offsets.iter())
+                    .map(|(buffer, &offset)| {
+                        let buffer = self
+                            .gpu_state
                             .resolve_resource::<VkBuffer>(&buffer.handle)
-                            .inner
+                            .inner;
+                        VertexBuffer { buffer, offset }
                     })
                     .collect(),
                 index_buffer: self.pipeline_state.index_buffer,
@@ -1371,6 +1381,10 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
             });
 
         Ok(())
+    }
+
+    fn set_scissor_rect(&mut self, scissor_rect: Rect2D) {
+        self.pipeline_state.scissor_area = Some(scissor_rect);
     }
 }
 

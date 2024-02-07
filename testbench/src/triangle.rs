@@ -267,24 +267,27 @@ impl App for TriangleApp {
 
             pass.set_vertex_shader(self.vertex_module);
             pass.set_fragment_shader(self.fragment_module);
-            pass.set_vertex_buffers(&[
-                VertexBindingInfo {
-                    handle: self.triangle_buffer,
-                    location: 0,
-                    offset: 0,
-                    stride: std::mem::size_of::<[f32; 3]>() as _,
-                    format: ImageFormat::RgbFloat32,
-                    input_rate: InputRate::PerVertex,
-                },
-                VertexBindingInfo {
-                    handle: self.uv_buffer,
-                    location: 1,
-                    offset: 0,
-                    stride: std::mem::size_of::<[f32; 2]>() as _,
-                    format: ImageFormat::RgFloat32,
-                    input_rate: InputRate::PerVertex,
-                },
-            ]);
+            pass.set_vertex_buffers(
+                &[
+                    VertexBindingInfo {
+                        handle: self.triangle_buffer,
+                        location: 0,
+                        offset: 0,
+                        stride: std::mem::size_of::<[f32; 3]>() as _,
+                        format: ImageFormat::RgbFloat32,
+                        input_rate: InputRate::PerVertex,
+                    },
+                    VertexBindingInfo {
+                        handle: self.uv_buffer,
+                        location: 1,
+                        offset: 0,
+                        stride: std::mem::size_of::<[f32; 2]>() as _,
+                        format: ImageFormat::RgFloat32,
+                        input_rate: InputRate::PerVertex,
+                    },
+                ],
+                &[0, 0],
+            );
             pass.set_index_buffer(self.index_buffer, IndexType::Uint32, 0);
             pass.bind_resources_2(
                 0,

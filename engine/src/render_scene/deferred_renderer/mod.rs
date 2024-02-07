@@ -904,48 +904,51 @@ fn draw_mesh_primitive(
         });
     }
 
-    render_pass.set_vertex_buffers(&[
-        VertexBindingInfo {
-            handle: primitive.position_component,
-            location: 0,
-            offset: 0,
-            stride: std::mem::size_of::<Vector3<f32>>() as _,
-            format: ImageFormat::RgbFloat32,
-            input_rate: InputRate::PerVertex,
-        },
-        VertexBindingInfo {
-            handle: primitive.color_component,
-            location: 1,
-            offset: 0,
-            stride: std::mem::size_of::<Vector3<f32>>() as _,
-            format: ImageFormat::RgbFloat32,
-            input_rate: InputRate::PerVertex,
-        },
-        VertexBindingInfo {
-            handle: primitive.normal_component,
-            location: 2,
-            offset: 0,
-            stride: std::mem::size_of::<Vector3<f32>>() as _,
-            format: ImageFormat::RgbFloat32,
-            input_rate: InputRate::PerVertex,
-        },
-        VertexBindingInfo {
-            handle: primitive.tangent_component,
-            location: 3,
-            offset: 0,
-            stride: std::mem::size_of::<Vector3<f32>>() as _,
-            format: ImageFormat::RgbFloat32,
-            input_rate: InputRate::PerVertex,
-        },
-        VertexBindingInfo {
-            handle: primitive.uv_component,
-            location: 4,
-            offset: 0,
-            stride: std::mem::size_of::<Vector2<f32>>() as _,
-            format: ImageFormat::RgFloat32,
-            input_rate: InputRate::PerVertex,
-        },
-    ]);
+    render_pass.set_vertex_buffers(
+        &[
+            VertexBindingInfo {
+                handle: primitive.position_component,
+                location: 0,
+                offset: 0,
+                stride: std::mem::size_of::<Vector3<f32>>() as _,
+                format: ImageFormat::RgbFloat32,
+                input_rate: InputRate::PerVertex,
+            },
+            VertexBindingInfo {
+                handle: primitive.color_component,
+                location: 1,
+                offset: 0,
+                stride: std::mem::size_of::<Vector3<f32>>() as _,
+                format: ImageFormat::RgbFloat32,
+                input_rate: InputRate::PerVertex,
+            },
+            VertexBindingInfo {
+                handle: primitive.normal_component,
+                location: 2,
+                offset: 0,
+                stride: std::mem::size_of::<Vector3<f32>>() as _,
+                format: ImageFormat::RgbFloat32,
+                input_rate: InputRate::PerVertex,
+            },
+            VertexBindingInfo {
+                handle: primitive.tangent_component,
+                location: 3,
+                offset: 0,
+                stride: std::mem::size_of::<Vector3<f32>>() as _,
+                format: ImageFormat::RgbFloat32,
+                input_rate: InputRate::PerVertex,
+            },
+            VertexBindingInfo {
+                handle: primitive.uv_component,
+                location: 4,
+                offset: 0,
+                stride: std::mem::size_of::<Vector2<f32>>() as _,
+                format: ImageFormat::RgFloat32,
+                input_rate: InputRate::PerVertex,
+            },
+        ],
+        &[0, 0, 0, 0, 0],
+    );
     render_pass.bind_resources_2(1, &user_bindings);
     render_pass.push_constants(
         0,

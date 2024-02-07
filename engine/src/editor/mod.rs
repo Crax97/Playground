@@ -99,7 +99,7 @@ impl EditorPlugin {
     ) -> Self {
         let window = app.world.get_resource::<EngineWindow>().unwrap();
 
-        let egui_support = EguiSupport::new(window, gpu, swapchain).unwrap();
+        let egui_support = EguiSupport::new(window, gpu).unwrap();
 
         let context = egui_support.create_context();
         let egui_app_context = EguiContext(context.clone());
@@ -165,7 +165,7 @@ impl Plugin for EditorPlugin {
         self.output = Some(self.egui_support.end_frame(window));
         if let Some(output) = self.output.take() {
             self.egui_support
-                .paint_frame(output, &app_state.swapchain, command_buffer)
+                .paint_frame(app_state.gpu(), command_buffer, todo!(), output);
         }
     }
 }

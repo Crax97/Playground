@@ -98,6 +98,11 @@ pub struct IndexBuffer {
     pub offset: vk::DeviceSize,
 }
 
+pub struct VertexBuffer {
+    pub buffer: vk::Buffer,
+    pub offset: vk::DeviceSize,
+}
+
 pub struct DrawCommand {
     pub pipeline: vk::Pipeline,
     pub pipeline_layout: vk::PipelineLayout,
@@ -105,7 +110,7 @@ pub struct DrawCommand {
     pub push_constants: Vec<PushConstant>,
     pub dynamic_state: DynamicState,
 
-    pub vertex_buffers: Vec<vk::Buffer>,
+    pub vertex_buffers: Vec<VertexBuffer>,
     pub index_buffer: Option<IndexBuffer>,
 
     pub command_type: DrawCommandType,
@@ -477,13 +482,23 @@ impl RenderGraph {
                 &command.descriptor_sets,
                 &[],
             );
+            let buffers = command
+                .vertex_buffers
+                .iter()
+                .map(|b| b.buffer)
+                .collect::<Vec<_>>();
+            let offsets = command
+                .vertex_buffers
+                .iter()
+                .map(|b| b.offset)
+                .collect::<Vec<_>>();
             if !command.vertex_buffers.is_empty() {
                 self.device.cmd_bind_vertex_buffers(
                     execution_context.graphics_command_buffer,
                     0,
-                    &command.vertex_buffers,
+                    &buffers,
                     // TODO:  Add support for offsets
-                    &command.vertex_buffers.iter().map(|_| 0).collect::<Vec<_>>(),
+                    &offsets,
                 )
             }
 

@@ -348,48 +348,51 @@ fn cubemap_main_loop(
                 gpu::IndexType::Uint32,
                 0,
             );
-            render_pass_command.set_vertex_buffers(&[
-                VertexBindingInfo {
-                    handle: mesh.primitives[0].position_component,
-                    location: 0,
-                    offset: 0,
-                    stride: std::mem::size_of::<Vector3<f32>>() as _,
-                    format: ImageFormat::RgbFloat32,
-                    input_rate: InputRate::PerVertex,
-                },
-                VertexBindingInfo {
-                    handle: mesh.primitives[0].color_component,
-                    location: 1,
-                    offset: 0,
-                    stride: std::mem::size_of::<Vector3<f32>>() as _,
-                    format: ImageFormat::RgbFloat32,
-                    input_rate: InputRate::PerVertex,
-                },
-                VertexBindingInfo {
-                    handle: mesh.primitives[0].normal_component,
-                    location: 2,
-                    offset: 0,
-                    stride: std::mem::size_of::<Vector3<f32>>() as _,
-                    format: ImageFormat::RgbFloat32,
-                    input_rate: InputRate::PerVertex,
-                },
-                VertexBindingInfo {
-                    handle: mesh.primitives[0].tangent_component,
-                    location: 3,
-                    offset: 0,
-                    stride: std::mem::size_of::<Vector3<f32>>() as _,
-                    format: ImageFormat::RgbFloat32,
-                    input_rate: InputRate::PerVertex,
-                },
-                VertexBindingInfo {
-                    handle: mesh.primitives[0].uv_component,
-                    location: 4,
-                    offset: 0,
-                    stride: std::mem::size_of::<Vector2<f32>>() as _,
-                    format: ImageFormat::RgFloat32,
-                    input_rate: InputRate::PerVertex,
-                },
-            ]);
+            render_pass_command.set_vertex_buffers(
+                &[
+                    VertexBindingInfo {
+                        handle: mesh.primitives[0].position_component,
+                        location: 0,
+                        offset: 0,
+                        stride: std::mem::size_of::<Vector3<f32>>() as _,
+                        format: ImageFormat::RgbFloat32,
+                        input_rate: InputRate::PerVertex,
+                    },
+                    VertexBindingInfo {
+                        handle: mesh.primitives[0].color_component,
+                        location: 1,
+                        offset: 0,
+                        stride: std::mem::size_of::<Vector3<f32>>() as _,
+                        format: ImageFormat::RgbFloat32,
+                        input_rate: InputRate::PerVertex,
+                    },
+                    VertexBindingInfo {
+                        handle: mesh.primitives[0].normal_component,
+                        location: 2,
+                        offset: 0,
+                        stride: std::mem::size_of::<Vector3<f32>>() as _,
+                        format: ImageFormat::RgbFloat32,
+                        input_rate: InputRate::PerVertex,
+                    },
+                    VertexBindingInfo {
+                        handle: mesh.primitives[0].tangent_component,
+                        location: 3,
+                        offset: 0,
+                        stride: std::mem::size_of::<Vector3<f32>>() as _,
+                        format: ImageFormat::RgbFloat32,
+                        input_rate: InputRate::PerVertex,
+                    },
+                    VertexBindingInfo {
+                        handle: mesh.primitives[0].uv_component,
+                        location: 4,
+                        offset: 0,
+                        stride: std::mem::size_of::<Vector2<f32>>() as _,
+                        format: ImageFormat::RgFloat32,
+                        input_rate: InputRate::PerVertex,
+                    },
+                ],
+                &[0; 5],
+            );
             render_pass_command.push_constants(
                 0,
                 0,

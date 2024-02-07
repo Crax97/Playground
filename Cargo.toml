@@ -11,6 +11,3 @@ members = [
 
 [profile.release]
 debug = true
-
-[patch.crates-io]
-egui-winit-ash-integration = { git = "https://github.com/Crax97/egui-winit-ash-integration/", branch="reuse_descriptor_sets" }

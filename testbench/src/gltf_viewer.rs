@@ -354,8 +354,7 @@ impl App for GLTFViewer {
             .swapchain_mut()
             .select_present_mode(PresentMode::Immediate)?;
 
-        let egui_support =
-            EguiSupport::new(&app_state.window, &app_state.gpu, &app_state.swapchain)?;
+        let egui_support = EguiSupport::new(&app_state.window, &app_state.gpu)?;
 
         gltf_loader.scene_mut().add_light(Light {
             ty: LightType::Directional {
@@ -649,8 +648,8 @@ impl App for GLTFViewer {
             None,
         )?;
 
-        // self.egui_support
-        //     .paint_frame(output, &app_state.swapchain, &command_buffer);
+        self.egui_support
+            .paint_frame(app_state.gpu(), &mut command_buffer, backbuffer, output);
 
         Ok(command_buffer)
     }
@@ -660,7 +659,8 @@ impl App for GLTFViewer {
         self.gltf_loader
             .scene_mut()
             .clean_resources(app_state.gpu());
-        self.scene_renderer.destroy(app_state.gpu())
+        self.scene_renderer.destroy(app_state.gpu());
+        self.egui_support.destroy(app_state.gpu());
     }
 }
 

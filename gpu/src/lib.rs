@@ -218,16 +218,17 @@ pub mod render_pass_2 {
 
     use crate::{
         Binding2, BufferHandle, CompareOp, CullMode, FrontFace, IndexType,
-        PipelineColorBlendAttachmentState, PolygonMode, PrimitiveTopology, ShaderModuleHandle,
-        VertexBindingInfo, Viewport,
+        PipelineColorBlendAttachmentState, PolygonMode, PrimitiveTopology, Rect2D,
+        ShaderModuleHandle, VertexBindingInfo, Viewport,
     };
     define_pass_type!(RenderPass2 {
      fn set_primitive_topology(&mut self, new_topology: PrimitiveTopology);
      fn set_vertex_shader(&mut self, vertex_shader: ShaderModuleHandle);
      fn set_fragment_shader(&mut self, fragment_shader: ShaderModuleHandle);
-     fn set_vertex_buffers(&mut self, bindings: &[VertexBindingInfo]);
+     fn set_vertex_buffers(&mut self, bindings: &[VertexBindingInfo], offsets: &[u64]);
      fn set_color_output_enabled(&mut self, color_output_enabled: bool);
      fn set_viewport(&mut self, viewport: Viewport);
+     fn set_scissor_rect(&mut self, scissor_rect: Rect2D);
      fn set_depth_bias(&mut self, constant: f32, slope: f32);
      fn set_front_face(&mut self, front_face: FrontFace);
      fn set_polygon_mode(&mut self, polygon_mode: PolygonMode);

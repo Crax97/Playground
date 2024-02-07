@@ -27,10 +27,7 @@ crossbeam = "0.8.*"
 thunderdome = "0.6.*"
 bitflags = "2.*"
 
-egui = "0.23.0"
-egui-winit = { version = "0.23.0", default-features = false }
-gpu-allocator = { version = "0.23.0", default-features = false, features = ["vulkan"] }
-egui-winit-ash-integration = { version = "0.6.0", features = ["gpu-allocator-feature"] }
+egui = { version = "0.26.0", features = ["bytemuck"] }
 
 rapier2d = { version = "0.17", features = ["simd-stable", "serde-serialize"] }
 
