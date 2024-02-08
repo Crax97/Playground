@@ -1,8 +1,7 @@
 use std::{
     collections::HashMap,
-    ffi::{c_void, CStr, CString},
-    ptr::addr_of_mut,
-    ptr::{addr_of, null},
+    ffi::{c_char, c_void, CStr, CString},
+    ptr::{addr_of, addr_of_mut, null},
     sync::{
         atomic::{AtomicBool, AtomicUsize},
         Arc, RwLock, RwLockReadGuard, RwLockWriteGuard,
@@ -10,13 +9,8 @@ use std::{
 };
 
 use anyhow::{bail, Result};
-use ash::vk::{
-    CommandBufferBeginInfo, CommandBufferResetFlags, FenceCreateFlags, ObjectType,
-    PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR,
-    PhysicalDeviceSynchronization2Features, SemaphoreCreateFlags, TaggedStructure,
-};
 use ash::{
-    extensions::ext::DebugUtils,
+    extensions::ext::{self, DebugUtils},
     prelude::*,
     vk::{
         make_api_version, ApplicationInfo, BufferCreateFlags, CommandBufferAllocateInfo,
@@ -33,12 +27,20 @@ use ash::{
     *,
 };
 use ash::{
+    extensions::khr,
+    vk::{
+        CommandBufferBeginInfo, CommandBufferResetFlags, FenceCreateFlags, ObjectType,
+        PhysicalDeviceDynamicRenderingFeaturesKHR, PhysicalDeviceFeatures2KHR,
+        PhysicalDeviceSynchronization2Features, SemaphoreCreateFlags, TaggedStructure,
+    },
+};
+use ash::{
     extensions::khr::DynamicRendering,
     vk::{PipelineBindPoint, SubpassDescriptionFlags},
 };
 
 use log::{debug, error, info, trace, warn};
-use raw_window_handle::HasRawDisplayHandle;
+use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use thiserror::Error;
 use winit::window::Window;
 
@@ -47,16 +49,17 @@ use crate::{
     get_allocation_callbacks, lifetime_cache_constants, quick_hash,
     vk::render_graph::{RenderGraph, RenderGraphExecutionContext},
     vk_staging_buffer::VkStagingBuffer,
-    BeginRenderPassInfo, BufferCreateInfo, BufferHandle, BufferImageCopyInfo,
-    CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineState, DescriptorBindingInfo,
-    DescriptorSetDescription, DescriptorSetInfo2, DescriptorSetState, Extent2D, FenceHandle, Gpu,
-    GpuConfiguration, GpuResourceMap, GraphicsPipelineState2, GraphicsPipelineTraditional,
-    Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat, ImageHandle, ImageLayout,
-    ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo, ImageViewHandle, LogicOp,
-    Offset2D, PipelineBarrierInfo, PipelineStageFlags, PushConstantBlockDescription, QueueType,
-    Rect2D, RenderPassAttachments, SampleCount, SamplerCreateInfo, SamplerHandle, SemaphoreHandle,
-    ShaderAttribute, ShaderModuleCreateInfo, ShaderModuleHandle, SubpassDescription, Swapchain,
-    ToVk, TransitionInfo, UniformVariableDescription, VkCommandBuffer, VkCommandPool, VkFence,
+    BeginRenderPassInfo, BlendMode, BlendOp, BufferCreateInfo, BufferHandle, BufferImageCopyInfo,
+    ColorComponentFlags, CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineState,
+    DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2, DescriptorSetState,
+    Extent2D, FenceHandle, Gpu, GpuConfiguration, GpuResourceMap, GraphicsPipelineState2,
+    GraphicsPipelineTraditional, Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat,
+    ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
+    ImageViewHandle, LogicOp, Offset2D, PipelineBarrierInfo, PipelineColorBlendAttachmentState,
+    PipelineStageFlags, PushConstantBlockDescription, QueueType, Rect2D, RenderPassAttachments,
+    SampleCount, SamplerCreateInfo, SamplerHandle, SemaphoreHandle, ShaderAttribute,
+    ShaderModuleCreateInfo, ShaderModuleHandle, SubpassDescription, Swapchain, ToVk,
+    TransitionInfo, UniformVariableDescription, VkCommandBuffer, VkCommandPool, VkFence,
     VkImageView, VkImageViewFlags, VkSemaphore, VkShaderModule, VkSwapchain,
 };
 use crate::{
@@ -393,20 +396,26 @@ impl GpuThreadSharedState {
         let color_attachments = pipeline_state
             .color_attachments
             .iter()
-            .map(|_| {
-                vk::PipelineColorBlendAttachmentState::builder()
-                    .color_write_mask(
-                        vk::ColorComponentFlags::R
-                            | vk::ColorComponentFlags::G
-                            | vk::ColorComponentFlags::B
-                            | vk::ColorComponentFlags::A,
-                    )
-                    .blend_enable(false)
-                    .src_color_blend_factor(vk::BlendFactor::ZERO)
-                    .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-                    .build()
+            .enumerate()
+            .map(|(i, _)| {
+                pipeline_state
+                    .blend_states
+                    .get(i)
+                    .cloned()
+                    .unwrap_or(PipelineColorBlendAttachmentState {
+                        blend_enable: true,
+                        src_color_blend_factor: crate::BlendMode::One,
+                        dst_color_blend_factor: BlendMode::OneMinusSrcAlpha,
+                        color_blend_op: BlendOp::Add,
+                        src_alpha_blend_factor: BlendMode::One,
+                        dst_alpha_blend_factor: BlendMode::OneMinusSrcAlpha,
+                        alpha_blend_op: BlendOp::Add,
+                        color_write_mask: ColorComponentFlags::RGBA,
+                    })
+                    .to_vk()
             })
             .collect::<Vec<_>>();
+
         let color_blend_state = vk::PipelineColorBlendStateCreateInfo {
             s_type: StructureType::PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
             p_next: std::ptr::null(),
@@ -1169,7 +1178,7 @@ impl VkGpu {
         let entry = unsafe { Entry::load()? };
 
         let mut instance_extensions = if let Some(window) = configuration.window {
-            ash_window::enumerate_required_extensions(window.raw_display_handle())?
+            enumerate_window_extensions(window)?
                 .iter()
                 .map(|c_ext| unsafe { CStr::from_ptr(*c_ext) })
                 .map(|c_str| c_str.to_string_lossy().to_string())
@@ -2019,6 +2028,62 @@ impl VkGpu {
     ) -> H {
         self.state.resolve_resource(handle)
     }
+}
+
+fn enumerate_window_extensions(window: &Window) -> anyhow::Result<&[*const i8; 2]> {
+    let display_handle = window.display_handle().unwrap().as_raw();
+    let extensions = match display_handle {
+        RawDisplayHandle::Windows(_) => {
+            const WINDOWS_EXTS: [*const c_char; 2] = [
+                khr::Surface::name().as_ptr(),
+                khr::Win32Surface::name().as_ptr(),
+            ];
+            &WINDOWS_EXTS
+        }
+
+        RawDisplayHandle::Wayland(_) => {
+            const WAYLAND_EXTS: [*const c_char; 2] = [
+                khr::Surface::name().as_ptr(),
+                khr::WaylandSurface::name().as_ptr(),
+            ];
+            &WAYLAND_EXTS
+        }
+
+        RawDisplayHandle::Xlib(_) => {
+            const XLIB_EXTS: [*const c_char; 2] = [
+                khr::Surface::name().as_ptr(),
+                khr::XlibSurface::name().as_ptr(),
+            ];
+            &XLIB_EXTS
+        }
+
+        RawDisplayHandle::Xcb(_) => {
+            const XCB_EXTS: [*const c_char; 2] = [
+                khr::Surface::name().as_ptr(),
+                khr::XcbSurface::name().as_ptr(),
+            ];
+            &XCB_EXTS
+        }
+
+        RawDisplayHandle::Android(_) => {
+            const ANDROID_EXTS: [*const c_char; 2] = [
+                khr::Surface::name().as_ptr(),
+                khr::AndroidSurface::name().as_ptr(),
+            ];
+            &ANDROID_EXTS
+        }
+
+        RawDisplayHandle::AppKit(_) | RawDisplayHandle::UiKit(_) => {
+            const METAL_EXTS: [*const c_char; 2] = [
+                khr::Surface::name().as_ptr(),
+                ext::MetalSurface::name().as_ptr(),
+            ];
+            &METAL_EXTS
+        }
+
+        _ => return Err(anyhow::Error::from(vk::Result::ERROR_EXTENSION_NOT_PRESENT)),
+    };
+    Ok(extensions)
 }
 
 fn make_semaphore(logical_device: &Device) -> vk::Semaphore {

@@ -13,8 +13,8 @@ use log::{info, trace};
 use winit::{
     dpi::PhysicalSize,
     event::Event,
-    event_loop::{ControlFlow, EventLoop},
-    platform::run_return::EventLoopExtRunReturn,
+    event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
+    platform::run_on_demand::EventLoopExtRunOnDemand,
 };
 
 use app_state::AppState;
@@ -59,7 +59,8 @@ pub trait App {
 pub fn app_loop<A: App + 'static>(
     app: &mut A,
     app_state: &mut AppState,
-    event: Event<'_, ()>,
+    event: Event<()>,
+    target: &EventLoopWindowTarget<()>,
 ) -> anyhow::Result<ControlFlow> {
     app.on_event(&event, app_state)?;
     match event {
@@ -68,11 +69,19 @@ pub fn app_loop<A: App + 'static>(
             match event {
                 winit::event::WindowEvent::CloseRequested => {
                     // app_state.gpu.on_destroyed();
-                    return Ok(ControlFlow::ExitWithCode(0));
+                    target.exit();
                 }
                 winit::event::WindowEvent::Resized(new_size) => {
                     app_state.needs_new_swapchain = true;
                     app_state.current_window_size = new_size;
+                }
+                winit::event::WindowEvent::RedrawRequested => {
+                    let sz = app_state.current_window_size;
+
+                    if sz.width > 0 && sz.height > 0 {
+                        update_app(app, app_state)?;
+                    }
+                    app_state.window.request_redraw();
                 }
                 _ => {}
             };
@@ -83,19 +92,13 @@ pub fn app_loop<A: App + 'static>(
         winit::event::Event::UserEvent(_) => {}
         winit::event::Event::Suspended => {}
         winit::event::Event::Resumed => {}
-        winit::event::Event::MainEventsCleared => {
-            let sz = app_state.current_window_size;
+        winit::event::Event::AboutToWait => {}
 
-            if sz.width > 0 && sz.height > 0 {
-                update_app(app, app_state)?;
-            }
-        }
-        winit::event::Event::RedrawRequested(..) => {}
-        winit::event::Event::RedrawEventsCleared => {}
-        winit::event::Event::LoopDestroyed => {
+        winit::event::Event::LoopExiting => {
             app_state.gpu.wait_device_idle().unwrap();
             app_state.gpu.save_pipeline_cache("pipeline_cache.pso")?;
         }
+        Event::MemoryWarning => {}
     }
 
     Ok(ControlFlow::Poll)
@@ -153,7 +156,7 @@ pub fn create_app<A: App + 'static>() -> anyhow::Result<(A, EventLoop<()>, AppSt
         "Running in {:?}",
         std::env::current_dir().unwrap_or(".".into())
     );
-    let event_loop = winit::event_loop::EventLoop::default();
+    let event_loop = winit::event_loop::EventLoop::new().unwrap();
     let window = winit::window::WindowBuilder::default()
         .with_inner_size(PhysicalSize {
             width: 1920,
@@ -174,11 +177,8 @@ pub fn run<A: App + 'static>(
     trace!("Created app");
     app.on_startup(&mut app_state)?;
     let mut errored = false;
-    let exit_code = event_loop.run_return(|event, _, control_flow| {
-        match app_loop(&mut app, &mut app_state, event) {
-            Ok(flow) => {
-                *control_flow = flow;
-            }
+    event_loop.run_on_demand(|event, target| {
+        match app_loop(&mut app, &mut app_state, event, target) {
             Err(e) => {
                 errored = true;
                 panic!(
@@ -188,13 +188,17 @@ pub fn run<A: App + 'static>(
                         .fold(String::new(), |s, e| s + &e.to_string() + "\n"),
                 );
             }
+            _ => {}
         }
-    });
-    if !errored {
+    })?;
+    let exit_code = if !errored {
         app.on_shutdown(&mut app_state);
         std::mem::drop(app);
         std::mem::drop(app_state);
-    }
+        0
+    } else {
+        -1
+    };
 
     std::process::exit(exit_code);
 }

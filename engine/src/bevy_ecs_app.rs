@@ -75,7 +75,7 @@ impl Deref for AppTypeRegistry {
 
 pub trait Plugin: 'static {
     fn on_start(&mut self, _world: &mut World) {}
-    fn on_event(&mut self, _world: &mut World, _event: &Event<()>) {}
+    fn on_event(&mut self, app_state: &AppState, _world: &mut World, _event: &Event<()>) {}
     fn on_resize(
         &mut self,
         _world: &mut World,
@@ -452,7 +452,7 @@ impl App for BevyEcsApp {
     fn on_event(
         &mut self,
         event: &winit::event::Event<()>,
-        _app_state: &crate::app::app_state::AppState,
+        app_state: &crate::app::app_state::AppState,
     ) -> anyhow::Result<()> {
         self.world
             .get_resource_mut::<InputState>()
@@ -464,7 +464,7 @@ impl App for BevyEcsApp {
             .update();
 
         for plugin in &mut self.plugins {
-            plugin.on_event(&mut self.world, event);
+            plugin.on_event(app_state, &mut self.world, event);
         }
         Ok(())
     }

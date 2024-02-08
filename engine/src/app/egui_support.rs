@@ -1,24 +1,27 @@
-use std::{collections::HashMap, sync::Arc, time::SystemTime};
+use std::{collections::HashMap, time::SystemTime};
 
 use bytemuck::{Pod, Zeroable};
 use egui::{
-    pos2, vec2, Context, FontDefinitions, FullOutput, RawInput, Rect, Sense, TextureId,
-    TexturesDelta, Ui,
+    pos2, vec2, Context, FontDefinitions, FullOutput, Pos2, RawInput, Rect, Sense, TextureId,
+    TexturesDelta, Ui, Vec2, ViewportId,
 };
 use engine_macros::glsl;
 use gpu::{
     render_pass_2::RenderPass2, BeginRenderPassInfo2, Binding2, BufferCreateInfo, BufferHandle,
-    BufferUsageFlags, ColorAttachment, CommandBuffer, ComponentMapping, Extent2D, Gpu,
-    ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle, ImageSubresourceRange,
-    ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, MemoryDomain, Offset2D, Rect2D,
-    SamplerCreateInfo, SamplerHandle, ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
-    Swapchain, VertexBindingInfo,
+    BufferUsageFlags, ColorAttachment, ColorComponentFlags, CommandBuffer, ComponentMapping,
+    Extent2D, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle,
+    ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, MemoryDomain,
+    Offset2D, PipelineColorBlendAttachmentState, Rect2D, SamplerCreateInfo, SamplerHandle,
+    ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage, Swapchain, VertexBindingInfo,
 };
 
 use log::warn;
-use winit::{event::WindowEvent, window::Window};
+use winit::{
+    event::{Touch, WindowEvent},
+    window::Window,
+};
 
-use crate::{Backbuffer, CvarManager};
+use crate::{input::InputState, Backbuffer, CvarManager, Time};
 
 use super::Console;
 
@@ -52,6 +55,21 @@ struct EguiTexture {
     sampler: Option<SamplerHandle>,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct EventResponse {
+    /// If true, egui consumed this event, i.e. wants exclusive use of this event
+    /// (e.g. a mouse click on an egui window, or entering text into a text field).
+    ///
+    /// For instance, if you use egui for a game, you should only
+    /// pass on the events to your game when [`Self::consumed`] is `false.
+    ///
+    /// Note that egui uses `tab` to move focus between elements, so this will always be `true` for tabs.
+    pub consumed: bool,
+
+    /// Do we need an egui refresh because of this event?
+    pub repaint: bool,
+}
+
 pub struct EguiSupport {
     context: Context,
     raw_input: RawInput,
@@ -60,6 +78,9 @@ pub struct EguiSupport {
     textures: HashMap<TextureId, EguiTexture>,
     current_frame: usize,
     pixels_per_point: f32,
+    viewport_id: ViewportId,
+    pointer_pos_in_points: Option<Pos2>,
+    input_method_editor_started: bool,
 
     vs: ShaderModuleHandle,
     fs: ShaderModuleHandle,
@@ -71,7 +92,7 @@ impl EguiSupport {
         Self::MAX_NUM_VERTICES * std::mem::size_of::<egui::epaint::Vertex>();
     const MAX_INDICES: usize = Self::MAX_NUM_VERTICES * std::mem::size_of::<u32>();
 
-    pub fn new(window: &Window, gpu: &Arc<dyn Gpu>) -> anyhow::Result<Self> {
+    pub fn new(window: &Window, gpu: &dyn Gpu) -> anyhow::Result<Self> {
         let mut mesh_buffers = Vec::with_capacity(gpu::constants::MAX_FRAMES_IN_FLIGHT);
 
         for i in 0..gpu::constants::MAX_FRAMES_IN_FLIGHT {
@@ -119,10 +140,11 @@ impl EguiSupport {
         })?;
 
         let context = Context::default();
+        let pixels_per_point = Self::compute_pixels_per_point(&context, window);
         context.set_fonts(FontDefinitions::default());
 
-        let pixels_per_point = Self::compute_pixels_per_point(&context, window);
         context.set_pixels_per_point(pixels_per_point);
+        let viewport_id = context.viewport_id();
 
         Ok(Self {
             context,
@@ -134,6 +156,9 @@ impl EguiSupport {
             vs,
             fs,
             pixels_per_point,
+            viewport_id,
+            pointer_pos_in_points: None,
+            input_method_editor_started: false,
         })
     }
 
@@ -203,16 +228,15 @@ impl EguiSupport {
         }
     }
 
-    pub fn handle_event(&mut self, winit_event: &WindowEvent) {
-        let mut new_input = RawInput::default();
-
-        self.raw_input = new_input;
+    pub fn handle_window_event(&mut self, window: &Window, event: &WindowEvent) -> EventResponse {
+        self.on_window_event(window, event)
     }
 
     pub fn swapchain_updated(&mut self, swapchain: &Swapchain) {}
 
-    pub fn begin_frame(&mut self, window: &Window) {
-        self.context.begin_frame(self.raw_input.clone());
+    pub fn begin_frame(&mut self, window: &Window, time: &Time) {
+        let input = self.take_input(window, time);
+        self.context.begin_frame(input);
     }
 
     pub fn end_frame(&mut self, window: &Window) -> FullOutput {
@@ -239,6 +263,218 @@ impl EguiSupport {
 
     pub fn create_context(&self) -> Context {
         self.context.clone()
+    }
+
+    fn on_window_event(&mut self, window: &Window, event: &WindowEvent) -> EventResponse {
+        match event {
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                let native_pixels_per_point = *scale_factor as f32;
+
+                self.raw_input
+                    .viewports
+                    .entry(self.viewport_id)
+                    .or_default()
+                    .native_pixels_per_point = Some(native_pixels_per_point);
+
+                EventResponse {
+                    repaint: true,
+                    consumed: false,
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                self.on_mouse_button_input(*state, *button);
+                EventResponse {
+                    repaint: true,
+                    consumed: self.context.wants_pointer_input(),
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                self.on_mouse_wheel(window, *delta);
+                EventResponse {
+                    repaint: true,
+                    consumed: self.context.wants_pointer_input(),
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.on_cursor_moved(window, *position);
+                EventResponse {
+                    repaint: true,
+                    consumed: self.context.is_using_pointer(),
+                }
+            }
+            WindowEvent::CursorLeft { .. } => {
+                self.pointer_pos_in_points = None;
+                self.raw_input.events.push(egui::Event::PointerGone);
+                EventResponse {
+                    repaint: true,
+                    consumed: false,
+                }
+            }
+            // WindowEvent::TouchpadPressure {device_id, pressure, stage, ..  } => {} // TODO
+            WindowEvent::Touch(touch) => {
+                self.on_touch(window, touch);
+                let consumed = match touch.phase {
+                    winit::event::TouchPhase::Started
+                    | winit::event::TouchPhase::Ended
+                    | winit::event::TouchPhase::Cancelled => self.context.wants_pointer_input(),
+                    winit::event::TouchPhase::Moved => self.context.is_using_pointer(),
+                };
+                EventResponse {
+                    repaint: true,
+                    consumed,
+                }
+            }
+
+            WindowEvent::Ime(ime) => {
+                // on Mac even Cmd-C is pressed during ime, a `c` is pushed to Preedit.
+                // So no need to check is_mac_cmd.
+                //
+                // How winit produce `Ime::Enabled` and `Ime::Disabled` differs in MacOS
+                // and Windows.
+                //
+                // - On Windows, before and after each Commit will produce an Enable/Disabled
+                // event.
+                // - On MacOS, only when user explicit enable/disable ime. No Disabled
+                // after Commit.
+                //
+                // We use input_method_editor_started to manually insert CompositionStart
+                // between Commits.
+                match ime {
+                    winit::event::Ime::Enabled | winit::event::Ime::Disabled => (),
+                    winit::event::Ime::Commit(text) => {
+                        self.input_method_editor_started = false;
+                        self.raw_input
+                            .events
+                            .push(egui::Event::CompositionEnd(text.clone()));
+                    }
+                    winit::event::Ime::Preedit(text, Some(_)) => {
+                        if !self.input_method_editor_started {
+                            self.input_method_editor_started = true;
+                            self.raw_input.events.push(egui::Event::CompositionStart);
+                        }
+                        self.raw_input
+                            .events
+                            .push(egui::Event::CompositionUpdate(text.clone()));
+                    }
+                    winit::event::Ime::Preedit(_, None) => {}
+                };
+
+                EventResponse {
+                    repaint: true,
+                    consumed: self.context.wants_keyboard_input(),
+                }
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                self.on_keyboard_input(event);
+
+                // When pressing the Tab key, egui focuses the first focusable element, hence Tab always consumes.
+                let consumed = self.context.wants_keyboard_input()
+                    || event.logical_key
+                        == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Tab);
+                EventResponse {
+                    repaint: true,
+                    consumed,
+                }
+            }
+            WindowEvent::Focused(focused) => {
+                self.raw_input.focused = *focused;
+                // We will not be given a KeyboardInput event when the modifiers are released while
+                // the window does not have focus. Unset all modifier state to be safe.
+                self.raw_input.modifiers = egui::Modifiers::default();
+                self.raw_input
+                    .events
+                    .push(egui::Event::WindowFocused(*focused));
+                EventResponse {
+                    repaint: true,
+                    consumed: false,
+                }
+            }
+            WindowEvent::HoveredFile(path) => {
+                self.raw_input.hovered_files.push(egui::HoveredFile {
+                    path: Some(path.clone()),
+                    ..Default::default()
+                });
+                EventResponse {
+                    repaint: true,
+                    consumed: false,
+                }
+            }
+            WindowEvent::HoveredFileCancelled => {
+                self.raw_input.hovered_files.clear();
+                EventResponse {
+                    repaint: true,
+                    consumed: false,
+                }
+            }
+            WindowEvent::DroppedFile(path) => {
+                self.raw_input.hovered_files.clear();
+                self.raw_input.dropped_files.push(egui::DroppedFile {
+                    path: Some(path.clone()),
+                    ..Default::default()
+                });
+                EventResponse {
+                    repaint: true,
+                    consumed: false,
+                }
+            }
+            WindowEvent::ModifiersChanged(state) => {
+                let state = state.state();
+
+                let alt = state.alt_key();
+                let ctrl = state.control_key();
+                let shift = state.shift_key();
+                let super_ = state.super_key();
+
+                self.raw_input.modifiers.alt = alt;
+                self.raw_input.modifiers.ctrl = ctrl;
+                self.raw_input.modifiers.shift = shift;
+                self.raw_input.modifiers.mac_cmd = cfg!(target_os = "macos") && super_;
+                self.raw_input.modifiers.command = if cfg!(target_os = "macos") {
+                    super_
+                } else {
+                    ctrl
+                };
+
+                EventResponse {
+                    repaint: true,
+                    consumed: false,
+                }
+            }
+
+            // Things that may require repaint:
+            WindowEvent::RedrawRequested
+            | WindowEvent::CursorEntered { .. }
+            | WindowEvent::Destroyed
+            | WindowEvent::Occluded(_)
+            | WindowEvent::Resized(_)
+            | WindowEvent::Moved(_)
+            | WindowEvent::ThemeChanged(_)
+            | WindowEvent::TouchpadPressure { .. }
+            | WindowEvent::CloseRequested => EventResponse {
+                repaint: true,
+                consumed: false,
+            },
+
+            // Things we completely ignore:
+            WindowEvent::ActivationTokenDone { .. }
+            | WindowEvent::AxisMotion { .. }
+            | WindowEvent::SmartMagnify { .. }
+            | WindowEvent::TouchpadRotate { .. } => EventResponse {
+                repaint: false,
+                consumed: false,
+            },
+
+            WindowEvent::TouchpadMagnify { delta, .. } => {
+                // Positive delta values indicate magnification (zooming in).
+                // Negative delta values indicate shrinking (zooming out).
+                let zoom_factor = (*delta as f32).exp();
+                self.raw_input.events.push(egui::Event::Zoom(zoom_factor));
+                EventResponse {
+                    repaint: true,
+                    consumed: self.context.wants_pointer_input(),
+                }
+            }
+        }
     }
 
     fn update_textures(&mut self, gpu: &dyn Gpu, delta: &TexturesDelta) -> anyhow::Result<()> {
@@ -446,7 +682,7 @@ impl EguiSupport {
         render_passs.set_scissor_rect(Rect2D {
             offset: Offset2D {
                 x: clip_min_x,
-                y: height_px as i32 - clip_max_y,
+                y: clip_min_y,
             },
             extent: Extent2D {
                 width: (clip_max_x - clip_min_x) as u32,
@@ -496,6 +732,19 @@ impl EguiSupport {
             &[0, 0, 0],
         );
         let screen_size = screen_size.map(|v| v / pixels_per_point);
+        render_pass.set_color_attachment_blend_state(
+            0,
+            PipelineColorBlendAttachmentState {
+                blend_enable: true,
+                src_color_blend_factor: gpu::BlendMode::One,
+                dst_color_blend_factor: gpu::BlendMode::OneMinusSrcAlpha,
+                color_blend_op: gpu::BlendOp::Add,
+                src_alpha_blend_factor: gpu::BlendMode::One,
+                dst_alpha_blend_factor: gpu::BlendMode::OneMinusSrcAlpha,
+                alpha_blend_op: gpu::BlendOp::Add,
+                color_write_mask: ColorComponentFlags::RGBA,
+            },
+        );
         render_pass.set_index_buffer(indices, gpu::IndexType::Uint32, 0);
         render_pass.set_cull_mode(gpu::CullMode::None);
         render_pass.set_vertex_shader(self.vs);
@@ -536,6 +785,134 @@ impl EguiSupport {
         gpu.destroy_shader_module(self.vs);
         gpu.destroy_shader_module(self.fs);
     }
+
+    fn on_mouse_button_input(
+        &mut self,
+        state: winit::event::ElementState,
+        button: winit::event::MouseButton,
+    ) {
+        if let Some(pos) = self.pointer_pos_in_points {
+            if let Some(button) = translate_mouse_button(button) {
+                let pressed = state == winit::event::ElementState::Pressed;
+
+                self.raw_input.events.push(egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed,
+                    modifiers: self.raw_input.modifiers,
+                });
+            }
+        }
+    }
+
+    fn on_mouse_wheel(&mut self, window: &Window, delta: winit::event::MouseScrollDelta) {
+        let pixels_per_point = self.pixels_per_point;
+
+        {
+            let (unit, delta) = match delta {
+                winit::event::MouseScrollDelta::LineDelta(x, y) => {
+                    (egui::MouseWheelUnit::Line, egui::vec2(x, y))
+                }
+                winit::event::MouseScrollDelta::PixelDelta(winit::dpi::PhysicalPosition {
+                    x,
+                    y,
+                }) => (
+                    egui::MouseWheelUnit::Point,
+                    egui::vec2(x as f32, y as f32) / pixels_per_point,
+                ),
+            };
+            let modifiers = self.raw_input.modifiers;
+            self.raw_input.events.push(egui::Event::MouseWheel {
+                unit,
+                delta,
+                modifiers,
+            });
+        }
+        let delta = match delta {
+            winit::event::MouseScrollDelta::LineDelta(x, y) => {
+                let points_per_scroll_line = 50.0; // Scroll speed decided by consensus: https://github.com/emilk/egui/issues/461
+                egui::vec2(x, y) * points_per_scroll_line
+            }
+            winit::event::MouseScrollDelta::PixelDelta(delta) => {
+                egui::vec2(delta.x as f32, delta.y as f32) / pixels_per_point
+            }
+        };
+
+        if self.raw_input.modifiers.ctrl || self.raw_input.modifiers.command {
+            // Treat as zoom instead:
+            let factor = (delta.y / 200.0).exp();
+            self.raw_input.events.push(egui::Event::Zoom(factor));
+        } else if self.raw_input.modifiers.shift {
+            // Treat as horizontal scrolling.
+            // Note: one Mac we already get horizontal scroll events when shift is down.
+            self.raw_input
+                .events
+                .push(egui::Event::Scroll(egui::vec2(delta.x + delta.y, 0.0)));
+        } else {
+            self.raw_input.events.push(egui::Event::Scroll(delta));
+        }
+    }
+
+    fn on_keyboard_input(&self, event: &winit::event::KeyEvent) {}
+
+    fn on_cursor_moved(
+        &mut self,
+        window: &Window,
+        pos_in_pixels: winit::dpi::PhysicalPosition<f64>,
+    ) {
+        let pixels_per_point = self.pixels_per_point;
+
+        let pos_in_points = egui::pos2(
+            pos_in_pixels.x as f32 / pixels_per_point,
+            pos_in_pixels.y as f32 / pixels_per_point,
+        );
+        self.pointer_pos_in_points = Some(pos_in_points);
+
+        self.raw_input
+            .events
+            .push(egui::Event::PointerMoved(pos_in_points));
+    }
+
+    fn on_touch(&self, window: &Window, touch: &Touch) {}
+
+    fn take_input(&mut self, window: &Window, time: &Time) -> RawInput {
+        let mut input = self.raw_input.take();
+        input.time = Some(time.since_app_start() as f64);
+
+        let screen_size_pixels = window.inner_size().cast::<f32>();
+        let screen_size_pixels = Vec2 {
+            x: screen_size_pixels.width,
+            y: screen_size_pixels.height,
+        };
+        let screen_size_points = screen_size_pixels / self.pixels_per_point;
+
+        input.screen_rect = (screen_size_pixels.x > 0.0 && screen_size_pixels.y > 0.0)
+            .then(|| Rect::from_min_size(Pos2::ZERO, screen_size_points));
+
+        // input.viewport_id = self.viewport_id;
+        // input
+        //     .viewports
+        //     .entry(self.viewport_id)
+        //     .or_default()
+        //     .native_pixels_per_point = Some(window.scale_factor() as f32);
+
+        input
+    }
+}
+
+fn translate_mouse_button(button: winit::event::MouseButton) -> Option<egui::PointerButton> {
+    match button {
+        winit::event::MouseButton::Left => Some(egui::PointerButton::Primary),
+        winit::event::MouseButton::Right => Some(egui::PointerButton::Secondary),
+        winit::event::MouseButton::Middle => Some(egui::PointerButton::Middle),
+        winit::event::MouseButton::Back => Some(egui::PointerButton::Extra1),
+        winit::event::MouseButton::Forward => Some(egui::PointerButton::Extra2),
+        winit::event::MouseButton::Other(_) => None,
+    }
+}
+
+fn parse_input_modifiers(input_state: &InputState) -> egui::Modifiers {
+    todo!()
 }
 
 fn free_texture(gpu: &dyn Gpu, egui_texture: &EguiTexture) {

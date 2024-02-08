@@ -9,8 +9,8 @@ edition = "2021"
 ash = { version = "0.37.*", features = ["linked"] }
 bitflags = "2.*"
 log = "0.4.*"
-raw-window-handle = "0.5.0"
-winit = "0.28.*"
+raw-window-handle = "0.6.0"
+winit = "0.29.*"
 ash-window = "0.12.*"
 anyhow = { version = "1.0.*", features = ["backtrace"] }
 thiserror = "1.0.*"

@@ -59,6 +59,7 @@ pub fn init(app_name: &str, window: winit::window::Window) -> anyhow::Result<App
         app_name,
         enable_debug_utilities,
         pipeline_cache_path: Some("pipeline_cache.pso"),
+
         window: Some(&window),
     })?;
     let swapchain = gpu

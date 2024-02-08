@@ -100,6 +100,7 @@ pub(crate) struct GraphicsPipelineState2 {
     pub(crate) color_output_enabled: bool,
     pub(crate) color_attachments: Vec<ColorAttachment>,
     pub(crate) depth_format: vk::Format,
+    pub(crate) blend_states: Vec<PipelineColorBlendAttachmentState>,
 }
 
 impl GraphicsPipelineState2 {
@@ -1078,10 +1079,16 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
 
     fn set_color_attachment_blend_state(
         &mut self,
-        _attachment: usize,
-        _blend_state: PipelineColorBlendAttachmentState,
+        attachment: usize,
+        blend_state: PipelineColorBlendAttachmentState,
     ) {
-        todo!()
+        if self.pipeline_state.blend_states.len() <= attachment {
+            self.pipeline_state
+                .blend_states
+                .resize(attachment + 1, PipelineColorBlendAttachmentState::default());
+        }
+
+        self.pipeline_state.blend_states[attachment] = blend_state;
     }
 
     fn set_early_discard_enabled(&mut self, allow_early_discard: bool) {

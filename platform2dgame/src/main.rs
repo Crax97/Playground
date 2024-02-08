@@ -53,8 +53,7 @@ fn main() -> anyhow::Result<()> {
         .add_systems(camera_system.after(player_movement_system));
     app.post_update_schedule().add_systems(collision_checking);
 
-    let plugin =
-        EditorPluginBuilder::new().build(&app.state.gpu, app.state.swapchain(), &mut app.app);
+    let plugin = EditorPluginBuilder::new().build(app.state.gpu(), &mut app.app);
     app.add_plugin::<EditorPlugin>(plugin);
 
     app.world().insert_resource(GameState::default());

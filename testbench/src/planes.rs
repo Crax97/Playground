@@ -112,8 +112,7 @@ impl App for PlanesApp {
             }],
         };
 
-        let egui_integration =
-            EguiSupport::new(&app_state.window, &app_state.gpu, &app_state.swapchain)?;
+        let egui_integration = EguiSupport::new(&app_state.window, app_state.gpu())?;
         let mesh = Mesh::new(app_state.gpu(), &mesh_data)?;
         let mesh = resource_map.add(mesh);
 

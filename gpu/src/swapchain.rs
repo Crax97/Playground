@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::ffi::CString;
 use std::{num::NonZeroU32, ptr::addr_of, sync::Arc};
 
+use ash::extensions::khr;
 use ash::vk::{DebugUtilsObjectNameInfoEXT, Handle};
 use ash::{
     extensions::khr::Surface,
@@ -13,10 +14,9 @@ use ash::{
         SwapchainCreateFlagsKHR, SwapchainCreateInfoKHR, SwapchainKHR,
     },
 };
+use ash::{Entry, Instance};
 use log::{info, trace, warn};
-use raw_window_handle::{
-    HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle, RawWindowHandle,
-};
+use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use winit::window::Window;
 
 use crate::swapchain_2::Impl;
@@ -110,8 +110,8 @@ impl VkSwapchain {
                 next_image_fence,
                 current_frame: Cell::new(0),
                 state,
-                window_handle: window.raw_window_handle(),
-                display_handle: window.raw_display_handle(),
+                window_handle: window.window_handle().unwrap().as_raw(),
+                display_handle: window.display_handle().unwrap().as_raw(),
             };
 
             me.recreate_swapchain()?;
@@ -335,6 +335,84 @@ impl VkSwapchain {
             self.surface_capabilities.max_image_extent.height
         );
     }
+    pub unsafe fn create_surface(
+        entry: &Entry,
+        instance: &Instance,
+        display_handle: RawDisplayHandle,
+        window_handle: RawWindowHandle,
+        allocation_callbacks: Option<&vk::AllocationCallbacks>,
+    ) -> VkResult<vk::SurfaceKHR> {
+        match (display_handle, window_handle) {
+            (RawDisplayHandle::Windows(_), RawWindowHandle::Win32(window)) => {
+                let surface_desc = vk::Win32SurfaceCreateInfoKHR::builder()
+                    .hinstance(std::mem::transmute(window.hinstance.unwrap()))
+                    .hwnd(std::mem::transmute(window.hwnd));
+                let surface_fn = khr::Win32Surface::new(entry, instance);
+                surface_fn.create_win32_surface(&surface_desc, allocation_callbacks)
+            }
+
+            (RawDisplayHandle::Wayland(display), RawWindowHandle::Wayland(window)) => {
+                let surface_desc = vk::WaylandSurfaceCreateInfoKHR::builder()
+                    .display(display.display.as_ptr())
+                    .surface(window.surface.as_ptr());
+                let surface_fn = khr::WaylandSurface::new(entry, instance);
+                surface_fn.create_wayland_surface(&surface_desc, allocation_callbacks)
+            }
+
+            (RawDisplayHandle::Xlib(display), RawWindowHandle::Xlib(window)) => {
+                let surface_desc = vk::XlibSurfaceCreateInfoKHR::builder()
+                    .dpy(display.display.unwrap().as_ptr() as *mut _)
+                    .window(window.window);
+                let surface_fn = khr::XlibSurface::new(entry, instance);
+                surface_fn.create_xlib_surface(&surface_desc, allocation_callbacks)
+            }
+
+            (RawDisplayHandle::Xcb(display), RawWindowHandle::Xcb(window)) => {
+                let surface_desc = vk::XcbSurfaceCreateInfoKHR::builder()
+                    .connection(display.connection.unwrap().as_mut())
+                    .window(window.window.get());
+                let surface_fn = khr::XcbSurface::new(entry, instance);
+                surface_fn.create_xcb_surface(&surface_desc, allocation_callbacks)
+            }
+
+            (RawDisplayHandle::Android(_), RawWindowHandle::AndroidNdk(window)) => {
+                let surface_desc = vk::AndroidSurfaceCreateInfoKHR::builder()
+                    .window(window.a_native_window.as_ptr());
+                let surface_fn = khr::AndroidSurface::new(entry, instance);
+                surface_fn.create_android_surface(&surface_desc, allocation_callbacks)
+            }
+
+            #[cfg(target_os = "macos")]
+            (RawDisplayHandle::AppKit(_), RawWindowHandle::AppKit(window)) => {
+                use raw_window_metal::{appkit, Layer};
+
+                let layer = match appkit::metal_layer_from_handle(window) {
+                    Layer::Existing(layer) | Layer::Allocated(layer) => layer as *mut _,
+                    Layer::None => return Err(vk::Result::ERROR_INITIALIZATION_FAILED),
+                };
+
+                let surface_desc = vk::MetalSurfaceCreateInfoEXT::builder().layer(&*layer);
+                let surface_fn = ext::MetalSurface::new(entry, instance);
+                surface_fn.create_metal_surface(&surface_desc, allocation_callbacks)
+            }
+
+            #[cfg(target_os = "ios")]
+            (RawDisplayHandle::UiKit(_), RawWindowHandle::UiKit(window)) => {
+                use raw_window_metal::{uikit, Layer};
+
+                let layer = match uikit::metal_layer_from_handle(window) {
+                    Layer::Existing(layer) | Layer::Allocated(layer) => layer as *mut _,
+                    Layer::None => return Err(vk::Result::ERROR_INITIALIZATION_FAILED),
+                };
+
+                let surface_desc = vk::MetalSurfaceCreateInfoEXT::builder().layer(&*layer);
+                let surface_fn = ext::MetalSurface::new(entry, instance);
+                surface_fn.create_metal_surface(&surface_desc, allocation_callbacks)
+            }
+
+            _ => Err(vk::Result::ERROR_EXTENSION_NOT_PRESENT),
+        }
+    }
 
     fn drop_swapchain_structs(&self) {
         unsafe {
@@ -391,7 +469,7 @@ impl swapchain_2::Impl for VkSwapchain {
         };
 
         self.surface = unsafe {
-            ash_window::create_surface(
+            Self::create_surface(
                 &self.state.entry,
                 &self.state.instance,
                 self.display_handle,

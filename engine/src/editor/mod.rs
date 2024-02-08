@@ -3,7 +3,7 @@ mod entity_outliner;
 
 pub mod ui_extension;
 
-use std::{any::TypeId, sync::Arc};
+use std::any::TypeId;
 
 pub use editor_ui::EditorUi;
 
@@ -20,7 +20,7 @@ use crate::{
     app::{app_state::AppState, egui_support::EguiSupport},
     components::{DebugName, EngineWindow, Transform2D},
     physics::{Collider2DHandle, RigidBody2DHandle},
-    AppTypeRegistry, BevyEcsApp, Plugin,
+    AppTypeRegistry, BevyEcsApp, Plugin, Time,
 };
 
 use self::entity_outliner::EntityOutliner;
@@ -80,23 +80,13 @@ impl EditorPluginBuilder {
         self
     }
 
-    pub fn build(
-        self,
-        gpu: &Arc<dyn Gpu>,
-        swapchain: &Swapchain,
-        app: &mut BevyEcsApp,
-    ) -> EditorPlugin {
-        EditorPlugin::new(gpu, swapchain, app, self)
+    pub fn build(self, gpu: &dyn Gpu, app: &mut BevyEcsApp) -> EditorPlugin {
+        EditorPlugin::new(gpu, app, self)
     }
 }
 
 impl EditorPlugin {
-    fn new(
-        gpu: &Arc<dyn Gpu>,
-        swapchain: &Swapchain,
-        app: &mut crate::BevyEcsApp,
-        builder: EditorPluginBuilder,
-    ) -> Self {
+    fn new(gpu: &dyn Gpu, app: &mut crate::BevyEcsApp, builder: EditorPluginBuilder) -> Self {
         let window = app.world.get_resource::<EngineWindow>().unwrap();
 
         let egui_support = EguiSupport::new(window, gpu).unwrap();
@@ -126,17 +116,25 @@ impl Plugin for EditorPlugin {
     ) {
         self.egui_support.swapchain_updated(&app_state.swapchain)
     }
-    fn on_event(&mut self, _world: &mut World, event: &winit::event::Event<()>) {
+    fn on_event(
+        &mut self,
+        app_state: &AppState,
+        _world: &mut World,
+        event: &winit::event::Event<()>,
+    ) {
         match event {
             winit::event::Event::WindowEvent { event, .. } => {
-                let _ = self.egui_support.handle_event(event);
+                let _ = self
+                    .egui_support
+                    .handle_window_event(&app_state.window, event);
             }
             _ => {}
         }
     }
     fn pre_update(&mut self, world: &mut World) {
         let window = world.get_resource::<EngineWindow>().unwrap();
-        self.egui_support.begin_frame(window);
+        let time = world.get_resource::<Time>().unwrap();
+        self.egui_support.begin_frame(window, time);
         egui::Window::new("Important message!").show(&self.ui_context, |ui| {
             ui.label("Hiiiiii");
             ui.text_edit_singleline(&mut self.test);

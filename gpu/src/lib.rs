@@ -415,7 +415,7 @@ pub enum ImageLayout {
     PresentSrc,
 }
 
-#[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug)]
+#[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Default, Debug)]
 pub struct PipelineColorBlendAttachmentState {
     pub blend_enable: bool,
     pub src_color_blend_factor: BlendMode,
