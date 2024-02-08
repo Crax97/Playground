@@ -1,7 +1,7 @@
 use engine_macros::*;
 use gpu::{
-    Binding, BufferCreateInfo, BufferUsageFlags, Gpu, GpuConfiguration, MemoryDomain, QueueType,
-    ShaderModuleCreateInfo, ShaderStage, VkGpu,
+    make_gpu, Binding, BufferCreateInfo, BufferUsageFlags, GpuConfiguration, MemoryDomain,
+    QueueType, ShaderModuleCreateInfo, ShaderStage,
 };
 use std::mem::{size_of, size_of_val};
 
@@ -32,7 +32,7 @@ fn main() -> anyhow::Result<()> {
         env_logger::init();
     }
 
-    let gpu = VkGpu::new(GpuConfiguration {
+    let gpu = make_gpu(GpuConfiguration {
         app_name: "compute sample",
         pipeline_cache_path: None,
         enable_debug_utilities: true,
@@ -42,11 +42,6 @@ fn main() -> anyhow::Result<()> {
     let compute_module = gpu.make_shader_module(&ShaderModuleCreateInfo {
         label: Some("Compute sum"),
         code: bytemuck::cast_slice(COMPUTE_SUM),
-    })?;
-
-    let wait_fence = gpu.make_fence(&gpu::FenceCreateInfo {
-        flags: gpu::FenceCreateFlags::empty(),
-        label: Some("wait fence"),
     })?;
 
     let output_buffer = gpu.make_buffer(
@@ -99,11 +94,6 @@ fn main() -> anyhow::Result<()> {
 
         compute_pass.dispatch(1, 1, 1);
     }
-
-    gpu.wait_for_fences(&[&wait_fence], true, 10000000)
-        .expect("Fence not triggered!");
-
-    gpu.wait_queue_idle(QueueType::Graphics)?;
 
     let output: u32 =
         bytemuck::cast_slice(&gpu.read_buffer(&output_buffer, 0, std::mem::size_of::<u32>())?)[0];

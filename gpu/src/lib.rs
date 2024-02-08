@@ -1,27 +1,17 @@
-mod allocator;
-mod command_buffer;
-mod gpu;
+mod vulkan;
+
 mod gpu_resource_manager;
 mod handle;
-mod swapchain;
-mod types;
-mod vk;
-mod vk_staging_buffer;
-
-pub use crate::gpu::*;
-pub use allocator::*;
 pub use bitflags::bitflags;
-pub use command_buffer::*;
-pub use gpu_resource_manager::*;
 pub use handle::*;
 use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::sync::Arc;
-pub use swapchain::VkSwapchain;
-pub use types::*;
 use winit::window::Window;
+
+pub use gpu_resource_manager::*;
 
 pub const WHOLE_SIZE: u64 = u64::MAX;
 pub const QUEUE_FAMILY_IGNORED: u32 = u32::MAX;
@@ -371,9 +361,19 @@ pub trait Gpu: Send + Sync + AsAnyArc + 'static {
 }
 
 pub fn make_gpu(config: GpuConfiguration) -> anyhow::Result<Arc<dyn Gpu>> {
-    Ok(Arc::new(VkGpu::new(config)?))
+    Ok(Arc::new(vulkan::gpu::VkGpu::new(config)?))
 }
 
+bitflags! {
+    #[repr(transparent)]
+    #[derive(Clone, Copy, Debug, Ord, PartialOrd, PartialEq, Eq, Hash)]
+    pub struct MemoryDomain: u32 {
+        const DeviceLocal =     0b00000001;
+        const HostVisible =     0b00000010;
+        const HostCoherent =    0b00000100;
+        const HostCached =      0b00001000;
+    }
+}
 bitflags! {
 #[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Debug, Default)]
     pub struct FenceCreateFlags : u32 {
@@ -415,6 +415,68 @@ pub enum ImageLayout {
     PresentSrc,
 }
 
+#[derive(Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
+pub enum DescriptorBindingType {
+    UniformBuffer {
+        handle: BufferHandle,
+        offset: u64,
+        range: usize,
+    },
+
+    StorageBuffer {
+        handle: BufferHandle,
+        offset: u64,
+        range: usize,
+    },
+    ImageView {
+        image_view_handle: ImageViewHandle,
+        sampler_handle: SamplerHandle,
+        layout: ImageLayout,
+    },
+    InputAttachment {
+        image_view_handle: ImageViewHandle,
+        layout: ImageLayout,
+    },
+}
+
+impl Default for DescriptorBindingType {
+    fn default() -> Self {
+        Self::UniformBuffer {
+            handle: BufferHandle::null(),
+            offset: 0,
+            range: 0,
+        }
+    }
+}
+
+#[derive(Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
+pub enum DescriptorBindingType2 {
+    UniformBuffer {
+        handle: BufferHandle,
+        offset: u64,
+        range: u64,
+    },
+
+    StorageBuffer {
+        handle: BufferHandle,
+        offset: u64,
+        range: u64,
+    },
+    ImageView {
+        image_view_handle: ImageViewHandle,
+        sampler_handle: SamplerHandle,
+    },
+}
+
+impl Default for DescriptorBindingType2 {
+    fn default() -> Self {
+        Self::UniformBuffer {
+            handle: BufferHandle::null(),
+            offset: 0,
+            range: 0,
+        }
+    }
+}
 #[derive(Clone, Copy, Hash, Eq, Ord, PartialOrd, PartialEq, Default, Debug)]
 pub struct PipelineColorBlendAttachmentState {
     pub blend_enable: bool,
@@ -993,15 +1055,6 @@ pub enum QueueType {
     AsyncCompute,
     Transfer,
 }
-impl QueueType {
-    fn get_vk_queue_index(&self, families: &QueueFamilies) -> u32 {
-        match self {
-            QueueType::Graphics => families.graphics_family.index,
-            QueueType::AsyncCompute => families.async_compute_family.index,
-            QueueType::Transfer => families.transfer_family.index,
-        }
-    }
-}
 
 #[derive(Clone, Hash)]
 pub struct BufferRange {
@@ -1139,15 +1192,6 @@ pub enum FrontFace {
 pub enum InputRate {
     PerVertex,
     PerInstance,
-}
-impl ToVk for InputRate {
-    type Inner = ash::vk::VertexInputRate;
-    fn to_vk(&self) -> ash::vk::VertexInputRate {
-        match self {
-            InputRate::PerVertex => Self::Inner::VERTEX,
-            InputRate::PerInstance => Self::Inner::INSTANCE,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Hash)]

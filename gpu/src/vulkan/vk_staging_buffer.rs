@@ -6,7 +6,7 @@ use ash::vk::{
     PhysicalDevice,
 };
 
-use crate::get_allocation_callbacks;
+use super::get_allocation_callbacks;
 
 pub enum BufferOperation {
     CopyBuffer {

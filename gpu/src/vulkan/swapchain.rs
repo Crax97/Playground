@@ -21,12 +21,14 @@ use winit::window::Window;
 
 use crate::swapchain_2::Impl;
 use crate::{
-    get_allocation_callbacks, swapchain_2, Extent2D, Gpu, ImageAspectFlags, ImageFormat,
-    ImageHandle, ImageSubresourceRange, ImageViewHandle, PresentMode, ToVk, VkGpu, VkImage,
-    VkImageView, VkImageViewFlags,
+    swapchain_2, Extent2D, Gpu, ImageAspectFlags, ImageFormat, ImageHandle, ImageSubresourceRange,
+    ImageViewHandle, PresentMode,
 };
 
-use super::GpuThreadSharedState;
+use self::gpu::VkGpu;
+
+use super::gpu::GpuThreadSharedState;
+use crate::vulkan::*;
 
 mod util {
     use ash::vk::{PresentModeKHR, SurfaceFormatKHR};

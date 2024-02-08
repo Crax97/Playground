@@ -18,7 +18,7 @@ use ash::{
         DebugUtilsMessengerCreateFlagsEXT, DebugUtilsMessengerCreateInfoEXT,
         DebugUtilsObjectNameInfoEXT, DependencyInfo, DescriptorBufferInfo, DescriptorImageInfo,
         DeviceCreateFlags, DeviceCreateInfo, DeviceQueueCreateFlags, DeviceQueueCreateInfo,
-        Extent3D, FormatFeatureFlags, Handle, ImageCreateFlags, ImageTiling, ImageType,
+        Extent3D, FormatFeatureFlags, ImageCreateFlags, ImageTiling, ImageType,
         ImageViewCreateFlags, InstanceCreateFlags, InstanceCreateInfo, MemoryHeap, MemoryHeapFlags,
         PhysicalDevice, PhysicalDeviceFeatures, PhysicalDeviceProperties, PhysicalDeviceType,
         PipelineCacheCreateFlags, Queue, QueueFlags, ShaderModuleCreateFlags, SharingMode,
@@ -39,39 +39,33 @@ use ash::{
     vk::{PipelineBindPoint, SubpassDescriptionFlags},
 };
 
+use crate::{
+    gpu_resource_manager::{lifetime_cache_constants, quick_hash, GpuResourceMap},
+    vulkan::*,
+    AccessFlags, BeginRenderPassInfo, BlendMode, BlendOp, BufferCreateInfo, BufferHandle,
+    BufferImageCopyInfo, ColorComponentFlags, CommandBuffer, CommandPoolCreateFlags,
+    CommandPoolCreateInfo, DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2,
+    DescriptorSetState, Extent2D, FenceHandle, Gpu, GpuConfiguration, HandleType, ImageCreateInfo,
+    ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
+    ImageViewCreateInfo, ImageViewHandle, LogicOp, MemoryDomain, Offset2D, PipelineBarrierInfo,
+    PipelineColorBlendAttachmentState, PipelineStageFlags, PushConstantBlockDescription, QueueType,
+    Rect2D, RenderPassAttachments, SampleCount, SamplerCreateInfo, SamplerHandle, SemaphoreHandle,
+    ShaderAttribute, ShaderModuleCreateInfo, ShaderModuleHandle, Swapchain, TransitionInfo,
+    UniformVariableDescription,
+};
+
+use crate::Handle;
+
 use log::{debug, error, info, trace, warn};
 use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 use thiserror::Error;
 use winit::window::Window;
 
 use crate::{
-    command_buffer_2::CommandBuffer,
-    get_allocation_callbacks, lifetime_cache_constants, quick_hash,
-    vk::render_graph::{RenderGraph, RenderGraphExecutionContext},
-    vk_staging_buffer::VkStagingBuffer,
-    BeginRenderPassInfo, BlendMode, BlendOp, BufferCreateInfo, BufferHandle, BufferImageCopyInfo,
-    ColorComponentFlags, CommandPoolCreateFlags, CommandPoolCreateInfo, ComputePipelineState,
-    DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2, DescriptorSetState,
-    Extent2D, FenceHandle, Gpu, GpuConfiguration, GpuResourceMap, GraphicsPipelineState2,
-    GraphicsPipelineTraditional, Handle as GpuHandle, HandleType, ImageCreateInfo, ImageFormat,
-    ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
-    ImageViewHandle, LogicOp, Offset2D, PipelineBarrierInfo, PipelineColorBlendAttachmentState,
-    PipelineStageFlags, PushConstantBlockDescription, QueueType, Rect2D, RenderPassAttachments,
-    SampleCount, SamplerCreateInfo, SamplerHandle, SemaphoreHandle, ShaderAttribute,
-    ShaderModuleCreateInfo, ShaderModuleHandle, SubpassDescription, Swapchain, ToVk,
-    TransitionInfo, UniformVariableDescription, VkCommandBuffer, VkCommandPool, VkFence,
-    VkImageView, VkImageViewFlags, VkSemaphore, VkShaderModule, VkSwapchain,
-};
-use crate::{
     gpu_resource_manager::{
         utils::associate_to_handle, AllocatedResourceMap, HasAssociatedHandle, LifetimedCache,
     },
     ShaderInfo,
-};
-
-use super::{
-    allocator::{GpuAllocator, PasstroughAllocator},
-    AccessFlags, AllocationRequirements, MemoryDomain, VkBuffer, VkImage, VkSampler,
 };
 
 const KHRONOS_VALIDATION_LAYER: &str = "VK_LAYER_KHRONOS_validation";
@@ -95,6 +89,15 @@ impl GpuDescription {
         let name = name.to_owned();
 
         Self { name }
+    }
+}
+impl QueueType {
+    pub(crate) fn get_vk_queue_index(&self, families: &QueueFamilies) -> u32 {
+        match self {
+            QueueType::Graphics => families.graphics_family.index,
+            QueueType::AsyncCompute => families.async_compute_family.index,
+            QueueType::Transfer => families.transfer_family.index,
+        }
     }
 }
 
@@ -230,118 +233,14 @@ impl GpuThreadSharedState {
     ) -> T {
         self.allocated_resources().resolve(source)
     }
-
-    #[allow(dead_code)]
-    fn create_graphics_pipeline(
+    pub(crate) fn get_graphics_pipeline_dynamic(
         &self,
-        pipeline_state: &GraphicsPipelineTraditional,
-        render_pass: vk::RenderPass,
-        subpass_description: &SubpassDescription,
+        pipeline_state: &GraphicsPipelineState2,
         layout: vk::PipelineLayout,
     ) -> vk::Pipeline {
-        assert!(pipeline_state.vertex_shader.is_valid());
-        assert!(render_pass != vk::RenderPass::null());
-        let mut stages = vec![];
-        let main_name = std::ffi::CString::new("main").unwrap();
-        let vertex_shader = self.resolve_resource::<VkShaderModule>(&pipeline_state.vertex_shader);
-        stages.push(vk::PipelineShaderStageCreateInfo {
-            s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::PipelineShaderStageCreateFlags::empty(),
-            stage: vk::ShaderStageFlags::VERTEX,
-            module: vertex_shader.inner,
-            p_name: main_name.as_ptr(),
-            p_specialization_info: std::ptr::null(),
-        });
-        if !pipeline_state.fragment_shader.is_null() {
-            let fragment_shader =
-                self.resolve_resource::<VkShaderModule>(&pipeline_state.fragment_shader);
-            stages.push(vk::PipelineShaderStageCreateInfo {
-                s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
-                p_next: std::ptr::null(),
-                flags: vk::PipelineShaderStageCreateFlags::empty(),
-                stage: vk::ShaderStageFlags::FRAGMENT,
-                module: fragment_shader.inner,
-                p_name: main_name.as_ptr(),
-                p_specialization_info: std::ptr::null(),
-            });
-        }
-
-        let mut color_attachments = vec![];
-        for subpass in &subpass_description.color_attachments {
-            color_attachments
-                .push(pipeline_state.color_blend_states[subpass.attachment as usize].to_vk());
-        }
-
-        let (vertex_input_bindings, vertex_attribute_descriptions) =
-            pipeline_state.get_vertex_inputs_description();
-
-        let vertex_input_state = vk::PipelineVertexInputStateCreateInfo {
-            s_type: StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::PipelineVertexInputStateCreateFlags::empty(),
-            vertex_binding_description_count: vertex_input_bindings.len() as _,
-            p_vertex_binding_descriptions: vertex_input_bindings.as_ptr() as *const _,
-            vertex_attribute_description_count: vertex_attribute_descriptions.len() as _,
-            p_vertex_attribute_descriptions: vertex_attribute_descriptions.as_ptr() as *const _,
-        };
-
-        let input_assembly_state = pipeline_state.input_assembly_state();
-        let rasterization_state = pipeline_state.rasterization_state();
-        let multisample_state = pipeline_state.multisample_state();
-        let depth_stencil_state = pipeline_state.depth_stencil_state();
-        let color_blend_state = vk::PipelineColorBlendStateCreateInfo {
-            s_type: StructureType::PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::PipelineColorBlendStateCreateFlags::empty(),
-            logic_op_enable: false.to_vk(),
-            logic_op: LogicOp::Clear.to_vk(),
-            attachment_count: color_attachments.len() as _,
-            p_attachments: color_attachments.as_ptr(),
-            blend_constants: [0.0; 4],
-        };
-        let viewport_state = vk::PipelineViewportStateCreateInfo {
-            s_type: StructureType::PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::PipelineViewportStateCreateFlags::empty(),
-            viewport_count: 1,
-            p_viewports: std::ptr::null(),
-            scissor_count: 1,
-            p_scissors: std::ptr::null(),
-        };
-        let dynamic_state = pipeline_state.dynamic_state();
-
-        let create_info = vk::GraphicsPipelineCreateInfo {
-            s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::PipelineCreateFlags::empty(),
-            stage_count: stages.len() as _,
-            p_stages: stages.as_ptr() as *const _,
-            p_vertex_input_state: addr_of!(vertex_input_state),
-            p_input_assembly_state: addr_of!(input_assembly_state),
-            p_tessellation_state: std::ptr::null(),
-            p_viewport_state: addr_of!(viewport_state), // It's part of the dynamic state
-            p_rasterization_state: addr_of!(rasterization_state),
-            p_multisample_state: addr_of!(multisample_state),
-            p_depth_stencil_state: addr_of!(depth_stencil_state),
-            p_color_blend_state: addr_of!(color_blend_state),
-            p_dynamic_state: addr_of!(dynamic_state),
-            layout,
-            render_pass,
-            subpass: pipeline_state.current_subpass as _,
-            base_pipeline_handle: vk::Pipeline::null(),
-            base_pipeline_index: 0,
-        };
-        let pipeline = unsafe {
-            self.logical_device.create_graphics_pipelines(
-                self.vk_pipeline_cache,
-                &[create_info],
-                get_allocation_callbacks(),
-            )
-        }
-        .expect("Failed to create pipelines");
-        info!("Created a new graphics pipeline");
-        pipeline[0]
+        self.graphics_pipeline_cache.get(&pipeline_state, || {
+            self.create_graphics_pipeline_dynamic(pipeline_state, layout)
+        })
     }
     fn create_graphics_pipeline_dynamic(
         &self,
@@ -487,28 +386,6 @@ impl GpuThreadSharedState {
         pipeline[0]
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn get_graphics_pipeline(
-        &self,
-        pipeline_state: &GraphicsPipelineTraditional,
-        layout: vk::PipelineLayout,
-        render_pass: vk::RenderPass,
-        subpass_description: &SubpassDescription,
-    ) -> vk::Pipeline {
-        self.graphics_pipeline_cache.get(&pipeline_state, || {
-            self.create_graphics_pipeline(pipeline_state, render_pass, subpass_description, layout)
-        })
-    }
-    pub(crate) fn get_graphics_pipeline_dynamic(
-        &self,
-        pipeline_state: &GraphicsPipelineState2,
-        layout: vk::PipelineLayout,
-    ) -> vk::Pipeline {
-        self.graphics_pipeline_cache.get(&pipeline_state, || {
-            self.create_graphics_pipeline_dynamic(pipeline_state, layout)
-        })
-    }
-
     fn create_compute_pipeline(
         &self,
         pipeline_state: &ComputePipelineState,
@@ -550,7 +427,7 @@ impl GpuThreadSharedState {
 
     pub(crate) fn get_compute_pipeline(
         &self,
-        pipeline_state: &crate::ComputePipelineState,
+        pipeline_state: &ComputePipelineState,
         layout: vk::PipelineLayout,
     ) -> vk::Pipeline {
         self.compute_pipeline_cache.get(pipeline_state, || {
@@ -887,7 +764,7 @@ impl GpuThreadSharedState {
                                 s_type: StructureType::DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                                 p_next: std::ptr::null(),
                                 object_type: vk::ObjectType::RENDER_PASS,
-                                object_handle: render_pass.as_raw(),
+                                object_handle: vk::Handle::as_raw(render_pass),
                                 p_object_name: object_c_name.as_ptr(),
                             },
                         )
@@ -1357,7 +1234,7 @@ impl VkGpu {
                             s_type: DebugUtilsObjectNameInfoEXT::STRUCTURE_TYPE,
                             p_next: std::ptr::null(),
                             object_type: ObjectType::COMMAND_BUFFER,
-                            object_handle: primary_graphics_command_buffer.as_raw(),
+                            object_handle: vk::Handle::as_raw(primary_graphics_command_buffer),
                             p_object_name: graphics_name.as_ptr(),
                         },
                     )?;
@@ -1368,7 +1245,7 @@ impl VkGpu {
                             s_type: DebugUtilsObjectNameInfoEXT::STRUCTURE_TYPE,
                             p_next: std::ptr::null(),
                             object_type: ObjectType::COMMAND_BUFFER,
-                            object_handle: primary_transfer_command_buffer.as_raw(),
+                            object_handle: vk::Handle::as_raw(primary_transfer_command_buffer),
                             p_object_name: transfer_name.as_ptr(),
                         },
                     )?;
@@ -1379,7 +1256,7 @@ impl VkGpu {
                             s_type: DebugUtilsObjectNameInfoEXT::STRUCTURE_TYPE,
                             p_next: std::ptr::null(),
                             object_type: ObjectType::COMMAND_BUFFER,
-                            object_handle: primary_async_compute_command_buffer.as_raw(),
+                            object_handle: vk::Handle::as_raw(primary_async_compute_command_buffer),
                             p_object_name: compute_name.as_ptr(),
                         },
                     )?;
@@ -2236,7 +2113,7 @@ impl VkGpu {
         VkBuffer::create(create_info.label, buffer, memory_domain, allocation)
     }
 
-    fn set_object_debug_name<T: Handle>(
+    fn set_object_debug_name<T: ash::vk::Handle>(
         &self,
         label: Option<&str>,
         object: T,
@@ -2439,7 +2316,7 @@ impl VkGpu {
     pub fn transition_image_layout_in_command_buffer(
         &self,
         image: ImageHandle,
-        command_buffer: &mut crate::VkCommandBuffer,
+        command_buffer: &mut VkCommandBuffer,
         old_layout: TransitionInfo,
         new_layout: TransitionInfo,
         subresource_range: ImageSubresourceRange,
@@ -3029,7 +2906,7 @@ impl Gpu for VkGpu {
                             s_type: StructureType::DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
                             p_next: std::ptr::null(),
                             object_type: vk::ObjectType::IMAGE_VIEW,
-                            object_handle: view.as_raw(),
+                            object_handle: vk::Handle::as_raw(view.inner),
                             p_object_name: c_label.as_ptr(),
                         },
                     )?

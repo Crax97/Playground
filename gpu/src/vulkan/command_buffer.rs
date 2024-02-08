@@ -8,11 +8,15 @@ use ash::vk::{
 };
 use ash::{extensions::ext::DebugUtils, prelude::VkResult};
 
-use crate::vk::render_graph::{
+use crate::vulkan::render_graph::{
     self, AttachmentMode, DrawCommand, DrawCommandType, DynamicState, GraphicsPassInfo,
     GraphicsSubpass, IndexBuffer, PushConstant, RenderGraphImage, ShaderInput, VertexBuffer,
 };
+
+use crate::vulkan::*;
 use crate::*;
+
+use super::gpu::GpuThreadSharedState;
 
 struct VkCommandBufferState {
     inner_command_buffer: vk::CommandBuffer,
@@ -98,7 +102,7 @@ pub(crate) struct GraphicsPipelineState2 {
     pub(crate) primitive_topology: PrimitiveTopology,
     pub(crate) polygon_mode: PolygonMode,
     pub(crate) color_output_enabled: bool,
-    pub(crate) color_attachments: Vec<ColorAttachment>,
+    pub(crate) color_attachments: Vec<crate::ColorAttachment>,
     pub(crate) depth_format: vk::Format,
     pub(crate) blend_states: Vec<PipelineColorBlendAttachmentState>,
 }
@@ -351,69 +355,6 @@ impl GraphicsPipelineTraditional {
             flags: vk::PipelineDynamicStateCreateFlags::empty(),
             dynamic_state_count: DYNAMIC_STATES.len() as _,
             p_dynamic_states: DYNAMIC_STATES.as_ptr() as *const _,
-        }
-    }
-}
-
-#[derive(Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
-pub enum DescriptorBindingType {
-    UniformBuffer {
-        handle: BufferHandle,
-        offset: u64,
-        range: usize,
-    },
-
-    StorageBuffer {
-        handle: BufferHandle,
-        offset: u64,
-        range: usize,
-    },
-    ImageView {
-        image_view_handle: ImageViewHandle,
-        sampler_handle: SamplerHandle,
-        layout: ImageLayout,
-    },
-    InputAttachment {
-        image_view_handle: ImageViewHandle,
-        layout: ImageLayout,
-    },
-}
-
-impl Default for DescriptorBindingType {
-    fn default() -> Self {
-        Self::UniformBuffer {
-            handle: BufferHandle::null(),
-            offset: 0,
-            range: 0,
-        }
-    }
-}
-
-#[derive(Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
-pub enum DescriptorBindingType2 {
-    UniformBuffer {
-        handle: BufferHandle,
-        offset: u64,
-        range: u64,
-    },
-
-    StorageBuffer {
-        handle: BufferHandle,
-        offset: u64,
-        range: u64,
-    },
-    ImageView {
-        image_view_handle: ImageViewHandle,
-        sampler_handle: SamplerHandle,
-    },
-}
-
-impl Default for DescriptorBindingType2 {
-    fn default() -> Self {
-        Self::UniformBuffer {
-            handle: BufferHandle::null(),
-            offset: 0,
-            range: 0,
         }
     }
 }
@@ -900,7 +841,7 @@ pub(crate) struct VkRenderPass2 {
     depth_bias_config: Option<(f32, f32, f32)>,
 
     graphics_pass_info: GraphicsPassInfo,
-    current_color_attachments: Vec<ColorAttachment>,
+    current_color_attachments: Vec<crate::ColorAttachment>,
     uses_depth_attachment: bool,
     current_subpass: usize,
     vertex_offsets: Vec<u64>,

@@ -10,19 +10,9 @@ use ash::{
     vk::{DeviceMemory, MemoryRequirements},
 };
 use ash::{Device, Instance};
-use bitflags::bitflags;
 use log::trace;
 
-bitflags! {
-    #[repr(transparent)]
-    #[derive(Clone, Copy, Debug, Ord, PartialOrd, PartialEq, Eq, Hash)]
-    pub struct MemoryDomain: u32 {
-        const DeviceLocal =     0b00000001;
-        const HostVisible =     0b00000010;
-        const HostCoherent =    0b00000100;
-        const HostCached =      0b00001000;
-    }
-}
+use crate::MemoryDomain;
 
 impl From<MemoryDomain> for MemoryPropertyFlags {
     fn from(domain: MemoryDomain) -> Self {

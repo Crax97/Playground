@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use super::gpu::*;
-use crate::vk::render_graph::AttachmentFlags;
+use crate::vulkan::render_graph::AttachmentFlags;
 use crate::{
     Extent2D, Filter, IndexType, Offset2D, PipelineBindPoint, Rect2D, SamplerAddressMode,
     SamplerCreateInfo, StencilOp, StencilOpState, *,
@@ -14,7 +14,7 @@ use ash::{
     vk::{self, AllocationCallbacks, Buffer, ShaderModuleCreateInfo},
 };
 
-use super::{MemoryAllocation, MemoryDomain};
+use super::MemoryAllocation;
 
 pub fn get_allocation_callbacks() -> Option<&'static AllocationCallbacks> {
     None
@@ -1118,7 +1118,7 @@ impl ToVk for SamplerCreateInfo {
     }
 }
 
-impl ToVk for super::BlendMode {
+impl ToVk for BlendMode {
     type Inner = vk::BlendFactor;
 
     fn to_vk(&self) -> Self::Inner {
@@ -1146,7 +1146,7 @@ impl ToVk for super::BlendMode {
     }
 }
 
-impl ToVk for super::BlendOp {
+impl ToVk for BlendOp {
     type Inner = vk::BlendOp;
 
     fn to_vk(&self) -> Self::Inner {
@@ -1160,7 +1160,7 @@ impl ToVk for super::BlendOp {
     }
 }
 
-impl ToVk for super::ColorComponentFlags {
+impl ToVk for ColorComponentFlags {
     type Inner = vk::ColorComponentFlags;
 
     fn to_vk(&self) -> Self::Inner {
@@ -1173,7 +1173,7 @@ impl ToVk for super::ColorComponentFlags {
     }
 }
 
-impl ToVk for super::AttachmentReference {
+impl ToVk for AttachmentReference {
     type Inner = vk::AttachmentReference;
     fn to_vk(&self) -> Self::Inner {
         Self::Inner {
@@ -1183,18 +1183,18 @@ impl ToVk for super::AttachmentReference {
     }
 }
 
-impl ToVk for super::SampleCount {
+impl ToVk for SampleCount {
     type Inner = vk::SampleCountFlags;
 
     fn to_vk(&self) -> Self::Inner {
         match self {
-            super::SampleCount::Sample1 => Self::Inner::TYPE_1,
-            super::SampleCount::Sample2 => Self::Inner::TYPE_2,
-            super::SampleCount::Sample4 => Self::Inner::TYPE_4,
-            super::SampleCount::Sample8 => Self::Inner::TYPE_8,
-            super::SampleCount::Sample16 => Self::Inner::TYPE_16,
-            super::SampleCount::Sample32 => Self::Inner::TYPE_32,
-            super::SampleCount::Sample64 => Self::Inner::TYPE_64,
+            SampleCount::Sample1 => Self::Inner::TYPE_1,
+            SampleCount::Sample2 => Self::Inner::TYPE_2,
+            SampleCount::Sample4 => Self::Inner::TYPE_4,
+            SampleCount::Sample8 => Self::Inner::TYPE_8,
+            SampleCount::Sample16 => Self::Inner::TYPE_16,
+            SampleCount::Sample32 => Self::Inner::TYPE_32,
+            SampleCount::Sample64 => Self::Inner::TYPE_64,
         }
     }
 }
@@ -1464,5 +1464,14 @@ impl From<VkImageViewFlags> for AttachmentFlags {
         );
 
         result
+    }
+}
+impl ToVk for InputRate {
+    type Inner = ash::vk::VertexInputRate;
+    fn to_vk(&self) -> ash::vk::VertexInputRate {
+        match self {
+            InputRate::PerVertex => Self::Inner::VERTEX,
+            InputRate::PerInstance => Self::Inner::INSTANCE,
+        }
     }
 }

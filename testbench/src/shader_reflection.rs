@@ -54,7 +54,7 @@ void main() {
 );
 
 fn main() -> anyhow::Result<()> {
-    let gpu = VkGpu::new(GpuConfiguration {
+    let gpu = make_gpu(GpuConfiguration {
         app_name: "shader reflection sample",
         pipeline_cache_path: None,
         enable_debug_utilities: true,

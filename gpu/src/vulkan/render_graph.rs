@@ -7,7 +7,8 @@ use ash::{
     vk::{self, ClearColorValue, ClearDepthStencilValue, ClearValue},
 };
 
-use crate::{AttachmentStoreOp, ColorLoadOp, DepthLoadOp, StencilLoadOp, ToVk};
+use crate::vulkan::ToVk;
+use crate::{AttachmentStoreOp, ColorLoadOp, DepthLoadOp, StencilLoadOp};
 
 pub enum DrawCommandType {
     Draw(u32, u32, u32, u32),

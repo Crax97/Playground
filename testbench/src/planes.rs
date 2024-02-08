@@ -250,7 +250,7 @@ impl App for PlanesApp {
     fn draw<'a>(
         &'a mut self,
         app_state: &'a mut AppState,
-        backbuffer: &Backbuffer,
+        _backbuffer: &Backbuffer,
     ) -> anyhow::Result<CommandBuffer> {
         let mut cb = app_state
             .gpu
@@ -299,7 +299,7 @@ impl App for PlanesApp {
         Ok(())
     }
 
-    fn on_shutdown(&mut self, app_state: &mut AppState) {
+    fn on_shutdown(&mut self, _app_state: &mut AppState) {
         todo!()
     }
 }

@@ -19,7 +19,7 @@ use gpu::{
     ImageAspectFlags, ImageCreateInfo, ImageFormat, ImageHandle, ImageSubresourceRange,
     ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, InputRate, MemoryDomain, Offset2D,
     PipelineStageFlags, Rect2D, SamplerCreateInfo, ShaderModuleCreateInfo, ShaderModuleHandle,
-    ShaderStage, VertexBindingInfo, VkGpu,
+    ShaderStage, VertexBindingInfo,
 };
 
 pub fn read_file_to_vk_module<P: AsRef<Path>>(
@@ -41,7 +41,7 @@ pub fn read_file_to_vk_module<P: AsRef<Path>>(
 }
 
 pub fn read_file_to_shader_module<P: AsRef<Path>>(
-    gpu: &VkGpu,
+    gpu: &dyn Gpu,
     path: P,
 ) -> anyhow::Result<ShaderModuleHandle> {
     let path = path
@@ -93,7 +93,7 @@ pub fn load_image_from_path<P: AsRef<Path>>(
 // Loads 6 images from a folders and turns them into a cubemap texture
 // Searches for "left", "right", "up", "down", "front", "back" in the path
 pub fn load_cubemap_from_path<P: AsRef<Path>>(
-    gpu: &VkGpu,
+    gpu: &dyn Gpu,
     path: P,
     extension: &str,
     target_format: ImageFormat,
