@@ -753,27 +753,6 @@ impl VkBuffer {
 
         address.copy_from_slice(data);
     }
-
-    pub fn read<T: Copy + Sized>(&self, offset: u64) -> T {
-        let data_length = std::mem::size_of::<T>();
-        assert!(
-            data_length > 0,
-            "Cannot write on a buffer with 0 data length!"
-        );
-        assert!(offset < self.allocation.size);
-        assert!(data_length as u64 + offset <= self.allocation.size);
-
-        let address = unsafe {
-            self.allocation
-                .persistent_ptr
-                .expect("Tried to write to a buffer without a persistent ptr!")
-                .as_ptr::<T>()
-                .add(offset as _)
-        };
-        let address = unsafe { std::slice::from_raw_parts_mut(address, data_length) };
-
-        address[0]
-    }
 }
 
 impl ToVk for VkBuffer {
@@ -788,7 +767,6 @@ pub struct VkImage {
     pub(super) label: Option<String>,
     pub(super) inner: vk::Image,
     pub(super) allocation: Option<MemoryAllocation>,
-    pub(super) extents: Extent2D,
     pub(super) format: ImageFormat,
 }
 impl std::fmt::Debug for VkImage {
@@ -801,14 +779,12 @@ impl VkImage {
         image: vk::Image,
         label: Option<&str>,
         allocation: MemoryAllocation,
-        extents: Extent2D,
         format: ImageFormat,
     ) -> VkResult<Self> {
         Ok(Self {
             label: label.map(|s| s.to_owned()),
             inner: image,
             allocation: Some(allocation),
-            extents,
             format,
         })
     }
@@ -817,24 +793,14 @@ impl VkImage {
         _device: ash::Device,
         label: Option<&str>,
         inner: vk::Image,
-        extents: Extent2D,
         format: ImageFormat,
     ) -> Self {
         Self {
             inner,
             label: label.map(|s| s.to_owned()),
             allocation: None,
-            extents,
             format,
         }
-    }
-
-    pub fn format(&self) -> ImageFormat {
-        self.format
-    }
-
-    pub fn extents(&self) -> Extent2D {
-        self.extents
     }
 }
 
@@ -858,7 +824,6 @@ pub struct VkImageView {
     pub(super) label: Option<String>,
     pub(super) format: ImageFormat,
     pub(super) owner_image: ImageHandle,
-    pub(super) extents: Extent2D,
     pub(super) flags: VkImageViewFlags,
 }
 
@@ -874,7 +839,6 @@ impl VkImageView {
         create_info: &vk::ImageViewCreateInfo,
         format: ImageFormat,
         owner_image: ImageHandle,
-        extents: Extent2D,
         flags: VkImageViewFlags,
     ) -> VkResult<Self> {
         let inner = {
@@ -887,7 +851,6 @@ impl VkImageView {
             label: label.map(|s| s.to_owned()),
             format,
             owner_image,
-            extents,
             flags,
         })
     }
@@ -903,23 +866,6 @@ impl ToVk for VkImageView {
     type Inner = vk::ImageView;
     fn to_vk(&self) -> Self::Inner {
         self.inner
-    }
-}
-
-impl VkImageView {
-    pub fn inner_image_view(&self) -> vk::ImageView {
-        self.inner
-    }
-    pub fn owner_image_handle(&self) -> ImageHandle {
-        self.owner_image
-    }
-
-    pub fn format(&self) -> ImageFormat {
-        self.format
-    }
-
-    pub fn extents(&self) -> Extent2D {
-        self.extents
     }
 }
 

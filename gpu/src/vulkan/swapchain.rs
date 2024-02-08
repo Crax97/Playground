@@ -228,7 +228,6 @@ impl VkSwapchain {
                     self.state.logical_device.clone(),
                     Some("Swapchain image"),
                     *i,
-                    self.extents(),
                     self.present_format().into(),
                 )
             })
@@ -286,7 +285,6 @@ impl VkSwapchain {
                 &view_info,
                 view_info.format.into(),
                 *image,
-                self.present_extent,
                 VkImageViewFlags::SWAPCHAIN_IMAGE,
             )?;
             if let Some(utilities) = &self.state.debug_utilities {

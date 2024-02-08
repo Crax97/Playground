@@ -23,9 +23,6 @@ struct VkCommandBufferState {
     has_recorded_anything: bool,
     descriptor_state: DescriptorSetState,
     push_constant_data: Vec<Vec<u8>>,
-
-    image_shader_reads: Vec<RenderGraphImage>,
-    image_shader_writes: Vec<RenderGraphImage>,
 }
 
 impl VkCommandBufferState {}
@@ -397,165 +394,12 @@ impl VkCommandBuffer {
                 has_recorded_anything: false,
                 descriptor_state: DescriptorSetState::default(),
                 push_constant_data: vec![],
-                image_shader_reads: vec![],
-                image_shader_writes: vec![],
             })),
         })
     }
 
     pub fn begin_compute_pass(&mut self) -> VkComputePassCommand {
         VkComputePassCommand::new(self)
-    }
-
-    pub fn copy_buffer(
-        &mut self,
-        src_buffer: &VkBuffer,
-        dst_buffer: &VkBuffer,
-        dst_offset: u64,
-        size: usize,
-    ) -> VkResult<()> {
-        self.command_buffer_state.borrow_mut().has_recorded_anything = true;
-        unsafe {
-            self.state.logical_device.cmd_copy_buffer(
-                self.command_buffer_state.borrow().inner_command_buffer,
-                src_buffer.inner,
-                dst_buffer.inner,
-                &[vk::BufferCopy {
-                    src_offset: 0,
-                    dst_offset: dst_offset as _,
-                    size: size as _,
-                }],
-            );
-
-            Ok(())
-        }
-    }
-
-    pub fn copy_buffer_to_image(&mut self, info: &BufferImageCopyInfo) -> VkResult<()> {
-        self.command_buffer_state.borrow_mut().has_recorded_anything = true;
-        let source = self.state.resolve_resource::<VkBuffer>(&info.source).inner;
-        let image = self.state.resolve_resource::<VkImage>(&info.dest).inner;
-        let image_subresource = vk::ImageSubresourceLayers {
-            aspect_mask: ImageAspectFlags::COLOR.to_vk(),
-            mip_level: info.mip_level,
-            layer_count: info.num_layers,
-            base_array_layer: info.base_layer,
-        };
-        unsafe {
-            self.state.logical_device.cmd_copy_buffer_to_image(
-                self.command_buffer_state.borrow().inner_command_buffer,
-                source,
-                image,
-                info.dest_layout.to_vk(),
-                &[vk::BufferImageCopy {
-                    buffer_offset: info.buffer_offset,
-                    buffer_row_length: info.buffer_row_length,
-                    buffer_image_height: info.buffer_image_height,
-                    image_subresource,
-                    image_offset: info.image_offset.to_vk(),
-                    image_extent: info.image_extent.to_vk(),
-                }],
-            );
-        }
-
-        // self.state.mutate_resource::<VkImage, _>(&info.dest, |image| {
-        //     image.layout = info.dest_layout.to_vk();
-        //     image.current_stage_mask = PipelineStageFlags2::TRANSFER;
-        //     image.current_access_mask = AccessFlags2::TRANSFER_WRITE;
-        // });
-
-        Ok(())
-    }
-
-    pub fn push_constants(
-        &mut self,
-        index: u32,
-        offset: u32,
-        data: &[u8],
-        shader_stage: ShaderStage,
-    ) {
-        // Ensure enough push constant range descriptions are allocated
-        let mut state = self.command_buffer_state.borrow_mut();
-        if state.descriptor_state.push_constant_range.len() <= (index as _) {
-            state
-                .descriptor_state
-                .push_constant_range
-                .resize(index as usize + 1, PushConstantRange::default());
-            state.push_constant_data.resize(index as usize + 1, vec![]);
-        }
-
-        state.push_constant_data[index as usize] = data.to_vec();
-
-        state.descriptor_state.push_constant_range[index as usize] = PushConstantRange {
-            stage_flags: shader_stage,
-            offset,
-            size: std::mem::size_of_val(data) as _,
-        }
-    }
-
-    pub fn bind_resources(&mut self, set: u32, bindings: &[Binding]) {
-        let mut state = self.command_buffer_state.borrow_mut();
-        if state.descriptor_state.sets.len() <= (set as _) {
-            state
-                .descriptor_state
-                .sets
-                .resize(set as usize + 1, DescriptorSetInfo2::default());
-        }
-
-        let desc_set = state.descriptor_state.sets.get(set as usize).cloned();
-        if let Some(set) = desc_set {
-            let remove = set
-                .bindings
-                .iter()
-                .filter_map(|b| match b.ty {
-                    DescriptorBindingType::ImageView {
-                        image_view_handle,
-                        layout,
-                        ..
-                    } => Some((image_view_handle, layout)),
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-            for (binding, layout) in remove {
-                if layout == ImageLayout::ShaderReadOnly {
-                    state.image_shader_reads.retain(|&v| {
-                        v.view != self.state.resolve_resource::<VkImageView>(&binding).inner
-                    });
-                } else {
-                    state.image_shader_writes.retain(|&v| {
-                        v.view != self.state.resolve_resource::<VkImageView>(&binding).inner
-                    });
-                }
-            }
-        }
-
-        for (image_view_handle, layout) in bindings.iter().filter_map(|b| match b.ty {
-            DescriptorBindingType::ImageView {
-                image_view_handle,
-                layout,
-                ..
-            } => Some((image_view_handle, layout)),
-            _ => None,
-        }) {
-            if layout == ImageLayout::ShaderReadOnly {
-                state.image_shader_reads.push({
-                    let vk_view = self
-                        .state
-                        .resolve_resource::<VkImageView>(&image_view_handle);
-                    RenderGraphImage {
-                        view: vk_view.inner,
-                        image: self
-                            .state
-                            .resolve_resource::<VkImage>(&vk_view.owner_image)
-                            .inner,
-                    }
-                });
-            } else {
-                todo!()
-            }
-        }
-
-        state.descriptor_state.sets[set as usize].bindings = bindings.to_vec();
     }
 
     pub fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo) {
@@ -697,29 +541,6 @@ pub struct ScopedDebugLabelInner {
 }
 
 impl ScopedDebugLabelInner {
-    fn new(
-        label: &str,
-        color: [f32; 4],
-        debug_utils: DebugUtils,
-        command_buffer: vk::CommandBuffer,
-    ) -> Self {
-        unsafe {
-            let c_label = CString::new(label).unwrap();
-            debug_utils.cmd_begin_debug_utils_label(
-                command_buffer,
-                &DebugUtilsLabelEXT {
-                    s_type: StructureType::DEBUG_UTILS_LABEL_EXT,
-                    p_next: std::ptr::null(),
-                    p_label_name: c_label.as_ptr(),
-                    color,
-                },
-            );
-        }
-        Self {
-            debug_utils,
-            command_buffer,
-        }
-    }
     fn end(&self) {
         unsafe {
             self.debug_utils
@@ -731,15 +552,6 @@ impl ScopedDebugLabelInner {
 pub struct ScopedDebugLabel {
     inner: Option<ScopedDebugLabelInner>,
 }
-
-impl ScopedDebugLabel {
-    pub fn end(mut self) {
-        if let Some(label) = self.inner.take() {
-            label.end();
-        }
-    }
-}
-
 impl Drop for ScopedDebugLabel {
     fn drop(&mut self) {
         if let Some(label) = self.inner.take() {
@@ -747,22 +559,6 @@ impl Drop for ScopedDebugLabel {
         }
     }
 }
-
-impl VkCommandBuffer {
-    pub fn begin_debug_region(&self, label: &str, color: [f32; 4]) -> ScopedDebugLabel {
-        ScopedDebugLabel {
-            inner: self.state.debug_utilities.as_ref().map(|debug_utils| {
-                ScopedDebugLabelInner::new(
-                    label,
-                    color,
-                    debug_utils.clone(),
-                    self.command_buffer_state.borrow().inner_command_buffer,
-                )
-            }),
-        }
-    }
-}
-
 impl VkComputePassCommand {
     fn new(command_buffer: &mut VkCommandBuffer) -> Self {
         Self {

@@ -13,7 +13,7 @@ use bevy_ecs::{
     world::{EntityWorldMut, World},
 };
 use egui::{Context, FullOutput, Ui};
-use gpu::{CommandBuffer, Gpu, Swapchain};
+use gpu::{CommandBuffer, Gpu};
 use std::collections::HashMap;
 
 use crate::{

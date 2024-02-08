@@ -232,14 +232,14 @@ impl EguiSupport {
         self.on_window_event(window, event)
     }
 
-    pub fn swapchain_updated(&mut self, swapchain: &Swapchain) {}
+    pub fn swapchain_updated(&mut self, _swapchain: &Swapchain) {}
 
     pub fn begin_frame(&mut self, window: &Window, time: &Time) {
         let input = self.take_input(window, time);
         self.context.begin_frame(input);
     }
 
-    pub fn end_frame(&mut self, window: &Window) -> FullOutput {
+    pub fn end_frame(&mut self, _window: &Window) -> FullOutput {
         self.context.end_frame()
     }
 
@@ -805,7 +805,7 @@ impl EguiSupport {
         }
     }
 
-    fn on_mouse_wheel(&mut self, window: &Window, delta: winit::event::MouseScrollDelta) {
+    fn on_mouse_wheel(&mut self, _window: &Window, delta: winit::event::MouseScrollDelta) {
         let pixels_per_point = self.pixels_per_point;
 
         {
@@ -853,11 +853,11 @@ impl EguiSupport {
         }
     }
 
-    fn on_keyboard_input(&self, event: &winit::event::KeyEvent) {}
+    fn on_keyboard_input(&self, _event: &winit::event::KeyEvent) {}
 
     fn on_cursor_moved(
         &mut self,
-        window: &Window,
+        _window: &Window,
         pos_in_pixels: winit::dpi::PhysicalPosition<f64>,
     ) {
         let pixels_per_point = self.pixels_per_point;
@@ -873,7 +873,7 @@ impl EguiSupport {
             .push(egui::Event::PointerMoved(pos_in_points));
     }
 
-    fn on_touch(&self, window: &Window, touch: &Touch) {}
+    fn on_touch(&self, _window: &Window, _touch: &Touch) {}
 
     fn take_input(&mut self, window: &Window, time: &Time) -> RawInput {
         let mut input = self.raw_input.take();
@@ -911,7 +911,8 @@ fn translate_mouse_button(button: winit::event::MouseButton) -> Option<egui::Poi
     }
 }
 
-fn parse_input_modifiers(input_state: &InputState) -> egui::Modifiers {
+#[allow(dead_code)]
+fn parse_input_modifiers(_input_state: &InputState) -> egui::Modifiers {
     todo!()
 }
 

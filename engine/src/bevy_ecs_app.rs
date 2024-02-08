@@ -75,7 +75,7 @@ impl Deref for AppTypeRegistry {
 
 pub trait Plugin: 'static {
     fn on_start(&mut self, _world: &mut World) {}
-    fn on_event(&mut self, app_state: &AppState, _world: &mut World, _event: &Event<()>) {}
+    fn on_event(&mut self, _app_state: &AppState, _world: &mut World, _event: &Event<()>) {}
     fn on_resize(
         &mut self,
         _world: &mut World,

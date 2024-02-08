@@ -9,6 +9,7 @@ use std::{
 };
 
 use anyhow::{bail, Result};
+use ash::extensions::khr::DynamicRendering;
 use ash::{
     extensions::ext::{self, DebugUtils},
     prelude::*,
@@ -34,23 +35,19 @@ use ash::{
         PhysicalDeviceSynchronization2Features, SemaphoreCreateFlags, TaggedStructure,
     },
 };
-use ash::{
-    extensions::khr::DynamicRendering,
-    vk::{PipelineBindPoint, SubpassDescriptionFlags},
-};
 
 use crate::{
     gpu_resource_manager::{lifetime_cache_constants, quick_hash, GpuResourceMap},
     vulkan::*,
     AccessFlags, BeginRenderPassInfo, BlendMode, BlendOp, BufferCreateInfo, BufferHandle,
-    BufferImageCopyInfo, ColorComponentFlags, CommandBuffer, CommandPoolCreateFlags,
-    CommandPoolCreateInfo, DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2,
-    DescriptorSetState, Extent2D, FenceHandle, Gpu, GpuConfiguration, HandleType, ImageCreateInfo,
-    ImageFormat, ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange,
-    ImageViewCreateInfo, ImageViewHandle, LogicOp, MemoryDomain, Offset2D, PipelineBarrierInfo,
+    ColorComponentFlags, CommandBuffer, CommandPoolCreateFlags, CommandPoolCreateInfo,
+    DescriptorBindingInfo, DescriptorSetDescription, DescriptorSetInfo2, DescriptorSetState,
+    Extent2D, FenceHandle, Gpu, GpuConfiguration, HandleType, ImageCreateInfo, ImageFormat,
+    ImageHandle, ImageLayout, ImageMemoryBarrier, ImageSubresourceRange, ImageViewCreateInfo,
+    ImageViewHandle, LogicOp, MemoryDomain, Offset2D, PipelineBarrierInfo,
     PipelineColorBlendAttachmentState, PipelineStageFlags, PushConstantBlockDescription, QueueType,
-    Rect2D, RenderPassAttachments, SampleCount, SamplerCreateInfo, SamplerHandle, SemaphoreHandle,
-    ShaderAttribute, ShaderModuleCreateInfo, ShaderModuleHandle, Swapchain, TransitionInfo,
+    Rect2D, SamplerCreateInfo, SamplerHandle, SemaphoreHandle, ShaderAttribute,
+    ShaderModuleCreateInfo, ShaderModuleHandle, Swapchain, TransitionInfo,
     UniformVariableDescription,
 };
 
@@ -194,7 +191,6 @@ pub struct GpuThreadSharedState {
     pub(crate) descriptor_set_layout_cache: LifetimedCache<vk::DescriptorSetLayout>,
     pub(crate) pipeline_layout_cache: LifetimedCache<vk::PipelineLayout>,
     pub(crate) descriptor_set_cache: LifetimedCache<DescriptorSetAllocation>,
-    pub(crate) render_pass_cache: LifetimedCache<vk::RenderPass>,
     pub(crate) framebuffer_cache: LifetimedCache<vk::Framebuffer>,
 
     features: SupportedFeatures,
@@ -745,176 +741,6 @@ impl GpuThreadSharedState {
                 .expect("Failure in descriptor set layout creation")
         }
     }
-    pub fn get_render_pass(
-        &self,
-        render_pass_info: &RenderPassAttachments,
-        debug_label: Option<&str>,
-    ) -> vk::RenderPass {
-        self.render_pass_cache.get(render_pass_info, || {
-            let render_pass = self.create_render_pass(render_pass_info);
-
-            if let (Some(debug_utils), Some(label)) = (&self.debug_utilities, debug_label) {
-                let object_c_name = CString::new(label).unwrap();
-
-                unsafe {
-                    debug_utils
-                        .set_debug_utils_object_name(
-                            self.logical_device.handle(),
-                            &vk::DebugUtilsObjectNameInfoEXT {
-                                s_type: StructureType::DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
-                                p_next: std::ptr::null(),
-                                object_type: vk::ObjectType::RENDER_PASS,
-                                object_handle: vk::Handle::as_raw(render_pass),
-                                p_object_name: object_c_name.as_ptr(),
-                            },
-                        )
-                        .unwrap();
-                }
-            }
-
-            render_pass
-        })
-    }
-
-    fn create_render_pass(&self, render_pass_info: &RenderPassAttachments) -> vk::RenderPass {
-        let mut attachments = render_pass_info
-            .color_attachments
-            .iter()
-            .map(|att| vk::AttachmentDescription {
-                flags: vk::AttachmentDescriptionFlags::empty(),
-                format: att.format.to_vk(),
-                samples: SampleCount::Sample1.to_vk(),
-                load_op: att.load_op.to_vk(),
-                store_op: att.store_op.to_vk(),
-                stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-                initial_layout: att.initial_layout.to_vk(),
-                final_layout: att.final_layout.to_vk(),
-            })
-            .collect::<Vec<_>>();
-
-        if let Some(att) = &render_pass_info.depth_attachment {
-            assert!(att.format == ImageFormat::Depth);
-            attachments.push(vk::AttachmentDescription {
-                flags: vk::AttachmentDescriptionFlags::empty(),
-                format: att.format.to_vk(),
-                samples: SampleCount::Sample1.to_vk(),
-                load_op: att.load_op.to_vk(),
-                store_op: att.store_op.to_vk(),
-                stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
-                stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
-                initial_layout: att.initial_layout.to_vk(),
-                final_layout: att.final_layout.to_vk(),
-            });
-        };
-        let mut all_inputs: Vec<vk::AttachmentReference> = vec![];
-        let mut all_colors: Vec<vk::AttachmentReference> = vec![];
-        let mut all_resolve: Vec<vk::AttachmentReference> = vec![];
-        let mut all_depths: Vec<vk::AttachmentReference> = vec![];
-        let mut all_preserve: Vec<u32> = vec![];
-
-        for s in render_pass_info.subpasses.iter() {
-            all_inputs.extend(
-                s.input_attachments
-                    .iter()
-                    .map(|i| i.to_vk())
-                    .collect::<Vec<_>>(),
-            );
-            all_colors.extend(
-                s.color_attachments
-                    .iter()
-                    .map(|i| i.to_vk())
-                    .collect::<Vec<_>>(),
-            );
-            all_resolve.extend(
-                s.resolve_attachments
-                    .iter()
-                    .map(|i| i.to_vk())
-                    .collect::<Vec<_>>(),
-            );
-
-            all_depths.push(match s.depth_stencil_attachment {
-                Some(d) => d.to_vk(),
-                None => vk::AttachmentReference {
-                    attachment: vk::ATTACHMENT_UNUSED,
-                    layout: vk::ImageLayout::UNDEFINED,
-                },
-            });
-            all_preserve.extend(s.preserve_attachments.clone());
-        }
-
-        let mut cur_input = 0;
-        let mut cur_color = 0;
-        let mut cur_resolve = 0;
-        let mut cur_depth = 0;
-        let mut cur_preserve = 0;
-
-        let subpasses = render_pass_info
-            .subpasses
-            .iter()
-            .map(|s| unsafe {
-                assert!(
-                    s.resolve_attachments.is_empty()
-                        || s.resolve_attachments.len() == s.color_attachments.len()
-                );
-                let p_input_attachments = all_inputs.as_ptr().add(cur_input);
-                let p_color_attachments = all_colors.as_ptr().add(cur_color);
-                let p_resolve_attachments = all_resolve.as_ptr().add(cur_resolve);
-                let p_depth_stencil_attachment = all_depths.as_ptr().add(cur_depth);
-                let p_preserve_attachments = all_preserve.as_ptr().add(cur_preserve);
-                cur_input += s.input_attachments.len();
-                cur_color += s.color_attachments.len();
-                cur_resolve += s.resolve_attachments.len();
-                cur_depth += if s.depth_stencil_attachment.is_some() {
-                    1
-                } else {
-                    0
-                };
-                cur_preserve += s.preserve_attachments.len();
-                vk::SubpassDescription {
-                    flags: SubpassDescriptionFlags::empty(),
-                    pipeline_bind_point: PipelineBindPoint::GRAPHICS,
-                    input_attachment_count: s.input_attachments.len() as _,
-                    p_input_attachments,
-                    color_attachment_count: s.color_attachments.len() as _,
-                    p_color_attachments,
-                    p_resolve_attachments: if !s.resolve_attachments.is_empty() {
-                        p_resolve_attachments
-                    } else {
-                        std::ptr::null()
-                    },
-                    p_depth_stencil_attachment,
-                    preserve_attachment_count: s.preserve_attachments.len() as _,
-                    p_preserve_attachments,
-                }
-            })
-            .collect::<Vec<_>>();
-        let dependencies = render_pass_info
-            .dependencies
-            .iter()
-            .map(|d| d.to_vk())
-            .collect::<Vec<_>>();
-
-        assert!(!subpasses.is_empty());
-
-        let create_info = vk::RenderPassCreateInfo {
-            s_type: StructureType::RENDER_PASS_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: vk::RenderPassCreateFlags::empty(),
-            attachment_count: attachments.len() as _,
-            p_attachments: attachments.as_ptr() as *const _,
-            subpass_count: subpasses.len() as _,
-            p_subpasses: subpasses.as_ptr(),
-            dependency_count: dependencies.len() as _,
-            p_dependencies: dependencies.as_ptr(),
-        };
-
-        unsafe {
-            self.logical_device
-                .create_render_pass(&create_info, get_allocation_callbacks())
-                .expect("Failed to create render pass")
-        }
-    }
 
     #[allow(dead_code)]
     pub(crate) fn get_framebuffer(
@@ -1318,7 +1144,6 @@ impl VkGpu {
             descriptor_set_layout_cache: LifetimedCache::new(60 * 60),
             descriptor_pool_cache: LifetimedCache::new(lifetime_cache_constants::NEVER_DEALLOCATE),
             descriptor_set_cache: LifetimedCache::new(60 * 60),
-            render_pass_cache: LifetimedCache::new(lifetime_cache_constants::NEVER_DEALLOCATE),
             framebuffer_cache: LifetimedCache::new(lifetime_cache_constants::NEVER_DEALLOCATE),
             dynamic_rendering,
             allocated_resources: Arc::new(RwLock::new(GpuResourceMap::new())),
@@ -1602,63 +1427,8 @@ impl VkGpu {
 
         Ok(())
     }
-    pub fn instance(&self) -> Instance {
-        self.state.instance.clone()
-    }
-
-    pub fn dynamic_rendering(&self) -> DynamicRendering {
-        self.state.dynamic_rendering.clone()
-    }
-
     pub fn vk_logical_device(&self) -> Device {
         self.state.logical_device.clone()
-    }
-
-    pub fn vk_physical_device(&self) -> vk::PhysicalDevice {
-        self.state.physical_device.physical_device
-    }
-
-    pub fn graphics_command_pool(&self) -> &VkCommandPool {
-        &self.state.command_pools[self
-            .state
-            .current_command_pools
-            .load(std::sync::atomic::Ordering::Relaxed)]
-        .graphics_command_buffer
-        .command_pool
-    }
-
-    pub fn async_compute_command_pool(&self) -> &VkCommandPool {
-        &self.state.command_pools[self
-            .state
-            .current_command_pools
-            .load(std::sync::atomic::Ordering::Relaxed)]
-        .async_compute_command_buffer
-        .command_pool
-    }
-
-    pub fn transfer_command_pool(&self) -> &VkCommandPool {
-        &self.state.command_pools[self
-            .state
-            .current_command_pools
-            .load(std::sync::atomic::Ordering::Relaxed)]
-        .transfer_command_buffer
-        .command_pool
-    }
-
-    pub fn queue_families(&self) -> QueueFamilies {
-        self.state.queue_families.clone()
-    }
-
-    pub fn graphics_queue_family_index(&self) -> u32 {
-        self.state.queue_families.graphics_family.index
-    }
-
-    pub fn graphics_queue(&self) -> Queue {
-        self.state.graphics_queue
-    }
-
-    pub fn state(&self) -> &GpuThreadSharedState {
-        &self.state
     }
 
     fn log_physical_device_memory(physical_device: &SelectedPhysicalDevice, instance: Instance) {
@@ -1706,19 +1476,6 @@ impl VkGpu {
 
     pub fn wait_device_idle_impl(&self) -> VkResult<()> {
         unsafe { self.vk_logical_device().device_wait_idle() }
-    }
-    pub fn wait_queue_idle(&self, queue_type: QueueType) -> VkResult<()> {
-        unsafe {
-            self.vk_logical_device().queue_wait_idle(match queue_type {
-                QueueType::Graphics => self.state.graphics_queue,
-                QueueType::AsyncCompute => self.state.async_compute_queue,
-                QueueType::Transfer => self.state.transfer_queue,
-            })
-        }
-    }
-
-    pub fn physical_device_properties(&self) -> PhysicalDeviceProperties {
-        self.state.physical_device.device_properties
     }
 
     pub fn create_shader_module(
@@ -2136,10 +1893,6 @@ impl VkGpu {
         Ok(())
     }
 
-    pub fn write_buffer_data<T: Copy>(&self, buffer: &VkBuffer, data: &[T]) -> VkResult<()> {
-        self.write_buffer_data_with_offset(buffer, 0, data)
-    }
-
     pub fn write_buffer_data_with_offset<T: Copy>(
         &self,
         buffer: &VkBuffer,
@@ -2226,72 +1979,13 @@ impl VkGpu {
         }?;
         self.set_object_debug_name(create_info.label, image)?;
 
-        let image = VkImage::create(
-            image,
-            create_info.label,
-            allocation,
-            Extent2D {
-                width: create_info.width,
-                height: create_info.height,
-            },
-            format,
-        )?;
+        let image = VkImage::create(image, create_info.label, allocation, format)?;
 
         Ok((image, format))
     }
 
-    pub fn create_image_view(&self, create_info: &ImageViewCreateInfo) -> VkResult<VkImageView> {
-        let image = self.resolve_resource::<VkImage>(&create_info.image);
-        let vk_image = image.inner;
-
-        let gpu_view_format: ImageFormat = create_info.format;
-        let format = if gpu_view_format == image.format {
-            create_info.format
-        } else {
-            warn!(
-                "Creating an image view of an image with a different format: Requested {:?} but image uses {:?}! Using Image format",
-            gpu_view_format,
-            image.format);
-            image.format
-        };
-
-        // TODO: implement ToVk for ImageViewCreateInfo
-        let vk_create_info = vk::ImageViewCreateInfo {
-            s_type: StructureType::IMAGE_VIEW_CREATE_INFO,
-            p_next: std::ptr::null(),
-            flags: ImageViewCreateFlags::empty(),
-            image: vk_image,
-            view_type: create_info.view_type.to_vk(),
-            format: format.to_vk(),
-            components: create_info.components.to_vk(),
-            subresource_range: create_info.subresource_range.to_vk(),
-        };
-        VkImageView::create(
-            self.vk_logical_device(),
-            create_info.label.to_owned(),
-            &vk_create_info,
-            gpu_view_format,
-            create_info.image,
-            image.extents,
-            VkImageViewFlags::empty(),
-        )
-    }
     pub fn create_sampler(&self, create_info: &SamplerCreateInfo) -> VkResult<VkSampler> {
         VkSampler::create(self.vk_logical_device(), None, create_info)
-    }
-
-    pub fn copy_buffer(
-        &self,
-        source_buffer: &VkBuffer,
-        dest_buffer: &VkBuffer,
-        dest_offset: u64,
-        size: usize,
-    ) -> VkResult<()> {
-        let mut command_buffer = self.create_command_buffer(QueueType::Transfer)?;
-
-        command_buffer.copy_buffer(source_buffer, dest_buffer, dest_offset, size)?;
-
-        Ok(())
     }
 
     pub fn transition_image_layout_impl(
@@ -2339,48 +2033,6 @@ impl VkGpu {
         });
     }
 
-    pub fn copy_buffer_to_image(&self, info: &BufferImageCopyInfo) -> VkResult<()> {
-        let mut command_buffer = self.create_command_buffer(QueueType::Transfer)?;
-        command_buffer.copy_buffer_to_image(info)?;
-
-        Ok(())
-    }
-
-    pub fn wait_for_fences(
-        &self,
-        fences: &[&FenceHandle],
-        wait_all: bool,
-        timeout_ns: u64,
-    ) -> VkResult<()> {
-        let fences: Vec<_> = fences
-            .iter()
-            .map(|f| self.resolve_resource::<VkFence>(f).inner)
-            .collect();
-        unsafe {
-            self.vk_logical_device()
-                .wait_for_fences(&fences, wait_all, timeout_ns)
-        }
-    }
-
-    pub fn reset_fences(&self, fences: &[&FenceHandle]) -> VkResult<()> {
-        let fences: Vec<_> = fences
-            .iter()
-            .map(|f| self.resolve_resource::<VkFence>(f).inner)
-            .collect();
-        unsafe { self.vk_logical_device().reset_fences(&fences) }
-    }
-
-    pub fn create_command_pool(
-        &self,
-        create_info: &CommandPoolCreateInfo,
-    ) -> VkResult<VkCommandPool> {
-        VkCommandPool::new(
-            self.vk_logical_device(),
-            &self.queue_families(),
-            create_info,
-        )
-    }
-
     pub fn create_command_buffer(&self, queue_type: QueueType) -> VkResult<VkCommandBuffer> {
         let pool = &self.state.command_pools[self
             .state
@@ -2424,10 +2076,6 @@ impl VkGpu {
                 Err(vk::Result::ERROR_UNKNOWN)
             }
         }
-    }
-
-    pub fn allocator(&self) -> Arc<RwLock<dyn GpuAllocator>> {
-        self.state.gpu_memory_allocator.clone()
     }
 
     fn update_cycle_for_deleted_resources<T: std::fmt::Debug, F: Fn(&T)>(
@@ -2892,7 +2540,6 @@ impl Gpu for VkGpu {
                 &vk_create_info,
                 gpu_view_format,
                 info.image,
-                image.extents,
                 VkImageViewFlags::empty(),
             )
         }?;

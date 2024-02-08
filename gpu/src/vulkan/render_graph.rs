@@ -147,10 +147,6 @@ impl RenderGraph {
         }
     }
 
-    pub fn all_graphics_attachments(&self) -> &[vk::Image] {
-        &self.all_graphics_attachments
-    }
-
     fn validate_graph(&self) -> anyhow::Result<()> {
         Ok(())
     }
