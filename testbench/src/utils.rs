@@ -339,7 +339,7 @@ fn cubemap_main_loop(
                         image_view_handle: *input_texture_view,
                         sampler_handle: skybox_sampler,
                     },
-                    binding_stage: ShaderStage::FRAGMENT,
+                    write: false,
                 }],
             );
 

@@ -504,7 +504,7 @@ impl DeferredRenderingPipeline {
                                 image_view_handle: self.cascaded_shadow_map.shadow_atlas_view,
                                 sampler_handle: self.gbuffer_nearest_sampler,
                             },
-                            binding_stage: ShaderStage::FRAGMENT,
+                            write: false,
                         },
                         Binding2 {
                             ty: gpu::DescriptorBindingType2::StorageBuffer {
@@ -512,7 +512,7 @@ impl DeferredRenderingPipeline {
                                 offset: 0,
                                 range: gpu::WHOLE_SIZE as _,
                             },
-                            binding_stage: ShaderStage::FRAGMENT,
+                            write: false,
                         },
                         Binding2 {
                             ty: gpu::DescriptorBindingType2::ImageView {
@@ -525,7 +525,7 @@ impl DeferredRenderingPipeline {
                                     .view,
                                 sampler_handle: self.gbuffer_nearest_sampler,
                             },
-                            binding_stage: ShaderStage::FRAGMENT,
+                            write: false,
                         },
                         Binding2 {
                             ty: gpu::DescriptorBindingType2::StorageBuffer {
@@ -533,7 +533,7 @@ impl DeferredRenderingPipeline {
                                 offset: 0,
                                 range: gpu::WHOLE_SIZE,
                             },
-                            binding_stage: ShaderStage::FRAGMENT,
+                            write: false,
                         },
                         Binding2 {
                             ty: gpu::DescriptorBindingType2::StorageBuffer {
@@ -541,7 +541,7 @@ impl DeferredRenderingPipeline {
                                 offset: 0,
                                 range: gpu::WHOLE_SIZE,
                             },
-                            binding_stage: ShaderStage::FRAGMENT,
+                            write: false,
                         },
                         Binding2 {
                             ty: gpu::DescriptorBindingType2::StorageBuffer {
@@ -549,7 +549,7 @@ impl DeferredRenderingPipeline {
                                 offset: 0,
                                 range: gpu::WHOLE_SIZE,
                             },
-                            binding_stage: ShaderStage::FRAGMENT,
+                            write: false,
                         },
                     ],
                 );
@@ -615,7 +615,7 @@ impl DeferredRenderingPipeline {
                     image_view_handle: *source,
                     sampler_handle: self.gbuffer_nearest_sampler,
                 },
-                binding_stage: ShaderStage::FRAGMENT,
+                write: false,
             }],
         );
 
@@ -845,7 +845,7 @@ fn bind_master_material(
                     offset: 0,
                     range: gpu::WHOLE_SIZE as _,
                 },
-                binding_stage: ShaderStage::ALL_GRAPHICS,
+                write: false,
             },
             Binding2 {
                 ty: gpu::DescriptorBindingType2::UniformBuffer {
@@ -853,7 +853,7 @@ fn bind_master_material(
                     offset: 0,
                     range: (100 * size_of::<ObjectDrawInfo>()) as u64,
                 },
-                binding_stage: ShaderStage::ALL_GRAPHICS,
+                write: false,
             },
         ],
     );
@@ -873,26 +873,20 @@ fn draw_mesh_primitive(
     render_pass.set_index_buffer(primitive.index_buffer, IndexType::Uint32, 0);
 
     let mut user_bindings = vec![];
-    user_bindings.extend(
-        &mut master
-            .texture_inputs
-            .iter()
-            .enumerate()
-            .map(|(i, tex_info)| {
-                let texture_parameter = &material.textures[i];
-                let tex = resource_map.get(texture_parameter);
+    user_bindings.extend(&mut master.texture_inputs.iter().enumerate().map(|(i, _)| {
+        let texture_parameter = &material.textures[i];
+        let tex = resource_map.get(texture_parameter);
 
-                let sampler_handle = sampler_allocator.get(gpu, &tex.sampler_settings);
+        let sampler_handle = sampler_allocator.get(gpu, &tex.sampler_settings);
 
-                Binding2 {
-                    ty: gpu::DescriptorBindingType2::ImageView {
-                        image_view_handle: tex.view,
-                        sampler_handle,
-                    },
-                    binding_stage: tex_info.shader_stage,
-                }
-            }),
-    );
+        Binding2 {
+            ty: gpu::DescriptorBindingType2::ImageView {
+                image_view_handle: tex.view,
+                sampler_handle,
+            },
+            write: false,
+        }
+    }));
     for user_buffer in &material.parameter_buffers {
         user_bindings.push(Binding2 {
             ty: gpu::DescriptorBindingType2::UniformBuffer {
@@ -900,7 +894,7 @@ fn draw_mesh_primitive(
                 offset: 0,
                 range: gpu::WHOLE_SIZE as _,
             },
-            binding_stage: master.parameter_shader_stages,
+            write: false,
         });
     }
 

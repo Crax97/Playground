@@ -44,14 +44,6 @@ impl ComputePipelineState {
         }
     }
 }
-
-pub struct VkComputePassCommand {
-    pipeline_state: ComputePipelineState,
-    command_buffer: vk::CommandBuffer,
-    command_buffer_state: Rc<RefCell<VkCommandBufferState>>,
-    state: Arc<GpuThreadSharedState>,
-}
-
 #[derive(Hash)]
 pub(crate) struct GraphicsPipelineTraditional {
     pub(crate) fragment_shader: ShaderModuleHandle,
@@ -559,16 +551,21 @@ impl Drop for ScopedDebugLabel {
         }
     }
 }
+
+pub struct VkComputePassCommand {
+    pipeline_state: ComputePipelineState,
+    command_buffer_state: Rc<RefCell<VkCommandBufferState>>,
+    state: Arc<GpuThreadSharedState>,
+    pass_info: ComputePassInfo,
+}
+
 impl VkComputePassCommand {
     fn new(command_buffer: &mut VkCommandBuffer) -> Self {
         Self {
-            command_buffer: command_buffer
-                .command_buffer_state
-                .borrow()
-                .inner_command_buffer,
             state: command_buffer.state.clone(),
             command_buffer_state: command_buffer.command_buffer_state.clone(),
             pipeline_state: ComputePipelineState::new(),
+            pass_info: ComputePassInfo::default(),
         }
     }
 
@@ -592,9 +589,45 @@ impl VkComputePassCommand {
     }
 }
 
+impl Drop for VkComputePassCommand {
+    fn drop(&mut self) {
+        self.state
+            .render_graph
+            .write()
+            .expect("Failed to lock render graph")
+            .add_compute(std::mem::take(&mut self.pass_info));
+    }
+}
+
 impl compute_pass::Impl for VkComputePassCommand {
     fn set_compute_shader(&mut self, compute_shader: ShaderModuleHandle) {
         self.pipeline_state.shader = compute_shader;
+    }
+
+    fn bind_resources_2(&mut self, resources: &[Binding2]) {
+        self.pass_info
+            .all_read_resources
+            .extend(resources.iter().filter(|r| !r.write).map(|r| match r.ty {
+                DescriptorBindingType2::UniformBuffer { handle, .. }
+                | DescriptorBindingType2::StorageBuffer { handle, .. } => ShaderInput {
+                    resource: Resource::Buffer(
+                        self.state.resolve_resource::<VkBuffer>(&handle).inner,
+                    ),
+                },
+                DescriptorBindingType2::ImageView {
+                    image_view_handle, ..
+                } => {
+                    let handle = self
+                        .state
+                        .resolve_resource::<VkImageView>(&image_view_handle)
+                        .owner_image;
+                    let image = self.state.resolve_resource::<VkImage>(&handle);
+
+                    ShaderInput {
+                        resource: Resource::Image(image.inner, image.format.aspect_mask().to_vk()),
+                    }
+                }
+            }))
     }
 
     fn dispatch(&mut self, group_size_x: u32, group_size_y: u32, group_size_z: u32) {
@@ -605,26 +638,16 @@ impl compute_pass::Impl for VkComputePassCommand {
         };
         let pipeline = self.find_matching_compute_pipeline(pipeline_layout);
         let mut state = self.command_buffer_state.borrow_mut();
-        let device = &self.state.logical_device;
-        unsafe {
-            device.cmd_bind_pipeline(self.command_buffer, PipelineBindPoint::COMPUTE, pipeline);
 
-            let sets = self.find_matching_descriptor_sets(&state.descriptor_state);
-            device.cmd_bind_descriptor_sets(
-                self.command_buffer,
-                PipelineBindPoint::COMPUTE,
-                pipeline_layout,
-                0,
-                &sets,
-                &[],
-            );
-            device.cmd_dispatch(
-                self.command_buffer,
-                group_size_x,
-                group_size_y,
-                group_size_z,
-            );
-        }
+        let sets = self.find_matching_descriptor_sets(&state.descriptor_state);
+        self.pass_info.dispatches.push(DispatchCommand {
+            pipeline,
+            pipeline_layout,
+            descriptor_sets: sets,
+            push_constants: vec![],
+            group_count: [group_size_x, group_size_y, group_size_z],
+        });
+
         state.has_recorded_anything = true;
     }
 }
@@ -874,12 +897,16 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
                 _ => None,
             })
         {
-            current_subpass
-                .shader_reads
-                .retain(|im| im.image != binding);
+            current_subpass.shader_reads.retain(|im| match im.resource {
+                Resource::Image(im, ..) => im != binding,
+                _ => true,
+            });
             current_subpass
                 .shader_writes
-                .retain(|im| im.image != binding);
+                .retain(|im| match im.resource {
+                    Resource::Image(im, ..) => im != binding,
+                    _ => true,
+                });
         }
 
         for (binding, read) in bindings.iter().filter_map(|b| match b.ty {
@@ -898,13 +925,11 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
         }) {
             if read {
                 current_subpass.shader_reads.push(ShaderInput {
-                    image: binding.inner,
-                    aspect_flags: binding.format.aspect_mask().to_vk(),
+                    resource: Resource::Image(binding.inner, binding.format.aspect_mask().to_vk()),
                 });
             } else {
                 current_subpass.shader_writes.push(ShaderInput {
-                    image: binding.inner,
-                    aspect_flags: binding.format.aspect_mask().to_vk(),
+                    resource: Resource::Image(binding.inner, binding.format.aspect_mask().to_vk()),
                 });
             }
         }
@@ -941,7 +966,7 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
                         layout: ImageLayout::ShaderReadOnly,
                     },
                 },
-                binding_stage: b.binding_stage,
+                binding_stage: ShaderStage::ALL_GRAPHICS,
                 location: i as _,
             })
             .collect();

@@ -261,10 +261,11 @@ pub mod render_pass_2 {
     });
 }
 pub mod compute_pass {
-    use crate::ShaderModuleHandle;
+    use crate::{Binding2, ShaderModuleHandle};
 
     define_pass_type!(ComputePass {
         fn set_compute_shader(&mut self, compute_shader: ShaderModuleHandle);
+        fn bind_resources_2(&mut self, resources: &[Binding2]);
         fn dispatch(&mut self, group_size_x: u32, group_size_y: u32, group_size_z: u32);
     });
 }
@@ -1600,7 +1601,7 @@ pub struct Binding {
 #[derive(Default, Hash, Clone, Eq, PartialEq, PartialOrd, Ord)]
 pub struct Binding2 {
     pub ty: DescriptorBindingType2,
-    pub binding_stage: ShaderStage,
+    pub write: bool,
 }
 
 impl Binding2 {
@@ -1610,7 +1611,7 @@ impl Binding2 {
                 image_view_handle: view,
                 sampler_handle: sampler,
             },
-            binding_stage: ShaderStage::ALL_GRAPHICS,
+            write: false,
         }
     }
 
@@ -1621,18 +1622,18 @@ impl Binding2 {
                 offset: 0,
                 range: WHOLE_SIZE,
             },
-            binding_stage: ShaderStage::ALL_GRAPHICS,
+            write: false,
         }
     }
 
-    pub fn whole_storage_buffer(buffer: BufferHandle) -> Self {
+    pub fn whole_storage_buffer(buffer: BufferHandle, write: bool) -> Self {
         Self {
             ty: DescriptorBindingType2::StorageBuffer {
                 handle: buffer,
                 offset: 0,
                 range: WHOLE_SIZE,
             },
-            binding_stage: ShaderStage::ALL_GRAPHICS,
+            write,
         }
     }
 }

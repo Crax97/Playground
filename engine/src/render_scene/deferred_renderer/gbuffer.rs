@@ -83,35 +83,35 @@ impl GBuffer {
                         image_view_handle: self.position_component.view,
                         sampler_handle: self.gbuffer_sampler,
                     },
-                    binding_stage: ShaderStage::FRAGMENT,
+                    write: false,
                 },
                 Binding2 {
                     ty: gpu::DescriptorBindingType2::ImageView {
                         image_view_handle: self.normal_component.view,
                         sampler_handle: self.gbuffer_sampler,
                     },
-                    binding_stage: ShaderStage::FRAGMENT,
+                    write: false,
                 },
                 Binding2 {
                     ty: gpu::DescriptorBindingType2::ImageView {
                         image_view_handle: self.diffuse_component.view,
                         sampler_handle: self.gbuffer_sampler,
                     },
-                    binding_stage: ShaderStage::FRAGMENT,
+                    write: false,
                 },
                 Binding2 {
                     ty: gpu::DescriptorBindingType2::ImageView {
                         image_view_handle: self.emissive_component.view,
                         sampler_handle: self.gbuffer_sampler,
                     },
-                    binding_stage: ShaderStage::FRAGMENT,
+                    write: false,
                 },
                 Binding2 {
                     ty: gpu::DescriptorBindingType2::ImageView {
                         image_view_handle: self.pbr_component.view,
                         sampler_handle: self.gbuffer_sampler,
                     },
-                    binding_stage: ShaderStage::FRAGMENT,
+                    write: false,
                 },
             ],
         );

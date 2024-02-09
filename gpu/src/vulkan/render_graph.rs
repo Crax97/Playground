@@ -74,10 +74,15 @@ pub struct StencilAttachment {
     pub store_op: AttachmentStoreOp,
 }
 
-#[derive(Clone, Copy, Hash)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub enum Resource {
+    Image(vk::Image, vk::ImageAspectFlags),
+    Buffer(vk::Buffer),
+}
+
+#[derive(Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct ShaderInput {
-    pub image: vk::Image,
-    pub aspect_flags: vk::ImageAspectFlags,
+    pub resource: Resource,
 }
 
 pub struct GraphicsSubpass {
@@ -126,15 +131,44 @@ pub struct GraphicsPassInfo {
     pub sub_passes: Vec<GraphicsSubpass>,
 }
 
+pub struct DispatchCommand {
+    pub pipeline: vk::Pipeline,
+    pub pipeline_layout: vk::PipelineLayout,
+    pub descriptor_sets: Vec<vk::DescriptorSet>,
+    pub push_constants: Vec<PushConstant>,
+    pub group_count: [u32; 3],
+}
+
+bitflags! {
+    #[derive(Copy, Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+    pub struct ComputePassFlags : u32 {
+        const ASYNC = 1;
+    }
+}
+
+#[derive(Default)]
+pub struct ComputePassInfo {
+    pub label: Option<String>,
+    pub flags: ComputePassFlags,
+    pub dispatches: Vec<DispatchCommand>,
+    pub all_read_resources: Vec<ShaderInput>,
+    pub all_written_resources: Vec<ShaderInput>,
+}
+
+#[derive(Clone, Copy)]
 pub enum RenderPass {
     Graphics(usize),
+    Compute(usize),
 }
 
 pub struct RenderGraph {
     device: ash::Device,
     all_graphics_attachments: Vec<vk::Image>,
     graphics_passes: Vec<GraphicsPassInfo>,
+    compute_passes: Vec<ComputePassInfo>,
     debug_utils: Option<DebugUtils>,
+
+    sequence: Vec<RenderPass>,
 }
 
 impl RenderGraph {
@@ -143,7 +177,10 @@ impl RenderGraph {
             device,
             all_graphics_attachments: vec![],
             graphics_passes: vec![],
+            compute_passes: vec![],
             debug_utils,
+
+            sequence: vec![],
         }
     }
 
@@ -151,8 +188,20 @@ impl RenderGraph {
         Ok(())
     }
 
-    fn pick_label_color(&self, _info: &GraphicsPassInfo) -> [f32; 4] {
+    fn pick_label_color_graphics(&self, _info: &GraphicsPassInfo) -> [f32; 4] {
         [0.3, 0.5, 0.2, 1.0]
+    }
+
+    fn pick_label_color_compute(&self, _info: &ComputePassInfo) -> [f32; 4] {
+        [0.1, 0.6, 0.5, 1.0]
+    }
+
+    fn find_starting_render_pass(&self) -> Option<&RenderPass> {
+        self.sequence.last()
+    }
+
+    fn find_execution_plan(&self) -> Vec<RenderPass> {
+        self.sequence.clone()
     }
 }
 
@@ -166,11 +215,6 @@ pub struct LayoutInfo {
     pub layout: vk::ImageLayout,
     pub access_flags: vk::AccessFlags2,
     pub pipeline_flags: vk::PipelineStageFlags2,
-}
-
-#[derive(Default)]
-struct ExecutionPlan {
-    sequence: Vec<RenderPass>,
 }
 
 impl RenderGraph {
@@ -190,7 +234,15 @@ impl RenderGraph {
                 .iter()
                 .map(|att| att.render_image.image),
         );
+        self.sequence
+            .push(RenderPass::Graphics(self.graphics_passes.len()));
         self.graphics_passes.push(pass);
+    }
+
+    pub fn add_compute(&mut self, pass: ComputePassInfo) {
+        self.sequence
+            .push(RenderPass::Compute(self.compute_passes.len()));
+        self.compute_passes.push(pass);
     }
 
     pub fn execute(
@@ -200,7 +252,7 @@ impl RenderGraph {
         self.validate_graph()?;
         let execution_plan = self.find_execution_plan();
         let mut previous_layout = HashMap::<vk::Image, LayoutInfo>::new();
-        for pass in execution_plan.sequence {
+        for pass in execution_plan {
             match pass {
                 RenderPass::Graphics(index) => {
                     let info = &self.graphics_passes[index];
@@ -209,6 +261,10 @@ impl RenderGraph {
                         execution_context,
                         &mut previous_layout,
                     );
+                }
+                RenderPass::Compute(index) => {
+                    let info = &self.compute_passes[index];
+                    self.execute_compute_pass(info, execution_context, &mut previous_layout);
                 }
             }
         }
@@ -237,16 +293,6 @@ impl RenderGraph {
 
         None
     }
-    fn find_execution_plan(&self) -> ExecutionPlan {
-        // TODO: improve execution plan strategy
-        let mut plan = ExecutionPlan::default();
-
-        for (i, _) in self.graphics_passes.iter().enumerate() {
-            plan.sequence.push(RenderPass::Graphics(i));
-        }
-
-        plan
-    }
 
     fn execute_graphics_pass_dynamic_rendering(
         &self,
@@ -257,7 +303,7 @@ impl RenderGraph {
         if let Some(utils) = &self.debug_utils {
             let label_string = info.label.as_deref().unwrap_or("Graphics Pass");
             let label_pointer = CString::new(label_string).unwrap();
-            let label_color = self.pick_label_color(info);
+            let label_color = self.pick_label_color_graphics(info);
             unsafe {
                 utils.cmd_begin_debug_utils_label(
                     execution_context.graphics_command_buffer,
@@ -273,7 +319,7 @@ impl RenderGraph {
             if let Some(utils) = &self.debug_utils {
                 let label_string = format!("Subpass #{i}");
                 let label_pointer = CString::new(label_string).unwrap();
-                let label_color = self.pick_label_color(info);
+                let label_color = self.pick_label_color_graphics(info);
                 unsafe {
                     utils.cmd_begin_debug_utils_label(
                         execution_context.graphics_command_buffer,
@@ -302,27 +348,43 @@ impl RenderGraph {
                     vk::ImageAspectFlags::COLOR,
                 );
             }
-            for &read in &subpass.shader_reads {
+            for (image, aspect_mask) in
+                subpass
+                    .shader_reads
+                    .iter()
+                    .filter_map(|res| match res.resource {
+                        Resource::Image(image, aspect_mask) => Some((image, aspect_mask)),
+                        Resource::Buffer(_) => None,
+                    })
+            {
                 try_push_image_transition(
                     previous_layouts,
                     vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                     vk::AccessFlags2::SHADER_READ,
                     vk::PipelineStageFlags2::FRAGMENT_SHADER,
-                    read.image,
+                    image,
                     &mut image_barriers,
-                    read.aspect_flags,
+                    aspect_mask,
                 );
             }
 
-            for &write in &subpass.shader_writes {
+            for (image, aspect_mask) in
+                subpass
+                    .shader_writes
+                    .iter()
+                    .filter_map(|res| match res.resource {
+                        Resource::Image(image, aspect_mask) => Some((image, aspect_mask)),
+                        Resource::Buffer(_) => None,
+                    })
+            {
                 try_push_image_transition(
                     previous_layouts,
                     vk::ImageLayout::GENERAL,
                     vk::AccessFlags2::SHADER_WRITE,
                     vk::PipelineStageFlags2::FRAGMENT_SHADER,
-                    write.image,
+                    image,
                     &mut image_barriers,
-                    write.aspect_flags,
+                    aspect_mask,
                 );
             }
 
@@ -455,6 +517,73 @@ impl RenderGraph {
         }
     }
 
+    fn execute_compute_pass(
+        &self,
+        info: &ComputePassInfo,
+        execution_context: &RenderGraphExecutionContext,
+        previous_layout: &mut HashMap<vk::Image, LayoutInfo>,
+    ) {
+        if let Some(utils) = &self.debug_utils {
+            let label_string = info.label.as_deref().unwrap_or("Graphics Pass");
+            let label_pointer = CString::new(label_string).unwrap();
+            let label_color = self.pick_label_color_compute(info);
+            unsafe {
+                utils.cmd_begin_debug_utils_label(
+                    execution_context.graphics_command_buffer,
+                    &vk::DebugUtilsLabelEXT {
+                        p_label_name: label_pointer.as_ptr(),
+                        color: label_color,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+
+        let command_buffer = if info.flags.contains(ComputePassFlags::ASYNC) {
+            execution_context.async_compute_command_buffer
+        } else {
+            execution_context.graphics_command_buffer
+        };
+        unsafe {
+            for dispatch in &info.dispatches {
+                self.device.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::COMPUTE,
+                    dispatch.pipeline,
+                );
+                self.device.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    vk::PipelineBindPoint::COMPUTE,
+                    dispatch.pipeline_layout,
+                    0,
+                    &dispatch.descriptor_sets,
+                    &[],
+                );
+                for push_constant in &dispatch.push_constants {
+                    self.device.cmd_push_constants(
+                        execution_context.graphics_command_buffer,
+                        dispatch.pipeline_layout,
+                        push_constant.stage_flags,
+                        0,
+                        &push_constant.data,
+                    );
+                }
+                self.device.cmd_dispatch(
+                    command_buffer,
+                    dispatch.group_count[0],
+                    dispatch.group_count[1],
+                    dispatch.group_count[2],
+                )
+            }
+        }
+
+        if let Some(utils) = &self.debug_utils {
+            unsafe {
+                utils.cmd_end_debug_utils_label(execution_context.graphics_command_buffer);
+            }
+        }
+    }
+
     unsafe fn execute_draw_command(
         &self,
         subpass: &GraphicsSubpass,
@@ -580,7 +709,10 @@ impl RenderGraph {
     }
 
     fn reset(&mut self) {
+        self.all_graphics_attachments.clear();
         self.graphics_passes.clear();
+        self.compute_passes.clear();
+        self.sequence.clear();
     }
 }
 impl DynamicState {

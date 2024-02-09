@@ -67,7 +67,7 @@ impl PostProcessPass for TonemapPass {
                     image_view_handle: *resources.previous_pass_result,
                     sampler_handle: *resources.sampler,
                 },
-                binding_stage: ShaderStage::FRAGMENT,
+                write: false,
             }],
         );
         post_process_pass.set_vertex_shader(*resources.screen_quad);
@@ -153,7 +153,7 @@ impl PostProcessPass for FxaaPass {
                     image_view_handle: *resources.previous_pass_result,
                     sampler_handle: *resources.sampler,
                 },
-                binding_stage: ShaderStage::FRAGMENT,
+                write: false,
             }],
         );
         let rcp_frame = vector![
