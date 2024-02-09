@@ -238,6 +238,7 @@ impl VkSwapchain {
                 handle
             })
             .collect();
+
         Ok(())
     }
 
@@ -573,7 +574,6 @@ impl swapchain_2::Impl for VkSwapchain {
                     p_results: std::ptr::null_mut(),
                 },
             );
-            self.state.logical_device.device_wait_idle()?;
 
             if let Err(e) = result {
                 if e == vk::Result::ERROR_OUT_OF_DATE_KHR {
