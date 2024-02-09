@@ -3,7 +3,10 @@ use std::ffi::CString;
 use std::{num::NonZeroU32, ptr::addr_of, sync::Arc};
 
 use ash::extensions::khr;
-use ash::vk::{DebugUtilsObjectNameInfoEXT, Handle};
+use ash::vk::{
+    CommandBufferAllocateInfo, CommandPoolCreateInfo, DebugUtilsObjectNameInfoEXT, FenceCreateInfo,
+    Handle,
+};
 use ash::{
     extensions::khr::Surface,
     prelude::VkResult,
@@ -74,6 +77,8 @@ pub struct VkSwapchain {
 
     display_handle: RawDisplayHandle,
     window_handle: RawWindowHandle,
+
+    support_command_pool: vk::CommandPool,
 }
 
 impl VkSwapchain {
@@ -93,6 +98,15 @@ impl VkSwapchain {
                 width: window.inner_size().width,
                 height: window.inner_size().height,
             };
+            let support_command_pool = gpu.state.logical_device.create_command_pool(
+                &CommandPoolCreateInfo {
+                    flags: vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER,
+                    queue_family_index: gpu.state.queue_families.graphics_family.index,
+
+                    ..Default::default()
+                },
+                get_allocation_callbacks(),
+            )?;
 
             let mut me = Self {
                 surface_extension,
@@ -114,6 +128,8 @@ impl VkSwapchain {
                 state,
                 window_handle: window.window_handle().unwrap().as_raw(),
                 display_handle: window.display_handle().unwrap().as_raw(),
+
+                support_command_pool,
             };
 
             me.recreate_swapchain()?;
@@ -238,7 +254,80 @@ impl VkSwapchain {
                 handle
             })
             .collect();
+        unsafe {
+            self.transition_images_to_present(images)?;
+        }
+        Ok(())
+    }
 
+    unsafe fn transition_images_to_present(
+        &self,
+        images: Vec<vk::Image>,
+    ) -> Result<(), vk::Result> {
+        let oneshot_command_buffer =
+            self.state
+                .logical_device
+                .allocate_command_buffers(&CommandBufferAllocateInfo {
+                    command_pool: self.support_command_pool,
+                    level: vk::CommandBufferLevel::PRIMARY,
+                    command_buffer_count: 1,
+                    ..Default::default()
+                })?[0];
+        let barriers = images
+            .iter()
+            .map(|img| vk::ImageMemoryBarrier2 {
+                src_stage_mask: vk::PipelineStageFlags2::TOP_OF_PIPE,
+                src_access_mask: vk::AccessFlags2::empty(),
+                dst_stage_mask: vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
+                dst_access_mask: vk::AccessFlags2::empty(),
+                old_layout: vk::ImageLayout::UNDEFINED,
+                new_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                image: *img,
+                subresource_range: vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+        let device = &self.state.logical_device;
+        let fence = device.create_fence(
+            &FenceCreateInfo::builder().build(),
+            get_allocation_callbacks(),
+        )?;
+        device.begin_command_buffer(
+            oneshot_command_buffer,
+            &vk::CommandBufferBeginInfo::builder()
+                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
+                .build(),
+        )?;
+        device.cmd_pipeline_barrier2(
+            oneshot_command_buffer,
+            &vk::DependencyInfo::builder()
+                .dependency_flags(vk::DependencyFlags::BY_REGION)
+                .image_memory_barriers(&barriers)
+                .build(),
+        );
+        device.end_command_buffer(oneshot_command_buffer)?;
+        self.state.logical_device.queue_submit(
+            self.state.graphics_queue,
+            &[vk::SubmitInfo::builder()
+                .command_buffers(&[oneshot_command_buffer])
+                .build()],
+            fence,
+        )?;
+        device.wait_for_fences(&[fence], true, u64::MAX)?;
+        device.reset_command_pool(
+            self.support_command_pool,
+            vk::CommandPoolResetFlags::RELEASE_RESOURCES,
+        )?;
+        device.free_command_buffers(self.support_command_pool, &[oneshot_command_buffer]);
+        device.destroy_fence(fence, get_allocation_callbacks());
         Ok(())
     }
 

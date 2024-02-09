@@ -94,6 +94,8 @@ fn main() -> anyhow::Result<()> {
 
         compute_pass.dispatch(1, 1, 1);
     }
+    gpu.submit_work();
+    gpu.wait_device_idle()?;
 
     let output: u32 =
         bytemuck::cast_slice(&gpu.read_buffer(&output_buffer, 0, std::mem::size_of::<u32>())?)[0];

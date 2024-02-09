@@ -855,7 +855,7 @@ unsafe extern "system" fn on_message(
     let message = CStr::from_ptr(cb_data.p_message);
     if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::ERROR) {
         log::error!("VULKAN ERROR: {:?}", message);
-        // panic!("Invalid vulkan state: check log above");
+        panic!("Invalid vulkan state: check log above");
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::INFO) {
         log::info!("Vulkan - : {:?}", message);
     } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::WARNING) {

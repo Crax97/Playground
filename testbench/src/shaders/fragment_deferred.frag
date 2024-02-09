@@ -16,4 +16,5 @@ void main() {
     outPosition = vec4(fragOut.position, 0.0);
     outNormal = vec4(fragOut.normal, 0.0);
     outDiffuse = texture(texSampler, fragOut.uv);
+    outPbr.w = 1.0; // The objects with this material should be receiving shadows
 }

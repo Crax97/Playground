@@ -11,9 +11,9 @@ use engine::{
     Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, MaterialDescription,
     MaterialDomain, MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo,
     MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline, ResourceMap, ScenePrimitive, Texture,
-    TextureInput,
+    TextureInput, Time,
 };
-use gpu::{CommandBuffer, PresentMode, ShaderStage};
+use gpu::{CommandBuffer, Offset2D, PresentMode, Rect2D, ShaderStage};
 use nalgebra::*;
 use winit::{event::ElementState, event_loop::EventLoop};
 #[repr(C)]
@@ -39,6 +39,8 @@ pub struct PlanesApp {
     resource_map: ResourceMap,
     cvar_manager: CvarManager,
     egui_integration: EguiSupport,
+
+    time: Time,
 }
 
 impl App for PlanesApp {
@@ -199,6 +201,9 @@ impl App for PlanesApp {
             bounds,
         });
 
+        scene_renderer.ambient_color = vector![1.0, 1.0, 1.0];
+        scene_renderer.ambient_intensity = 1.0;
+
         Ok(Self {
             egui_integration,
             camera,
@@ -212,6 +217,7 @@ impl App for PlanesApp {
             scene,
             resource_map,
             cvar_manager,
+            time: Time::default(),
         })
     }
 
@@ -247,28 +253,11 @@ impl App for PlanesApp {
         Ok(())
     }
 
-    fn draw<'a>(
-        &'a mut self,
-        app_state: &'a mut AppState,
-        _backbuffer: &Backbuffer,
-    ) -> anyhow::Result<CommandBuffer> {
-        let mut cb = app_state
-            .gpu
-            .start_command_buffer(gpu::QueueType::Graphics)?;
-        self.scene_renderer.render(
-            app_state.gpu(),
-            &mut cb,
-            &self.camera,
-            &self.scene,
-            &self.resource_map,
-            &self.cvar_manager,
-        )?;
-
-        // let out = self.egui_integration.end_frame(&self.window);
-
-        // self.egui_integration
-        // .paint_frame(out, &app_state.swapchain, &mut cb);
-        Ok(cb)
+    fn begin_frame(&mut self, app_state: &mut AppState) -> anyhow::Result<()> {
+        self.time.begin_frame();
+        self.egui_integration
+            .begin_frame(&app_state.window, &self.time);
+        Ok(())
     }
 
     fn update(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
@@ -296,11 +285,56 @@ impl App for PlanesApp {
 
         let direction = vector![new_forward[0], new_forward[1], new_forward[2]];
         self.camera.forward = -direction;
+
         Ok(())
     }
 
-    fn on_shutdown(&mut self, _app_state: &mut AppState) {
-        todo!()
+    fn draw<'a>(
+        &'a mut self,
+        app_state: &'a mut AppState,
+        backbuffer: &Backbuffer,
+    ) -> anyhow::Result<CommandBuffer> {
+        let mut cb = app_state
+            .gpu
+            .start_command_buffer(gpu::QueueType::Graphics)?;
+        let final_render = self.scene_renderer.render(
+            app_state.gpu(),
+            &mut cb,
+            &self.camera,
+            &self.scene,
+            &self.resource_map,
+            &self.cvar_manager,
+        )?;
+
+        let output = self.egui_integration.end_frame(&app_state.window);
+        self.scene_renderer.draw_textured_quad(
+            &mut cb,
+            &backbuffer.image_view,
+            &final_render,
+            Rect2D {
+                offset: Offset2D::default(),
+                extent: backbuffer.size,
+            },
+            true,
+            None,
+        )?;
+
+        self.egui_integration.paint_frame(
+            app_state.gpu(),
+            &mut cb,
+            backbuffer,
+            output.textures_delta,
+            output.shapes,
+        )?;
+        self.egui_integration
+            .handle_platform_output(&app_state.window, output.platform_output);
+        Ok(cb)
+    }
+    fn on_shutdown(&mut self, app_state: &mut AppState) {
+        let gpu = app_state.gpu();
+        self.scene_renderer.destroy(gpu);
+        self.resource_map.update();
+        self.egui_integration.destroy(gpu);
     }
 }
 

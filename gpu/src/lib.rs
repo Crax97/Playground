@@ -272,16 +272,57 @@ pub mod compute_pass {
 pub(crate) mod swapchain_2 {
 
     use crate::{Extent2D, Gpu, ImageFormat, ImageHandle, ImageViewHandle, PresentMode};
-    define_pimpl_type!(Swapchain {
-        fn acquire_next_image(&mut self) -> anyhow::Result<(ImageHandle, ImageViewHandle)>;
+    pub trait Impl: 'static {
+        expand_impl!(
+            fn acquire_next_image(&mut self) -> anyhow::Result<(ImageHandle, ImageViewHandle)>;
+            fn present(&self) -> anyhow::Result<bool>;
+            fn recreate_swapchain(&mut self) -> anyhow::Result<()>;
+            fn select_present_mode(&mut self, present_mode: PresentMode) -> anyhow::Result<()>;
+            fn extents(&self) -> Extent2D;
+            fn present_format(&self) -> ImageFormat;
+            fn destroy(&mut self, gpu: &dyn Gpu);
+        );
+        fn as_any(&self) -> &dyn std::any::Any;
+    }
+    pub struct Swapchain {
+        pub pimpl: Box<dyn Impl>,
+    }
+    impl Swapchain {
+        /// Acquires the next presentable image: the image MUST be presentable right away:
+        /// ```
+        /// let (image, image_view) = swapchain.acquire_next_image().unwrap();
+        /// // Do some rendering using the image or image view
+        /// swapchain.present().unwrap();
+        /// ```
+        pub fn acquire_next_image(&mut self) -> anyhow::Result<(ImageHandle, ImageViewHandle)> {
+            self.pimpl.acquire_next_image()
+        }
 
-        fn present(&self) -> anyhow::Result<bool>;
-        fn recreate_swapchain(&mut self) -> anyhow::Result<()>;
-        fn select_present_mode(&mut self, present_mode: PresentMode) -> anyhow::Result<()>;
-        fn extents(&self) -> Extent2D;
-        fn present_format(&self) -> ImageFormat;
-        fn destroy(&mut self, gpu: &dyn Gpu);
-    });
+        pub fn present(&self) -> anyhow::Result<bool> {
+            self.pimpl.present()
+        }
+
+        /// Call this when the surface changes, e.g when the window is resized
+        pub fn recreate_swapchain(&mut self) -> anyhow::Result<()> {
+            self.pimpl.recreate_swapchain()
+        }
+
+        pub fn select_present_mode(&mut self, present_mode: PresentMode) -> anyhow::Result<()> {
+            self.pimpl.select_present_mode(present_mode)
+        }
+
+        pub fn extents(&self) -> Extent2D {
+            self.pimpl.extents()
+        }
+
+        pub fn present_format(&self) -> ImageFormat {
+            self.pimpl.present_format()
+        }
+
+        pub fn destroy(&mut self, gpu: &dyn Gpu) {
+            self.pimpl.destroy(gpu)
+        }
+    }
 }
 
 pub use self::{

@@ -601,7 +601,7 @@ impl DeferredRenderingPipeline {
                 label: Some("Copy to backbuffer"),
                 color_attachments: &[ColorAttachment {
                     image_view: *destination,
-                    load_op: ColorLoadOp::DontCare,
+                    load_op: ColorLoadOp::Clear([0.0; 4]),
                     store_op: AttachmentStoreOp::Store,
                 }],
                 depth_attachment: None,
@@ -975,6 +975,22 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         if self.update_frustum {
             self.frustum = camera.frustum();
         }
+        let color_desc = RenderImageDescription {
+            format: ImageFormat::Rgba8,
+            samples: SampleCount::Sample1,
+            width: self.view_size.width,
+            height: self.view_size.height,
+            view_type: ImageViewType::Type2D,
+        };
+        let color_output =
+            self.image_allocator
+                .get(gpu, "color_output/post_process_1", &color_desc);
+
+        let primitives = scene.intersect_frustum(&self.frustum);
+
+        if primitives.is_empty() {
+            return Ok(color_output.view);
+        }
 
         self.update_light_data(gpu, camera, scene)?;
 
@@ -1006,18 +1022,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         // let slices = pov.split_into_slices(4);
         // let slices = slices.iter().map(|sl| sl.near).collect::<Vec<_>>();
 
-        let color_desc = RenderImageDescription {
-            format: ImageFormat::Rgba8,
-            samples: SampleCount::Sample1,
-            width: self.view_size.width,
-            height: self.view_size.height,
-            view_type: ImageViewType::Type2D,
-        };
-
-        let color_output =
-            self.image_allocator
-                .get(gpu, "color_output/post_process_1", &color_desc);
-
         self.cascaded_shadow_map.render_shadow_atlas(
             gpu,
             scene,
@@ -1029,7 +1033,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         )?;
 
         let gbuffer = self.get_gbuffer(gpu);
-        let primitives = scene.intersect_frustum(&self.frustum);
         self.drawcalls_last_frame = primitives.len() as u64;
         self.main_pass(
             gpu,
