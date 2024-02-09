@@ -650,8 +650,15 @@ impl App for GLTFViewer {
             None,
         )?;
 
+        self.egui_support.paint_frame(
+            app_state.gpu(),
+            &mut command_buffer,
+            backbuffer,
+            output.textures_delta,
+            output.shapes,
+        )?;
         self.egui_support
-            .paint_frame(app_state.gpu(), &mut command_buffer, backbuffer, output);
+            .handle_platform_output(&app_state.window, output.platform_output);
 
         Ok(command_buffer)
     }

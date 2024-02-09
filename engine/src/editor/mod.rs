@@ -20,7 +20,7 @@ use crate::{
     app::{app_state::AppState, egui_support::EguiSupport},
     components::{DebugName, EngineWindow, Transform2D},
     physics::{Collider2DHandle, RigidBody2DHandle},
-    AppTypeRegistry, BevyEcsApp, Plugin, Time,
+    AppTypeRegistry, Backbuffer, BevyEcsApp, Plugin, Time,
 };
 
 use self::entity_outliner::EntityOutliner;
@@ -157,13 +157,24 @@ impl Plugin for EditorPlugin {
         &mut self,
         world: &mut World,
         app_state: &mut AppState,
+        backbuffer: &Backbuffer,
         command_buffer: &mut CommandBuffer,
-    ) {
+    ) -> anyhow::Result<()> {
         let window = world.get_resource::<EngineWindow>().unwrap();
         self.output = Some(self.egui_support.end_frame(window));
         if let Some(output) = self.output.take() {
+            self.egui_support.paint_frame(
+                app_state.gpu(),
+                command_buffer,
+                backbuffer,
+                output.textures_delta,
+                output.shapes,
+            )?;
+
             self.egui_support
-                .paint_frame(app_state.gpu(), command_buffer, todo!(), output);
+                .handle_platform_output(window, output.platform_output);
         }
+
+        Ok(())
     }
 }

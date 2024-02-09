@@ -22,9 +22,9 @@ use crate::{
     loaders::FileSystemTextureLoader,
     physics::PhysicsContext2D,
     render_scene::camera::Camera,
-    utils, CvarManager, DeferredRenderingPipeline, MasterMaterial, Mesh, MeshCreateInfo,
-    MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline, ResourceHandle, ResourceMap, Texture,
-    TextureInput, Time,
+    utils, Backbuffer, CvarManager, DeferredRenderingPipeline, MasterMaterial, Mesh,
+    MeshCreateInfo, MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline, ResourceHandle,
+    ResourceMap, Texture, TextureInput, Time,
 };
 
 const DEFAULT_DEFERRED_FS: &[u32] = glsl!(
@@ -91,8 +91,10 @@ pub trait Plugin: 'static {
         &mut self,
         _world: &mut World,
         _app_state: &mut AppState,
+        _backbuffer: &Backbuffer,
         _command_buffer: &mut CommandBuffer,
-    ) {
+    ) -> anyhow::Result<()> {
+        Ok(())
     }
 }
 
@@ -557,7 +559,7 @@ impl App for BevyEcsApp {
         )?;
 
         for plugin in &mut self.plugins {
-            plugin.draw(&mut self.world, app_state, &mut command_buffer)
+            plugin.draw(&mut self.world, app_state, backbuffer, &mut command_buffer)?;
         }
 
         Ok(command_buffer)
