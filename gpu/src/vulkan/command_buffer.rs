@@ -1003,7 +1003,10 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
                 .pipeline_state
                 .scissor_area
                 .unwrap_or(Rect2D {
-                    offset: Offset2D::default(),
+                    offset: Offset2D::make(
+                        self.viewport_area.x as i32,
+                        self.viewport_area.y as i32,
+                    ),
                     extent: Extent2D {
                         width: self.viewport_area.width as u32,
                         height: self.viewport_area.height as u32,
@@ -1078,7 +1081,10 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
                 .pipeline_state
                 .scissor_area
                 .unwrap_or(Rect2D {
-                    offset: Offset2D::default(),
+                    offset: Offset2D::make(
+                        self.viewport_area.x as i32,
+                        self.viewport_area.y as i32,
+                    ),
                     extent: Extent2D {
                         width: self.viewport_area.width as u32,
                         height: self.viewport_area.height as u32,

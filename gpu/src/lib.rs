@@ -966,11 +966,22 @@ pub struct Offset2D {
     pub x: i32,
     pub y: i32,
 }
+impl Offset2D {
+    fn make(x: i32, y: i32) -> Offset2D {
+        Self { x, y }
+    }
+}
 
 #[derive(Default, Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Extent2D {
     pub width: u32,
     pub height: u32,
+}
+
+impl Extent2D {
+    pub fn make(width: u32, height: u32) -> Self {
+        Self { width, height }
+    }
 }
 
 #[derive(Default, Clone, Debug, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]

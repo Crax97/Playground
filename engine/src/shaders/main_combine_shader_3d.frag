@@ -245,6 +245,7 @@ vec3 compute_sample_location(vec3 light_pos, ShadowMap shadow_map) {
 
     vec2 shadow_map_size = shadow_map.offset_size.zw * texel_size;
     vec2 shadow_map_offset = shadow_map.offset_size.xy * texel_size;
+    light_pos.y = 1.0 - light_pos.y;
     light_pos.xy = shadow_map_offset + light_pos.xy * shadow_map_size;
     light_pos.x = clamp(light_pos.x, shadow_map_offset.x, shadow_map_offset.x + shadow_map_size.x);
     light_pos.y = clamp(light_pos.y, shadow_map_offset.y, shadow_map_offset.y + shadow_map_size.y);
@@ -326,7 +327,7 @@ float is_in_shadow(FragmentInfo frag_info, LightInfo light_info, vec3 light_proj
     if (do_pcf == 1) {
         float blocker_distance = find_blocker_distance(light_info, caster, light_proj, eye_position);
         float penumbra_size = (light_proj.z - blocker_distance) / blocker_distance;
-        penumbra_size = penumbra_size * light_info.position_radius.w * 0.001 / light_proj.z;
+        penumbra_size = penumbra_size * light_info.position_radius.w * 0.0001 / light_proj.z;
         return 1.0 - pcf(frag_info, light_proj, caster, penumbra_size);
     } else {
         return 1.0 - sample_shadow_atlas(light_proj, caster);
