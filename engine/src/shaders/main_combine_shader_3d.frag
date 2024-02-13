@@ -59,6 +59,10 @@ bool is_csm_debug_enabled() {
     return csm_data.csm_settings[1] != 0;
 }
 
+bool is_pcf_enabled() {
+    return csm_data.csm_settings[2] != 0;
+}
+
 CubeSample sample_cube(vec3 v)
 {
 	vec3 v_abs = abs(v);
@@ -322,9 +326,9 @@ float pcf(FragmentInfo frag_info, vec3 light_proj, ShadowMap caster, float penum
 }
 
 float is_in_shadow(FragmentInfo frag_info, LightInfo light_info, vec3 light_proj, ShadowMap caster, vec3 eye_position) {
-    const int do_pcf = 1;
+    bool do_pcf = is_pcf_enabled();
 
-    if (do_pcf == 1) {
+    if (do_pcf) {
         float blocker_distance = find_blocker_distance(light_info, caster, light_proj, eye_position);
         float penumbra_size = (light_proj.z - blocker_distance) / blocker_distance;
         penumbra_size = penumbra_size * light_info.position_radius.w * 0.0001 / light_proj.z;

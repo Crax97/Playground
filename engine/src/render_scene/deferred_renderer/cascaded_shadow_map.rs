@@ -41,6 +41,8 @@ pub struct CascadedShadowMap {
     pub csm_split_lambda: f32,
     pub z_mult: f32,
     pub debug_csm_splits: bool,
+    pub is_pcf_enabled: bool,
+    pub stabilize_cascades: bool,
 
     pub(crate) csm_buffers: Vec<CsmBuffers>,
     #[allow(dead_code)]
@@ -129,8 +131,10 @@ impl CascadedShadowMap {
         Ok(Self {
             num_cascades: 4,
             csm_split_lambda: 0.05,
-            z_mult: 1.5,
+            z_mult: 1.35,
             debug_csm_splits: false,
+            is_pcf_enabled: true,
+            stabilize_cascades: true,
 
             csm_buffers,
             shadow_atlas,
@@ -347,10 +351,10 @@ impl CascadedShadowMap {
                     let split_dist = cascade_splits[i];
 
                     let mut frustum_corners = [
-                        vector![-1.0, 1.0, 0.0],
-                        vector![1.0, 1.0, 0.0],
-                        vector![1.0, -1.0, 0.0],
-                        vector![-1.0, -1.0, 0.0],
+                        vector![-1.0, 1.0, -1.0],
+                        vector![1.0, 1.0, -1.0],
+                        vector![1.0, -1.0, -1.0],
+                        vector![-1.0, -1.0, -1.0],
                         vector![-1.0, 1.0, 1.0],
                         vector![1.0, 1.0, 1.0],
                         vector![1.0, -1.0, 1.0],
@@ -403,20 +407,22 @@ impl CascadedShadowMap {
                         min_extents.y,
                         max_extents.y,
                         0.0,
-                        (max_extents.z - min_extents.z) + self.z_mult,
+                        max_extents.z - min_extents.z,
                     );
 
-                    // Compute texel snapping factor
-                    // https://johanmedestrom.wordpress.com/2016/03/18/opengl-cascaded-shadow-maps/
-                    let shadow_matrix = light_ortho * view_matrix;
-                    let shadow_origin = shadow_matrix * vector![0.0, 0.0, 0.0, 1.0];
-                    let shadow_origin = shadow_origin * (allocation.width as f32) / 2.0;
-                    let rounded_origin = shadow_origin.map(|v| v.round());
-                    let round_offset = rounded_origin - shadow_origin;
-                    let mut round_offset = round_offset * 2.0 / (allocation.width as f32);
-                    round_offset.z = 0.0;
-                    round_offset.w = 0.0;
-                    light_ortho.set_column(3, &(light_ortho.column(3) + round_offset));
+                    if self.stabilize_cascades {
+                        // Compute texel snapping factor
+                        // https://johanmedestrom.wordpress.com/2016/03/18/opengl-cascaded-shadow-maps/
+                        let shadow_matrix = light_ortho * view_matrix;
+                        let shadow_origin = shadow_matrix * vector![0.0, 0.0, 0.0, 1.0];
+                        let shadow_origin = shadow_origin * (allocation.height as f32) / 2.0;
+                        let rounded_origin = shadow_origin.map(|v| v.round());
+                        let round_offset = rounded_origin - shadow_origin;
+                        let mut round_offset = round_offset * 2.0 / (allocation.height as f32);
+                        round_offset.z = 0.0;
+                        round_offset.w = 0.0;
+                        light_ortho.set_column(3, &(light_ortho.column(3) + round_offset));
+                    }
 
                     povs.push(PointOfViewData {
                         eye: point![l.position.x, l.position.y, l.position.z, 0.0],
@@ -462,6 +468,7 @@ impl CascadedShadowMap {
             bytemuck::cast_slice(&[
                 self.num_cascades as u32,
                 if self.debug_csm_splits { 1 } else { 0 },
+                if self.is_pcf_enabled { 1 } else { 0 },
             ]),
         )?;
 

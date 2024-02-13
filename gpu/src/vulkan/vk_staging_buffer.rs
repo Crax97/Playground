@@ -306,6 +306,9 @@ impl VkStagingBuffer {
     }
 
     unsafe fn write_resources(&mut self, device: &ash::Device) -> Result<(), anyhow::Error> {
+        if self.operations.is_empty() {
+            return Ok(());
+        }
         let copy_command_buffer = self.create_command_buffer(device)?;
         device.begin_command_buffer(
             copy_command_buffer,
@@ -405,7 +408,7 @@ impl VkStagingBuffer {
         &mut self,
         device: &ash::Device,
     ) -> Result<(), anyhow::Error> {
-        if self.images_to_transition.len() > 0 {
+        if !self.images_to_transition.is_empty() {
             let image_transition_command_buffer = self.create_command_buffer(device)?;
             device.begin_command_buffer(
                 image_transition_command_buffer,

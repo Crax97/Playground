@@ -244,7 +244,7 @@ impl VkSwapchain {
                     self.state.logical_device.clone(),
                     Some("Swapchain image"),
                     *i,
-                    self.present_format().into(),
+                    self.present_format(),
                 )
             })
             .map(|img| {

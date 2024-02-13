@@ -3,8 +3,7 @@ use std::ffi::CString;
 use std::rc::Rc;
 
 use ash::vk::{
-    self, DebugUtilsLabelEXT, DependencyFlags, PipelineBindPoint,
-    PipelineInputAssemblyStateCreateFlags, StructureType,
+    self, DebugUtilsLabelEXT, DependencyFlags, PipelineInputAssemblyStateCreateFlags, StructureType,
 };
 use ash::{extensions::ext::DebugUtils, prelude::VkResult};
 

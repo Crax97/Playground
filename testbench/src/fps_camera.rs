@@ -8,9 +8,10 @@ pub struct FpsCamera {
     pub rotation: Rotation3<f32>,
     pub speed: f32,
     pub rotation_speed: f32,
+    pub fov_degrees: f32,
 
-    roll: f32,
-    pitch: f32,
+    pub roll: f32,
+    pub pitch: f32,
 }
 
 impl Default for FpsCamera {
@@ -20,6 +21,7 @@ impl Default for FpsCamera {
             rotation: Default::default(),
             speed: 150.0,
             rotation_speed: 180.0,
+            fov_degrees: 37.0,
             roll: Default::default(),
             pitch: Default::default(),
         }
@@ -58,7 +60,9 @@ impl FpsCamera {
         Camera {
             location: self.location,
             forward,
-            mode: engine::CameraMode::Perspective { fov_degrees: 45.0 },
+            mode: engine::CameraMode::Perspective {
+                fov_degrees: self.fov_degrees.clamp(0.0, 90.0),
+            },
             width: 1920.0,
             height: 1080.0,
             near: 0.1,

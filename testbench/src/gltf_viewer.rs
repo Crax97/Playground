@@ -358,7 +358,7 @@ impl App for GLTFViewer {
 
         gltf_loader.scene_mut().add_light(Light {
             ty: LightType::Directional {
-                direction: vector![0.45, -0.45, 0.0],
+                direction: vector![-0.172285721, -0.374876559, 0.910925507],
                 size: vector![50.0, 50.0],
             },
             position: Default::default(),
@@ -379,11 +379,15 @@ impl App for GLTFViewer {
             label: Some("Depth draw"),
             code: bytemuck::cast_slice(DEPTH_DRAW),
         })?;
+        let mut camera = FpsCamera::default();
+        camera.location = point![-292.7, 136.0, -216.7];
+        camera.roll = 19.0;
+        camera.pitch = 61.0;
 
         Ok(Self {
             scene_renderer,
             gltf_loader,
-            camera: FpsCamera::default(),
+            camera,
             camera_light: None,
             console,
             input,
@@ -475,6 +479,7 @@ impl App for GLTFViewer {
 
                     ui.input_float("Camera speed", &mut self.camera.speed);
                     ui.input_float("Camera rotation speed", &mut self.camera.rotation_speed);
+                    ui.input_float("Camera FOV", &mut self.camera.fov_degrees);
 
                     ui.checkbox(
                         &mut self.gltf_loader.scene_mut().use_frustum_culling,
@@ -551,8 +556,16 @@ impl App for GLTFViewer {
                         &mut self.scene_renderer.cascaded_shadow_map.z_mult,
                     );
                     ui.checkbox(
+                        &mut self.scene_renderer.cascaded_shadow_map.stabilize_cascades,
+                        "Stabilize cascades",
+                    );
+                    ui.checkbox(
                         &mut self.scene_renderer.cascaded_shadow_map.debug_csm_splits,
                         "Debug CSM Splits",
+                    );
+                    ui.checkbox(
+                        &mut self.scene_renderer.cascaded_shadow_map.is_pcf_enabled,
+                        "Enable Percentage Close Filtering",
                     );
                 });
 
