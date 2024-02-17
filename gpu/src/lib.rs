@@ -265,7 +265,7 @@ pub mod compute_pass {
 
     define_pass_type!(ComputePass {
         fn set_compute_shader(&mut self, compute_shader: ShaderModuleHandle);
-        fn bind_resources_2(&mut self, resources: &[Binding2]);
+        fn bind_resources_2(&mut self, set: usize, resources: &[Binding2]);
         fn dispatch(&mut self, group_size_x: u32, group_size_y: u32, group_size_z: u32);
     });
 }

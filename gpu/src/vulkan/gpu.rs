@@ -2789,7 +2789,12 @@ impl Gpu for VkGpu {
             .expect("Failed to lock render graph")
             .execute(&RenderGraphExecutionContext {
                 graphics_command_buffer: graphics_buffer,
+                graphics_queue: self.state.graphics_queue,
+                graphics_queue_index: self.state.queue_families.graphics_family.index,
                 async_compute_command_buffer: compute_buffer,
+
+                compute_queue: self.state.async_compute_queue,
+                compute_queue_index: self.state.queue_families.async_compute_family.index,
             })
             .unwrap();
 

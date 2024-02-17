@@ -603,7 +603,7 @@ impl compute_pass::Impl for VkComputePassCommand {
         self.pipeline_state.shader = compute_shader;
     }
 
-    fn bind_resources_2(&mut self, resources: &[Binding2]) {
+    fn bind_resources_2(&mut self, set: usize, resources: &[Binding2]) {
         self.pass_info
             .all_read_resources
             .extend(resources.iter().filter(|r| !r.write).map(|r| match r.ty {
@@ -616,17 +616,92 @@ impl compute_pass::Impl for VkComputePassCommand {
                 DescriptorBindingType2::ImageView {
                     image_view_handle, ..
                 } => {
-                    let handle = self
+                    let view = self
                         .state
-                        .resolve_resource::<VkImageView>(&image_view_handle)
-                        .owner_image;
+                        .resolve_resource::<VkImageView>(&image_view_handle);
+                    let handle = view.owner_image;
                     let image = self.state.resolve_resource::<VkImage>(&handle);
 
                     ShaderInput {
-                        resource: Resource::Image(image.inner, image.format.aspect_mask().to_vk()),
+                        resource: Resource::Image(
+                            image.inner,
+                            view.inner,
+                            image.format.aspect_mask().to_vk(),
+                        ),
                     }
                 }
-            }))
+            }));
+        self.pass_info
+            .all_written_resources
+            .extend(resources.iter().filter(|r| r.write).map(|r| match r.ty {
+                DescriptorBindingType2::UniformBuffer { handle, .. }
+                | DescriptorBindingType2::StorageBuffer { handle, .. } => ShaderInput {
+                    resource: Resource::Buffer(
+                        self.state.resolve_resource::<VkBuffer>(&handle).inner,
+                    ),
+                },
+                DescriptorBindingType2::ImageView {
+                    image_view_handle, ..
+                } => {
+                    let view = self
+                        .state
+                        .resolve_resource::<VkImageView>(&image_view_handle);
+                    let handle = view.owner_image;
+                    let image = self.state.resolve_resource::<VkImage>(&handle);
+
+                    ShaderInput {
+                        resource: Resource::Image(
+                            image.inner,
+                            view.inner,
+                            image.format.aspect_mask().to_vk(),
+                        ),
+                    }
+                }
+            }));
+        let mut state = self.command_buffer_state.borrow_mut();
+        if state.descriptor_state.sets.len() <= (set as _) {
+            state
+                .descriptor_state
+                .sets
+                .resize(set + 1, DescriptorSetInfo2::default());
+        }
+
+        state.descriptor_state.sets[set].bindings = resources
+            .iter()
+            .enumerate()
+            .map(|(i, b)| Binding {
+                ty: match b.ty {
+                    DescriptorBindingType2::UniformBuffer {
+                        handle,
+                        offset,
+                        range,
+                    } => DescriptorBindingType::UniformBuffer {
+                        handle,
+                        offset,
+                        range: range as usize,
+                    },
+                    DescriptorBindingType2::StorageBuffer {
+                        handle,
+                        offset,
+                        range,
+                    } => DescriptorBindingType::StorageBuffer {
+                        handle,
+                        offset,
+                        range: range as usize,
+                    },
+                    DescriptorBindingType2::ImageView {
+                        image_view_handle,
+                        sampler_handle,
+                    } => DescriptorBindingType::ImageView {
+                        image_view_handle,
+                        sampler_handle,
+                        layout: ImageLayout::ShaderReadOnly,
+                    },
+                },
+                binding_stage: ShaderStage::COMPUTE,
+                location: i as _,
+            })
+            .collect();
     }
 
     fn dispatch(&mut self, group_size_x: u32, group_size_y: u32, group_size_z: u32) {
@@ -677,17 +752,20 @@ impl VkRenderPass2 {
             .color_attachments
             .iter()
             .enumerate()
-            .map(|(index, _)| render_graph::SubpassColorAttachment {
+            .map(|(index, attachment)| render_graph::SubpassColorAttachment {
                 index,
-                attachment_mode: AttachmentMode::AttachmentWrite,
+                attachment_mode: match attachment.store_op {
+                    AttachmentStoreOp::DontCare => AttachmentMode::AttachmentRead,
+                    AttachmentStoreOp::Store => AttachmentMode::AttachmentWrite,
+                },
             })
             .collect::<Vec<_>>();
-        let depth_attachment = if info.depth_attachment.is_some() {
-            Some(AttachmentMode::AttachmentWrite)
-        } else {
-            None
-        };
-        let stencil_attachment: Option<AttachmentMode> = None;
+        let depth_attachment = info
+            .depth_attachment
+            .map(|_| AttachmentMode::AttachmentRead);
+        let stencil_attachment = info
+            .stencil_attachment
+            .map(|_| AttachmentMode::AttachmentRead);
 
         Self {
             vertex_offsets: vec![],
@@ -908,7 +986,7 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
                 });
         }
 
-        for (binding, read) in bindings.iter().filter_map(|b| match b.ty {
+        for (binding, view, read) in bindings.iter().filter_map(|b| match b.ty {
             DescriptorBindingType2::ImageView {
                 image_view_handle, ..
             } => {
@@ -918,17 +996,25 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
                 let image = self
                     .gpu_state
                     .resolve_resource::<VkImage>(&image_view.owner_image);
-                Some((image, true))
+                Some((image, image_view.inner, true))
             }
             _ => None,
         }) {
             if read {
                 current_subpass.shader_reads.push(ShaderInput {
-                    resource: Resource::Image(binding.inner, binding.format.aspect_mask().to_vk()),
+                    resource: Resource::Image(
+                        binding.inner,
+                        view,
+                        binding.format.aspect_mask().to_vk(),
+                    ),
                 });
             } else {
                 current_subpass.shader_writes.push(ShaderInput {
-                    resource: Resource::Image(binding.inner, binding.format.aspect_mask().to_vk()),
+                    resource: Resource::Image(
+                        binding.inner,
+                        view,
+                        binding.format.aspect_mask().to_vk(),
+                    ),
                 });
             }
         }
@@ -1016,6 +1102,14 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
             depth_test_enable: self.pipeline_state.enable_depth_test,
         };
 
+        if self.pipeline_state.depth_write_enabled {
+            if let Some(da) =
+                &mut self.graphics_pass_info.sub_passes[self.current_subpass].depth_attachment
+            {
+                *da = AttachmentMode::AttachmentWrite;
+            }
+        }
+
         self.graphics_pass_info.sub_passes[self.current_subpass]
             .draw_commands
             .push(DrawCommand {
@@ -1094,35 +1188,13 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
             depth_test_enable: self.pipeline_state.enable_depth_test,
         };
 
-        let _color_attachments = self
-            .current_color_attachments
-            .iter()
-            .map(|attach| {
-                self.graphics_pass_info
-                    .all_color_attachments
-                    .iter()
-                    .enumerate()
-                    .find(|(_, att)| {
-                        att.render_image.view
-                            == self
-                                .gpu_state
-                                .resolve_resource::<VkImageView>(&attach.image_view)
-                                .inner
-                    })
-                    .expect("No matching color attachment")
-                    .0
-            })
-            .collect::<Vec<_>>();
-        let _depth_attachment = if self.uses_depth_attachment {
-            Some(if self.pipeline_state.depth_write_enabled {
-                AttachmentMode::AttachmentWrite
-            } else {
-                AttachmentMode::AttachmentRead
-            })
-        } else {
-            None
-        };
-        let _stencil_attachment: Option<AttachmentMode> = None;
+        if self.pipeline_state.depth_write_enabled {
+            if let Some(da) =
+                &mut self.graphics_pass_info.sub_passes[self.current_subpass].depth_attachment
+            {
+                *da = AttachmentMode::AttachmentWrite;
+            }
+        }
 
         self.graphics_pass_info.sub_passes[self.current_subpass]
             .draw_commands

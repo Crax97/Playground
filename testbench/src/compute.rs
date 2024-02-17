@@ -1,7 +1,7 @@
 use engine_macros::*;
 use gpu::{
-    make_gpu, Binding, BufferCreateInfo, BufferUsageFlags, GpuConfiguration, MemoryDomain,
-    QueueType, ShaderModuleCreateInfo, ShaderStage,
+    make_gpu, Binding, Binding2, BufferCreateInfo, BufferUsageFlags, GpuConfiguration,
+    MemoryDomain, QueueType, ShaderModuleCreateInfo, ShaderStage,
 };
 use std::mem::{size_of, size_of_val};
 
@@ -68,26 +68,24 @@ fn main() -> anyhow::Result<()> {
     {
         let mut compute_pass = command_buffer.start_compute_pass();
         compute_pass.set_compute_shader(compute_module);
-        compute_pass.bind_resources(
+        compute_pass.bind_resources_2(
             0,
             &[
-                Binding {
-                    location: 0,
-                    ty: gpu::DescriptorBindingType::UniformBuffer {
+                Binding2 {
+                    ty: gpu::DescriptorBindingType2::UniformBuffer {
                         handle: input_buffer,
                         offset: 0,
                         range: gpu::WHOLE_SIZE as _,
                     },
-                    binding_stage: ShaderStage::COMPUTE,
+                    write: false,
                 },
-                Binding {
-                    location: 1,
-                    ty: gpu::DescriptorBindingType::StorageBuffer {
+                Binding2 {
+                    ty: gpu::DescriptorBindingType2::StorageBuffer {
                         handle: output_buffer,
                         offset: 0,
                         range: gpu::WHOLE_SIZE as _,
                     },
-                    binding_stage: ShaderStage::COMPUTE,
+                    write: true,
                 },
             ],
         );

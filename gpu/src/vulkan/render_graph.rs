@@ -1,10 +1,14 @@
 use bitflags::bitflags;
+use crossbeam::channel::at;
 
-use std::{collections::HashMap, ffi::CString};
+use std::{collections::HashMap, f64::consts::E, ffi::CString};
 
 use ash::{
     extensions::ext::DebugUtils,
-    vk::{self, ClearColorValue, ClearDepthStencilValue, ClearValue},
+    vk::{
+        self, ClearColorValue, ClearDepthStencilValue, ClearValue, DependencyInfo,
+        PipelineStageFlags2,
+    },
 };
 
 use crate::vulkan::ToVk;
@@ -20,12 +24,13 @@ pub struct PushConstant {
     pub stage_flags: vk::ShaderStageFlags,
 }
 
-#[derive(Hash, Eq, PartialEq, Ord, PartialOrd, Copy, Clone)]
+#[derive(Debug, Hash, Eq, PartialEq, Ord, PartialOrd, Copy, Clone)]
 pub enum AttachmentMode {
     AttachmentRead,
     AttachmentWrite,
     ShaderRead,
     ShaderWrite,
+    Ignored,
 }
 
 pub struct SubpassColorAttachment {
@@ -74,9 +79,9 @@ pub struct StencilAttachment {
     pub store_op: AttachmentStoreOp,
 }
 
-#[derive(Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum Resource {
-    Image(vk::Image, vk::ImageAspectFlags),
+    Image(vk::Image, vk::ImageView, vk::ImageAspectFlags),
     Buffer(vk::Buffer),
 }
 
@@ -155,10 +160,17 @@ pub struct ComputePassInfo {
     pub all_written_resources: Vec<ShaderInput>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum RenderPass {
     Graphics(usize),
     Compute(usize),
+}
+
+#[derive(Debug, Clone)]
+struct Ownership {
+    queue: vk::Queue,
+    queue_index: u32,
+    modes: Vec<AttachmentMode>,
 }
 
 pub struct RenderGraph {
@@ -207,42 +219,90 @@ impl RenderGraph {
 
 pub struct RenderGraphExecutionContext {
     pub graphics_command_buffer: vk::CommandBuffer,
+    pub graphics_queue: vk::Queue,
+    pub graphics_queue_index: u32,
     pub async_compute_command_buffer: vk::CommandBuffer,
+    pub compute_queue: vk::Queue,
+    pub compute_queue_index: u32,
 }
 
-#[derive(Default)]
-pub struct LayoutInfo {
+#[derive(Default, Eq, PartialEq, Copy, Clone)]
+pub struct ImageLayoutInfo {
     pub layout: vk::ImageLayout,
+    pub access_flags: vk::AccessFlags2,
+    pub pipeline_flags: vk::PipelineStageFlags2,
+}
+#[derive(Default, Eq, PartialEq, Copy, Clone)]
+pub struct BufferLayoutInfo {
     pub access_flags: vk::AccessFlags2,
     pub pipeline_flags: vk::PipelineStageFlags2,
 }
 
 impl RenderGraph {
-    pub fn add_graphics(&mut self, pass: GraphicsPassInfo) {
-        self.all_graphics_attachments.extend(
-            pass.all_color_attachments
-                .iter()
-                .map(|att| att.render_image.image),
-        );
-        self.all_graphics_attachments.extend(
-            pass.depth_attachment
-                .iter()
-                .map(|att| att.render_image.image),
-        );
-        self.all_graphics_attachments.extend(
-            pass.stencil_attachment
-                .iter()
-                .map(|att| att.render_image.image),
-        );
+    pub fn add_graphics(&mut self, info: GraphicsPassInfo) {
+        let pass = RenderPass::Graphics(self.graphics_passes.len());
         self.sequence
             .push(RenderPass::Graphics(self.graphics_passes.len()));
-        self.graphics_passes.push(pass);
+
+        for (i, res) in info.all_color_attachments.iter().enumerate() {
+            let resource = Resource::Image(
+                res.render_image.image,
+                res.render_image.view,
+                vk::ImageAspectFlags::COLOR,
+            );
+            let mut modes = vec![];
+            for subpass in &info.sub_passes {
+                let mut mode = AttachmentMode::Ignored;
+                if let Some(attachment) = subpass.color_attachments.iter().find(|a| a.index == i) {
+                    mode = attachment.attachment_mode;
+                }
+
+                modes.push(mode);
+            }
+        }
+
+        if let Some(res) = info.depth_attachment {
+            let resource = Resource::Image(
+                res.render_image.image,
+                res.render_image.view,
+                vk::ImageAspectFlags::DEPTH,
+            );
+            let mut modes = vec![];
+            for subpass in &info.sub_passes {
+                let mut mode = AttachmentMode::Ignored;
+                if let Some(attachment) = subpass.depth_attachment {
+                    mode = attachment;
+                }
+
+                modes.push(mode);
+            }
+        }
+
+        if let Some(res) = info.stencil_attachment {
+            let resource = Resource::Image(
+                res.render_image.image,
+                res.render_image.view,
+                vk::ImageAspectFlags::DEPTH,
+            );
+            let mut modes = vec![];
+            for subpass in &info.sub_passes {
+                let mut mode = AttachmentMode::Ignored;
+                if let Some(attachment) = subpass.stencil_attachment {
+                    mode = attachment;
+                }
+
+                modes.push(mode);
+            }
+        }
+
+        self.graphics_passes.push(info);
     }
 
-    pub fn add_compute(&mut self, pass: ComputePassInfo) {
-        self.sequence
-            .push(RenderPass::Compute(self.compute_passes.len()));
-        self.compute_passes.push(pass);
+    pub fn add_compute(&mut self, info: ComputePassInfo) {
+        let pass = RenderPass::Compute(self.compute_passes.len());
+
+        self.sequence.push(pass);
+        self.compute_passes.push(info);
     }
 
     pub fn execute(
@@ -251,7 +311,9 @@ impl RenderGraph {
     ) -> anyhow::Result<()> {
         self.validate_graph()?;
         let execution_plan = self.find_execution_plan();
-        let mut previous_layout = HashMap::<vk::Image, LayoutInfo>::new();
+        let mut previous_image_layout = HashMap::<vk::Image, ImageLayoutInfo>::new();
+        let mut previous_buffer_layout = HashMap::new();
+        let mut ownerships = HashMap::<Resource, Ownership>::new();
         for pass in execution_plan {
             match pass {
                 RenderPass::Graphics(index) => {
@@ -259,12 +321,20 @@ impl RenderGraph {
                     self.execute_graphics_pass_dynamic_rendering(
                         info,
                         execution_context,
-                        &mut previous_layout,
+                        &mut previous_image_layout,
+                        &mut previous_buffer_layout,
+                        &mut ownerships,
                     );
                 }
                 RenderPass::Compute(index) => {
                     let info = &self.compute_passes[index];
-                    self.execute_compute_pass(info, execution_context, &mut previous_layout);
+                    self.execute_compute_pass(
+                        info,
+                        execution_context,
+                        &mut previous_image_layout,
+                        &mut previous_buffer_layout,
+                        &mut ownerships,
+                    );
                 }
             }
         }
@@ -273,7 +343,7 @@ impl RenderGraph {
             self.make_sure_swapchain_is_presentable(
                 execution_context,
                 swapchain_image,
-                &mut previous_layout,
+                &mut previous_image_layout,
             );
         }
         self.reset();
@@ -298,7 +368,9 @@ impl RenderGraph {
         &self,
         info: &GraphicsPassInfo,
         execution_context: &RenderGraphExecutionContext,
-        previous_layouts: &mut HashMap<vk::Image, LayoutInfo>,
+        previous_image_layouts: &mut HashMap<vk::Image, ImageLayoutInfo>,
+        previous_buffer_layouts: &mut HashMap<vk::Buffer, BufferLayoutInfo>,
+        ownerships: &mut HashMap<Resource, Ownership>,
     ) {
         if let Some(utils) = &self.debug_utils {
             let label_string = info.label.as_deref().unwrap_or("Graphics Pass");
@@ -332,10 +404,11 @@ impl RenderGraph {
                 }
             }
             let mut image_barriers = vec![];
+            let mut buffer_barriers = vec![];
             for attachment_reference in &subpass.color_attachments {
                 let attachment = &info.all_color_attachments[attachment_reference.index];
                 push_image_transition(
-                    previous_layouts,
+                    previous_image_layouts,
                     vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                     match attachment_reference.attachment_mode {
                         AttachmentMode::AttachmentRead => vk::AccessFlags2::COLOR_ATTACHMENT_READ,
@@ -353,12 +426,12 @@ impl RenderGraph {
                     .shader_reads
                     .iter()
                     .filter_map(|res| match res.resource {
-                        Resource::Image(image, aspect_mask) => Some((image, aspect_mask)),
+                        Resource::Image(image, _, aspect_mask) => Some((image, aspect_mask)),
                         Resource::Buffer(_) => None,
                     })
             {
                 try_push_image_transition(
-                    previous_layouts,
+                    previous_image_layouts,
                     vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                     vk::AccessFlags2::SHADER_READ,
                     vk::PipelineStageFlags2::FRAGMENT_SHADER,
@@ -367,31 +440,58 @@ impl RenderGraph {
                     aspect_mask,
                 );
             }
+            for res in &subpass.shader_reads {
+                let new_ownership = Ownership {
+                    queue: execution_context.graphics_queue,
+                    queue_index: execution_context.graphics_queue_index,
+                    modes: vec![AttachmentMode::ShaderRead],
+                };
 
-            for (image, aspect_mask) in
-                subpass
-                    .shader_writes
-                    .iter()
-                    .filter_map(|res| match res.resource {
-                        Resource::Image(image, aspect_mask) => Some((image, aspect_mask)),
-                        Resource::Buffer(_) => None,
-                    })
-            {
-                try_push_image_transition(
-                    previous_layouts,
-                    vk::ImageLayout::GENERAL,
-                    vk::AccessFlags2::SHADER_WRITE,
-                    vk::PipelineStageFlags2::FRAGMENT_SHADER,
-                    image,
+                let new_layout = ImageLayoutInfo {
+                    layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    access_flags: vk::AccessFlags2::SHADER_READ,
+                    pipeline_flags: vk::PipelineStageFlags2::ALL_GRAPHICS,
+                };
+                push_generic_pipeline_operation(
+                    ownerships,
+                    res,
+                    new_ownership,
+                    previous_image_layouts,
+                    new_layout,
                     &mut image_barriers,
-                    aspect_mask,
+                    previous_buffer_layouts,
+                    &mut buffer_barriers,
+                );
+            }
+
+            for res in &subpass.shader_writes {
+                let new_ownership = Ownership {
+                    queue: execution_context.graphics_queue,
+                    queue_index: execution_context.graphics_queue_index,
+                    modes: vec![AttachmentMode::ShaderRead],
+                };
+
+                let new_layout = ImageLayoutInfo {
+                    layout: vk::ImageLayout::GENERAL,
+                    access_flags: vk::AccessFlags2::SHADER_WRITE,
+                    pipeline_flags: vk::PipelineStageFlags2::ALL_GRAPHICS,
+                };
+                push_generic_pipeline_operation(
+                    ownerships,
+                    res,
+                    new_ownership,
+                    previous_image_layouts,
+                    new_layout,
+                    &mut image_barriers,
+                    previous_buffer_layouts,
+                    &mut buffer_barriers,
                 );
             }
 
             if let Some(attachment_mode) = subpass.depth_attachment {
                 let attachment = info.depth_attachment.unwrap();
                 push_image_transition(
-                    previous_layouts,
+                    previous_image_layouts,
                     vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
                     match attachment_mode {
                         AttachmentMode::AttachmentRead => {
@@ -413,7 +513,7 @@ impl RenderGraph {
             if let Some(attachment_mode) = subpass.stencil_attachment {
                 let attachment = info.stencil_attachment.unwrap();
                 push_image_transition(
-                    previous_layouts,
+                    previous_image_layouts,
                     vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
                     match attachment_mode {
                         AttachmentMode::AttachmentRead => {
@@ -521,7 +621,9 @@ impl RenderGraph {
         &self,
         info: &ComputePassInfo,
         execution_context: &RenderGraphExecutionContext,
-        previous_layout: &mut HashMap<vk::Image, LayoutInfo>,
+        previous_image_layouts: &mut HashMap<vk::Image, ImageLayoutInfo>,
+        previous_buffer_layouts: &mut HashMap<vk::Buffer, BufferLayoutInfo>,
+        ownerships: &mut HashMap<Resource, Ownership>,
     ) {
         if let Some(utils) = &self.debug_utils {
             let label_string = info.label.as_deref().unwrap_or("Graphics Pass");
@@ -539,12 +641,84 @@ impl RenderGraph {
             }
         }
 
-        let command_buffer = if info.flags.contains(ComputePassFlags::ASYNC) {
+        let is_async = info.flags.contains(ComputePassFlags::ASYNC);
+
+        let command_buffer = if is_async {
             execution_context.async_compute_command_buffer
         } else {
             execution_context.graphics_command_buffer
         };
+        let (queue, queue_index) = if is_async {
+            (
+                execution_context.compute_queue,
+                execution_context.compute_queue_index,
+            )
+        } else {
+            (
+                execution_context.graphics_queue,
+                execution_context.graphics_queue_index,
+            )
+        };
+
+        let mut image_barriers = vec![];
+        let mut buffer_barriers = vec![];
+
+        for res in &info.all_read_resources {
+            let new_ownership = Ownership {
+                queue,
+                queue_index,
+                modes: vec![AttachmentMode::ShaderRead],
+            };
+
+            let new_layout = ImageLayoutInfo {
+                layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                access_flags: vk::AccessFlags2::SHADER_READ,
+                pipeline_flags: PipelineStageFlags2::COMPUTE_SHADER,
+            };
+            push_generic_pipeline_operation(
+                ownerships,
+                res,
+                new_ownership,
+                previous_image_layouts,
+                new_layout,
+                &mut image_barriers,
+                previous_buffer_layouts,
+                &mut buffer_barriers,
+            );
+        }
+        for res in &info.all_written_resources {
+            let new_ownership = Ownership {
+                queue,
+                queue_index,
+                modes: vec![AttachmentMode::ShaderWrite],
+            };
+
+            let new_layout = ImageLayoutInfo {
+                layout: vk::ImageLayout::GENERAL,
+                access_flags: vk::AccessFlags2::SHADER_WRITE,
+                pipeline_flags: PipelineStageFlags2::COMPUTE_SHADER,
+            };
+            push_generic_pipeline_operation(
+                ownerships,
+                res,
+                new_ownership,
+                previous_image_layouts,
+                new_layout,
+                &mut image_barriers,
+                previous_buffer_layouts,
+                &mut buffer_barriers,
+            );
+        }
         unsafe {
+            if !image_barriers.is_empty() || !buffer_barriers.is_empty() {
+                self.device.cmd_pipeline_barrier2(
+                    command_buffer,
+                    &DependencyInfo::builder()
+                        .image_memory_barriers(&image_barriers)
+                        .buffer_memory_barriers(&buffer_barriers)
+                        .build(),
+                );
+            }
             for dispatch in &info.dispatches {
                 self.device.cmd_bind_pipeline(
                     command_buffer,
@@ -686,7 +860,7 @@ impl RenderGraph {
         &self,
         execution_context: &RenderGraphExecutionContext,
         swapchain_image: vk::Image,
-        previous_layouts: &mut HashMap<vk::Image, LayoutInfo>,
+        previous_layouts: &mut HashMap<vk::Image, ImageLayoutInfo>,
     ) {
         let mut image_barriers = vec![];
         push_image_transition(
@@ -715,6 +889,110 @@ impl RenderGraph {
         self.sequence.clear();
     }
 }
+
+fn push_generic_pipeline_operation(
+    ownerships: &mut HashMap<Resource, Ownership>,
+    res: &ShaderInput,
+    new_ownership: Ownership,
+    previous_image_layouts: &mut HashMap<vk::Image, ImageLayoutInfo>,
+    new_layout: ImageLayoutInfo,
+    image_barriers: &mut Vec<vk::ImageMemoryBarrier2>,
+    previous_buffer_layouts: &mut HashMap<vk::Buffer, BufferLayoutInfo>,
+    buffer_barriers: &mut Vec<vk::BufferMemoryBarrier2>,
+) {
+    let old_ownership = ownerships
+        .entry(res.resource)
+        .or_insert(new_ownership.clone());
+
+    if old_ownership.queue != new_ownership.queue {
+        // queue transfer operation
+        match res.resource {
+            Resource::Image(image, _, aspect_mask) => {
+                let previous_layout = *previous_image_layouts
+                    .entry(image)
+                    .and_modify(|l| *l = new_layout)
+                    .or_insert(ImageLayoutInfo {
+                        layout: vk::ImageLayout::UNDEFINED,
+                        access_flags: vk::AccessFlags2::empty(),
+                        pipeline_flags: vk::PipelineStageFlags2::empty(),
+                    });
+                image_barriers.push(vk::ImageMemoryBarrier2 {
+                    src_stage_mask: previous_layout.pipeline_flags,
+                    src_access_mask: previous_layout.access_flags,
+                    dst_stage_mask: new_layout.pipeline_flags,
+                    dst_access_mask: new_layout.access_flags,
+                    old_layout: previous_layout.layout,
+                    new_layout: new_layout.layout,
+                    src_queue_family_index: old_ownership.queue_index,
+                    dst_queue_family_index: new_ownership.queue_index,
+                    image,
+                    subresource_range: vk::ImageSubresourceRange {
+                        aspect_mask,
+                        base_mip_level: 0,
+                        level_count: vk::REMAINING_MIP_LEVELS,
+                        base_array_layer: 0,
+                        layer_count: vk::REMAINING_ARRAY_LAYERS,
+                    },
+                    ..Default::default()
+                });
+            }
+
+            Resource::Buffer(buffer) => {
+                let previous_layout = *previous_buffer_layouts
+                    .entry(buffer)
+                    .and_modify(|l| {
+                        *l = BufferLayoutInfo {
+                            access_flags: new_layout.access_flags,
+                            pipeline_flags: new_layout.pipeline_flags,
+                        }
+                    })
+                    .or_insert(BufferLayoutInfo {
+                        access_flags: vk::AccessFlags2::empty(),
+                        pipeline_flags: vk::PipelineStageFlags2::empty(),
+                    });
+                buffer_barriers.push(vk::BufferMemoryBarrier2 {
+                    src_stage_mask: previous_layout.pipeline_flags,
+                    src_access_mask: previous_layout.access_flags,
+                    dst_stage_mask: new_layout.pipeline_flags,
+                    dst_access_mask: new_layout.access_flags,
+                    src_queue_family_index: old_ownership.queue_index,
+                    dst_queue_family_index: new_ownership.queue_index,
+                    buffer,
+                    offset: 0,
+                    size: vk::WHOLE_SIZE,
+                    ..Default::default()
+                })
+            }
+        }
+    } else if let Resource::Image(image, _, aspect_mask) = res.resource {
+        let previous_layout = *previous_image_layouts.entry(image).or_insert(new_layout);
+        if previous_layout != new_layout {
+            image_barriers.push(vk::ImageMemoryBarrier2 {
+                src_stage_mask: previous_layout.pipeline_flags,
+                src_access_mask: previous_layout.access_flags,
+                dst_stage_mask: new_layout.pipeline_flags,
+                dst_access_mask: new_layout.access_flags,
+                old_layout: previous_layout.layout,
+                new_layout: new_layout.layout,
+                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+                image,
+                subresource_range: vk::ImageSubresourceRange {
+                    aspect_mask,
+                    base_mip_level: 0,
+                    level_count: vk::REMAINING_MIP_LEVELS,
+                    base_array_layer: 0,
+                    layer_count: vk::REMAINING_ARRAY_LAYERS,
+                },
+                ..Default::default()
+            });
+        }
+    }
+    ownerships
+        .entry(res.resource)
+        .and_modify(|e| *e = new_ownership.clone())
+        .or_insert(new_ownership);
+}
 impl DynamicState {
     unsafe fn apply(&self, device: &ash::Device, command_buffer: vk::CommandBuffer) {
         let (constant, clamp, slope) = self.depth_bias.unwrap_or_default();
@@ -728,7 +1006,7 @@ impl DynamicState {
 }
 
 fn push_image_transition(
-    previous_layouts: &mut HashMap<vk::Image, LayoutInfo>,
+    previous_layouts: &mut HashMap<vk::Image, ImageLayoutInfo>,
     new_layout: vk::ImageLayout,
     dst_access_mask: vk::AccessFlags2,
     dst_stage_mask: vk::PipelineStageFlags2,
@@ -737,7 +1015,7 @@ fn push_image_transition(
     aspect_mask: vk::ImageAspectFlags,
 ) {
     let previous_layout = previous_layouts.entry(attachment).or_default();
-    let new_layout = LayoutInfo {
+    let new_layout = ImageLayoutInfo {
         layout: new_layout,
         access_flags: dst_access_mask,
         pipeline_flags: dst_stage_mask,
@@ -768,7 +1046,7 @@ fn push_image_transition(
 }
 
 fn try_push_image_transition(
-    previous_layouts: &mut HashMap<vk::Image, LayoutInfo>,
+    previous_layouts: &mut HashMap<vk::Image, ImageLayoutInfo>,
     new_layout: vk::ImageLayout,
     dst_access_mask: vk::AccessFlags2,
     dst_stage_mask: vk::PipelineStageFlags2,
@@ -777,7 +1055,7 @@ fn try_push_image_transition(
     aspect_mask: vk::ImageAspectFlags,
 ) {
     if let Some(previous_layout) = previous_layouts.get_mut(&attachment) {
-        let new_layout = LayoutInfo {
+        let new_layout = ImageLayoutInfo {
             layout: new_layout,
             access_flags: dst_access_mask,
             pipeline_flags: dst_stage_mask,
