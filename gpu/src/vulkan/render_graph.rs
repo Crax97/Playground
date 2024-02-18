@@ -1,13 +1,12 @@
 use bitflags::bitflags;
-use crossbeam::channel::at;
 
-use std::{collections::HashMap, f64::consts::E, ffi::CString};
+use std::{collections::HashMap, ffi::CString};
 
 use ash::{
     extensions::ext::DebugUtils,
     vk::{
-        self, ClearColorValue, ClearDepthStencilValue, ClearValue, DependencyInfo,
-        PipelineStageFlags2,
+        self, BufferMemoryBarrier2, ClearColorValue, ClearDepthStencilValue, ClearValue,
+        ImageMemoryBarrier2, PipelineStageFlags2,
     },
 };
 
@@ -165,14 +164,6 @@ pub enum RenderPass {
     Graphics(usize),
     Compute(usize),
 }
-
-#[derive(Debug, Clone)]
-struct Ownership {
-    queue: vk::Queue,
-    queue_index: u32,
-    modes: Vec<AttachmentMode>,
-}
-
 pub struct RenderGraph {
     device: ash::Device,
     all_graphics_attachments: Vec<vk::Image>,
@@ -217,13 +208,13 @@ impl RenderGraph {
     }
 }
 
-pub struct RenderGraphExecutionContext {
+pub struct RenderGraphExecutionContext<'a> {
     pub graphics_command_buffer: vk::CommandBuffer,
     pub graphics_queue: vk::Queue,
     pub graphics_queue_index: u32,
-    pub async_compute_command_buffer: vk::CommandBuffer,
-    pub compute_queue: vk::Queue,
-    pub compute_queue_index: u32,
+
+    pub image_layouts: &'a mut HashMap<vk::Image, ImageLayoutInfo>,
+    pub buffer_layouts: &'a mut HashMap<vk::Buffer, BufferLayoutInfo>,
 }
 
 #[derive(Default, Eq, PartialEq, Copy, Clone)]
@@ -238,62 +229,29 @@ pub struct BufferLayoutInfo {
     pub pipeline_flags: vk::PipelineStageFlags2,
 }
 
+#[derive(Default)]
+struct ResourceBarriers {
+    image_barriers: Vec<ImageMemoryBarrier2>,
+    buffer_barriers: Vec<BufferMemoryBarrier2>,
+}
+impl ResourceBarriers {
+    unsafe fn execute(&self, device: &ash::Device, command_buffer: vk::CommandBuffer) {
+        if !self.image_barriers.is_empty() || !self.buffer_barriers.is_empty() {
+            device.cmd_pipeline_barrier2(
+                command_buffer,
+                &vk::DependencyInfo::builder()
+                    .image_memory_barriers(&self.image_barriers)
+                    .buffer_memory_barriers(&self.buffer_barriers)
+                    .build(),
+            );
+        }
+    }
+}
+
 impl RenderGraph {
     pub fn add_graphics(&mut self, info: GraphicsPassInfo) {
         let pass = RenderPass::Graphics(self.graphics_passes.len());
-        self.sequence
-            .push(RenderPass::Graphics(self.graphics_passes.len()));
-
-        for (i, res) in info.all_color_attachments.iter().enumerate() {
-            let resource = Resource::Image(
-                res.render_image.image,
-                res.render_image.view,
-                vk::ImageAspectFlags::COLOR,
-            );
-            let mut modes = vec![];
-            for subpass in &info.sub_passes {
-                let mut mode = AttachmentMode::Ignored;
-                if let Some(attachment) = subpass.color_attachments.iter().find(|a| a.index == i) {
-                    mode = attachment.attachment_mode;
-                }
-
-                modes.push(mode);
-            }
-        }
-
-        if let Some(res) = info.depth_attachment {
-            let resource = Resource::Image(
-                res.render_image.image,
-                res.render_image.view,
-                vk::ImageAspectFlags::DEPTH,
-            );
-            let mut modes = vec![];
-            for subpass in &info.sub_passes {
-                let mut mode = AttachmentMode::Ignored;
-                if let Some(attachment) = subpass.depth_attachment {
-                    mode = attachment;
-                }
-
-                modes.push(mode);
-            }
-        }
-
-        if let Some(res) = info.stencil_attachment {
-            let resource = Resource::Image(
-                res.render_image.image,
-                res.render_image.view,
-                vk::ImageAspectFlags::DEPTH,
-            );
-            let mut modes = vec![];
-            for subpass in &info.sub_passes {
-                let mut mode = AttachmentMode::Ignored;
-                if let Some(attachment) = subpass.stencil_attachment {
-                    mode = attachment;
-                }
-
-                modes.push(mode);
-            }
-        }
+        self.sequence.push(pass);
 
         self.graphics_passes.push(info);
     }
@@ -307,44 +265,26 @@ impl RenderGraph {
 
     pub fn execute(
         &mut self,
-        execution_context: &RenderGraphExecutionContext,
+        mut execution_context: RenderGraphExecutionContext,
     ) -> anyhow::Result<()> {
         self.validate_graph()?;
         let execution_plan = self.find_execution_plan();
-        let mut previous_image_layout = HashMap::<vk::Image, ImageLayoutInfo>::new();
-        let mut previous_buffer_layout = HashMap::new();
-        let mut ownerships = HashMap::<Resource, Ownership>::new();
+
         for pass in execution_plan {
             match pass {
                 RenderPass::Graphics(index) => {
                     let info = &self.graphics_passes[index];
-                    self.execute_graphics_pass_dynamic_rendering(
-                        info,
-                        execution_context,
-                        &mut previous_image_layout,
-                        &mut previous_buffer_layout,
-                        &mut ownerships,
-                    );
+                    self.execute_graphics_pass_dynamic_rendering(info, &mut execution_context);
                 }
                 RenderPass::Compute(index) => {
                     let info = &self.compute_passes[index];
-                    self.execute_compute_pass(
-                        info,
-                        execution_context,
-                        &mut previous_image_layout,
-                        &mut previous_buffer_layout,
-                        &mut ownerships,
-                    );
+                    self.execute_compute_pass(info, &mut execution_context);
                 }
             }
         }
 
         if let Some(swapchain_image) = self.find_swapchain_image() {
-            self.make_sure_swapchain_is_presentable(
-                execution_context,
-                swapchain_image,
-                &mut previous_image_layout,
-            );
+            self.make_sure_swapchain_is_presentable(&mut execution_context, swapchain_image);
         }
         self.reset();
         Ok(())
@@ -367,10 +307,7 @@ impl RenderGraph {
     fn execute_graphics_pass_dynamic_rendering(
         &self,
         info: &GraphicsPassInfo,
-        execution_context: &RenderGraphExecutionContext,
-        previous_image_layouts: &mut HashMap<vk::Image, ImageLayoutInfo>,
-        previous_buffer_layouts: &mut HashMap<vk::Buffer, BufferLayoutInfo>,
-        ownerships: &mut HashMap<Resource, Ownership>,
+        execution_context: &mut RenderGraphExecutionContext,
     ) {
         if let Some(utils) = &self.debug_utils {
             let label_string = info.label.as_deref().unwrap_or("Graphics Pass");
@@ -403,109 +340,82 @@ impl RenderGraph {
                     );
                 }
             }
-            let mut image_barriers = vec![];
-            let mut buffer_barriers = vec![];
+
+            let mut barriers = ResourceBarriers::default();
+
             for attachment_reference in &subpass.color_attachments {
                 let attachment = &info.all_color_attachments[attachment_reference.index];
                 push_image_transition(
-                    previous_image_layouts,
-                    vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                    match attachment_reference.attachment_mode {
-                        AttachmentMode::AttachmentRead => vk::AccessFlags2::COLOR_ATTACHMENT_READ,
-                        AttachmentMode::AttachmentWrite => vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-                        _ => unreachable!(),
+                    execution_context.image_layouts,
+                    ImageLayoutInfo {
+                        layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                        access_flags: match attachment_reference.attachment_mode {
+                            AttachmentMode::AttachmentRead => {
+                                vk::AccessFlags2::COLOR_ATTACHMENT_READ
+                            }
+                            AttachmentMode::AttachmentWrite => {
+                                vk::AccessFlags2::COLOR_ATTACHMENT_WRITE
+                            }
+                            _ => unreachable!(),
+                        },
+                        pipeline_flags: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
                     },
-                    vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
                     attachment.render_image.image,
-                    &mut image_barriers,
+                    &mut barriers.image_barriers,
                     vk::ImageAspectFlags::COLOR,
                 );
             }
-            for (image, aspect_mask) in
-                subpass
-                    .shader_reads
-                    .iter()
-                    .filter_map(|res| match res.resource {
-                        Resource::Image(image, _, aspect_mask) => Some((image, aspect_mask)),
-                        Resource::Buffer(_) => None,
-                    })
-            {
-                try_push_image_transition(
-                    previous_image_layouts,
-                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                    vk::AccessFlags2::SHADER_READ,
-                    vk::PipelineStageFlags2::FRAGMENT_SHADER,
-                    image,
-                    &mut image_barriers,
-                    aspect_mask,
-                );
-            }
-            for res in &subpass.shader_reads {
-                let new_ownership = Ownership {
-                    queue: execution_context.graphics_queue,
-                    queue_index: execution_context.graphics_queue_index,
-                    modes: vec![AttachmentMode::ShaderRead],
-                };
 
+            for res in &subpass.shader_reads {
                 let new_layout = ImageLayoutInfo {
                     layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                     access_flags: vk::AccessFlags2::SHADER_READ,
                     pipeline_flags: vk::PipelineStageFlags2::ALL_GRAPHICS,
                 };
                 push_generic_pipeline_operation(
-                    ownerships,
                     res,
-                    new_ownership,
-                    previous_image_layouts,
                     new_layout,
-                    &mut image_barriers,
-                    previous_buffer_layouts,
-                    &mut buffer_barriers,
+                    execution_context.image_layouts,
+                    execution_context.buffer_layouts,
+                    &mut barriers,
                 );
             }
 
             for res in &subpass.shader_writes {
-                let new_ownership = Ownership {
-                    queue: execution_context.graphics_queue,
-                    queue_index: execution_context.graphics_queue_index,
-                    modes: vec![AttachmentMode::ShaderRead],
-                };
-
                 let new_layout = ImageLayoutInfo {
                     layout: vk::ImageLayout::GENERAL,
                     access_flags: vk::AccessFlags2::SHADER_WRITE,
                     pipeline_flags: vk::PipelineStageFlags2::ALL_GRAPHICS,
                 };
                 push_generic_pipeline_operation(
-                    ownerships,
                     res,
-                    new_ownership,
-                    previous_image_layouts,
                     new_layout,
-                    &mut image_barriers,
-                    previous_buffer_layouts,
-                    &mut buffer_barriers,
+                    execution_context.image_layouts,
+                    execution_context.buffer_layouts,
+                    &mut barriers,
                 );
             }
 
             if let Some(attachment_mode) = subpass.depth_attachment {
                 let attachment = info.depth_attachment.unwrap();
                 push_image_transition(
-                    previous_image_layouts,
-                    vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
-                    match attachment_mode {
-                        AttachmentMode::AttachmentRead => {
-                            vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ
-                        }
-                        AttachmentMode::AttachmentWrite => {
-                            vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE
-                        }
-                        _ => unreachable!(),
+                    execution_context.image_layouts,
+                    ImageLayoutInfo {
+                        layout: vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+                        access_flags: match attachment_mode {
+                            AttachmentMode::AttachmentRead => {
+                                vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ
+                            }
+                            AttachmentMode::AttachmentWrite => {
+                                vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE
+                            }
+                            _ => unreachable!(),
+                        },
+                        pipeline_flags: vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
+                            | vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
                     },
-                    vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
-                        | vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
                     attachment.render_image.image,
-                    &mut image_barriers,
+                    &mut barriers.image_barriers,
                     vk::ImageAspectFlags::DEPTH,
                 );
             }
@@ -513,32 +423,29 @@ impl RenderGraph {
             if let Some(attachment_mode) = subpass.stencil_attachment {
                 let attachment = info.stencil_attachment.unwrap();
                 push_image_transition(
-                    previous_image_layouts,
-                    vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
-                    match attachment_mode {
-                        AttachmentMode::AttachmentRead => {
-                            vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ
-                        }
-                        AttachmentMode::AttachmentWrite => {
-                            vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE
-                        }
-                        _ => unreachable!(),
+                    execution_context.image_layouts,
+                    ImageLayoutInfo {
+                        layout: vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+                        access_flags: match attachment_mode {
+                            AttachmentMode::AttachmentRead => {
+                                vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ
+                            }
+                            AttachmentMode::AttachmentWrite => {
+                                vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE
+                            }
+                            _ => unreachable!(),
+                        },
+                        pipeline_flags: vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
+                            | vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
                     },
-                    vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
-                        | vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
                     attachment.render_image.image,
-                    &mut image_barriers,
+                    &mut barriers.image_barriers,
                     vk::ImageAspectFlags::STENCIL,
                 );
             }
 
             unsafe {
-                self.device.cmd_pipeline_barrier2(
-                    execution_context.graphics_command_buffer,
-                    &vk::DependencyInfo::builder()
-                        .image_memory_barriers(&image_barriers)
-                        .build(),
-                );
+                barriers.execute(&self.device, execution_context.graphics_command_buffer);
             }
 
             let color_attachments = subpass
@@ -620,10 +527,7 @@ impl RenderGraph {
     fn execute_compute_pass(
         &self,
         info: &ComputePassInfo,
-        execution_context: &RenderGraphExecutionContext,
-        previous_image_layouts: &mut HashMap<vk::Image, ImageLayoutInfo>,
-        previous_buffer_layouts: &mut HashMap<vk::Buffer, BufferLayoutInfo>,
-        ownerships: &mut HashMap<Resource, Ownership>,
+        execution_context: &mut RenderGraphExecutionContext,
     ) {
         if let Some(utils) = &self.debug_utils {
             let label_string = info.label.as_deref().unwrap_or("Graphics Pass");
@@ -641,84 +545,41 @@ impl RenderGraph {
             }
         }
 
-        let is_async = info.flags.contains(ComputePassFlags::ASYNC);
-
-        let command_buffer = if is_async {
-            execution_context.async_compute_command_buffer
-        } else {
-            execution_context.graphics_command_buffer
-        };
-        let (queue, queue_index) = if is_async {
-            (
-                execution_context.compute_queue,
-                execution_context.compute_queue_index,
-            )
-        } else {
-            (
-                execution_context.graphics_queue,
-                execution_context.graphics_queue_index,
-            )
-        };
-
-        let mut image_barriers = vec![];
-        let mut buffer_barriers = vec![];
+        let mut barriers = ResourceBarriers::default();
 
         for res in &info.all_read_resources {
-            let new_ownership = Ownership {
-                queue,
-                queue_index,
-                modes: vec![AttachmentMode::ShaderRead],
-            };
-
             let new_layout = ImageLayoutInfo {
                 layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 access_flags: vk::AccessFlags2::SHADER_READ,
                 pipeline_flags: PipelineStageFlags2::COMPUTE_SHADER,
             };
             push_generic_pipeline_operation(
-                ownerships,
                 res,
-                new_ownership,
-                previous_image_layouts,
                 new_layout,
-                &mut image_barriers,
-                previous_buffer_layouts,
-                &mut buffer_barriers,
+                execution_context.image_layouts,
+                execution_context.buffer_layouts,
+                &mut barriers,
             );
         }
         for res in &info.all_written_resources {
-            let new_ownership = Ownership {
-                queue,
-                queue_index,
-                modes: vec![AttachmentMode::ShaderWrite],
-            };
-
             let new_layout = ImageLayoutInfo {
                 layout: vk::ImageLayout::GENERAL,
                 access_flags: vk::AccessFlags2::SHADER_WRITE,
                 pipeline_flags: PipelineStageFlags2::COMPUTE_SHADER,
             };
+
             push_generic_pipeline_operation(
-                ownerships,
                 res,
-                new_ownership,
-                previous_image_layouts,
                 new_layout,
-                &mut image_barriers,
-                previous_buffer_layouts,
-                &mut buffer_barriers,
+                execution_context.image_layouts,
+                execution_context.buffer_layouts,
+                &mut barriers,
             );
         }
+        let command_buffer = execution_context.graphics_command_buffer;
         unsafe {
-            if !image_barriers.is_empty() || !buffer_barriers.is_empty() {
-                self.device.cmd_pipeline_barrier2(
-                    command_buffer,
-                    &DependencyInfo::builder()
-                        .image_memory_barriers(&image_barriers)
-                        .buffer_memory_barriers(&buffer_barriers)
-                        .build(),
-                );
-            }
+            barriers.execute(&self.device, execution_context.graphics_command_buffer);
+
             for dispatch in &info.dispatches {
                 self.device.cmd_bind_pipeline(
                     command_buffer,
@@ -858,16 +719,18 @@ impl RenderGraph {
 
     fn make_sure_swapchain_is_presentable(
         &self,
-        execution_context: &RenderGraphExecutionContext,
+        execution_context: &mut RenderGraphExecutionContext,
         swapchain_image: vk::Image,
-        previous_layouts: &mut HashMap<vk::Image, ImageLayoutInfo>,
     ) {
         let mut image_barriers = vec![];
         push_image_transition(
-            previous_layouts,
-            vk::ImageLayout::PRESENT_SRC_KHR,
-            vk::AccessFlags2::empty(),
-            vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
+            execution_context.image_layouts,
+            ImageLayoutInfo {
+                layout: vk::ImageLayout::PRESENT_SRC_KHR,
+                access_flags: vk::AccessFlags2::empty(),
+
+                pipeline_flags: vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
+            },
             swapchain_image,
             &mut image_barriers,
             vk::ImageAspectFlags::COLOR,
@@ -891,107 +754,41 @@ impl RenderGraph {
 }
 
 fn push_generic_pipeline_operation(
-    ownerships: &mut HashMap<Resource, Ownership>,
     res: &ShaderInput,
-    new_ownership: Ownership,
-    previous_image_layouts: &mut HashMap<vk::Image, ImageLayoutInfo>,
     new_layout: ImageLayoutInfo,
-    image_barriers: &mut Vec<vk::ImageMemoryBarrier2>,
+    previous_image_layouts: &mut HashMap<vk::Image, ImageLayoutInfo>,
     previous_buffer_layouts: &mut HashMap<vk::Buffer, BufferLayoutInfo>,
-    buffer_barriers: &mut Vec<vk::BufferMemoryBarrier2>,
+    barriers: &mut ResourceBarriers,
 ) {
-    let old_ownership = ownerships
-        .entry(res.resource)
-        .or_insert(new_ownership.clone());
+    if let Resource::Image(image, _, aspect_mask) = res.resource {
+        push_image_transition(
+            previous_image_layouts,
+            new_layout,
+            image,
+            &mut barriers.image_barriers,
+            aspect_mask,
+        );
+    } else if let Resource::Buffer(buffer) = res.resource {
+        let new_layout = BufferLayoutInfo {
+            access_flags: vk::AccessFlags2::empty(),
+            pipeline_flags: vk::PipelineStageFlags2::empty(),
+        };
 
-    if old_ownership.queue != new_ownership.queue {
-        // queue transfer operation
-        match res.resource {
-            Resource::Image(image, _, aspect_mask) => {
-                let previous_layout = *previous_image_layouts
-                    .entry(image)
-                    .and_modify(|l| *l = new_layout)
-                    .or_insert(ImageLayoutInfo {
-                        layout: vk::ImageLayout::UNDEFINED,
-                        access_flags: vk::AccessFlags2::empty(),
-                        pipeline_flags: vk::PipelineStageFlags2::empty(),
-                    });
-                image_barriers.push(vk::ImageMemoryBarrier2 {
-                    src_stage_mask: previous_layout.pipeline_flags,
-                    src_access_mask: previous_layout.access_flags,
-                    dst_stage_mask: new_layout.pipeline_flags,
-                    dst_access_mask: new_layout.access_flags,
-                    old_layout: previous_layout.layout,
-                    new_layout: new_layout.layout,
-                    src_queue_family_index: old_ownership.queue_index,
-                    dst_queue_family_index: new_ownership.queue_index,
-                    image,
-                    subresource_range: vk::ImageSubresourceRange {
-                        aspect_mask,
-                        base_mip_level: 0,
-                        level_count: vk::REMAINING_MIP_LEVELS,
-                        base_array_layer: 0,
-                        layer_count: vk::REMAINING_ARRAY_LAYERS,
-                    },
-                    ..Default::default()
-                });
-            }
-
-            Resource::Buffer(buffer) => {
-                let previous_layout = *previous_buffer_layouts
-                    .entry(buffer)
-                    .and_modify(|l| {
-                        *l = BufferLayoutInfo {
-                            access_flags: new_layout.access_flags,
-                            pipeline_flags: new_layout.pipeline_flags,
-                        }
-                    })
-                    .or_insert(BufferLayoutInfo {
-                        access_flags: vk::AccessFlags2::empty(),
-                        pipeline_flags: vk::PipelineStageFlags2::empty(),
-                    });
-                buffer_barriers.push(vk::BufferMemoryBarrier2 {
-                    src_stage_mask: previous_layout.pipeline_flags,
-                    src_access_mask: previous_layout.access_flags,
-                    dst_stage_mask: new_layout.pipeline_flags,
-                    dst_access_mask: new_layout.access_flags,
-                    src_queue_family_index: old_ownership.queue_index,
-                    dst_queue_family_index: new_ownership.queue_index,
-                    buffer,
-                    offset: 0,
-                    size: vk::WHOLE_SIZE,
-                    ..Default::default()
-                })
-            }
-        }
-    } else if let Resource::Image(image, _, aspect_mask) = res.resource {
-        let previous_layout = *previous_image_layouts.entry(image).or_insert(new_layout);
-        if previous_layout != new_layout {
-            image_barriers.push(vk::ImageMemoryBarrier2 {
-                src_stage_mask: previous_layout.pipeline_flags,
-                src_access_mask: previous_layout.access_flags,
-                dst_stage_mask: new_layout.pipeline_flags,
-                dst_access_mask: new_layout.access_flags,
-                old_layout: previous_layout.layout,
-                new_layout: new_layout.layout,
-                src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-                image,
-                subresource_range: vk::ImageSubresourceRange {
-                    aspect_mask,
-                    base_mip_level: 0,
-                    level_count: vk::REMAINING_MIP_LEVELS,
-                    base_array_layer: 0,
-                    layer_count: vk::REMAINING_ARRAY_LAYERS,
-                },
-                ..Default::default()
-            });
-        }
+        let previous_layout = previous_buffer_layouts.entry(buffer).or_insert(new_layout);
+        barriers.buffer_barriers.push(vk::BufferMemoryBarrier2 {
+            src_stage_mask: previous_layout.pipeline_flags,
+            src_access_mask: previous_layout.access_flags,
+            dst_stage_mask: new_layout.pipeline_flags,
+            dst_access_mask: new_layout.access_flags,
+            src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            buffer,
+            offset: 0,
+            size: vk::WHOLE_SIZE,
+            ..Default::default()
+        });
+        *previous_layout = new_layout;
     }
-    ownerships
-        .entry(res.resource)
-        .and_modify(|e| *e = new_ownership.clone())
-        .or_insert(new_ownership);
 }
 impl DynamicState {
     unsafe fn apply(&self, device: &ash::Device, command_buffer: vk::CommandBuffer) {
@@ -1007,19 +804,12 @@ impl DynamicState {
 
 fn push_image_transition(
     previous_layouts: &mut HashMap<vk::Image, ImageLayoutInfo>,
-    new_layout: vk::ImageLayout,
-    dst_access_mask: vk::AccessFlags2,
-    dst_stage_mask: vk::PipelineStageFlags2,
-    attachment: vk::Image,
+    new_layout: ImageLayoutInfo,
+    image: vk::Image,
     image_barriers: &mut Vec<vk::ImageMemoryBarrier2>,
     aspect_mask: vk::ImageAspectFlags,
 ) {
-    let previous_layout = previous_layouts.entry(attachment).or_default();
-    let new_layout = ImageLayoutInfo {
-        layout: new_layout,
-        access_flags: dst_access_mask,
-        pipeline_flags: dst_stage_mask,
-    };
+    let previous_layout = previous_layouts.entry(image).or_default();
 
     image_barriers.push(vk::ImageMemoryBarrier2 {
         src_access_mask: previous_layout.access_flags,
@@ -1030,7 +820,7 @@ fn push_image_transition(
         dst_stage_mask: new_layout.pipeline_flags,
         src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
         dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-        image: attachment,
+        image,
         subresource_range: vk::ImageSubresourceRange {
             aspect_mask,
             base_mip_level: 0,
@@ -1047,20 +837,12 @@ fn push_image_transition(
 
 fn try_push_image_transition(
     previous_layouts: &mut HashMap<vk::Image, ImageLayoutInfo>,
-    new_layout: vk::ImageLayout,
-    dst_access_mask: vk::AccessFlags2,
-    dst_stage_mask: vk::PipelineStageFlags2,
+    new_layout: ImageLayoutInfo,
     attachment: vk::Image,
     image_barriers: &mut Vec<vk::ImageMemoryBarrier2>,
     aspect_mask: vk::ImageAspectFlags,
 ) {
     if let Some(previous_layout) = previous_layouts.get_mut(&attachment) {
-        let new_layout = ImageLayoutInfo {
-            layout: new_layout,
-            access_flags: dst_access_mask,
-            pipeline_flags: dst_stage_mask,
-        };
-
         image_barriers.push(vk::ImageMemoryBarrier2 {
             src_access_mask: previous_layout.access_flags,
             dst_access_mask: new_layout.access_flags,

@@ -92,8 +92,8 @@ impl QueueType {
     pub(crate) fn get_vk_queue_index(&self, families: &QueueFamilies) -> u32 {
         match self {
             QueueType::Graphics => families.graphics_family.index,
-            QueueType::AsyncCompute => families.async_compute_family.index,
-            QueueType::Transfer => families.transfer_family.index,
+            QueueType::AsyncCompute => families.graphics_family.index,
+            QueueType::Transfer => families.graphics_family.index,
         }
     }
 }
@@ -157,16 +157,12 @@ pub struct PrimaryCommandBufferInfo {
     pub command_pool: VkCommandPool,
     pub command_buffer: vk::CommandBuffer,
     pub was_started: AtomicBool,
-    pub wait_semaphore: vk::Semaphore,
+    pub work_done_semaphore: vk::Semaphore,
+    pub work_done_fence: vk::Fence,
 }
 
 pub struct InFlightFrame {
     pub graphics_command_buffer: PrimaryCommandBufferInfo,
-    pub async_compute_command_buffer: PrimaryCommandBufferInfo,
-    pub transfer_command_buffer: PrimaryCommandBufferInfo,
-
-    pub render_finished_semaphore: vk::Semaphore,
-    pub work_done_fence: vk::Fence,
 }
 
 /*
@@ -178,8 +174,7 @@ pub struct GpuThreadSharedState {
     pub logical_device: Device,
     pub physical_device: SelectedPhysicalDevice,
     pub graphics_queue: Queue,
-    pub async_compute_queue: Queue,
-    pub transfer_queue: Queue,
+
     pub queue_families: QueueFamilies,
     pub description: GpuDescription,
     pub gpu_memory_allocator: Arc<RwLock<dyn GpuAllocator>>,
@@ -203,7 +198,74 @@ pub struct GpuThreadSharedState {
     current_command_pools: AtomicUsize,
 
     pub render_graph: RwLock<RenderGraph>,
+    pub(crate) image_layouts: RwLock<HashMap<vk::Image, ImageLayoutInfo>>,
+    pub(crate) buffer_layouts: RwLock<HashMap<vk::Buffer, BufferLayoutInfo>>,
 }
+pub struct VkGpu {
+    pub(crate) state: Arc<GpuThreadSharedState>,
+    pub(crate) staging_buffer: RwLock<VkStagingBuffer>,
+}
+
+#[derive(Error, Debug, Clone)]
+pub enum GpuError {
+    #[error("No physical devices were found on this machine")]
+    NoPhysicalDevices,
+
+    #[error("A suitable device with the requested capabilities was not found")]
+    NoSuitableDevice,
+
+    #[error("One or more queue families aren't supported")]
+    NoQueueFamilyFound(Option<(u32, vk::QueueFamilyProperties)>),
+
+    #[error("Invalid queue family")]
+    InvalidQueueFamilies(QueueFamilies),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct QueueFamily {
+    pub index: u32,
+    pub count: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct QueueFamilies {
+    pub graphics_family: QueueFamily,
+
+    pub indices: Vec<u32>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SelectedPhysicalDevice {
+    pub physical_device: PhysicalDevice,
+    pub device_properties: PhysicalDeviceProperties,
+    pub device_features: PhysicalDeviceFeatures,
+}
+
+unsafe extern "system" fn on_message(
+    message_severity: DebugUtilsMessageSeverityFlagsEXT,
+    _message_types: DebugUtilsMessageTypeFlagsEXT,
+    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+    _p_user_data: *mut std::ffi::c_void,
+) -> u32 {
+    let cb_data: vk::DebugUtilsMessengerCallbackDataEXT = *p_callback_data;
+    let message = CStr::from_ptr(cb_data.p_message);
+    if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::ERROR) {
+        log::error!("VULKAN ERROR: {:?}", message);
+        panic!("Invalid vulkan state: check log above");
+    } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::INFO) {
+        log::info!("Vulkan - : {:?}", message);
+    } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::WARNING) {
+        log::warn!("Vulkan - : {:?}", message);
+    }
+
+    0
+}
+impl QueueFamilies {
+    pub fn is_valid(&self) -> bool {
+        self.graphics_family.count > 0
+    }
+}
+
 impl GpuThreadSharedState {
     pub fn current_frame(&self) -> &InFlightFrame {
         &self.command_pools[self
@@ -457,6 +519,7 @@ impl GpuThreadSharedState {
                         let mut uniform_buffers = 0;
                         let mut storage_buffers = 0;
                         let mut input_attachments = 0;
+                        let mut storage_images = 0;
 
                         for binding in &descriptor_set_bindings.elements {
                             match binding.binding_type {
@@ -467,6 +530,7 @@ impl GpuThreadSharedState {
                                     combined_image_samplers += 1
                                 }
                                 crate::BindingType::InputAttachment => input_attachments += 1,
+                                crate::BindingType::StorageImage => storage_images += 1,
                             }
                         }
 
@@ -499,6 +563,12 @@ impl GpuThreadSharedState {
                             pool_sizes.push(vk::DescriptorPoolSize {
                                 ty: vk::DescriptorType::INPUT_ATTACHMENT,
                                 descriptor_count: input_attachments as _,
+                            });
+                        }
+                        if storage_images > 0 {
+                            pool_sizes.push(vk::DescriptorPoolSize {
+                                ty: vk::DescriptorType::STORAGE_IMAGE,
+                                descriptor_count: storage_images as _,
                             });
                         }
                         let pool = unsafe {
@@ -621,6 +691,17 @@ impl GpuThreadSharedState {
                 },
                 vk::DescriptorType::INPUT_ATTACHMENT,
             )),
+            crate::DescriptorBindingType::StorageImage { handle: image } => {
+                image_descriptors.push((
+                    b.location,
+                    DescriptorImageInfo {
+                        sampler: vk::Sampler::null(),
+                        image_view: self.resolve_resource::<VkImageView>(image).inner,
+                        image_layout: vk::ImageLayout::GENERAL,
+                    },
+                    vk::DescriptorType::STORAGE_IMAGE,
+                ))
+            }
         });
 
         let mut write_descriptor_sets = vec![];
@@ -800,80 +881,6 @@ impl Drop for GpuThreadSharedState {
         }
     }
 }
-pub struct VkGpu {
-    pub(crate) state: Arc<GpuThreadSharedState>,
-    pub(crate) staging_buffer: RwLock<VkStagingBuffer>,
-}
-
-#[derive(Error, Debug, Clone)]
-pub enum GpuError {
-    #[error("No physical devices were found on this machine")]
-    NoPhysicalDevices,
-
-    #[error("A suitable device with the requested capabilities was not found")]
-    NoSuitableDevice,
-
-    #[error("One or more queue families aren't supported")]
-    NoQueueFamilyFound(
-        Option<(u32, vk::QueueFamilyProperties)>,
-        Option<(u32, vk::QueueFamilyProperties)>,
-        Option<(u32, vk::QueueFamilyProperties)>,
-    ),
-
-    #[error("Invalid queue family")]
-    InvalidQueueFamilies(QueueFamilies),
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct QueueFamily {
-    pub index: u32,
-    pub count: u32,
-}
-
-#[derive(Clone, Debug)]
-pub struct QueueFamilies {
-    pub graphics_family: QueueFamily,
-    pub async_compute_family: QueueFamily,
-    pub transfer_family: QueueFamily,
-    pub indices: Vec<u32>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct SelectedPhysicalDevice {
-    pub physical_device: PhysicalDevice,
-    pub device_properties: PhysicalDeviceProperties,
-    pub device_features: PhysicalDeviceFeatures,
-}
-
-unsafe extern "system" fn on_message(
-    message_severity: DebugUtilsMessageSeverityFlagsEXT,
-    _message_types: DebugUtilsMessageTypeFlagsEXT,
-    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
-    _p_user_data: *mut std::ffi::c_void,
-) -> u32 {
-    let cb_data: vk::DebugUtilsMessengerCallbackDataEXT = *p_callback_data;
-    let message = CStr::from_ptr(cb_data.p_message);
-    if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::ERROR) {
-        log::error!("VULKAN ERROR: {:?}", message);
-        panic!("Invalid vulkan state: check log above");
-    } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::INFO) {
-        log::info!("Vulkan - : {:?}", message);
-    } else if message_severity.contains(DebugUtilsMessageSeverityFlagsEXT::WARNING) {
-        log::warn!("Vulkan - : {:?}", message);
-    }
-
-    0
-}
-impl QueueFamilies {
-    pub fn is_valid(&self) -> bool {
-        self.graphics_family.count > 0
-            && self.async_compute_family.count > 0
-            && self.transfer_family.count > 0
-            && self.graphics_family.index != self.async_compute_family.index
-            && self.graphics_family.index != self.transfer_family.index
-    }
-}
-
 impl VkGpu {
     const MB_64: u64 = 1024 * 1024 * 64;
 
@@ -936,8 +943,7 @@ impl VkGpu {
         )?;
         trace!("Created logical device");
 
-        let (graphics_queue, async_compute_queue, transfer_queue) =
-            Self::get_device_queues(&logical_device, &queue_families)?;
+        let graphics_queue = Self::get_device_queues(&logical_device, &queue_families)?;
         trace!("Created queues");
 
         trace!(
@@ -1093,24 +1099,9 @@ impl VkGpu {
                     command_pool: graphics_command_pool,
                     command_buffer: primary_graphics_command_buffer,
                     was_started: AtomicBool::new(false),
-                    wait_semaphore: make_semaphore(&logical_device),
+                    work_done_semaphore: make_semaphore(&logical_device),
+                    work_done_fence: make_fence(&logical_device, i > 0),
                 },
-
-                transfer_command_buffer: PrimaryCommandBufferInfo {
-                    command_pool: transfer_command_pool,
-                    command_buffer: primary_transfer_command_buffer,
-                    was_started: AtomicBool::new(false),
-                    wait_semaphore: make_semaphore(&logical_device),
-                },
-
-                async_compute_command_buffer: PrimaryCommandBufferInfo {
-                    command_pool: async_compute_command_pool,
-                    command_buffer: primary_async_compute_command_buffer,
-                    was_started: AtomicBool::new(false),
-                    wait_semaphore: make_semaphore(&logical_device),
-                },
-                render_finished_semaphore: make_semaphore(&logical_device),
-                work_done_fence: make_fence(&logical_device, i > 0),
             };
             command_pools.push(command_pool);
         }
@@ -1129,8 +1120,7 @@ impl VkGpu {
             logical_device: logical_device.clone(),
             physical_device,
             graphics_queue,
-            async_compute_queue,
-            transfer_queue,
+
             description,
             queue_families,
             debug_utilities: debug_utilities.clone(),
@@ -1155,6 +1145,8 @@ impl VkGpu {
                 logical_device.clone(),
                 debug_utilities.clone(),
             )),
+            image_layouts: Default::default(),
+            buffer_layouts: Default::default(),
         });
 
         Ok(VkGpu {
@@ -1246,44 +1238,28 @@ impl VkGpu {
             unsafe { instance.get_physical_device_queue_family_properties(device.physical_device) };
 
         let mut graphics_queue = None;
-        let mut async_compute_queue = None;
-        let mut transfer_queue = None;
-
         for (index, queue_family) in all_queue_families.iter().enumerate() {
             if queue_family.queue_count == 0 {
                 continue;
             }
 
-            if queue_family.queue_flags.intersects(QueueFlags::GRAPHICS) {
+            if queue_family
+                .queue_flags
+                .contains(QueueFlags::GRAPHICS | QueueFlags::COMPUTE)
+            {
                 graphics_queue = Some((index as u32, *queue_family));
-            } else if queue_family.queue_flags.intersects(QueueFlags::COMPUTE) {
-                async_compute_queue = Some((index as u32, *queue_family));
-            } else if queue_family.queue_flags.intersects(QueueFlags::TRANSFER) {
-                transfer_queue = Some((index as u32, *queue_family));
             }
         }
 
-        match (graphics_queue, async_compute_queue, transfer_queue) {
-            (Some(g), Some(a), Some(t)) => Ok(QueueFamilies {
+        match graphics_queue {
+            Some(g) => Ok(QueueFamilies {
                 graphics_family: QueueFamily {
                     index: g.0,
                     count: g.1.queue_count,
                 },
-                async_compute_family: QueueFamily {
-                    index: a.0,
-                    count: a.1.queue_count,
-                },
-                transfer_family: QueueFamily {
-                    index: t.0,
-                    count: t.1.queue_count,
-                },
-                indices: vec![g.0, a.0, t.0],
+                indices: vec![g.0],
             }),
-            _ => Err(GpuError::NoQueueFamilyFound(
-                graphics_queue,
-                async_compute_queue,
-                transfer_queue,
-            )),
+            _ => Err(GpuError::NoQueueFamilyFound(graphics_queue)),
         }
     }
 
@@ -1313,11 +1289,7 @@ impl VkGpu {
             queue_count: 1,
             p_queue_priorities: addr_of!(priority_one),
         };
-        let queue_create_infos = [
-            make_queue_create_info(queue_indices.graphics_family.index),
-            make_queue_create_info(queue_indices.async_compute_family.index),
-            make_queue_create_info(queue_indices.transfer_family.index),
-        ];
+        let queue_create_infos = [make_queue_create_info(queue_indices.graphics_family.index)];
 
         let device_features = PhysicalDeviceFeatures {
             sampler_anisotropy: vk::TRUE,
@@ -1347,7 +1319,7 @@ impl VkGpu {
             s_type: StructureType::DEVICE_CREATE_INFO,
             p_next: addr_of!(device_features_2).cast(),
             flags: DeviceCreateFlags::empty(),
-            queue_create_info_count: 3,
+            queue_create_info_count: queue_create_infos.len() as _,
             p_queue_create_infos: queue_create_infos.as_ptr(),
             enabled_extension_count: c_ptr_device_extensions.len() as u32,
             pp_enabled_extension_names: c_ptr_device_extensions.as_ptr(),
@@ -1383,15 +1355,10 @@ impl VkGpu {
         Ok(())
     }
 
-    fn get_device_queues(
-        device: &Device,
-        queues: &QueueFamilies,
-    ) -> Result<(Queue, Queue, Queue), GpuError> {
+    fn get_device_queues(device: &Device, queues: &QueueFamilies) -> Result<Queue, GpuError> {
         let graphics_queue = unsafe { device.get_device_queue(queues.graphics_family.index, 0) };
-        let async_compute_queue =
-            unsafe { device.get_device_queue(queues.async_compute_family.index, 0) };
-        let transfer_queue = unsafe { device.get_device_queue(queues.transfer_family.index, 0) };
-        Ok((graphics_queue, async_compute_queue, transfer_queue))
+
+        Ok(graphics_queue)
     }
 
     fn ensure_required_device_extensions_are_available(
@@ -1614,7 +1581,9 @@ impl VkGpu {
                             crate::BindingType::CombinedImageSampler
                         }
                         spirv_reflect::types::ReflectDescriptorType::SampledImage => todo!(),
-                        spirv_reflect::types::ReflectDescriptorType::StorageImage => todo!(),
+                        spirv_reflect::types::ReflectDescriptorType::StorageImage => {
+                            crate::BindingType::StorageImage
+                        }
                         spirv_reflect::types::ReflectDescriptorType::UniformTexelBuffer => todo!(),
                         spirv_reflect::types::ReflectDescriptorType::StorageTexelBuffer => todo!(),
                         spirv_reflect::types::ReflectDescriptorType::UniformBuffer => {
@@ -1833,7 +1802,7 @@ impl VkGpu {
                 } else {
                     vk::BufferUsageFlags::TRANSFER_DST
                 },
-            sharing_mode: SharingMode::CONCURRENT,
+            sharing_mode: SharingMode::EXCLUSIVE,
             queue_family_index_count: self.state.queue_families.indices.len() as _,
             p_queue_family_indices: self.state.queue_families.indices.as_ptr(),
         };
@@ -1950,7 +1919,7 @@ impl VkGpu {
                     ImageTiling::OPTIMAL
                 },
                 usage: create_info.usage.to_vk(),
-                sharing_mode: SharingMode::CONCURRENT,
+                sharing_mode: SharingMode::EXCLUSIVE,
                 queue_family_index_count: self.state.queue_families.indices.len() as _,
                 p_queue_family_indices: self.state.queue_families.indices.as_ptr(),
                 initial_layout: ImageLayout::Undefined.to_vk(),
@@ -2040,8 +2009,8 @@ impl VkGpu {
             .load(std::sync::atomic::Ordering::Relaxed)];
         let primary_buffer = match queue_type {
             QueueType::Graphics => &pool.graphics_command_buffer,
-            QueueType::AsyncCompute => &pool.async_compute_command_buffer,
-            QueueType::Transfer => &pool.transfer_command_buffer,
+            QueueType::AsyncCompute => &pool.graphics_command_buffer,
+            QueueType::Transfer => &pool.graphics_command_buffer,
         };
 
         if !primary_buffer
@@ -2104,32 +2073,19 @@ impl VkGpu {
         let command_pools = &self.state.command_pools[current_pools];
         let device = &self.state.logical_device;
         unsafe {
-            device.wait_for_fences(&[command_pools.work_done_fence], true, u64::MAX)?;
-            device.reset_fences(&[command_pools.work_done_fence])?;
+            device.wait_for_fences(
+                &[command_pools.graphics_command_buffer.work_done_fence],
+                true,
+                u64::MAX,
+            )?;
+            device.reset_fences(&[command_pools.graphics_command_buffer.work_done_fence])?;
             device.reset_command_buffer(
                 command_pools.graphics_command_buffer.command_buffer,
                 CommandBufferResetFlags::RELEASE_RESOURCES,
             )?;
 
-            device.reset_command_buffer(
-                command_pools.transfer_command_buffer.command_buffer,
-                CommandBufferResetFlags::RELEASE_RESOURCES,
-            )?;
-            device.reset_command_buffer(
-                command_pools.async_compute_command_buffer.command_buffer,
-                CommandBufferResetFlags::RELEASE_RESOURCES,
-            )?;
-
             command_pools
                 .graphics_command_buffer
-                .was_started
-                .store(false, std::sync::atomic::Ordering::Relaxed);
-            command_pools
-                .async_compute_command_buffer
-                .was_started
-                .store(false, std::sync::atomic::Ordering::Relaxed);
-            command_pools
-                .transfer_command_buffer
                 .was_started
                 .store(false, std::sync::atomic::Ordering::Relaxed);
         }
@@ -2501,7 +2457,21 @@ impl Gpu for VkGpu {
                 },
                 vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 data,
-            )
+            )?;
+        let new_layout = ImageLayoutInfo {
+            layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            access_flags: vk::AccessFlags2::SHADER_READ,
+            pipeline_flags: vk::PipelineStageFlags2::ALL_GRAPHICS,
+        };
+
+        self.state
+            .image_layouts
+            .write()
+            .unwrap()
+            .entry(vk_image.inner)
+            .and_modify(|i| *i = new_layout)
+            .or_insert(new_layout);
+        Ok(())
     }
 
     fn make_image_view(
@@ -2678,10 +2648,7 @@ impl Gpu for VkGpu {
             .create_command_buffer(QueueType::Graphics)
             .unwrap()
             .vk_command_buffer();
-        let compute_buffer = self
-            .create_command_buffer(QueueType::AsyncCompute)
-            .unwrap()
-            .vk_command_buffer();
+
         let mut staging_buffer = self
             .staging_buffer
             .write()
@@ -2707,94 +2674,17 @@ impl Gpu for VkGpu {
         }
 
         let pool = self.state.current_frame();
-        // let has_transfer_work = pool
-        //     .transfer_command_buffer
-        //     .was_started
-        //     .load(std::sync::atomic::Ordering::Relaxed);
-        // let has_graphics_work = pool
-        //     .graphics_command_buffer
-        //     .was_started
-        //     .load(std::sync::atomic::Ordering::Relaxed);
-
-        // let device = self.vk_logical_device();
-        // let transfer_buffer = pool.transfer_command_buffer.command_buffer;
-        // let graphics_buffer = pool.graphics_command_buffer.command_buffer;
-
-        // unsafe {
-        //     if has_transfer_work {
-        //         device.end_command_buffer(transfer_buffer).unwrap();
-
-        //         device
-        //             .queue_submit(
-        //                 self.state.transfer_queue,
-        //                 &[SubmitInfo {
-        //                     s_type: SubmitInfo::STRUCTURE_TYPE,
-        //                     p_next: std::ptr::null(),
-        //                     wait_semaphore_count: 0,
-        //                     p_wait_semaphores: std::ptr::null(),
-        //                     p_wait_dst_stage_mask: std::ptr::null(),
-        //                     command_buffer_count: 1,
-        //                     p_command_buffers: addr_of!(
-        //                         pool.transfer_command_buffer.command_buffer
-        //                     ),
-
-        //                     signal_semaphore_count: 1,
-        //                     p_signal_semaphores: addr_of!(
-        //                         pool.transfer_command_buffer.wait_semaphore
-        //                     ),
-        //                 }],
-        //                 Fence::null(),
-        //             )
-        //             .unwrap();
-        //     }
-        //     if has_graphics_work {
-
-        //         device.end_command_buffer(graphics_buffer).unwrap();
-
-        //         let all_graphics = vk::PipelineStageFlags::ALL_GRAPHICS;
-        //         device
-        //             .queue_submit(
-        //                 self.state.graphics_queue,
-        //                 &[SubmitInfo {
-        //                     s_type: SubmitInfo::STRUCTURE_TYPE,
-        //                     p_next: std::ptr::null(),
-        //                     wait_semaphore_count: if has_transfer_work { 1 } else { 0 },
-        //                     p_wait_semaphores: if has_transfer_work {
-        //                         addr_of!(pool.transfer_command_buffer.wait_semaphore)
-        //                     } else {
-        //                         std::ptr::null()
-        //                     },
-        //                     p_wait_dst_stage_mask: if has_transfer_work {
-        //                         addr_of!(all_graphics)
-        //                     } else {
-        //                         std::ptr::null()
-        //                     },
-        //                     command_buffer_count: 1,
-        //                     p_command_buffers: addr_of!(
-        //                         pool.graphics_command_buffer.command_buffer
-        //                     ),
-
-        //                     signal_semaphore_count: 1,
-        //                     p_signal_semaphores: addr_of!(pool.render_finished_semaphore),
-        //                 }],
-        //                 Fence::null(),
-        //             )
-        //             .unwrap();
-        //     }
-        // }
-
         self.state
             .render_graph
             .write()
             .expect("Failed to lock render graph")
-            .execute(&RenderGraphExecutionContext {
+            .execute(RenderGraphExecutionContext {
                 graphics_command_buffer: graphics_buffer,
                 graphics_queue: self.state.graphics_queue,
                 graphics_queue_index: self.state.queue_families.graphics_family.index,
-                async_compute_command_buffer: compute_buffer,
 
-                compute_queue: self.state.async_compute_queue,
-                compute_queue_index: self.state.queue_families.async_compute_family.index,
+                image_layouts: &mut self.state.image_layouts.write().unwrap(),
+                buffer_layouts: &mut self.state.buffer_layouts.write().unwrap(),
             })
             .unwrap();
 
@@ -2806,19 +2696,21 @@ impl Gpu for VkGpu {
                 .end_command_buffer(graphics_buffer)
                 .unwrap();
 
-            let signal_semaphores = [pool.render_finished_semaphore];
-            let graphics_command_buffers = [graphics_buffer];
-            self.state
-                .logical_device
-                .queue_submit(
-                    self.state.graphics_queue,
-                    &[SubmitInfo::builder()
-                        .signal_semaphores(&signal_semaphores)
-                        .command_buffers(&graphics_command_buffers)
-                        .build()],
-                    pool.work_done_fence,
-                )
-                .unwrap();
+            {
+                let signal_semaphores = [pool.graphics_command_buffer.work_done_semaphore];
+                let command_buffers = [graphics_buffer];
+                self.state
+                    .logical_device
+                    .queue_submit(
+                        self.state.graphics_queue,
+                        &[SubmitInfo::builder()
+                            .signal_semaphores(&signal_semaphores)
+                            .command_buffers(&command_buffers)
+                            .build()],
+                        pool.graphics_command_buffer.work_done_fence,
+                    )
+                    .unwrap();
+            }
         }
     }
 

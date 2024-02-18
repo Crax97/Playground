@@ -649,7 +649,9 @@ impl swapchain_2::Impl for VkSwapchain {
     fn present(&self) -> anyhow::Result<bool> {
         unsafe {
             let current_gpu_frame = self.state.current_frame();
-            let wait_semaphore = current_gpu_frame.render_finished_semaphore;
+            let wait_semaphore = current_gpu_frame
+                .graphics_command_buffer
+                .work_done_semaphore;
             let result = self.swapchain_extension.queue_present(
                 self.state.graphics_queue,
                 &PresentInfoKHR {

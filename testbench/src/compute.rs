@@ -1,7 +1,8 @@
 use engine_macros::*;
 use gpu::{
-    make_gpu, Binding, Binding2, BufferCreateInfo, BufferUsageFlags, GpuConfiguration,
-    MemoryDomain, QueueType, ShaderModuleCreateInfo, ShaderStage,
+    make_gpu, BeginComputePassInfo, Binding, Binding2, BufferCreateInfo, BufferUsageFlags,
+    ComputePassFlags, GpuConfiguration, MemoryDomain, QueueType, ShaderModuleCreateInfo,
+    ShaderStage,
 };
 use std::mem::{size_of, size_of_val};
 
@@ -66,7 +67,10 @@ fn main() -> anyhow::Result<()> {
 
     let mut command_buffer = gpu.start_command_buffer(QueueType::Graphics)?;
     {
-        let mut compute_pass = command_buffer.start_compute_pass();
+        let mut compute_pass = command_buffer.start_compute_pass(&BeginComputePassInfo {
+            label: Some("Summing numbers"),
+            flags: ComputePassFlags::default(),
+        });
         compute_pass.set_compute_shader(compute_module);
         compute_pass.bind_resources_2(
             0,

@@ -8,6 +8,10 @@ name = "triangle"
 path = "src/triangle.rs"
 
 [[bin]]
+name = "async_triangle"
+path = "src/async_triangle.rs"
+
+[[bin]]
 name = "planes"
 path = "src/planes.rs"
 

@@ -358,6 +358,7 @@ impl DescriptorSetLayoutDescription {
                 BindingType::CombinedImageSampler => vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
                 BindingType::Sampler => vk::DescriptorType::SAMPLER,
                 BindingType::InputAttachment => vk::DescriptorType::INPUT_ATTACHMENT,
+                BindingType::StorageImage => vk::DescriptorType::STORAGE_IMAGE,
             };
             let binding = vk::DescriptorSetLayoutBinding {
                 binding: binding_index as _,
@@ -389,8 +390,8 @@ impl VkCommandBuffer {
         })
     }
 
-    pub fn begin_compute_pass(&mut self) -> VkComputePassCommand {
-        VkComputePassCommand::new(self)
+    pub fn begin_compute_pass(&mut self, info: &BeginComputePassInfo) -> VkComputePassCommand {
+        VkComputePassCommand::new(self, info)
     }
 
     pub fn pipeline_barrier(&mut self, barrier_info: &PipelineBarrierInfo) {
@@ -457,8 +458,11 @@ impl VkCommandBuffer {
 }
 
 impl CommandBufferPassBegin for VkCommandBuffer {
-    fn create_compute_pass_impl(&mut self) -> Box<dyn compute_pass::Impl> {
-        Box::new(self.begin_compute_pass())
+    fn create_compute_pass_impl(
+        &mut self,
+        info: &BeginComputePassInfo,
+    ) -> Box<dyn compute_pass::Impl> {
+        Box::new(self.begin_compute_pass(info))
     }
 
     fn create_render_pass_2_impl(
@@ -559,12 +563,16 @@ pub struct VkComputePassCommand {
 }
 
 impl VkComputePassCommand {
-    fn new(command_buffer: &mut VkCommandBuffer) -> Self {
+    fn new(command_buffer: &mut VkCommandBuffer, info: &BeginComputePassInfo) -> Self {
         Self {
             state: command_buffer.state.clone(),
             command_buffer_state: command_buffer.command_buffer_state.clone(),
             pipeline_state: ComputePipelineState::new(),
-            pass_info: ComputePassInfo::default(),
+            pass_info: ComputePassInfo {
+                label: info.label.map(|s| s.to_owned()),
+                flags: info.flags.into(),
+                ..Default::default()
+            },
         }
     }
 
@@ -630,6 +638,19 @@ impl compute_pass::Impl for VkComputePassCommand {
                         ),
                     }
                 }
+                DescriptorBindingType2::StorageImage { handle } => {
+                    let view = self.state.resolve_resource::<VkImageView>(&handle);
+                    let handle = view.owner_image;
+                    let image = self.state.resolve_resource::<VkImage>(&handle);
+
+                    ShaderInput {
+                        resource: Resource::Image(
+                            image.inner,
+                            view.inner,
+                            image.format.aspect_mask().to_vk(),
+                        ),
+                    }
+                }
             }));
         self.pass_info
             .all_written_resources
@@ -646,6 +667,20 @@ impl compute_pass::Impl for VkComputePassCommand {
                     let view = self
                         .state
                         .resolve_resource::<VkImageView>(&image_view_handle);
+                    let handle = view.owner_image;
+                    let image = self.state.resolve_resource::<VkImage>(&handle);
+
+                    ShaderInput {
+                        resource: Resource::Image(
+                            image.inner,
+                            view.inner,
+                            image.format.aspect_mask().to_vk(),
+                        ),
+                    }
+                }
+
+                DescriptorBindingType2::StorageImage { handle } => {
+                    let view = self.state.resolve_resource::<VkImageView>(&handle);
                     let handle = view.owner_image;
                     let image = self.state.resolve_resource::<VkImage>(&handle);
 
@@ -697,6 +732,10 @@ impl compute_pass::Impl for VkComputePassCommand {
                         sampler_handle,
                         layout: ImageLayout::ShaderReadOnly,
                     },
+
+                    DescriptorBindingType2::StorageImage { handle } => {
+                        DescriptorBindingType::StorageImage { handle }
+                    }
                 },
                 binding_stage: ShaderStage::COMPUTE,
                 location: i as _,
@@ -734,8 +773,7 @@ pub(crate) struct VkRenderPass2 {
     depth_bias_config: Option<(f32, f32, f32)>,
 
     graphics_pass_info: GraphicsPassInfo,
-    current_color_attachments: Vec<crate::ColorAttachment>,
-    uses_depth_attachment: bool,
+
     current_subpass: usize,
     vertex_offsets: Vec<u64>,
 }
@@ -848,8 +886,7 @@ impl VkRenderPass2 {
                     shader_writes: vec![],
                 }],
             },
-            current_color_attachments: info.color_attachments.to_vec(),
-            uses_depth_attachment: true,
+
             current_subpass: 0,
         }
     }
@@ -1050,6 +1087,9 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
                         sampler_handle,
                         layout: ImageLayout::ShaderReadOnly,
                     },
+                    DescriptorBindingType2::StorageImage { handle } => {
+                        DescriptorBindingType::StorageImage { handle }
+                    }
                 },
                 binding_stage: ShaderStage::ALL_GRAPHICS,
                 location: i as _,

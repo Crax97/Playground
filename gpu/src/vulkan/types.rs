@@ -1,7 +1,7 @@
 use std::ops::Deref;
 
 use super::gpu::*;
-use crate::vulkan::render_graph::AttachmentFlags;
+use crate::vulkan::render_graph::{self, AttachmentFlags};
 use crate::{
     Extent2D, Filter, IndexType, Offset2D, PipelineBindPoint, Rect2D, SamplerAddressMode,
     SamplerCreateInfo, StencilOp, StencilOpState, *,
@@ -44,6 +44,20 @@ macro_rules! case {
             $target |= $inner
         }
     };
+}
+
+impl From<crate::ComputePassFlags> for render_graph::ComputePassFlags {
+    fn from(value: crate::ComputePassFlags) -> Self {
+        let mut result = render_graph::ComputePassFlags::default();
+        case!(
+            value,
+            result,
+            crate::ComputePassFlags::ASYNC,
+            render_graph::ComputePassFlags::ASYNC
+        );
+
+        result
+    }
 }
 
 impl ToVk for IndexType {
@@ -494,7 +508,7 @@ impl ToVk for ImageUsageFlags {
             Self::INPUT_ATTACHMENT,
             Self::Inner::INPUT_ATTACHMENT
         );
-
+        case!(self, inner, Self::STORAGE, Self::Inner::STORAGE);
         inner
     }
 }

@@ -41,7 +41,10 @@ pub trait CommandBufferPassBegin {
         info: &BeginRenderPassInfo2,
     ) -> Box<dyn render_pass_2::Impl>;
 
-    fn create_compute_pass_impl(&mut self) -> Box<dyn compute_pass::Impl>;
+    fn create_compute_pass_impl(
+        &mut self,
+        info: &BeginComputePassInfo,
+    ) -> Box<dyn compute_pass::Impl>;
 }
 
 macro_rules! expand_impl {
@@ -171,8 +174,8 @@ macro_rules! define_pass_type {
 
 pub mod command_buffer_2 {
     use crate::{
-        compute_pass::ComputePass, render_pass_2::RenderPass2, BeginRenderPassInfo2, Binding,
-        CommandBufferPassBegin, ShaderStage,
+        compute_pass::ComputePass, render_pass_2::RenderPass2, BeginComputePassInfo,
+        BeginRenderPassInfo2, Binding, CommandBufferPassBegin, ShaderStage,
     };
 
     define_pimpl_type!(CommandBuffer : CommandBufferPassBegin {
@@ -190,8 +193,11 @@ pub mod command_buffer_2 {
             }
         }
 
-        pub fn start_compute_pass<'c>(&'c mut self) -> ComputePass<'c> {
-            let inner = self.pimpl.create_compute_pass_impl();
+        pub fn start_compute_pass<'c>(
+            &'c mut self,
+            info: &BeginComputePassInfo,
+        ) -> ComputePass<'c> {
+            let inner = self.pimpl.create_compute_pass_impl(info);
             ComputePass {
                 pimpl: inner,
                 parent: self,
@@ -470,6 +476,9 @@ pub enum DescriptorBindingType {
         offset: u64,
         range: usize,
     },
+    StorageImage {
+        handle: ImageViewHandle,
+    },
     ImageView {
         image_view_handle: ImageViewHandle,
         sampler_handle: SamplerHandle,
@@ -503,6 +512,9 @@ pub enum DescriptorBindingType2 {
         handle: BufferHandle,
         offset: u64,
         range: u64,
+    },
+    StorageImage {
+        handle: ImageViewHandle,
     },
     ImageView {
         image_view_handle: ImageViewHandle,
@@ -1360,6 +1372,7 @@ pub enum BindingType {
     Sampler,
     CombinedImageSampler,
     InputAttachment,
+    StorageImage,
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord, Debug)]
@@ -1582,6 +1595,18 @@ pub struct BeginRenderPassInfo2<'a> {
     pub render_area: Rect2D,
 }
 
+bitflags! {
+    #[derive(Copy, Clone, Default, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+    pub struct ComputePassFlags : u32 {
+        const ASYNC = 1;
+    }
+}
+#[derive(Clone, Hash, Default)]
+pub struct BeginComputePassInfo<'a> {
+    pub label: Option<&'a str>,
+    pub flags: ComputePassFlags,
+}
+
 #[derive(Clone, Hash, Default)]
 pub struct RenderPassAttachments {
     pub color_attachments: Vec<RenderPassAttachment>,
@@ -1616,6 +1641,12 @@ pub struct Binding2 {
 }
 
 impl Binding2 {
+    pub fn storage_image(view: ImageViewHandle) -> Self {
+        Self {
+            ty: DescriptorBindingType2::StorageImage { handle: view },
+            write: true,
+        }
+    }
     pub fn image_view(view: ImageViewHandle, sampler: SamplerHandle) -> Self {
         Self {
             ty: DescriptorBindingType2::ImageView {
@@ -1677,6 +1708,7 @@ impl DescriptorSetInfo2 {
                 crate::DescriptorBindingType::InputAttachment { .. } => {
                     BindingType::InputAttachment
                 }
+                crate::DescriptorBindingType::StorageImage { .. } => BindingType::StorageImage,
             };
             let binding = BindingElement {
                 binding_type: descriptor_type,
