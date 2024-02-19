@@ -261,6 +261,8 @@ impl App for PlanesApp {
     }
 
     fn update(&mut self, _app_state: &mut AppState) -> anyhow::Result<()> {
+        self.resource_map.update();
+
         if self.rotation_movement > 0.0 {
             self.rot_z += self.movement.y;
             self.rot_z = self.rot_z.clamp(-180.0, 180.0);

@@ -36,3 +36,4 @@ engine_macros = { path = "../engine_macros" }
 rand = "0.8.5"
 num_enum = "0.7.2"
 copypasta = "0.10.1"
+notify = "6.1.1"

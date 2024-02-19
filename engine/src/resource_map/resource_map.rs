@@ -10,6 +10,8 @@ use std::path::Path;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use thunderdome::{Arena, Index};
 
+use super::hot_reload_server::HotReloadServer;
+
 pub trait Resource: Send + Sync + 'static {
     fn get_description(&self) -> &str;
     fn destroyed(&mut self, gpu: &dyn Gpu);
@@ -29,6 +31,8 @@ pub struct ResourceMap {
     operations_sender: Sender<Box<dyn ResourceMapOperation>>,
 
     resource_loaders: HashMap<TypeId, Box<dyn ErasedResourceLoader>>,
+
+    hot_reload_server: Option<HotReloadServer>,
 }
 
 impl ResourceMap {
@@ -40,6 +44,7 @@ impl ResourceMap {
             operations_sender,
             resource_loaders: HashMap::new(),
             gpu,
+            hot_reload_server: Some(HotReloadServer::new()),
         }
     }
 
@@ -73,17 +78,23 @@ impl ResourceMap {
         &mut self,
         path: impl AsRef<Path>,
     ) -> anyhow::Result<ResourceHandle<R>> {
-        if let Some(loader) = self.resource_loaders.get(&TypeId::of::<R>()) {
+        let resource_type = TypeId::of::<R>();
+        if let Some(loader) = self.resource_loaders.get(&resource_type) {
             let loaded_resource = loader.load_erased(path.as_ref())?;
 
             let id = {
                 let mut handle = self.get_or_insert_arena_mut::<R>();
                 handle.insert(RefCounted::wrap(loaded_resource))
             };
+            let id = ResourceId { id: Some(id) };
+
+            if let Some(server) = &mut self.hot_reload_server {
+                server.watch(path.as_ref(), resource_type, id)?;
+            }
 
             Ok(ResourceHandle {
                 _marker: PhantomData,
-                id: ResourceId { id: Some(id) },
+                id,
                 operation_sender: Some(self.operations_sender.clone()),
             })
         } else {
@@ -164,10 +175,25 @@ impl ResourceMap {
     when A is destroyed on an update() call, B is going to be destroyed on the next update() call
     */
     pub fn update(&mut self) {
+        self.update_hot_reload()
+            .expect("Failed to update hot reload server");
+
         let operations = self.operations_receiver.try_iter().collect::<Vec<_>>();
         for op in operations {
             op.execute(self)
         }
+    }
+
+    fn update_hot_reload(&mut self) -> anyhow::Result<()> {
+        if let Some(server) = &mut self.hot_reload_server {
+            server.update(
+                &self.resource_loaders,
+                &mut self.loaded_resources,
+                &self.gpu,
+            )?;
+        }
+
+        Ok(())
     }
 
     fn increment_resource_ref_count<R: Resource>(&mut self, id: ResourceId) {
