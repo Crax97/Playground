@@ -43,7 +43,7 @@ impl ResourceMap {
         }
     }
 
-    pub fn add<R: Resource + 'static>(&mut self, resource: R) -> ResourceHandle<R> {
+    pub fn add<R: Resource>(&mut self, resource: R) -> ResourceHandle<R> {
         let id = {
             let mut handle = self.get_or_insert_arena_mut::<R>();
             handle.insert(RefCounted::new(resource))
@@ -119,46 +119,43 @@ impl ResourceMap {
             .unwrap()
     }
 
-    pub fn get<R: Resource + 'static>(&self, id: &ResourceHandle<R>) -> &R {
+    pub fn get<R: Resource>(&self, id: &ResourceHandle<R>) -> &R {
         self.try_get(id).unwrap()
     }
 
-    pub fn get_mut<R: Resource + 'static>(&mut self, id: &ResourceHandle<R>) -> &mut R {
+    pub fn get_mut<R: Resource>(&mut self, id: &ResourceHandle<R>) -> &mut R {
         self.try_get_mut(id).unwrap()
     }
 
-    pub fn try_get<'a, R: Resource + 'static>(&'a self, id: &ResourceHandle<R>) -> Option<&'a R> {
+    pub fn try_get<'a, R: Resource>(&'a self, id: &ResourceHandle<R>) -> Option<&'a R> {
         assert!(id.is_not_null(), "Tried to get a null resource");
         let arena_handle = self.get_arena_handle::<R>();
         let object_arc = arena_handle
             .get(id.id.id.unwrap())
-            .map(|r| r.resource.clone())
-            .map(|a| a.downcast::<R>().unwrap());
+            .map(|r| r.resource.clone());
+
         object_arc
             .map(|a| Arc::as_ptr(&a))
-            .map(|p| unsafe { p.as_ref() }.unwrap())
+            .map(|a| unsafe { a.as_ref() }.unwrap().as_any())
+            .map(|obj| obj.downcast_ref::<R>().unwrap())
     }
-    pub fn try_get_mut<'a, R: Resource + 'static>(
-        &'a self,
-        id: &ResourceHandle<R>,
-    ) -> Option<&'a mut R> {
+    pub fn try_get_mut<'a, R: Resource>(&'a self, id: &ResourceHandle<R>) -> Option<&'a mut R> {
         assert!(id.is_not_null(), "Tried to get_mut a null resource");
         let arena_handle = self.get_arena_handle::<R>();
         let object_arc = arena_handle
             .get(id.id.id.unwrap())
-            .map(|r| r.resource.clone())
-            .map(|a| a.downcast::<R>().unwrap());
+            .map(|r| r.resource.clone());
         object_arc
-            .map(|a| Arc::as_ptr(&a))
-            .map(|p| p as *mut R)
-            .map(|p| unsafe { p.as_mut() }.unwrap())
+            .map(|a| Arc::as_ptr(&a).cast_mut())
+            .map(|a| unsafe { a.as_mut() }.unwrap().as_any_mut())
+            .map(|obj| obj.downcast_mut::<R>().unwrap())
     }
 
-    pub fn len<R: Resource + 'static>(&self) -> usize {
+    pub fn len<R: Resource>(&self) -> usize {
         self.get_arena_handle_mut::<R>().len()
     }
 
-    pub fn is_empty<R: Resource + 'static>(&self) -> bool {
+    pub fn is_empty<R: Resource>(&self) -> bool {
         self.get_arena_handle_mut::<R>().is_empty()
     }
 
@@ -173,7 +170,7 @@ impl ResourceMap {
         }
     }
 
-    fn increment_resource_ref_count<R: Resource + 'static>(&mut self, id: ResourceId) {
+    fn increment_resource_ref_count<R: Resource>(&mut self, id: ResourceId) {
         let mut arena_handle = self.get_arena_handle_mut::<R>();
         let resource_mut = arena_handle
             .get_mut(
@@ -183,7 +180,7 @@ impl ResourceMap {
             .unwrap_or_else(|| panic!("Failed to fetch resource of type {}", type_name::<R>()));
         resource_mut.ref_count += 1;
     }
-    fn decrement_resource_ref_count<R: Resource + 'static>(&mut self, id: ResourceId) {
+    fn decrement_resource_ref_count<R: Resource>(&mut self, id: ResourceId) {
         let mut arena_handle = self.get_arena_handle_mut::<R>();
         let ref_count = {
             let resource_mut = arena_handle
@@ -202,19 +199,16 @@ impl ResourceMap {
                 panic!("Failed to remove resource of type {}", type_name::<R>())
             });
 
-            Arc::get_mut(&mut removed_resource.resource)
+            let resource = Arc::get_mut(&mut removed_resource.resource)
                 .unwrap()
+                .as_any_mut()
                 .downcast_mut::<R>()
-                .expect("Failed to downcast to resource")
-                .destroyed(self.gpu.as_ref());
+                .expect("Failed to downcast to resource");
+            resource.destroyed(self.gpu.as_ref());
 
             info!(
                 "Deleted resource {} of type {}",
-                removed_resource
-                    .resource
-                    .downcast_ref::<R>()
-                    .unwrap()
-                    .get_description(),
+                resource.get_description(),
                 type_name::<R>()
             );
         }
@@ -228,7 +222,20 @@ impl Drop for ResourceMap {
     }
 }
 
-pub type ResourcePtr = Arc<dyn Any + Send + Sync + 'static>;
+pub(super) trait AnyResource: Any + Resource {
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
+
+impl<T: Any + Resource + 'static> AnyResource for T {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+pub(super) type ResourcePtr = Arc<dyn AnyResource>;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Hash)]
@@ -236,8 +243,8 @@ pub(crate) struct ResourceId {
     pub(crate) id: Option<Index>,
 }
 
-pub struct RefCounted {
-    resource: ResourcePtr,
+pub(super) struct RefCounted {
+    pub resource: ResourcePtr,
     ref_count: u32,
 }
 impl RefCounted {
@@ -256,7 +263,7 @@ impl RefCounted {
     }
 }
 
-trait ErasedResourceLoader: Send + Sync + 'static {
+pub(super) trait ErasedResourceLoader: Send + Sync + 'static {
     fn load_erased(&self, path: &Path) -> anyhow::Result<ResourcePtr>;
 }
 
@@ -274,8 +281,8 @@ where
 type Resources = Arena<RefCounted>;
 
 #[derive(Default)]
-struct LoadedResources {
-    resources: HashMap<TypeId, RwLock<Resources>>,
+pub(super) struct LoadedResources {
+    pub resources: HashMap<TypeId, RwLock<Resources>>,
 }
 
 pub(crate) trait ResourceMapOperation: Send + Sync + 'static {
@@ -284,20 +291,20 @@ pub(crate) trait ResourceMapOperation: Send + Sync + 'static {
 
 pub struct ResourceHandle<R>
 where
-    R: Resource + 'static,
+    R: Resource,
 {
     _marker: PhantomData<R>,
     pub(crate) id: ResourceId,
     pub(crate) operation_sender: Option<Sender<Box<dyn ResourceMapOperation>>>,
 }
 
-impl<R: Resource + 'static> std::fmt::Debug for ResourceHandle<R> {
+impl<R: Resource> std::fmt::Debug for ResourceHandle<R> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.id.id.fmt(f)
     }
 }
 
-impl<R: Resource + 'static> ResourceHandle<R> {
+impl<R: Resource> ResourceHandle<R> {
     pub fn null() -> Self {
         Self {
             _marker: PhantomData,
@@ -335,7 +342,7 @@ impl<R: Resource + 'static> ResourceHandle<R> {
     fn inc_ref_count_operation(&self) -> Box<dyn ResourceMapOperation> {
         struct IncResourceMapOperation<R: Resource>(ResourceId, PhantomData<R>);
 
-        impl<R: Resource + 'static> ResourceMapOperation for IncResourceMapOperation<R> {
+        impl<R: Resource> ResourceMapOperation for IncResourceMapOperation<R> {
             fn execute(&self, map: &mut ResourceMap) {
                 map.increment_resource_ref_count::<R>(self.0)
             }
@@ -345,7 +352,7 @@ impl<R: Resource + 'static> ResourceHandle<R> {
     fn dec_ref_count_operation(&self) -> Box<dyn ResourceMapOperation> {
         struct DecResourceMapOperation<R: Resource>(ResourceId, PhantomData<R>);
 
-        impl<R: Resource + 'static> ResourceMapOperation for DecResourceMapOperation<R> {
+        impl<R: Resource> ResourceMapOperation for DecResourceMapOperation<R> {
             fn execute(&self, map: &mut ResourceMap) {
                 map.decrement_resource_ref_count::<R>(self.0)
             }
@@ -354,20 +361,20 @@ impl<R: Resource + 'static> ResourceHandle<R> {
     }
 }
 
-impl<R: Resource + 'static> PartialEq for ResourceHandle<R> {
+impl<R: Resource> PartialEq for ResourceHandle<R> {
     fn eq(&self, other: &Self) -> bool {
         self.id.id == other.id.id
     }
 }
 
-impl<R: Resource + 'static> Eq for ResourceHandle<R> {}
+impl<R: Resource> Eq for ResourceHandle<R> {}
 
-impl<R: Resource + 'static> std::hash::Hash for ResourceHandle<R> {
+impl<R: Resource> std::hash::Hash for ResourceHandle<R> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
 }
-impl<R: Resource + 'static> Clone for ResourceHandle<R> {
+impl<R: Resource> Clone for ResourceHandle<R> {
     fn clone(&self) -> Self {
         self.inc_ref_count();
         Self {
@@ -378,7 +385,7 @@ impl<R: Resource + 'static> Clone for ResourceHandle<R> {
     }
 }
 
-impl<R: Resource + 'static> Drop for ResourceHandle<R> {
+impl<R: Resource> Drop for ResourceHandle<R> {
     fn drop(&mut self) {
         self.dec_ref_count()
     }
