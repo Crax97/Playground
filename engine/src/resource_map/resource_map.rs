@@ -10,8 +10,6 @@ use std::path::Path;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use thunderdome::{Arena, Index};
 
-pub type ResourcePtr = Arc<dyn Any + Send + Sync + 'static>;
-
 pub trait Resource: Send + Sync + 'static {
     fn get_description(&self) -> &str;
     fn destroyed(&mut self, gpu: &dyn Gpu);
@@ -23,17 +21,6 @@ pub trait ResourceLoader: Send + Sync + 'static {
     fn load(&self, path: &Path) -> anyhow::Result<Self::LoadedResource>;
 }
 
-#[repr(transparent)]
-#[derive(Clone, Copy, Hash)]
-pub(crate) struct ResourceId {
-    pub(crate) id: Option<Index>,
-}
-
-pub struct RefCounted {
-    resource: ResourcePtr,
-    ref_count: u32,
-}
-
 #[derive(BevyResource)]
 pub struct ResourceMap {
     loaded_resources: LoadedResources,
@@ -42,150 +29,6 @@ pub struct ResourceMap {
     operations_sender: Sender<Box<dyn ResourceMapOperation>>,
 
     resource_loaders: HashMap<TypeId, Box<dyn ErasedResourceLoader>>,
-}
-
-impl RefCounted {
-    fn new(resource: impl Resource) -> Self {
-        Self {
-            resource: Arc::new(resource),
-            ref_count: 1,
-        }
-    }
-
-    fn wrap(resource: ResourcePtr) -> Self {
-        Self {
-            resource,
-            ref_count: 1,
-        }
-    }
-}
-
-trait ErasedResourceLoader: Send + Sync + 'static {
-    fn load_erased(&self, path: &Path) -> anyhow::Result<ResourcePtr>;
-}
-
-impl<T: ResourceLoader> ErasedResourceLoader for T
-where
-    T: Send + Sync + 'static,
-{
-    fn load_erased(&self, path: &Path) -> anyhow::Result<ResourcePtr> {
-        let inner = self.load(path)?;
-
-        Ok(Arc::new(inner))
-    }
-}
-
-type Resources = Arena<RefCounted>;
-
-#[derive(Default)]
-struct LoadedResources {
-    resources: HashMap<TypeId, RwLock<Resources>>,
-}
-
-pub(crate) trait ResourceMapOperation: Send + Sync + 'static {
-    fn execute(&self, map: &mut ResourceMap);
-}
-
-pub struct ResourceHandle<R>
-where
-    R: Resource + 'static,
-{
-    _marker: PhantomData<R>,
-    pub(crate) id: ResourceId,
-    pub(crate) operation_sender: Option<Sender<Box<dyn ResourceMapOperation>>>,
-}
-
-impl<R: Resource + 'static> std::fmt::Debug for ResourceHandle<R> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.id.id.fmt(f)
-    }
-}
-
-impl<R: Resource + 'static> ResourceHandle<R> {
-    pub fn null() -> Self {
-        Self {
-            _marker: PhantomData,
-            id: ResourceId { id: None },
-            operation_sender: None,
-        }
-    }
-
-    pub fn is_null(&self) -> bool {
-        self.id.id.is_none()
-    }
-
-    pub fn is_not_null(&self) -> bool {
-        !self.is_null()
-    }
-
-    fn inc_ref_count(&self) {
-        assert!(self.is_not_null());
-        self.operation_sender
-            .as_ref()
-            .expect("Handle is null()")
-            .send(self.inc_ref_count_operation())
-            .unwrap_or_else(|err| error!("Failed to send increment operation: {err}"));
-    }
-
-    fn dec_ref_count(&self) {
-        assert!(self.is_not_null());
-        self.operation_sender
-            .as_ref()
-            .expect("Handle is null()")
-            .send(self.dec_ref_count_operation())
-            .unwrap_or_else(|err| error!("Failed to send decrement operation: {err}"));
-    }
-
-    fn inc_ref_count_operation(&self) -> Box<dyn ResourceMapOperation> {
-        struct IncResourceMapOperation<R: Resource>(ResourceId, PhantomData<R>);
-
-        impl<R: Resource + 'static> ResourceMapOperation for IncResourceMapOperation<R> {
-            fn execute(&self, map: &mut ResourceMap) {
-                map.increment_resource_ref_count::<R>(self.0)
-            }
-        }
-        Box::new(IncResourceMapOperation::<R>(self.id, PhantomData))
-    }
-    fn dec_ref_count_operation(&self) -> Box<dyn ResourceMapOperation> {
-        struct DecResourceMapOperation<R: Resource>(ResourceId, PhantomData<R>);
-
-        impl<R: Resource + 'static> ResourceMapOperation for DecResourceMapOperation<R> {
-            fn execute(&self, map: &mut ResourceMap) {
-                map.decrement_resource_ref_count::<R>(self.0)
-            }
-        }
-        Box::new(DecResourceMapOperation::<R>(self.id, PhantomData))
-    }
-}
-
-impl<R: Resource + 'static> PartialEq for ResourceHandle<R> {
-    fn eq(&self, other: &Self) -> bool {
-        self.id.id == other.id.id
-    }
-}
-
-impl<R: Resource + 'static> Eq for ResourceHandle<R> {}
-
-impl<R: Resource + 'static> std::hash::Hash for ResourceHandle<R> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
-impl<R: Resource + 'static> Clone for ResourceHandle<R> {
-    fn clone(&self) -> Self {
-        self.inc_ref_count();
-        Self {
-            _marker: self._marker,
-            id: self.id,
-            operation_sender: self.operation_sender.clone(),
-        }
-    }
-}
-
-impl<R: Resource + 'static> Drop for ResourceHandle<R> {
-    fn drop(&mut self) {
-        self.dec_ref_count()
-    }
 }
 
 impl ResourceMap {
@@ -382,6 +225,162 @@ impl Drop for ResourceMap {
     fn drop(&mut self) {
         // Update any pending resources
         self.update();
+    }
+}
+
+pub type ResourcePtr = Arc<dyn Any + Send + Sync + 'static>;
+
+#[repr(transparent)]
+#[derive(Clone, Copy, Hash)]
+pub(crate) struct ResourceId {
+    pub(crate) id: Option<Index>,
+}
+
+pub struct RefCounted {
+    resource: ResourcePtr,
+    ref_count: u32,
+}
+impl RefCounted {
+    fn new(resource: impl Resource) -> Self {
+        Self {
+            resource: Arc::new(resource),
+            ref_count: 1,
+        }
+    }
+
+    fn wrap(resource: ResourcePtr) -> Self {
+        Self {
+            resource,
+            ref_count: 1,
+        }
+    }
+}
+
+trait ErasedResourceLoader: Send + Sync + 'static {
+    fn load_erased(&self, path: &Path) -> anyhow::Result<ResourcePtr>;
+}
+
+impl<T: ResourceLoader> ErasedResourceLoader for T
+where
+    T: Send + Sync + 'static,
+{
+    fn load_erased(&self, path: &Path) -> anyhow::Result<ResourcePtr> {
+        let inner = self.load(path)?;
+
+        Ok(Arc::new(inner))
+    }
+}
+
+type Resources = Arena<RefCounted>;
+
+#[derive(Default)]
+struct LoadedResources {
+    resources: HashMap<TypeId, RwLock<Resources>>,
+}
+
+pub(crate) trait ResourceMapOperation: Send + Sync + 'static {
+    fn execute(&self, map: &mut ResourceMap);
+}
+
+pub struct ResourceHandle<R>
+where
+    R: Resource + 'static,
+{
+    _marker: PhantomData<R>,
+    pub(crate) id: ResourceId,
+    pub(crate) operation_sender: Option<Sender<Box<dyn ResourceMapOperation>>>,
+}
+
+impl<R: Resource + 'static> std::fmt::Debug for ResourceHandle<R> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.id.id.fmt(f)
+    }
+}
+
+impl<R: Resource + 'static> ResourceHandle<R> {
+    pub fn null() -> Self {
+        Self {
+            _marker: PhantomData,
+            id: ResourceId { id: None },
+            operation_sender: None,
+        }
+    }
+
+    pub fn is_null(&self) -> bool {
+        self.id.id.is_none()
+    }
+
+    pub fn is_not_null(&self) -> bool {
+        !self.is_null()
+    }
+
+    fn inc_ref_count(&self) {
+        assert!(self.is_not_null());
+        self.operation_sender
+            .as_ref()
+            .expect("Handle is null()")
+            .send(self.inc_ref_count_operation())
+            .unwrap_or_else(|err| error!("Failed to send increment operation: {err}"));
+    }
+
+    fn dec_ref_count(&self) {
+        assert!(self.is_not_null());
+        self.operation_sender
+            .as_ref()
+            .expect("Handle is null()")
+            .send(self.dec_ref_count_operation())
+            .unwrap_or_else(|err| error!("Failed to send decrement operation: {err}"));
+    }
+
+    fn inc_ref_count_operation(&self) -> Box<dyn ResourceMapOperation> {
+        struct IncResourceMapOperation<R: Resource>(ResourceId, PhantomData<R>);
+
+        impl<R: Resource + 'static> ResourceMapOperation for IncResourceMapOperation<R> {
+            fn execute(&self, map: &mut ResourceMap) {
+                map.increment_resource_ref_count::<R>(self.0)
+            }
+        }
+        Box::new(IncResourceMapOperation::<R>(self.id, PhantomData))
+    }
+    fn dec_ref_count_operation(&self) -> Box<dyn ResourceMapOperation> {
+        struct DecResourceMapOperation<R: Resource>(ResourceId, PhantomData<R>);
+
+        impl<R: Resource + 'static> ResourceMapOperation for DecResourceMapOperation<R> {
+            fn execute(&self, map: &mut ResourceMap) {
+                map.decrement_resource_ref_count::<R>(self.0)
+            }
+        }
+        Box::new(DecResourceMapOperation::<R>(self.id, PhantomData))
+    }
+}
+
+impl<R: Resource + 'static> PartialEq for ResourceHandle<R> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id.id == other.id.id
+    }
+}
+
+impl<R: Resource + 'static> Eq for ResourceHandle<R> {}
+
+impl<R: Resource + 'static> std::hash::Hash for ResourceHandle<R> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+impl<R: Resource + 'static> Clone for ResourceHandle<R> {
+    fn clone(&self) -> Self {
+        self.inc_ref_count();
+        Self {
+            _marker: self._marker,
+            id: self.id,
+            operation_sender: self.operation_sender.clone(),
+        }
+    }
+}
+
+impl<R: Resource + 'static> Drop for ResourceHandle<R> {
+    fn drop(&mut self) {
+        self.dec_ref_count()
     }
 }
 
