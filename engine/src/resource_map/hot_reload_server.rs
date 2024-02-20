@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::{any::TypeId, sync::Arc};
 
 use gpu::Gpu;
-use log::info;
+use log::{error, info};
 use notify::event::ModifyKind;
 use notify::{RecommendedWatcher, Watcher};
 
@@ -23,6 +23,7 @@ pub(super) struct ReloadedResources {
 struct WatchedResource {
     pub resource_type: TypeId,
     pub resource_id: ResourceId,
+    pub original_path: PathBuf,
 }
 
 pub(super) struct HotReloadServer {
@@ -62,15 +63,18 @@ impl HotReloadServer {
         resource_type: TypeId,
         resource_id: ResourceId,
     ) -> anyhow::Result<()> {
-        let path = path.to_path_buf().canonicalize()?;
+        let original_path = path.to_path_buf();
+        let path = path.canonicalize()?;
         info!("Watching path {path:?} for hot reload");
         self.watched_paths.insert(
             path.clone(),
             WatchedResource {
                 resource_type,
                 resource_id,
+                original_path: original_path.clone(),
             },
         );
+
         self.watcher
             .watch(&path, notify::RecursiveMode::NonRecursive)?;
         Ok(())
@@ -113,18 +117,27 @@ impl HotReloadServer {
         let mut resources: HashMap<TypeId, Vec<ReloadedResource>> = HashMap::new();
         for path in paths {
             let path = path.canonicalize()?;
-            info!("Reloading file {path:?}");
             let resource_info = &self.watched_paths[&path];
+            info!("Reloading file {:?}", resource_info.original_path);
+
             let resource_loader = &resource_loaders[&resource_info.resource_type];
-            let new_resource = resource_loader.load_erased(&path)?;
-            resources
-                .entry(resource_info.resource_type)
-                .or_default()
-                .push(ReloadedResource {
-                    new_resource,
-                    id: resource_info.resource_id,
-                })
+            let new_resource = resource_loader.load_erased(&resource_info.original_path);
+            match new_resource {
+                Ok(new_resource) => {
+                    resources
+                        .entry(resource_info.resource_type)
+                        .or_default()
+                        .push(ReloadedResource {
+                            new_resource,
+                            id: resource_info.resource_id,
+                        });
+                }
+                Err(e) => {
+                    error!("Failed to reload resource {:?} because of {:?}", path, e);
+                }
+            };
         }
+
         let reloaded = resources
             .into_iter()
             .map(|(ty, res)| ReloadedResources {
