@@ -2,6 +2,7 @@ pub const SMALL_NUMBER: f32 = 0.005;
 pub mod app;
 pub mod components;
 pub mod editor;
+pub mod game_framework;
 pub mod input;
 pub mod loaders;
 pub mod math;
@@ -28,6 +29,8 @@ pub use resource_map::*;
 pub use texture::*;
 pub use time::*;
 pub use utils::*;
+
+pub use rhai::*;
 
 pub use egui;
 

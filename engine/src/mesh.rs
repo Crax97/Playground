@@ -48,8 +48,8 @@ impl Mesh {
                 let label = mesh_create_info
                     .label
                     .map(|s| s.to_owned())
-                    .unwrap_or_else(|| "GPU Mesh".to_owned())
-                    + &format!(" - primitive {idx}");
+                    .unwrap_or_else(|| "GPU Mesh".to_owned());
+                let label = format!("{label} - primitive {idx}");
                 let index_buffer = gpu.make_buffer(
                     &BufferCreateInfo {
                         label: Some(&(label.clone() + ": Index buffer")),

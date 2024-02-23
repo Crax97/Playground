@@ -185,7 +185,7 @@ pub fn run<A: App + 'static>(
                     "Backtrace: {}\nDuring app loop: {}",
                     e.backtrace(),
                     e.chain()
-                        .fold(String::new(), |s, e| s + &e.to_string() + "\n"),
+                        .fold(String::new(), |s, e| format!("{}{}\n", s, e.to_string())),
                 );
             }
             _ => {}
