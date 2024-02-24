@@ -1,11 +1,25 @@
 #![allow(dead_code)]
 use strum::EnumCount;
 
+use serde::{Deserialize, Serialize};
+
 use num_enum::TryFromPrimitive;
 use winit::keyboard::ModifiersState;
 
 #[repr(u32)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, EnumCount, Hash, TryFromPrimitive)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    PartialOrd,
+    EnumCount,
+    Hash,
+    TryFromPrimitive,
+    Serialize,
+    Deserialize,
+)]
 pub enum Key {
     Key1,
     Key2,

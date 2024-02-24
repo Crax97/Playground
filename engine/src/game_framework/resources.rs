@@ -12,7 +12,7 @@ impl<R: Send + Sync + 'static> Resource for R {}
 
 #[derive(Clone)]
 pub struct Resources {
-    resources: HashMap<TypeId, Arc<RwLock<dyn AnyResource>>>,
+    resources: SharedResources,
 }
 
 #[derive(Default)]
@@ -39,8 +39,39 @@ impl ResourcesBuilder {
 
     pub fn build(self) -> Resources {
         Resources {
-            resources: self.resources,
+            resources: Arc::new(RwOnly::new(self.resources)),
         }
+    }
+}
+
+impl Resources {
+    pub fn get<R: Resource>(&self) -> Ref<'_, R> {
+        self.try_get().unwrap()
+    }
+
+    pub fn try_get<R: Resource>(&self) -> Option<Ref<'_, R>> {
+        self.resources.get(&TypeId::of::<R>()).map(|o| {
+            let res = o.read().unwrap();
+            Ref {
+                _ph: PhantomData,
+                res,
+            }
+        })
+    }
+
+    pub fn get_mut<R: Resource>(&self) -> RefMut<'_, R> {
+        self.try_get_mut().unwrap()
+    }
+
+    pub fn try_get_mut<R: Resource>(&self) -> Option<RefMut<'_, R>> {
+        self.resources.get(&TypeId::of::<R>()).map(|o| {
+            let res = o.write().unwrap();
+
+            RefMut {
+                _ph: PhantomData,
+                res,
+            }
+        })
     }
 }
 
@@ -81,38 +112,24 @@ impl<'a, R: Resource> DerefMut for RefMut<'a, R> {
     }
 }
 
-impl Resources {
-    pub fn add_resource<R: Resource>(&mut self, resource: R) {
-        self.resources
-            .insert(TypeId::of::<R>(), Arc::new(RwLock::new(resource)));
-    }
+struct RwOnly<T> {
+    inner: T,
+}
 
-    pub fn get<R: Resource>(&self) -> Ref<'_, R> {
-        self.try_get().unwrap()
-    }
-
-    pub fn try_get<R: Resource>(&self) -> Option<Ref<'_, R>> {
-        self.resources.get(&TypeId::of::<R>()).map(|o| {
-            let res = o.read().unwrap();
-            Ref {
-                _ph: PhantomData,
-                res,
-            }
-        })
-    }
-
-    pub fn get_mut<R: Resource>(&self) -> RefMut<'_, R> {
-        self.try_get_mut().unwrap()
-    }
-
-    pub fn try_get_mut<R: Resource>(&self) -> Option<RefMut<'_, R>> {
-        self.resources.get(&TypeId::of::<R>()).map(|o| {
-            let res = o.write().unwrap();
-
-            RefMut {
-                _ph: PhantomData,
-                res,
-            }
-        })
+impl<T> RwOnly<T> {
+    fn new(inner: T) -> Self {
+        Self { inner }
     }
 }
+unsafe impl<T> Send for RwOnly<T> {}
+unsafe impl<T> Sync for RwOnly<T> {}
+
+impl<T> Deref for RwOnly<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+type SharedResources = Arc<RwOnly<HashMap<TypeId, Arc<RwLock<dyn AnyResource>>>>>;

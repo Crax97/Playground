@@ -8,21 +8,37 @@ pub struct SystemStartup<'w> {
     pub resources: &'w mut Resources,
 }
 
+pub struct SystemBeginFrameParams<'w> {
+    pub delta_seconds: f32,
+    pub event_queue: &'w EventQueue,
+    pub resources: &'w mut Resources,
+}
+
+pub struct SystemEndFrameParams<'w> {
+    pub delta_seconds: f32,
+    pub event_queue: &'w EventQueue,
+    pub resources: &'w mut Resources,
+}
+
+pub struct SystemOnOsEvent<'w> {
+    pub event: &'w winit::event::Event<()>,
+    pub event_queue: &'w EventQueue,
+    pub resources: &'w mut Resources,
+}
 pub trait System: 'static {
     // Called before the world's initialization, use it to setup any resources shared between systems
-    fn setup_resources(&self, resource_builder: &mut ResourcesBuilder);
+    fn setup_resources(&self, _resource_builder: &mut ResourcesBuilder) {}
 
     // Called on any os events
-    fn on_os_event(&mut self, _event: &winit::event::Event<()>) {}
-
+    fn on_os_event(&mut self, _on_os_event: SystemOnOsEvent) {}
     // Called on the world's first frame
-    fn startup(&mut self, startup: SystemStartup);
+    fn startup(&mut self, _startup: SystemStartup) {}
 
     // Called before the event loop has started
-    fn update(&mut self, delta_seconds: f32);
+    fn begin_frame(&mut self, _update: SystemBeginFrameParams) {}
 
     // Called after the event loop has ended
-    fn post_update(&mut self, delta_seconds: f32);
+    fn end_frame(&mut self, _post_update: SystemEndFrameParams) {}
 }
 
 #[derive(Default)]

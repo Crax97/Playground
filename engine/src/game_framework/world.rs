@@ -10,13 +10,21 @@ use super::{
     component::{AnyComponent, Component},
     event_queue::{Event, EventBase, EventQueue},
     resources::{Resource, Resources, ResourcesBuilder},
-    systems::{System, SystemStartup, Systems},
+    systems::{
+        System, SystemBeginFrameParams, SystemEndFrameParams, SystemOnOsEvent, SystemStartup,
+        Systems,
+    },
 };
 
 static CURRENT_ENTITY_ID: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Clone, Copy, CustomType)]
+pub struct BeginFrameEvent;
+#[derive(Clone, Copy, CustomType)]
 pub struct UpdateEvent(f32);
+
+#[derive(Clone, Copy, CustomType)]
+pub struct EndFrameEvent;
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Hash, Debug)]
 pub struct Entity {
@@ -143,7 +151,7 @@ impl World {
         'inst,
         'event,
         S: Component,
-        E: EventBase + Copy + Clone,
+        E: EventBase + Clone,
         F: FnMut(&mut S, E) + 'static,
     >(
         &mut self,
@@ -168,12 +176,41 @@ impl World {
         });
     }
 
+    /*
+    1. For each system call it's `begin_frame` method
+    2. Dispatch the `BeginFrameEvent` event and run the event loop
+    3. Dispatch the `UpdateEvent` event and run the event loop
+    4. Dispatch the `EndFrameEvent` event and run the event loop
+    5. For each system call it's `end_frame` method
+    */
     pub fn update(&mut self, delta_seconds: f32) {
         self.systems.for_each(|s| {
-            s.update(delta_seconds);
+            s.begin_frame(SystemBeginFrameParams {
+                delta_seconds,
+                event_queue: &self.event_queue,
+                resources: &mut self.resources,
+            });
         });
 
+        self.event_queue.push_event(BeginFrameEvent);
+        self.pump_events();
+
         self.event_queue.push_event(UpdateEvent(delta_seconds));
+        self.pump_events();
+
+        self.event_queue.push_event(EndFrameEvent);
+        self.pump_events();
+
+        self.systems.for_each(|s| {
+            s.end_frame(SystemEndFrameParams {
+                delta_seconds,
+                event_queue: &self.event_queue,
+                resources: &mut self.resources,
+            });
+        });
+    }
+
+    fn pump_events(&mut self) {
         while let Some(event) = self.event_queue.get_event() {
             let ty = event.get_type();
 
@@ -187,14 +224,16 @@ impl World {
                 }
             }
         }
-
-        self.systems.for_each(|s| {
-            s.post_update(delta_seconds);
-        });
     }
 
     pub fn on_os_event(&mut self, event: &winit::event::Event<()>) {
-        self.systems.for_each(|s| s.on_os_event(event))
+        self.systems.for_each(|s| {
+            s.on_os_event(SystemOnOsEvent {
+                event,
+                event_queue: &self.event_queue,
+                resources: &mut self.resources,
+            })
+        })
     }
 }
 
