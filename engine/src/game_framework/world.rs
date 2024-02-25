@@ -33,9 +33,10 @@ pub struct UpdateEvent {
 #[derive(Clone, Copy, CustomType)]
 pub struct EndFrameEvent;
 
+#[derive(Clone)]
 pub struct SpawnEntityEvent {
     entity: Entity,
-    components: Vec<Box<dyn AnyComponent>>,
+    components: Arc<Vec<Arc<Box<dyn AnyComponent>>>>,
 }
 
 #[derive(Clone, CustomType)]
@@ -286,13 +287,9 @@ impl World {
 
     fn pump_events(&mut self) {
         while let Some(mut event) = self.event_queue.get_event() {
-            if event.try_match::<SpawnEntityEvent>(|spawn: &mut SpawnEntityEvent| {
-                self.entities_to_spawn.push(SpawnEntityEvent {
-                    entity: spawn.entity,
-                    components: std::mem::take(&mut spawn.components),
-                })
-            }) || event
-                .try_match(|&mut DestroyEntity(entity)| self.entities_to_destroy.push(entity))
+            if event.try_match::<SpawnEntityEvent>(|spawn: SpawnEntityEvent| {
+                self.entities_to_spawn.push(spawn)
+            }) || event.try_match(|DestroyEntity(entity)| self.entities_to_destroy.push(entity))
             {
                 continue;
             }
@@ -315,10 +312,18 @@ impl World {
         }
     }
 
-    fn spawn_entity(&mut self, entity: Entity, components: Vec<Box<dyn AnyComponent>>) {
+    fn spawn_entity(
+        &mut self,
+        entity: Entity,
+        mut component_funcs: Arc<Vec<Arc<Box<dyn AnyComponent>>>>,
+    ) {
         let mut builder = EntityBuilder::explicit(self, entity);
 
+        let components = Arc::get_mut(&mut component_funcs).unwrap();
+        let components = std::mem::take(components);
         for component in components {
+            let component = Arc::try_unwrap(component)
+                .unwrap_or_else(|_| panic!("Failed to take unique ownership of new component"));
             builder.component_dyn(component);
         }
         builder.build();
@@ -360,7 +365,9 @@ impl SpawnEntityEvent {
     }
 
     pub fn add_component<C: Component>(&mut self, component: C) -> &mut Self {
-        self.components.push(Box::new(component));
+        Arc::get_mut(&mut self.components)
+            .unwrap()
+            .push(Arc::new(Box::new(component)));
         self
     }
 }

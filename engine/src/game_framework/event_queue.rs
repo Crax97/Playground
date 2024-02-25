@@ -55,22 +55,21 @@ impl Event {
             .cloned()
     }
 
-    pub fn try_match<E: EventBase>(&mut self, mut func: impl FnMut(&mut E)) -> bool {
+    pub fn try_match_ref<E: EventBase>(&mut self, mut func: impl FnMut(&E)) -> bool {
         if self.ptr.is_none() {
             return false;
         }
         if self.ty == TypeId::of::<E>() {
             let taken = self.ptr.take().unwrap();
-            let cast = taken.as_ref();
-            let cast = cast as *const dyn EventBase;
-            let cast = cast as *mut dyn EventBase;
-            let cast = unsafe { cast.as_mut().unwrap() };
-            let cast = cast.as_any_mut().downcast_mut::<E>().unwrap();
-            func(cast);
+            func(taken.as_ref().as_any().downcast_ref::<E>().unwrap());
             true
         } else {
             false
         }
+    }
+
+    pub fn try_match<E: EventBase + Clone>(&mut self, mut func: impl FnMut(E)) -> bool {
+        self.try_match_ref(|e: &E| func(e.clone()))
     }
 }
 
