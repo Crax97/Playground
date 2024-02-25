@@ -33,7 +33,7 @@ pub struct UpdateEvent {
 pub struct EndFrameEvent;
 
 pub struct SpawnEntityEventConstructParams<'w> {
-    context: &'w WorldEventContext,
+    context: &'w WorldEventContext<'w>,
     components: Arc<Vec<Arc<Box<dyn AnyComponent>>>>,
 }
 
@@ -78,14 +78,6 @@ pub struct Entity {
     id: thunderdome::Index,
 }
 
-impl Entity {
-    fn null() -> Self {
-        Self {
-            id: thunderdome::Index::DANGLING,
-        }
-    }
-}
-
 #[derive(Default)]
 struct EntityInfo {
     components: HashMap<TypeId, thunderdome::Index>,
@@ -116,14 +108,14 @@ pub struct WorldBuilder {
     systems: Systems,
 }
 
-pub struct WorldEventContext {
-    pub event_queue: EventQueue,
+pub struct WorldEventContext<'w> {
+    pub event_queue: &'w EventQueue,
     pub self_entity: Entity,
 
-    new_entities: Arc<RwLock<Arena<EntityInfo>>>,
+    new_entities: &'w Arc<RwLock<Arena<EntityInfo>>>,
 }
 
-impl WorldEventContext {
+impl<'w> WorldEventContext<'w> {
     pub fn begin_spawn_event(&self) -> SpawnEntityEventConstructParams {
         SpawnEntityEventConstructParams {
             context: self,
@@ -245,7 +237,7 @@ impl World {
         'inst,
         'event,
         S: Component,
-        F: FnMut(&mut S, &Event, &WorldEventContext) + 'static,
+        F: FnMut(&mut S, &Event, &WorldEventContext) + Send + 'static,
     >(
         &mut self,
         event_type: TypeId,
@@ -269,7 +261,7 @@ impl World {
         'event,
         S: Component,
         E: EventBase + Clone,
-        F: FnMut(&mut S, E, &WorldEventContext) + 'static,
+        F: FnMut(&mut S, E, &WorldEventContext) + Send + 'static,
     >(
         &mut self,
         mut method: F,
@@ -381,15 +373,20 @@ impl World {
                         .or_default()
                         .write()
                         .unwrap();
-                    let mut context = WorldEventContext {
-                        new_entities: self.entities.clone(),
-                        event_queue: self.event_queue.clone(),
-                        self_entity: Entity::null(),
-                    };
+                    if component_list.is_empty() {
+                        return;
+                    }
                     for (_, component) in component_list.iter_mut() {
-                        context.self_entity = component.owner;
                         // context.self_entity = component
-                        (method)(component.component.as_mut(), &event, &context);
+                        (method)(
+                            component.component.as_mut(),
+                            &event,
+                            &WorldEventContext {
+                                event_queue: &self.event_queue,
+                                self_entity: component.owner,
+                                new_entities: &self.entities,
+                            },
+                        );
                     }
                 }
             }
@@ -452,7 +449,7 @@ impl SpawnEntityEvent {
     }
 }
 
-type DispatchMethod = dyn FnMut(&mut dyn AnyComponent, &Event, &WorldEventContext);
+type DispatchMethod = dyn FnMut(&mut dyn AnyComponent, &Event, &WorldEventContext) + Send;
 struct OwnedComponent {
     owner: Entity,
     component: Box<dyn AnyComponent>,

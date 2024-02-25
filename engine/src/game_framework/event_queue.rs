@@ -73,12 +73,12 @@ impl Event {
     }
 }
 
-pub trait EventBase: Any {
+pub trait EventBase: Any + Sync + Send {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
-impl<E: 'static> EventBase for E {
+impl<E: Sync + Send + 'static> EventBase for E {
     fn as_any(&self) -> &dyn Any {
         self
     }

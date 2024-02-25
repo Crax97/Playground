@@ -31,12 +31,11 @@ impl BulletComponent {
     fn update(&mut self, update: UpdateEvent, context: &WorldEventContext) {
         self.starting_position += self.direction * update.delta_seconds;
 
+        self.lifetime -= 1;
         if self.lifetime == 0 {
             self.event_queue
                 .push_event(DestroyEntity(context.self_entity));
             println!("Bullet {:?} exhausted its life!", context.self_entity);
-        } else {
-            self.lifetime -= 1;
         }
     }
 }
@@ -59,7 +58,7 @@ impl CharacterComponent {
                 .with_component(BulletComponent {
                     starting_position: self.location,
                     direction: vector![1.0, 0.0],
-                    lifetime: 60000,
+                    lifetime: 6000,
                     event_queue: self.event_queue.clone(),
                 })
                 .commit();

@@ -39,7 +39,7 @@ pub struct SystemOnOsEvent<'w> {
     pub event_queue: &'w EventQueue,
     pub resources: &'w mut Resources,
 }
-pub trait System: 'static {
+pub trait System: Send + Sync + 'static {
     // Called before the world's initialization, use it to setup any resources shared between systems
     fn setup_resources(&self, _resource_builder: &mut ResourcesBuilder) {}
 
