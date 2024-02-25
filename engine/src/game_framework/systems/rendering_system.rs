@@ -4,7 +4,8 @@ use gpu::{Gpu, Offset2D, Rect2D};
 use log::{error, warn};
 
 use crate::{
-    Camera, CvarManager, DeferredRenderingPipeline, RenderScene, RenderingPipeline, ResourceMap,
+    game_scene::Scene, Camera, CvarManager, DeferredRenderingPipeline, RenderScene,
+    RenderingPipeline, ResourceMap,
 };
 
 use super::System;
@@ -24,7 +25,7 @@ impl System for RenderingSystem {
         &self,
         resource_builder: &mut crate::game_framework::resources::ResourcesBuilder,
     ) {
-        resource_builder.add_resource(RenderScene::new());
+        resource_builder.add_resource(Scene::new());
         let combine_shader =
             DeferredRenderingPipeline::make_3d_combine_shader(self.gpu.as_ref()).unwrap();
         resource_builder.add_resource(
@@ -55,36 +56,37 @@ impl System for RenderingSystem {
             Camera::default()
         };
 
-        let scene = params.resources.get::<RenderScene>();
-        let mut rendering_pipeline = params.resources.get_mut::<DeferredRenderingPipeline>();
+        if let Some(scene) = params.resources.try_get::<RenderScene>() {
+            let mut rendering_pipeline = params.resources.get_mut::<DeferredRenderingPipeline>();
 
-        let mut graphics_command_buffer = self
-            .gpu
-            .start_command_buffer(gpu::QueueType::Graphics)
-            .unwrap();
-        let final_render = rendering_pipeline
-            .render(
-                self.gpu.as_ref(),
-                &mut graphics_command_buffer,
-                &camera,
-                &scene,
-                &resource_map,
-                &cvar_manager,
-            )
-            .unwrap();
-        rendering_pipeline
-            .draw_textured_quad(
-                &mut graphics_command_buffer,
-                &params.backbuffer.image_view,
-                &final_render,
-                Rect2D {
-                    offset: Offset2D::default(),
-                    extent: params.backbuffer.size,
-                },
-                true,
-                None,
-            )
-            .unwrap();
+            let mut graphics_command_buffer = self
+                .gpu
+                .start_command_buffer(gpu::QueueType::Graphics)
+                .unwrap();
+            let final_render = rendering_pipeline
+                .render(
+                    self.gpu.as_ref(),
+                    &mut graphics_command_buffer,
+                    &camera,
+                    &scene,
+                    &resource_map,
+                    &cvar_manager,
+                )
+                .unwrap();
+            rendering_pipeline
+                .draw_textured_quad(
+                    &mut graphics_command_buffer,
+                    &params.backbuffer.image_view,
+                    &final_render,
+                    Rect2D {
+                        offset: Offset2D::default(),
+                        extent: params.backbuffer.size,
+                    },
+                    true,
+                    None,
+                )
+                .unwrap();
+        }
     }
 
     fn shutdown(&mut self, params: super::SystemShutdownParams) {

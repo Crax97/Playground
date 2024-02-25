@@ -1,3 +1,4 @@
+use std::clone;
 use std::ops::{Deref, DerefMut};
 
 use crate::math::shape::BoundingShape;
@@ -43,7 +44,7 @@ impl DerefMut for EngineWindow {
 #[reflect(Component)]
 pub struct DebugName(pub String);
 
-#[derive(Component)]
+#[derive(Component, Copy, Clone)]
 pub struct Transform {
     pub position: Point3<f32>,
     pub rotation: UnitQuaternion<f32>,

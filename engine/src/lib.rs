@@ -3,6 +3,7 @@ pub mod app;
 pub mod components;
 pub mod editor;
 pub mod game_framework;
+pub mod game_scene;
 pub mod input;
 pub mod loaders;
 pub mod math;
