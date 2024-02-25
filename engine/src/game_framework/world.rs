@@ -2,16 +2,17 @@ use std::{
     any::TypeId,
     collections::HashMap,
     marker::PhantomData,
-    sync::{atomic::AtomicU32, Arc, RwLock},
+    sync::{Arc, RwLock},
 };
 
 use gpu::CommandBuffer;
 use rhai::{CustomType, TypeBuilder};
+use thunderdome::Arena;
 
 use crate::Backbuffer;
 
 use super::{
-    component::{AnyComponent, Component, ComponentStartParams},
+    component::{AnyComponent, Component, ComponentDestroyParams, ComponentStartParams},
     event_queue::{Event, EventBase, EventQueue},
     resources::{Resource, Resources, ResourcesBuilder},
     systems::{
@@ -19,8 +20,6 @@ use super::{
         SystemShutdownParams, SystemStartupParams, Systems,
     },
 };
-
-static CURRENT_ENTITY_ID: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Clone, Copy, CustomType)]
 pub struct BeginFrameEvent;
@@ -33,6 +32,38 @@ pub struct UpdateEvent {
 #[derive(Clone, Copy, CustomType)]
 pub struct EndFrameEvent;
 
+pub struct SpawnEntityEventConstructParams<'w> {
+    context: &'w WorldEventContext,
+    components: Arc<Vec<Arc<Box<dyn AnyComponent>>>>,
+}
+
+impl<'w> SpawnEntityEventConstructParams<'w> {
+    pub fn with_component<C: Component>(&mut self, component: C) -> &mut Self {
+        Arc::get_mut(&mut self.components)
+            .unwrap()
+            .push(Arc::new(Box::new(component)));
+        self
+    }
+
+    pub fn commit(&mut self) -> Entity {
+        let entity_id = self
+            .context
+            .new_entities
+            .write()
+            .expect("Failed to lock entities")
+            .insert(EntityInfo::default());
+        let entity = Entity { id: entity_id };
+        let event = SpawnEntityEvent {
+            entity,
+            components: self.components.clone(),
+        };
+
+        self.context.event_queue.push_event(event);
+
+        entity
+    }
+}
+
 #[derive(Clone)]
 pub struct SpawnEntityEvent {
     entity: Entity,
@@ -44,7 +75,20 @@ pub struct DestroyEntity(pub Entity);
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Hash, Debug)]
 pub struct Entity {
-    id: u32,
+    id: thunderdome::Index,
+}
+
+impl Entity {
+    fn null() -> Self {
+        Self {
+            id: thunderdome::Index::DANGLING,
+        }
+    }
+}
+
+#[derive(Default)]
+struct EntityInfo {
+    components: HashMap<TypeId, thunderdome::Index>,
 }
 
 pub struct EntityBuilder<'world> {
@@ -54,8 +98,8 @@ pub struct EntityBuilder<'world> {
 }
 
 pub struct World {
-    entities: Vec<Entity>,
-    components: HashMap<TypeId, Arc<RwLock<Vec<OwnedComponent>>>>,
+    entities: Arc<RwLock<Arena<EntityInfo>>>,
+    components: HashMap<TypeId, Arc<RwLock<Arena<OwnedComponent>>>>,
     systems: Systems,
     event_mappings: HashMap<TypeId, HashMap<TypeId, Box<DispatchMethod>>>,
     resources: Resources,
@@ -70,6 +114,22 @@ pub struct World {
 pub struct WorldBuilder {
     resource_builder: ResourcesBuilder,
     systems: Systems,
+}
+
+pub struct WorldEventContext {
+    pub event_queue: EventQueue,
+    pub self_entity: Entity,
+
+    new_entities: Arc<RwLock<Arena<EntityInfo>>>,
+}
+
+impl WorldEventContext {
+    pub fn begin_spawn_event(&self) -> SpawnEntityEventConstructParams {
+        SpawnEntityEventConstructParams {
+            context: self,
+            components: Default::default(),
+        }
+    }
 }
 
 impl WorldBuilder {
@@ -100,11 +160,14 @@ impl WorldBuilder {
 
 impl<'world> EntityBuilder<'world> {
     pub fn new(world: &'world mut World) -> Self {
+        let id = world
+            .entities
+            .write()
+            .expect("Failed to take entities")
+            .insert(EntityInfo::default());
         Self {
             world,
-            entity: Entity {
-                id: CURRENT_ENTITY_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            },
+            entity: Entity { id },
             components: Default::default(),
         }
     }
@@ -139,20 +202,30 @@ impl<'world> EntityBuilder<'world> {
         self
     }
 
-    pub fn build(self) -> Entity {
-        self.world.entities.push(self.entity);
-        for (ty, mut component) in self.components {
+    pub fn build(mut self) -> Entity {
+        self.components.iter_mut().for_each(|(_, component)| {
             component.component.start(ComponentStartParams {
                 entity: self.entity,
                 world: self.world,
             });
-            self.world
+        });
+        let mut info = self
+            .world
+            .entities
+            .write()
+            .expect("Failed to take entities");
+        let info = info.get_mut(self.entity.id).unwrap();
+        for (ty, component) in self.components {
+            let component_index = self
+                .world
                 .components
                 .entry(ty)
                 .or_default()
                 .write()
                 .unwrap()
-                .push(component);
+                .insert(component);
+
+            info.components.insert(ty, component_index);
         }
 
         self.entity
@@ -172,7 +245,7 @@ impl World {
         'inst,
         'event,
         S: Component,
-        F: FnMut(&mut S, &Event) + 'static,
+        F: FnMut(&mut S, &Event, &WorldEventContext) + 'static,
     >(
         &mut self,
         event_type: TypeId,
@@ -180,11 +253,12 @@ impl World {
     ) where
         'inst: 'event,
     {
-        let binding_function = move |inst: &mut dyn AnyComponent, event: &Event| {
-            let inst = inst.as_any_mut().downcast_mut::<S>().unwrap();
+        let binding_function =
+            move |inst: &mut dyn AnyComponent, event: &Event, ctx: &WorldEventContext| {
+                let inst = inst.as_any_mut().downcast_mut::<S>().unwrap();
 
-            method(inst, event)
-        };
+                method(inst, event, ctx)
+            };
         let dispatchers = self.event_mappings.entry(event_type).or_default();
         dispatchers
             .entry(TypeId::of::<S>())
@@ -195,19 +269,22 @@ impl World {
         'event,
         S: Component,
         E: EventBase + Clone,
-        F: FnMut(&mut S, E) + 'static,
+        F: FnMut(&mut S, E, &WorldEventContext) + 'static,
     >(
         &mut self,
         mut method: F,
     ) where
         'inst: 'event,
     {
-        self.add_event_listener_dynamic(TypeId::of::<E>(), move |inst: &mut S, event: &Event| {
-            let event = event.downcast::<E>();
-            let event = event.expect("Failed to get event");
+        self.add_event_listener_dynamic(
+            TypeId::of::<E>(),
+            move |inst: &mut S, event: &Event, ctx: &WorldEventContext| {
+                let event = event.downcast::<E>();
+                let event = event.expect("Failed to get event");
 
-            method(inst, event)
-        });
+                method(inst, event, ctx)
+            },
+        );
     }
 
     pub fn resources(&self) -> &Resources {
@@ -304,8 +381,15 @@ impl World {
                         .or_default()
                         .write()
                         .unwrap();
-                    for component in component_list.iter_mut() {
-                        (method)(component.component.as_mut(), &event);
+                    let mut context = WorldEventContext {
+                        new_entities: self.entities.clone(),
+                        event_queue: self.event_queue.clone(),
+                        self_entity: Entity::null(),
+                    };
+                    for (_, component) in component_list.iter_mut() {
+                        context.self_entity = component.owner;
+                        // context.self_entity = component
+                        (method)(component.component.as_mut(), &event, &context);
                     }
                 }
             }
@@ -340,26 +424,22 @@ impl World {
     }
 
     fn destroy_entity(&mut self, entity: Entity) {
-        self.entities.retain(|&e| e != entity);
-
-        self.components.iter_mut().for_each(|(_, c)| {
-            c.write()
-                .expect("Failed to lock component vector")
-                .retain(|c| c.owner != entity);
-        });
+        let info = self
+            .entities
+            .write()
+            .expect("Failed to take entities")
+            .remove(entity.id)
+            .expect("Failed to find component");
+        for (ty, index) in info.components {
+            let comp_list = self.components.get(&ty).unwrap();
+            let mut comp_list = comp_list.write().expect("Failed to lock component list");
+            let mut component = comp_list.remove(index).expect("Failed to find component");
+            component.component.destroy(ComponentDestroyParams {});
+        }
     }
 }
 
 impl SpawnEntityEvent {
-    pub fn new() -> Self {
-        Self {
-            entity: Entity {
-                id: CURRENT_ENTITY_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            },
-            components: Default::default(),
-        }
-    }
-
     pub fn entity(&self) -> Entity {
         self.entity
     }
@@ -372,13 +452,7 @@ impl SpawnEntityEvent {
     }
 }
 
-impl Default for SpawnEntityEvent {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-type DispatchMethod = dyn FnMut(&mut dyn AnyComponent, &Event);
+type DispatchMethod = dyn FnMut(&mut dyn AnyComponent, &Event, &WorldEventContext);
 struct OwnedComponent {
     owner: Entity,
     component: Box<dyn AnyComponent>,

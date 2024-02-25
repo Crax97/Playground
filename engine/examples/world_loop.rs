@@ -6,7 +6,7 @@ use engine::{
             InputActionDefinition, InputActionEvent, InputActionState, InputAxisDefinition,
             InputAxisEvent, InputBindingsDefinitions, InputSystem,
         },
-        world::{DestroyEntity, Entity, SpawnEntityEvent, UpdateEvent, WorldBuilder},
+        world::{DestroyEntity, UpdateEvent, WorldBuilder, WorldEventContext},
     },
     input::Key,
 };
@@ -24,18 +24,17 @@ pub struct BulletComponent {
     pub starting_position: Vector2<f32>,
     pub direction: Vector2<f32>,
     pub lifetime: u32,
-    pub my_entity_id: Entity,
     pub event_queue: EventQueue,
 }
 
 impl BulletComponent {
-    fn update(&mut self, update: UpdateEvent) {
+    fn update(&mut self, update: UpdateEvent, context: &WorldEventContext) {
         self.starting_position += self.direction * update.delta_seconds;
 
         if self.lifetime == 0 {
             self.event_queue
-                .push_event(DestroyEntity(self.my_entity_id));
-            println!("Bullet {:?} exhausted its life!", self.my_entity_id);
+                .push_event(DestroyEntity(context.self_entity));
+            println!("Bullet {:?} exhausted its life!", context.self_entity);
         } else {
             self.lifetime -= 1;
         }
@@ -50,21 +49,22 @@ impl Component for BulletComponent {
 }
 
 impl CharacterComponent {
-    fn on_any_action_input(&mut self, input: InputActionEvent) {
+    fn on_any_action_input(&mut self, input: InputActionEvent, context: &WorldEventContext) {
         if input.state != InputActionState::Pressed {
             return;
         }
         if input.action_name == "shoot" {
-            let mut spawn = SpawnEntityEvent::new();
-            let bullet_id = spawn.entity();
-            spawn.add_component(BulletComponent {
-                starting_position: self.location,
-                direction: vector![1.0, 0.0],
-                lifetime: 60000,
-                my_entity_id: bullet_id,
-                event_queue: self.event_queue.clone(),
-            });
-            self.event_queue.push_event(spawn);
+            let bullet_id = context
+                .begin_spawn_event()
+                .with_component(BulletComponent {
+                    starting_position: self.location,
+                    direction: vector![1.0, 0.0],
+                    lifetime: 60000,
+                    event_queue: self.event_queue.clone(),
+                })
+                .commit();
+
+            println!("Spawned new bullet with id {bullet_id:?}");
         }
         if input.action_name == "jump" {
             println!("Jumping {}!!! ", self.counter);
@@ -72,7 +72,7 @@ impl CharacterComponent {
         }
     }
 
-    fn on_any_axis_input(&mut self, input: InputAxisEvent) {
+    fn on_any_axis_input(&mut self, input: InputAxisEvent, _: &WorldEventContext) {
         if input.value.abs() < 0.2 {
             return;
         }

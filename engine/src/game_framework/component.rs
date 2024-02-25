@@ -7,8 +7,11 @@ pub struct ComponentStartParams<'w> {
     pub world: &'w mut World,
 }
 
+pub struct ComponentDestroyParams {}
+
 pub trait Component: 'static {
     fn start(&mut self, _params: ComponentStartParams) {}
+    fn destroy(&mut self, _params: ComponentDestroyParams) {}
 }
 
 pub trait AnyComponent: Any + Component {
