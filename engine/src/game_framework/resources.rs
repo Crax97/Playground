@@ -6,11 +6,10 @@ use std::{
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
-pub trait Resource: 'static {}
+pub trait Resource: Send + Sync + 'static {}
 
 impl<R: Send + Sync + 'static> Resource for R {}
 
-#[derive(Clone)]
 pub struct Resources {
     resources: SharedResources,
 }
@@ -39,12 +38,18 @@ impl ResourcesBuilder {
 
     pub fn build(self) -> Resources {
         Resources {
-            resources: Arc::new(RwOnly::new(self.resources)),
+            resources: Arc::new(self.resources),
         }
     }
 }
 
 impl Resources {
+    pub fn add<R: Resource>(&mut self, resource: R) {
+        Arc::get_mut(&mut self.resources)
+            .unwrap()
+            .insert(TypeId::of::<R>(), Arc::new(RwLock::new(resource)));
+    }
+
     pub fn get<R: Resource>(&self) -> Ref<'_, R> {
         self.try_get()
             .unwrap_or_else(|| panic!("Failed to get resource {}", type_name::<R>()))
@@ -114,24 +119,4 @@ impl<'a, R: Resource> DerefMut for RefMut<'a, R> {
     }
 }
 
-struct RwOnly<T> {
-    inner: T,
-}
-
-impl<T> RwOnly<T> {
-    fn new(inner: T) -> Self {
-        Self { inner }
-    }
-}
-unsafe impl<T> Send for RwOnly<T> {}
-unsafe impl<T> Sync for RwOnly<T> {}
-
-impl<T> Deref for RwOnly<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-type SharedResources = Arc<RwOnly<HashMap<TypeId, Arc<RwLock<dyn AnyResource>>>>>;
+type SharedResources = Arc<HashMap<TypeId, Arc<RwLock<dyn AnyResource>>>>;

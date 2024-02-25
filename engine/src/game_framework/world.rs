@@ -111,6 +111,7 @@ pub struct WorldBuilder {
 pub struct WorldEventContext<'w> {
     pub event_queue: &'w EventQueue,
     pub self_entity: Entity,
+    pub resources: &'w mut Resources,
 
     new_entities: &'w Arc<RwLock<Arena<EntityInfo>>>,
 }
@@ -384,6 +385,7 @@ impl World {
                             &WorldEventContext {
                                 event_queue: &self.event_queue,
                                 self_entity: component.owner,
+                                resources: &mut self.resources,
                                 new_entities: &self.entities,
                             },
                         );
