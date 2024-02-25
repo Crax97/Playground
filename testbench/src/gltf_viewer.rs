@@ -295,8 +295,6 @@ impl App for GLTFViewer {
 
         let mut scene_renderer = DeferredRenderingPipeline::new(
             app_state.gpu(),
-            &mut resource_map,
-            cube_mesh,
             DeferredRenderingPipeline::make_3d_combine_shader(app_state.gpu.as_ref())?,
         )?;
 

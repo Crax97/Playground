@@ -141,39 +141,7 @@ impl TiledTexture2DPacker {
     }
 }
 
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn invalid_packer() {
-        let packer = super::TiledTexture2DPacker::new(16, 0, 0);
-        assert!(packer.is_err());
-    }
-
-    #[test]
-    fn no_space_when_filled() {
-        let mut packer = super::TiledTexture2DPacker::new(16, 32, 32).unwrap();
-        assert!(packer.allocate(16, 16).is_ok());
-        assert!(packer.allocate(16, 16).is_ok());
-        assert!(packer.allocate(16, 16).is_ok());
-        assert!(packer.allocate(16, 16).is_ok());
-
-        assert!(packer.allocate(16, 16).is_err());
-    }
-
-    #[test]
-    fn no_space_overflow() {
-        let mut packer = super::TiledTexture2DPacker::new(16, 32, 32).unwrap();
-        assert!(packer.allocate(16, 16).is_ok());
-        assert!(packer.allocate(32, 16).is_ok());
-        assert!(packer.allocate(32, 32).is_err());
-    }
-}
-
-pub fn load_cube_to_resource_map(
-    gpu: &dyn Gpu,
-    resource_map: &mut ResourceMap,
-) -> anyhow::Result<ResourceHandle<crate::Mesh>> {
+pub fn create_cube_mesh(gpu: &dyn Gpu) -> anyhow::Result<crate::Mesh> {
     let mesh_create_info = crate::MeshCreateInfo {
         label: Some("cube"),
         primitives: &[MeshPrimitiveCreateInfo {
@@ -280,6 +248,34 @@ pub fn load_cube_to_resource_map(
         }],
     };
     let cube_mesh = Mesh::new(gpu, &mesh_create_info)?;
-    let cube_mesh_handle = resource_map.add(cube_mesh);
-    Ok(cube_mesh_handle)
+    Ok(cube_mesh)
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn invalid_packer() {
+        let packer = super::TiledTexture2DPacker::new(16, 0, 0);
+        assert!(packer.is_err());
+    }
+
+    #[test]
+    fn no_space_when_filled() {
+        let mut packer = super::TiledTexture2DPacker::new(16, 32, 32).unwrap();
+        assert!(packer.allocate(16, 16).is_ok());
+        assert!(packer.allocate(16, 16).is_ok());
+        assert!(packer.allocate(16, 16).is_ok());
+        assert!(packer.allocate(16, 16).is_ok());
+
+        assert!(packer.allocate(16, 16).is_err());
+    }
+
+    #[test]
+    fn no_space_overflow() {
+        let mut packer = super::TiledTexture2DPacker::new(16, 32, 32).unwrap();
+        assert!(packer.allocate(16, 16).is_ok());
+        assert!(packer.allocate(32, 16).is_ok());
+        assert!(packer.allocate(32, 32).is_err());
+    }
 }

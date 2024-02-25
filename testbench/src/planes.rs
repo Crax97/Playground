@@ -121,8 +121,6 @@ impl App for PlanesApp {
         let texture = resource_map.load::<Texture>("images/texture.jpg")?;
         let mut scene_renderer = DeferredRenderingPipeline::new(
             app_state.gpu(),
-            &mut resource_map,
-            cube.clone(),
             DeferredRenderingPipeline::make_3d_combine_shader(app_state.gpu.as_ref())?,
         )?;
 

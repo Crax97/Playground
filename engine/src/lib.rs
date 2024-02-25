@@ -12,6 +12,7 @@ pub mod resource_map;
 
 mod bevy_ecs_app;
 mod cvar_manager;
+mod engine_app;
 mod material;
 mod mesh;
 mod render_scene;
@@ -23,6 +24,7 @@ pub use bevy_ecs;
 pub use bevy_ecs_app::*;
 pub use bevy_reflect;
 pub use cvar_manager::*;
+pub use engine_app::*;
 pub use material::*;
 pub use mesh::*;
 pub use resource_map::*;

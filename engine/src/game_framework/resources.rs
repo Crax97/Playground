@@ -1,5 +1,5 @@
 use std::{
-    any::{Any, TypeId},
+    any::{type_name, Any, TypeId},
     collections::HashMap,
     marker::PhantomData,
     ops::{Deref, DerefMut},
@@ -46,7 +46,8 @@ impl ResourcesBuilder {
 
 impl Resources {
     pub fn get<R: Resource>(&self) -> Ref<'_, R> {
-        self.try_get().unwrap()
+        self.try_get()
+            .unwrap_or_else(|| panic!("Failed to get resource {}", type_name::<R>()))
     }
 
     pub fn try_get<R: Resource>(&self) -> Option<Ref<'_, R>> {
@@ -60,7 +61,8 @@ impl Resources {
     }
 
     pub fn get_mut<R: Resource>(&self) -> RefMut<'_, R> {
-        self.try_get_mut().unwrap()
+        self.try_get_mut()
+            .unwrap_or_else(|| panic!("Failed to get resource {}", type_name::<R>()))
     }
 
     pub fn try_get_mut<R: Resource>(&self) -> Option<RefMut<'_, R>> {

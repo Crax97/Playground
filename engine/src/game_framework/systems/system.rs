@@ -1,10 +1,18 @@
+use gpu::CommandBuffer;
+
+use crate::Backbuffer;
+
 use super::super::{
     event_queue::EventQueue,
     resources::{Resources, ResourcesBuilder},
 };
 
-pub struct SystemStartup<'w> {
+pub struct SystemStartupParams<'w> {
     pub event_queue: &'w EventQueue,
+    pub resources: &'w mut Resources,
+}
+
+pub struct SystemShutdownParams<'w> {
     pub resources: &'w mut Resources,
 }
 
@@ -20,6 +28,12 @@ pub struct SystemEndFrameParams<'w> {
     pub resources: &'w mut Resources,
 }
 
+pub struct SystemDrawParams<'w> {
+    pub resources: &'w mut Resources,
+    pub backbuffer: &'w Backbuffer,
+    pub command_buffer: &'w mut CommandBuffer,
+}
+
 pub struct SystemOnOsEvent<'w> {
     pub event: &'w winit::event::Event<()>,
     pub event_queue: &'w EventQueue,
@@ -31,14 +45,20 @@ pub trait System: 'static {
 
     // Called on any os events
     fn on_os_event(&mut self, _on_os_event: SystemOnOsEvent) {}
+
     // Called on the world's first frame
-    fn startup(&mut self, _startup: SystemStartup) {}
+    fn startup(&mut self, _startup: SystemStartupParams) {}
+
+    // Called on the world's last frame
+    fn shutdown(&mut self, _shutdown: SystemShutdownParams) {}
 
     // Called before the event loop has started
     fn begin_frame(&mut self, _update: SystemBeginFrameParams) {}
 
     // Called after the event loop has ended
     fn end_frame(&mut self, _post_update: SystemEndFrameParams) {}
+
+    fn draw(&mut self, _draw: SystemDrawParams) {}
 }
 
 #[derive(Default)]

@@ -16,7 +16,7 @@ pub struct PostProcessResources<'a> {
     pub render_size: Extent2D,
 }
 
-pub trait PostProcessPass: 'static {
+pub trait PostProcessPass: Send + Sync + 'static {
     fn name(&self) -> String;
     fn apply(
         &self,

@@ -8,7 +8,7 @@ use std::{
 pub struct Event {
     ty: TypeId,
     ty_name: Cow<'static, str>,
-    ptr: Arc<dyn EventBase>,
+    ptr: Option<Arc<dyn EventBase>>,
 }
 
 #[derive(Default, Clone)]
@@ -37,7 +37,7 @@ impl Event {
         Event {
             ty: TypeId::of::<E>(),
             ty_name: Cow::Borrowed(std::any::type_name::<E>()),
-            ptr: Arc::new(evt),
+            ptr: Some(Arc::new(evt)),
         }
     }
 
@@ -49,16 +49,41 @@ impl Event {
         self.ty_name.clone()
     }
     pub fn downcast<E: EventBase + Clone>(&self) -> Option<E> {
-        self.ptr.as_ref().as_any().downcast_ref::<E>().cloned()
+        self.ptr
+            .as_ref()
+            .and_then(|e| e.as_ref().as_any().downcast_ref::<E>())
+            .cloned()
+    }
+
+    pub fn try_match<E: EventBase>(&mut self, mut func: impl FnMut(&mut E)) -> bool {
+        if self.ptr.is_none() {
+            return false;
+        }
+        if self.ty == TypeId::of::<E>() {
+            let taken = self.ptr.take().unwrap();
+            let cast = taken.as_ref();
+            let cast = cast as *const dyn EventBase;
+            let cast = cast as *mut dyn EventBase;
+            let cast = unsafe { cast.as_mut().unwrap() };
+            let cast = cast.as_any_mut().downcast_mut::<E>().unwrap();
+            func(cast);
+            true
+        } else {
+            false
+        }
     }
 }
 
-pub trait EventBase: Any + 'static {
+pub trait EventBase: Any {
     fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
-impl<E: Clone + 'static> EventBase for E {
+impl<E: 'static> EventBase for E {
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 }

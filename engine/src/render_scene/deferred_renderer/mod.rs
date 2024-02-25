@@ -6,6 +6,7 @@ mod sampler_allocator;
 use crate::{
     post_process_pass::{PostProcessPass, PostProcessResources},
     render_scene::render_structs::*,
+    Resource,
 };
 use cascaded_shadow_map::*;
 use gbuffer::*;
@@ -76,9 +77,9 @@ pub struct DeferredRenderingPipeline {
     active_lights: Vec<GpuLightInfo>,
     light_povs: Vec<PointOfViewData>,
     pub(crate) irradiance_map: Option<ResourceHandle<Texture>>,
-    default_irradiance_map: ResourceHandle<Texture>,
+    default_irradiance_map: Texture,
 
-    cube_mesh: ResourceHandle<Mesh>,
+    cube_mesh: Mesh,
 
     pub ambient_color: Vector3<f32>,
     pub ambient_intensity: f32,
@@ -96,13 +97,9 @@ pub struct DeferredRenderingPipeline {
 }
 
 impl DeferredRenderingPipeline {
-    pub fn new(
-        gpu: &dyn Gpu,
-        resource_map: &mut ResourceMap,
-        cube_mesh: ResourceHandle<Mesh>,
-        combine_shader: ShaderModuleHandle,
-    ) -> anyhow::Result<Self> {
+    pub fn new(gpu: &dyn Gpu, combine_shader: ShaderModuleHandle) -> anyhow::Result<Self> {
         let mut frame_buffers = vec![];
+        let cube_mesh = crate::utils::create_cube_mesh(gpu)?;
         for _ in 0..gpu::constants::MAX_FRAMES_IN_FLIGHT {
             let camera_buffer = {
                 let create_info = BufferCreateInfo {
@@ -173,7 +170,7 @@ impl DeferredRenderingPipeline {
             ImageFormat::Rgb8,
             gpu::ImageViewType::Cube,
         )?;
-        let default_irradiance_map = resource_map.add(default_irradiance_map);
+        // let default_irradiance_map = resource_map.add(default_irradiance_map);
 
         let view_size = Extent2D {
             width: 1920,
@@ -435,7 +432,6 @@ impl DeferredRenderingPipeline {
                     });
 
                 if let Some(material) = scene.get_skybox_material() {
-                    let cube_mesh = resource_map.get(&self.cube_mesh);
                     let skybox_master = resource_map.get(&material.owner);
                     bind_master_material(
                         skybox_master,
@@ -447,7 +443,7 @@ impl DeferredRenderingPipeline {
                         gpu,
                         &pov.location,
                         &mut gbuffer_output,
-                        cube_mesh,
+                        &self.cube_mesh,
                         material,
                         skybox_master,
                         resource_map,
@@ -516,13 +512,14 @@ impl DeferredRenderingPipeline {
                         },
                         Binding2 {
                             ty: gpu::DescriptorBindingType2::ImageView {
-                                image_view_handle: resource_map
-                                    .get(
-                                        self.irradiance_map
-                                            .as_ref()
-                                            .unwrap_or(&self.default_irradiance_map),
-                                    )
-                                    .view,
+                                image_view_handle: if let Some(irradiance_map) =
+                                    &self.irradiance_map
+                                {
+                                    resource_map.get(irradiance_map)
+                                } else {
+                                    &self.default_irradiance_map
+                                }
+                                .view,
                                 sampler_handle: self.gbuffer_nearest_sampler,
                             },
                             write: false,
@@ -1089,6 +1086,8 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
     fn destroy(&mut self, gpu: &dyn Gpu) {
         self.cascaded_shadow_map.destroy(gpu);
+        self.default_irradiance_map.destroyed(gpu);
+        self.cube_mesh.destroyed(gpu);
         for framebuffer in &self.frame_buffers {
             gpu.destroy_buffer(framebuffer.light_buffer);
             gpu.destroy_buffer(framebuffer.camera_buffer);

@@ -129,7 +129,6 @@ pub struct BevyEcsAppWithLoop {
 
 #[derive(Resource)]
 pub struct CommonResources {
-    pub cube_mesh: ResourceHandle<Mesh>,
     pub quad_mesh: ResourceHandle<Mesh>,
 
     pub white_texture: ResourceHandle<Texture>,
@@ -258,7 +257,6 @@ impl BevyEcsApp {
             resource_map.add(mesh)
         };
 
-        let cube_mesh = utils::load_cube_to_resource_map(gpu, resource_map)?;
         let white_texture = Texture::new_with_data(
             gpu,
             1,
@@ -371,7 +369,6 @@ impl BevyEcsApp {
         let default_sprite_material = resource_map.add(default_sprite_material);
 
         Ok(CommonResources {
-            cube_mesh,
             quad_mesh,
             white_texture,
             black_texture,
@@ -410,11 +407,8 @@ impl App for BevyEcsApp {
         Self::setup_resource_map(&mut resource_map, app_state.gpu.clone());
 
         let cvar_manager = CvarManager::new();
-        let cube_mesh = utils::load_cube_to_resource_map(app_state.gpu(), &mut resource_map)?;
         let renderer = DeferredRenderingPipeline::new(
             app_state.gpu(),
-            &mut resource_map,
-            cube_mesh,
             DeferredRenderingPipeline::make_3d_combine_shader(app_state.gpu.as_ref())?,
         )?;
 

@@ -1,18 +1,22 @@
 use std::{
     any::TypeId,
     collections::HashMap,
+    marker::PhantomData,
     sync::{atomic::AtomicU32, Arc, RwLock},
 };
 
+use gpu::CommandBuffer;
 use rhai::{CustomType, TypeBuilder};
 
+use crate::Backbuffer;
+
 use super::{
-    component::{AnyComponent, Component},
+    component::{AnyComponent, Component, ComponentStartParams},
     event_queue::{Event, EventBase, EventQueue},
     resources::{Resource, Resources, ResourcesBuilder},
     systems::{
-        System, SystemBeginFrameParams, SystemEndFrameParams, SystemOnOsEvent, SystemStartup,
-        Systems,
+        System, SystemBeginFrameParams, SystemDrawParams, SystemEndFrameParams, SystemOnOsEvent,
+        SystemShutdownParams, SystemStartupParams, Systems,
     },
 };
 
@@ -21,10 +25,21 @@ static CURRENT_ENTITY_ID: AtomicU32 = AtomicU32::new(0);
 #[derive(Clone, Copy, CustomType)]
 pub struct BeginFrameEvent;
 #[derive(Clone, Copy, CustomType)]
-pub struct UpdateEvent(f32);
+pub struct UpdateEvent {
+    pub delta_seconds: f32,
+    _marker: PhantomData<()>,
+}
 
 #[derive(Clone, Copy, CustomType)]
 pub struct EndFrameEvent;
+
+pub struct SpawnEntityEvent {
+    entity: Entity,
+    components: Vec<Box<dyn AnyComponent>>,
+}
+
+#[derive(Clone, CustomType)]
+pub struct DestroyEntity(pub Entity);
 
 #[derive(Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Hash, Debug)]
 pub struct Entity {
@@ -41,10 +56,13 @@ pub struct World {
     entities: Vec<Entity>,
     components: HashMap<TypeId, Arc<RwLock<Vec<OwnedComponent>>>>,
     systems: Systems,
-    event_mappings: HashMap<TypeId, Vec<ComponentEventDispatcher>>,
+    event_mappings: HashMap<TypeId, HashMap<TypeId, Box<DispatchMethod>>>,
     resources: Resources,
 
     event_queue: EventQueue,
+
+    entities_to_destroy: Vec<Entity>,
+    entities_to_spawn: Vec<SpawnEntityEvent>,
 }
 
 #[derive(Default)]
@@ -73,6 +91,8 @@ impl WorldBuilder {
             event_mappings: Default::default(),
             resources: self.resource_builder.build(),
             event_queue: EventQueue::default(),
+            entities_to_destroy: vec![],
+            entities_to_spawn: vec![],
         }
     }
 }
@@ -88,7 +108,15 @@ impl<'world> EntityBuilder<'world> {
         }
     }
 
-    pub fn component<C: Component>(mut self, component: C) -> Self {
+    fn explicit(world: &'world mut World, entity: Entity) -> Self {
+        Self {
+            world,
+            entity,
+            components: Default::default(),
+        }
+    }
+
+    pub fn component<C: Component>(&mut self, component: C) -> &mut Self {
         self.components.insert(
             TypeId::of::<C>(),
             OwnedComponent {
@@ -99,10 +127,24 @@ impl<'world> EntityBuilder<'world> {
         self
     }
 
+    pub fn component_dyn(&mut self, component: Box<dyn AnyComponent>) -> &mut Self {
+        self.components.insert(
+            component.as_ref().as_any().type_id(),
+            OwnedComponent {
+                owner: self.entity,
+                component,
+            },
+        );
+        self
+    }
+
     pub fn build(self) -> Entity {
         self.world.entities.push(self.entity);
         for (ty, mut component) in self.components {
-            component.component.start(self.world);
+            component.component.start(ComponentStartParams {
+                entity: self.entity,
+                world: self.world,
+            });
             self.world
                 .components
                 .entry(ty)
@@ -115,6 +157,7 @@ impl<'world> EntityBuilder<'world> {
         self.entity
     }
 }
+
 impl World {
     pub fn add_entity(&mut self) -> EntityBuilder {
         EntityBuilder::new(self)
@@ -142,10 +185,9 @@ impl World {
             method(inst, event)
         };
         let dispatchers = self.event_mappings.entry(event_type).or_default();
-        dispatchers.push(ComponentEventDispatcher {
-            ty: TypeId::of::<S>(),
-            method: Box::new(binding_function),
-        });
+        dispatchers
+            .entry(TypeId::of::<S>())
+            .or_insert(Box::new(binding_function));
     }
     pub fn add_event_listener<
         'inst,
@@ -167,10 +209,22 @@ impl World {
         });
     }
 
+    pub fn resources(&self) -> &Resources {
+        &self.resources
+    }
+
     pub fn start(&mut self) {
         self.systems.for_each(|s| {
-            s.startup(SystemStartup {
+            s.startup(SystemStartupParams {
                 event_queue: &self.event_queue,
+                resources: &mut self.resources,
+            });
+        });
+    }
+
+    pub fn shutdown(&mut self) {
+        self.systems.for_each(|s| {
+            s.shutdown(SystemShutdownParams {
                 resources: &mut self.resources,
             });
         });
@@ -184,6 +238,13 @@ impl World {
     5. For each system call it's `end_frame` method
     */
     pub fn update(&mut self, delta_seconds: f32) {
+        for entity in std::mem::take(&mut self.entities_to_spawn) {
+            self.spawn_entity(entity.entity, entity.components);
+        }
+        for entity in std::mem::take(&mut self.entities_to_destroy) {
+            self.destroy_entity(entity);
+        }
+
         self.systems.for_each(|s| {
             s.begin_frame(SystemBeginFrameParams {
                 delta_seconds,
@@ -195,7 +256,10 @@ impl World {
         self.event_queue.push_event(BeginFrameEvent);
         self.pump_events();
 
-        self.event_queue.push_event(UpdateEvent(delta_seconds));
+        self.event_queue.push_event(UpdateEvent {
+            delta_seconds,
+            _marker: PhantomData,
+        });
         self.pump_events();
 
         self.event_queue.push_event(EndFrameEvent);
@@ -210,20 +274,54 @@ impl World {
         });
     }
 
+    pub fn draw(&mut self, command_buffer: &mut CommandBuffer, backbuffer: &Backbuffer) {
+        self.systems.for_each(|s| {
+            s.draw(SystemDrawParams {
+                resources: &mut self.resources,
+                command_buffer,
+                backbuffer,
+            })
+        })
+    }
+
     fn pump_events(&mut self) {
-        while let Some(event) = self.event_queue.get_event() {
+        while let Some(mut event) = self.event_queue.get_event() {
+            if event.try_match::<SpawnEntityEvent>(|spawn: &mut SpawnEntityEvent| {
+                self.entities_to_spawn.push(SpawnEntityEvent {
+                    entity: spawn.entity,
+                    components: std::mem::take(&mut spawn.components),
+                })
+            }) || event
+                .try_match(|&mut DestroyEntity(entity)| self.entities_to_destroy.push(entity))
+            {
+                continue;
+            }
+
             let ty = event.get_type();
 
             if let Some(dispatchers) = self.event_mappings.get_mut(&ty) {
-                for dispatcher in dispatchers {
-                    let component_list = self.components.get_mut(&dispatcher.ty).unwrap().clone();
-                    let mut component_list = component_list.write().unwrap();
-                    for component_list in component_list.iter_mut() {
-                        (dispatcher.method)(component_list.component.as_mut(), &event);
+                for (&component_ty, method) in dispatchers {
+                    let mut component_list = self
+                        .components
+                        .entry(component_ty)
+                        .or_default()
+                        .write()
+                        .unwrap();
+                    for component in component_list.iter_mut() {
+                        (method)(component.component.as_mut(), &event);
                     }
                 }
             }
         }
+    }
+
+    fn spawn_entity(&mut self, entity: Entity, components: Vec<Box<dyn AnyComponent>>) {
+        let mut builder = EntityBuilder::explicit(self, entity);
+
+        for component in components {
+            builder.component_dyn(component);
+        }
+        builder.build();
     }
 
     pub fn on_os_event(&mut self, event: &winit::event::Event<()>) {
@@ -235,15 +333,45 @@ impl World {
             })
         })
     }
+
+    fn destroy_entity(&mut self, entity: Entity) {
+        self.entities.retain(|&e| e != entity);
+
+        self.components.iter_mut().for_each(|(_, c)| {
+            c.write()
+                .expect("Failed to lock component vector")
+                .retain(|c| c.owner != entity);
+        });
+    }
+}
+
+impl SpawnEntityEvent {
+    pub fn new() -> Self {
+        Self {
+            entity: Entity {
+                id: CURRENT_ENTITY_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            },
+            components: Default::default(),
+        }
+    }
+
+    pub fn entity(&self) -> Entity {
+        self.entity
+    }
+
+    pub fn add_component<C: Component>(&mut self, component: C) -> &mut Self {
+        self.components.push(Box::new(component));
+        self
+    }
+}
+
+impl Default for SpawnEntityEvent {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 type DispatchMethod = dyn FnMut(&mut dyn AnyComponent, &Event);
-
-struct ComponentEventDispatcher {
-    ty: TypeId,
-    method: Box<DispatchMethod>,
-}
-
 struct OwnedComponent {
     owner: Entity,
     component: Box<dyn AnyComponent>,
