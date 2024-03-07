@@ -14,7 +14,7 @@ raw-window-handle = "0.6.*"
 thiserror = "1.0"
 log = "0.4.17"
 memoffset = "0.9.0"
-image = "0.24.6"
+image = "0.24.9"
 indexmap = "2.1"
 bytemuck = { version = "1.13.1", features = ["derive"] }
 strum = { version = "0.25.0", features = ["derive", "strum_macros"] }
@@ -30,6 +30,7 @@ bitflags = "2.*"
 egui = { version = "0.26.0", features = ["bytemuck"] }
 
 rapier2d = { version = "0.17", features = ["simd-stable", "serde-serialize"] }
+kecs = { git="https://github.com/Crax97/kecs.git" }
 
 gpu = { path = "../gpu" }
 engine_macros = { path = "../engine_macros" }
