@@ -35,6 +35,8 @@ pub struct ResourceMap {
     hot_reload_server: Option<HotReloadServer>,
 }
 
+impl kecs::Resource for ResourceMap {}
+
 impl ResourceMap {
     pub fn new(gpu: Arc<dyn Gpu>) -> Self {
         let (operations_sender, operations_receiver) = crossbeam::channel::unbounded();
