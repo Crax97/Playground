@@ -1,15 +1,15 @@
 use std::marker::PhantomData;
 
 use egui::ahash::HashSet;
-use nalgebra::{vector, Matrix4, Point3, UnitQuaternion, Vector3};
+use nalgebra::{vector, Matrix, Matrix4, Point3, UnitQuaternion, Vector3};
 use thunderdome::{Arena, Index};
 
 use crate::{components::Transform, math::shape::BoundingShape, LightHandle, RenderScene};
 
 #[derive(Default)]
-pub struct Scene {
+pub struct Scene<T: 'static> {
     render_scene: RenderScene,
-    nodes: Arena<SceneNode>,
+    nodes: Arena<SceneNode<T>>,
 }
 
 #[derive(Default, Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
@@ -23,13 +23,12 @@ pub enum SceneNodeKind {
     Light(LightHandle),
 }
 
-#[derive(Default, Clone)]
-pub struct SceneNode {
+pub struct SceneNode<T: 'static> {
     pub children: HashSet<SceneNodeId>,
     pub parent: Option<SceneNodeId>,
     pub world_transform: Transform,
     pub local_transform: Transform,
-    pub kind: SceneNodeKind,
+    pub payload: T,
     pub collision_shape: Option<BoundingShape>,
     pub tags: Vec<String>,
     pub local_to_world: Matrix4<f32>,
@@ -38,9 +37,43 @@ pub struct SceneNode {
     _marker: PhantomData<()>,
 }
 
-pub struct SceneNodeBuilder<'s> {
-    scene: &'s mut Scene,
-    new_node: SceneNode,
+impl<T: Default> Default for SceneNode<T> {
+    fn default() -> Self {
+        Self {
+            children: Default::default(),
+            parent: Default::default(),
+            world_transform: Default::default(),
+            local_transform: Default::default(),
+            payload: Default::default(),
+            collision_shape: Default::default(),
+            tags: Default::default(),
+            local_to_world: Matrix4::identity(),
+            world_to_local: Matrix4::identity(),
+            _marker: Default::default(),
+        }
+    }
+}
+
+impl<T: Clone> Clone for SceneNode<T> {
+    fn clone(&self) -> Self {
+        Self {
+            payload: self.payload.clone(),
+            children: self.children.clone(),
+            parent: self.parent,
+            world_transform: self.world_transform,
+            local_transform: self.local_transform,
+            collision_shape: self.collision_shape,
+            tags: self.tags.clone(),
+            local_to_world: self.local_to_world,
+            world_to_local: self.world_to_local,
+            _marker: self._marker,
+        }
+    }
+}
+
+pub struct SceneNodeBuilder<'s, T: 'static> {
+    scene: &'s mut Scene<T>,
+    new_node: SceneNode<T>,
 }
 
 #[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Copy, Clone)]
@@ -49,8 +82,8 @@ pub enum TransformSpace {
     World,
 }
 
-impl<'s> SceneNodeBuilder<'s> {
-    fn new(scene: &'s mut Scene) -> SceneNodeBuilder<'_> {
+impl<'s, T: Clone + Default> SceneNodeBuilder<'s, T> {
+    fn new(scene: &'s mut Scene<T>) -> SceneNodeBuilder<'_, T> {
         Self {
             scene,
             new_node: Default::default(),
@@ -73,18 +106,18 @@ impl<'s> SceneNodeBuilder<'s> {
     }
 }
 
-impl Scene {
+impl<T: 'static + Default + Clone> Scene<T> {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn add_node(&mut self) -> SceneNodeBuilder {
+    pub fn add_node(&mut self) -> SceneNodeBuilder<T> {
         SceneNodeBuilder::new(self)
     }
-    pub fn get_node(&self, node_id: SceneNodeId) -> Option<&SceneNode> {
+    pub fn get_node(&self, node_id: SceneNodeId) -> Option<&SceneNode<T>> {
         node_id.0.and_then(|id| self.nodes.get(id))
     }
-    pub fn remove_node(&mut self, node_id: SceneNodeId) -> Option<SceneNode> {
+    pub fn remove_node(&mut self, node_id: SceneNodeId) -> Option<SceneNode<T>> {
         node_id.0.and_then(|n| self.nodes.remove(n))
     }
     pub fn set_position(
@@ -164,6 +197,8 @@ impl Scene {
             return;
         };
         if let Some(node) = self.nodes.get_mut(id) {
+            let old_local_to_world = node.local_to_world;
+            let children = node.children.clone();
             let old_transform = pick_transform_mut(transform_space, node);
             *old_transform = transform;
 
@@ -171,6 +206,14 @@ impl Scene {
                 self.recompute_world_from_relative(node_id);
             } else {
                 self.recompute_relative_from_world(node_id);
+            }
+            let node = self.nodes.get_mut(id).unwrap();
+            let new_local_to_world = node.local_to_world;
+
+            let transform_delta = new_local_to_world * old_local_to_world.try_inverse().unwrap();
+
+            for child in children {
+                self.apply_world_delta(child, transform_delta);
             }
         }
     }
@@ -238,6 +281,10 @@ impl Scene {
         node_id
             .0
             .map(|node_id| self.nodes.get_mut(node_id).map(|n| n.parent = new_parent));
+        new_parent
+            .and_then(|p| p.0)
+            .and_then(|n| self.nodes.get_mut(n))
+            .map(|node| node.children.insert(node_id));
     }
     pub fn get_parent(&self, node_id: SceneNodeId) -> Option<SceneNodeId> {
         node_id
@@ -312,10 +359,10 @@ impl Scene {
         false
     }
     pub fn get_children(&self, node_id: SceneNodeId) -> Option<impl Iterator<Item = &SceneNodeId>> {
-        node_id
+        dbg!(node_id
             .0
             .and_then(|id| self.nodes.get(id).map(|n| &n.children))
-            .map(|chi| chi.iter())
+            .map(|chi| chi.iter()))
     }
 
     pub fn find_by_tag(&self, tag: impl AsRef<str>) -> Option<SceneNodeId> {
@@ -339,6 +386,7 @@ impl Scene {
                 node.world_to_local = world_to_local;
 
                 let world_translation = Point3::from(local_to_world.column(3).xyz());
+                println!("New world translation is {world_translation}");
                 let scale = vector![
                     local_to_world.column(0).magnitude(),
                     local_to_world.column(1).magnitude(),
@@ -394,16 +442,39 @@ impl Scene {
             .map(|p| self.nodes.get(p.0.unwrap()).unwrap().local_to_world)
             .unwrap_or(Matrix4::identity())
     }
+
+    fn apply_world_delta(
+        &mut self,
+        child: SceneNodeId,
+        transform_delta: nalgebra::Matrix<
+            f32,
+            nalgebra::Const<4>,
+            nalgebra::Const<4>,
+            nalgebra::ArrayStorage<f32, 4, 4>,
+        >,
+    ) {
+        if let Some(node) = self.nodes.get_mut(child.0.unwrap()) {
+            node.local_to_world *= transform_delta;
+            let children = node.children.clone();
+            self.recompute_relative_from_world(child);
+            for child in children {
+                self.apply_world_delta(child, transform_delta);
+            }
+        }
+    }
 }
 
-fn pick_transform_mut(transform_space: TransformSpace, node: &mut SceneNode) -> &mut Transform {
+fn pick_transform_mut<T>(
+    transform_space: TransformSpace,
+    node: &mut SceneNode<T>,
+) -> &mut Transform {
     match transform_space {
         TransformSpace::Local => &mut node.local_transform,
         TransformSpace::World => &mut node.world_transform,
     }
 }
 
-fn pick_transform(transform_space: TransformSpace, node: &SceneNode) -> &Transform {
+fn pick_transform<T>(transform_space: TransformSpace, node: &SceneNode<T>) -> &Transform {
     match transform_space {
         TransformSpace::Local => &node.local_transform,
         TransformSpace::World => &node.world_transform,

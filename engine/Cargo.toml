@@ -40,3 +40,6 @@ copypasta = "0.10.1"
 notify = "6.1.1"
 rhai = "1.17.1"
 serde = { version = "1.0.197", features = ["derive"] }
+
+[dev-dependencies]
+approx = "0.5.1"
