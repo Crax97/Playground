@@ -17,7 +17,7 @@ mod tests {
     fn test_translation_parent() {
         let mut graph = VoidScene::new();
 
-        let child_node = graph.add_node().build();
+        let child_node = graph.add_node_defaulted().build();
         graph.set_transform(
             child_node,
             Transform {
@@ -27,7 +27,7 @@ mod tests {
             super::TransformSpace::World,
         );
 
-        let parent_node = graph.add_node().build();
+        let parent_node = graph.add_node_defaulted().build();
         graph.set_parent(child_node, Some(parent_node));
 
         assert!(graph
@@ -57,7 +57,7 @@ mod tests {
     fn test_rotation_parent_child() {
         let mut graph = VoidScene::new();
 
-        let child_node = graph.add_node().build();
+        let child_node = graph.add_node_defaulted().build();
         graph.set_transform(
             child_node,
             Transform {
@@ -67,7 +67,7 @@ mod tests {
             super::TransformSpace::World,
         );
 
-        let parent_node = graph.add_node().build();
+        let parent_node = graph.add_node_defaulted().build();
         graph.set_parent(child_node, Some(parent_node));
 
         assert!(graph
@@ -101,7 +101,7 @@ mod tests {
     fn test_translation_local() {
         let mut graph = VoidScene::new();
 
-        let child_node = graph.add_node().build();
+        let child_node = graph.add_node_defaulted().build();
         graph.set_transform(
             child_node,
             Transform {
@@ -111,7 +111,7 @@ mod tests {
             super::TransformSpace::World,
         );
 
-        let parent_node = graph.add_node().build();
+        let parent_node = graph.add_node_defaulted().build();
         graph.set_parent(child_node, Some(parent_node));
 
         assert!(graph

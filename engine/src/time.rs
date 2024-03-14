@@ -2,7 +2,7 @@ use std::time::*;
 
 use bevy_ecs::system::Resource;
 
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct Time {
     app_start: Instant,
     last_frame: Instant,
@@ -10,6 +10,8 @@ pub struct Time {
     since_app_start: f32,
     frame_counter: u64,
 }
+
+impl kecs::Resource for Time {}
 
 impl Time {
     pub fn new() -> Self {

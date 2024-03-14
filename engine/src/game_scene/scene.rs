@@ -1,38 +1,42 @@
-use std::marker::PhantomData;
+use std::{collections::HashSet, marker::PhantomData, str::FromStr};
 
-use egui::ahash::HashSet;
-use nalgebra::{vector, Matrix, Matrix4, Point3, UnitQuaternion, Vector3};
+use nalgebra::{vector, Matrix4, Point3, UnitQuaternion, Vector3};
 use thunderdome::{Arena, Index};
 
-use crate::{components::Transform, math::shape::BoundingShape, LightHandle, RenderScene};
+use crate::{components::Transform, math::shape::BoundingShape};
 
-#[derive(Default)]
 pub struct Scene<T: 'static> {
-    render_scene: RenderScene,
     nodes: Arena<SceneNode<T>>,
+    roots: HashSet<SceneNodeId>,
 }
 
-#[derive(Default, Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
-pub struct SceneNodeId(Option<Index>);
+impl<T: 'static> Default for Scene<T> {
+    fn default() -> Self {
+        let mut nodes = Arena::new();
 
-#[derive(Default, Clone)]
-pub enum SceneNodeKind {
-    #[default]
-    Empty,
-    Mesh,
-    Light(LightHandle),
+        Self {
+            nodes,
+            roots: HashSet::default(),
+        }
+    }
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
+pub struct SceneNodeId(Index);
 
 pub struct SceneNode<T: 'static> {
-    pub children: HashSet<SceneNodeId>,
-    pub parent: Option<SceneNodeId>,
-    pub world_transform: Transform,
-    pub local_transform: Transform,
+    pub label: String,
     pub payload: T,
     pub collision_shape: Option<BoundingShape>,
     pub tags: Vec<String>,
-    pub local_to_world: Matrix4<f32>,
-    pub world_to_local: Matrix4<f32>,
+    world_transform: Transform,
+    local_transform: Transform,
+
+    local_to_world: Matrix4<f32>,
+    world_to_local: Matrix4<f32>,
+
+    children: HashSet<SceneNodeId>,
+    parent: Option<SceneNodeId>,
 
     _marker: PhantomData<()>,
 }
@@ -40,6 +44,7 @@ pub struct SceneNode<T: 'static> {
 impl<T: Default> Default for SceneNode<T> {
     fn default() -> Self {
         Self {
+            label: Default::default(),
             children: Default::default(),
             parent: Default::default(),
             world_transform: Default::default(),
@@ -57,6 +62,7 @@ impl<T: Default> Default for SceneNode<T> {
 impl<T: Clone> Clone for SceneNode<T> {
     fn clone(&self) -> Self {
         Self {
+            label: self.label.clone(),
             payload: self.payload.clone(),
             children: self.children.clone(),
             parent: self.parent,
@@ -83,11 +89,36 @@ pub enum TransformSpace {
 }
 
 impl<'s, T: Clone + Default> SceneNodeBuilder<'s, T> {
-    fn new(scene: &'s mut Scene<T>) -> SceneNodeBuilder<'_, T> {
+    fn new_defaulted(scene: &'s mut Scene<T>) -> SceneNodeBuilder<'_, T> {
         Self {
             scene,
             new_node: Default::default(),
         }
+    }
+}
+impl<'s, T: Clone> SceneNodeBuilder<'s, T> {
+    pub fn new(scene: &'s mut Scene<T>, payload: T) -> SceneNodeBuilder<'_, T> {
+        Self {
+            scene,
+            new_node: SceneNode {
+                payload,
+                label: Default::default(),
+                collision_shape: Default::default(),
+                tags: Default::default(),
+                world_transform: Default::default(),
+                local_transform: Default::default(),
+                local_to_world: Default::default(),
+                world_to_local: Default::default(),
+                children: Default::default(),
+                parent: Default::default(),
+                _marker: PhantomData,
+            },
+        }
+    }
+
+    pub fn label(&mut self, label: impl AsRef<str>) -> &mut Self {
+        self.new_node.label = label.as_ref().to_owned();
+        self
     }
 
     pub fn with_tags<I: IntoIterator>(&mut self, tags: I) -> &mut Self
@@ -101,24 +132,33 @@ impl<'s, T: Clone + Default> SceneNodeBuilder<'s, T> {
     }
 
     pub fn build(&mut self) -> SceneNodeId {
-        let new_node = self.scene.nodes.insert(self.new_node.clone());
-        SceneNodeId(Some(new_node))
+        let new_node = self.scene.insert_node(self.new_node.clone());
+        SceneNodeId(new_node)
     }
 }
 
 impl<T: 'static + Default + Clone> Scene<T> {
+    pub fn add_node_defaulted(&mut self) -> SceneNodeBuilder<T> {
+        SceneNodeBuilder::new_defaulted(self)
+    }
+}
+
+impl<T: 'static + Clone> Scene<T> {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn add_node(&mut self) -> SceneNodeBuilder<T> {
-        SceneNodeBuilder::new(self)
+    pub fn add_node(&mut self, payload: T) -> SceneNodeBuilder<T> {
+        SceneNodeBuilder::new(self, payload)
     }
     pub fn get_node(&self, node_id: SceneNodeId) -> Option<&SceneNode<T>> {
-        node_id.0.and_then(|id| self.nodes.get(id))
+        self.nodes.get(node_id.0)
+    }
+    pub fn get_node_mut(&mut self, node_id: SceneNodeId) -> Option<&mut SceneNode<T>> {
+        self.nodes.get_mut(node_id.0)
     }
     pub fn remove_node(&mut self, node_id: SceneNodeId) -> Option<SceneNode<T>> {
-        node_id.0.and_then(|n| self.nodes.remove(n))
+        self.nodes.remove(node_id.0)
     }
     pub fn set_position(
         &mut self,
@@ -126,11 +166,7 @@ impl<T: 'static + Default + Clone> Scene<T> {
         position: Point3<f32>,
         transform_space: TransformSpace,
     ) {
-        let id = if let Some(index) = node_id.0 {
-            index
-        } else {
-            return;
-        };
+        let id = node_id.0;
         if let Some(node) = self.nodes.get_mut(id) {
             let transform = pick_transform_mut(transform_space, node);
             transform.position = position;
@@ -148,11 +184,8 @@ impl<T: 'static + Default + Clone> Scene<T> {
         rotation: UnitQuaternion<f32>,
         transform_space: TransformSpace,
     ) {
-        let id = if let Some(index) = node_id.0 {
-            index
-        } else {
-            return;
-        };
+        let id = node_id.0;
+
         if let Some(node) = self.nodes.get_mut(id) {
             let transform = pick_transform_mut(transform_space, node);
             transform.rotation = rotation;
@@ -169,11 +202,7 @@ impl<T: 'static + Default + Clone> Scene<T> {
         scale: Vector3<f32>,
         transform_space: TransformSpace,
     ) {
-        let id = if let Some(index) = node_id.0 {
-            index
-        } else {
-            return;
-        };
+        let id = node_id.0;
         if let Some(node) = self.nodes.get_mut(id) {
             let transform = pick_transform_mut(transform_space, node);
             transform.scale = scale;
@@ -191,11 +220,7 @@ impl<T: 'static + Default + Clone> Scene<T> {
         transform: Transform,
         transform_space: TransformSpace,
     ) {
-        let id = if let Some(index) = node_id.0 {
-            index
-        } else {
-            return;
-        };
+        let id = node_id.0;
         if let Some(node) = self.nodes.get_mut(id) {
             let old_local_to_world = node.local_to_world;
             let children = node.children.clone();
@@ -223,7 +248,7 @@ impl<T: 'static + Default + Clone> Scene<T> {
         node_id: SceneNodeId,
         transform_space: TransformSpace,
     ) -> Option<Point3<f32>> {
-        let id = node_id.0?;
+        let id = node_id.0;
         if let Some(node) = self.nodes.get(id) {
             let transform = pick_transform(transform_space, node);
             Some(transform.position)
@@ -236,7 +261,7 @@ impl<T: 'static + Default + Clone> Scene<T> {
         node_id: SceneNodeId,
         transform_space: TransformSpace,
     ) -> Option<UnitQuaternion<f32>> {
-        let id = node_id.0?;
+        let id = node_id.0;
         if let Some(node) = self.nodes.get(id) {
             let transform = pick_transform(transform_space, node);
             Some(transform.rotation)
@@ -249,7 +274,7 @@ impl<T: 'static + Default + Clone> Scene<T> {
         node_id: SceneNodeId,
         transform_space: TransformSpace,
     ) -> Option<Vector3<f32>> {
-        let id = node_id.0?;
+        let id = node_id.0;
         if let Some(node) = self.nodes.get(id) {
             let transform = pick_transform(transform_space, node);
             Some(transform.scale)
@@ -263,7 +288,7 @@ impl<T: 'static + Default + Clone> Scene<T> {
         node_id: SceneNodeId,
         transform_space: TransformSpace,
     ) -> Option<Transform> {
-        let id = node_id.0?;
+        let id = node_id.0;
         if let Some(node) = self.nodes.get(id) {
             let transform = pick_transform(transform_space, node);
             Some(*transform)
@@ -272,121 +297,116 @@ impl<T: 'static + Default + Clone> Scene<T> {
         }
     }
 
-    pub fn set_parent(&mut self, node_id: SceneNodeId, new_parent: Option<SceneNodeId>) {
+    pub fn set_parent(&mut self, node_id: SceneNodeId, mut new_parent: Option<SceneNodeId>) {
         assert!(
             new_parent.is_none()
                 || new_parent.is_some_and(|n| n != node_id && !self.is_child_of(n, node_id)),
             "The new parent is either a child of the current node, or the node itself"
         );
-        node_id
-            .0
-            .map(|node_id| self.nodes.get_mut(node_id).map(|n| n.parent = new_parent));
+
+        if new_parent.is_none() {
+            self.roots.insert(node_id);
+        } else {
+            self.roots.remove(&node_id);
+        }
+        if let Some(node) = self.nodes.get_mut(node_id.0) {
+            node.parent = new_parent;
+        }
         new_parent
-            .and_then(|p| p.0)
-            .and_then(|n| self.nodes.get_mut(n))
+            .and_then(|n| self.nodes.get_mut(n.0))
             .map(|node| node.children.insert(node_id));
     }
     pub fn get_parent(&self, node_id: SceneNodeId) -> Option<SceneNodeId> {
-        node_id
-            .0
-            .and_then(|n| self.nodes.get(n).map(|n| n.parent))
-            .flatten()
+        self.nodes.get(node_id.0).and_then(|n| n.parent)
     }
 
     pub fn add_child(&mut self, node_id: SceneNodeId, new_child: SceneNodeId) {
         assert!(
-            new_child
-                .0
-                .is_some_and(|_| !self.is_parent_of(new_child, node_id)),
+            self.is_parent_of(new_child, node_id),
             "Either the new child is null, or it's a parent of the current node"
         );
 
-        node_id.0.map(|n| {
-            self.nodes
-                .get_mut(n)
-                .map(|node| node.children.insert(new_child))
-        });
-        let old_parent = new_child
-            .0
-            .and_then(|n| self.nodes.get_mut(n).unwrap().parent.replace(node_id));
+        self.nodes
+            .get_mut(node_id.0)
+            .map(|node| node.children.insert(new_child));
+        let old_parent = self
+            .nodes
+            .get_mut(node_id.0)
+            .unwrap()
+            .parent
+            .replace(node_id);
         if let Some(old_parent) = old_parent {
-            let parent = self.nodes.get_mut(old_parent.0.unwrap()).unwrap();
+            let parent = self.nodes.get_mut(old_parent.0).unwrap();
             parent.children.remove(&new_child);
         }
     }
     pub fn remove_child(&mut self, node_id: SceneNodeId, child: SceneNodeId) {
-        let removed = node_id
-            .0
-            .and_then(|n| {
-                self.nodes
-                    .get_mut(n)
-                    .map(|node| node.children.remove(&child))
-            })
+        let removed = self
+            .nodes
+            .get_mut(node_id.0)
+            .map(|node| node.children.remove(&child))
             .unwrap_or_default();
 
         if removed {
-            self.nodes.get_mut(child.0.unwrap()).unwrap().parent = None;
+            self.nodes.get_mut(child.0).unwrap().parent = None;
         }
     }
     pub fn is_child_of(&self, who: SceneNodeId, maybe_child_of: SceneNodeId) -> bool {
-        if let (Some(_), Some(maybe_child_of)) = (who.0, maybe_child_of.0) {
-            if let Some(node) = self.nodes.get(maybe_child_of) {
-                for &child in &node.children {
-                    if child == who {
-                        return true;
-                    }
-                    if self.is_child_of(who, child) {
-                        return true;
-                    }
+        if let Some(node) = self.nodes.get(maybe_child_of.0) {
+            for &child in &node.children {
+                if child == who {
+                    return true;
                 }
-                return false;
+                if self.is_child_of(who, child) {
+                    return true;
+                }
             }
+            return false;
         }
         false
     }
 
     pub fn is_parent_of(&self, who: SceneNodeId, maybe_parent_of: SceneNodeId) -> bool {
-        let mut current = maybe_parent_of;
-        while let Some(index) = current.0 {
-            if let Some(node) = self.nodes.get(index) {
+        let mut current = self.get_parent(maybe_parent_of);
+        while let Some(index) = current {
+            if let Some(node) = self.nodes.get(index.0) {
                 if node.parent.is_some_and(|n| n == who) {
                     return true;
                 }
 
-                current = node.parent.unwrap_or_default();
+                current = node.parent;
             }
         }
         false
     }
     pub fn get_children(&self, node_id: SceneNodeId) -> Option<impl Iterator<Item = &SceneNodeId>> {
-        dbg!(node_id
-            .0
-            .and_then(|id| self.nodes.get(id).map(|n| &n.children))
-            .map(|chi| chi.iter()))
+        self.nodes
+            .get(node_id.0)
+            .map(|n| &n.children)
+            .map(|chi| chi.iter())
     }
 
     pub fn find_by_tag(&self, tag: impl AsRef<str>) -> Option<SceneNodeId> {
         self.nodes
             .iter()
             .find(|(_, node)| node.tags.iter().any(|s| s.as_str() == tag.as_ref()))
-            .map(|(i, _)| SceneNodeId(Some(i)))
+            .map(|(i, _)| SceneNodeId(i))
     }
 
     fn recompute_world_from_relative(&mut self, node_id: SceneNodeId) {
         let (node_parent, model_matrix) = self
             .nodes
-            .get(node_id.0.unwrap())
+            .get(node_id.0)
             .map(|node| (node.parent, node.local_transform.matrix()))
             .unwrap();
         if node_parent.is_some() {
             let local_to_world = self.get_node_local_to_world(node_parent) * model_matrix;
             let world_to_local = local_to_world.try_inverse().unwrap();
-            if let Some(node) = self.nodes.get_mut(node_id.0.unwrap()) {
+            if let Some(node) = self.nodes.get_mut(node_id.0) {
                 node.local_to_world = local_to_world;
                 node.world_to_local = world_to_local;
 
                 let world_translation = Point3::from(local_to_world.column(3).xyz());
-                println!("New world translation is {world_translation}");
                 let scale = vector![
                     local_to_world.column(0).magnitude(),
                     local_to_world.column(1).magnitude(),
@@ -401,19 +421,23 @@ impl<T: 'static + Default + Clone> Scene<T> {
                 node.world_transform.scale = scale;
                 node.world_transform.rotation = rotation;
             }
-        } else if let Some(node) = self.nodes.get_mut(node_id.0.unwrap()) {
+        } else if let Some(node) = self.nodes.get_mut(node_id.0) {
             node.world_transform = node.local_transform;
         }
     }
     fn recompute_relative_from_world(&mut self, node_id: SceneNodeId) {
         let (node_parent, model_matrix) = self
             .nodes
-            .get(node_id.0.unwrap())
+            .get(node_id.0)
             .map(|node| (node.parent, node.world_transform.matrix()))
             .unwrap();
         let local_to_world = self.get_node_local_to_world(node_parent) * model_matrix;
-        let world_to_local = local_to_world.try_inverse().unwrap();
-        if let Some(node) = self.nodes.get_mut(node_id.0.unwrap()) {
+        let world_to_local = if let Some(mat) = local_to_world.try_inverse() {
+            mat
+        } else {
+            return;
+        };
+        if let Some(node) = self.nodes.get_mut(node_id.0) {
             node.local_to_world = local_to_world;
             node.world_to_local = world_to_local;
 
@@ -439,7 +463,7 @@ impl<T: 'static + Default + Clone> Scene<T> {
     }
     fn get_node_local_to_world(&self, node_parent: Option<SceneNodeId>) -> Matrix4<f32> {
         node_parent
-            .map(|p| self.nodes.get(p.0.unwrap()).unwrap().local_to_world)
+            .map(|p| self.nodes.get(p.0).unwrap().local_to_world)
             .unwrap_or(Matrix4::identity())
     }
 
@@ -453,7 +477,7 @@ impl<T: 'static + Default + Clone> Scene<T> {
             nalgebra::ArrayStorage<f32, 4, 4>,
         >,
     ) {
-        if let Some(node) = self.nodes.get_mut(child.0.unwrap()) {
+        if let Some(node) = self.nodes.get_mut(child.0) {
             node.local_to_world *= transform_delta;
             let children = node.children.clone();
             self.recompute_relative_from_world(child);
@@ -461,6 +485,20 @@ impl<T: 'static + Default + Clone> Scene<T> {
                 self.apply_world_delta(child, transform_delta);
             }
         }
+    }
+
+    pub fn root_nodes(&self) -> impl Iterator<Item = &SceneNodeId> {
+        self.roots.iter()
+    }
+
+    fn insert_node(&mut self, mut node: SceneNode<T>) -> Index {
+        let is_leaf = node.parent.is_none();
+        let index = self.nodes.insert(node);
+
+        if is_leaf {
+            self.roots.insert(SceneNodeId(index));
+        }
+        index
     }
 }
 

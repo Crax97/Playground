@@ -20,6 +20,10 @@ name = "gltf_viewer"
 path = "src/gltf_viewer.rs"
 
 [[bin]]
+name = "kecs_scene_test"
+path = "src/kecs_scene_test.rs"
+
+[[bin]]
 name = "compute"
 path = "src/compute.rs"
 
