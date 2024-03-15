@@ -12,19 +12,19 @@ use thunderdome::{Arena, Index};
 
 use super::hot_reload_server::HotReloadServer;
 
-pub trait Resource: Send + Sync + 'static {
+pub trait Asset: Send + Sync + 'static {
     fn get_description(&self) -> &str;
     fn destroyed(&mut self, gpu: &dyn Gpu);
 }
 
 pub trait ResourceLoader: Send + Sync + 'static {
-    type LoadedResource: Resource;
+    type LoadedResource: Asset;
 
     fn load(&self, path: &Path) -> anyhow::Result<Self::LoadedResource>;
 }
 
 #[derive(BevyResource)]
-pub struct ResourceMap {
+pub struct AssetMap {
     loaded_resources: LoadedResources,
     gpu: Arc<dyn Gpu>,
     operations_receiver: Receiver<Box<dyn ResourceMapOperation>>,
@@ -35,9 +35,9 @@ pub struct ResourceMap {
     hot_reload_server: Option<HotReloadServer>,
 }
 
-impl kecs::Resource for ResourceMap {}
+impl kecs::Resource for AssetMap {}
 
-impl ResourceMap {
+impl AssetMap {
     pub fn new(gpu: Arc<dyn Gpu>) -> Self {
         let (operations_sender, operations_receiver) = crossbeam::channel::unbounded();
         Self {
@@ -50,12 +50,12 @@ impl ResourceMap {
         }
     }
 
-    pub fn add<R: Resource>(&mut self, resource: R) -> ResourceHandle<R> {
+    pub fn add<R: Asset>(&mut self, resource: R) -> AssetHandle<R> {
         let id = {
             let mut handle = self.get_or_insert_arena_mut::<R>();
             handle.insert(RefCounted::new(resource))
         };
-        ResourceHandle {
+        AssetHandle {
             _marker: PhantomData,
             id: ResourceId { id: Some(id) },
             operation_sender: Some(self.operations_sender.clone()),
@@ -76,10 +76,7 @@ impl ResourceMap {
         }
     }
 
-    pub fn load<R: Resource>(
-        &mut self,
-        path: impl AsRef<Path>,
-    ) -> anyhow::Result<ResourceHandle<R>> {
+    pub fn load<R: Asset>(&mut self, path: impl AsRef<Path>) -> anyhow::Result<AssetHandle<R>> {
         let resource_type = TypeId::of::<R>();
         if let Some(loader) = self.resource_loaders.get(&resource_type) {
             let loaded_resource = loader.load_erased(path.as_ref())?;
@@ -94,7 +91,7 @@ impl ResourceMap {
                 server.watch(path.as_ref(), resource_type, id)?;
             }
 
-            Ok(ResourceHandle {
+            Ok(AssetHandle {
                 _marker: PhantomData,
                 id,
                 operation_sender: Some(self.operations_sender.clone()),
@@ -107,7 +104,7 @@ impl ResourceMap {
         }
     }
 
-    fn get_arena_handle<R: Resource>(&self) -> RwLockReadGuard<Resources> {
+    fn get_arena_handle<R: Asset>(&self) -> RwLockReadGuard<Resources> {
         self.loaded_resources
             .resources
             .get(&TypeId::of::<R>())
@@ -115,7 +112,7 @@ impl ResourceMap {
             .read()
             .unwrap()
     }
-    fn get_or_insert_arena_mut<R: Resource>(&mut self) -> RwLockWriteGuard<Resources> {
+    fn get_or_insert_arena_mut<R: Asset>(&mut self) -> RwLockWriteGuard<Resources> {
         self.loaded_resources
             .resources
             .entry(TypeId::of::<R>())
@@ -123,7 +120,7 @@ impl ResourceMap {
             .write()
             .unwrap()
     }
-    fn get_arena_handle_mut<R: Resource>(&self) -> RwLockWriteGuard<Resources> {
+    fn get_arena_handle_mut<R: Asset>(&self) -> RwLockWriteGuard<Resources> {
         self.loaded_resources
             .resources
             .get(&TypeId::of::<R>())
@@ -132,15 +129,15 @@ impl ResourceMap {
             .unwrap()
     }
 
-    pub fn get<R: Resource>(&self, id: &ResourceHandle<R>) -> &R {
+    pub fn get<R: Asset>(&self, id: &AssetHandle<R>) -> &R {
         self.try_get(id).unwrap()
     }
 
-    pub fn get_mut<R: Resource>(&mut self, id: &ResourceHandle<R>) -> &mut R {
+    pub fn get_mut<R: Asset>(&mut self, id: &AssetHandle<R>) -> &mut R {
         self.try_get_mut(id).unwrap()
     }
 
-    pub fn try_get<'a, R: Resource>(&'a self, id: &ResourceHandle<R>) -> Option<&'a R> {
+    pub fn try_get<'a, R: Asset>(&'a self, id: &AssetHandle<R>) -> Option<&'a R> {
         assert!(id.is_not_null(), "Tried to get a null resource");
         let arena_handle = self.get_arena_handle::<R>();
         let object_arc = arena_handle
@@ -152,7 +149,7 @@ impl ResourceMap {
             .map(|a| unsafe { a.as_ref() }.unwrap().as_any())
             .map(|obj| obj.downcast_ref::<R>().unwrap())
     }
-    pub fn try_get_mut<'a, R: Resource>(&'a self, id: &ResourceHandle<R>) -> Option<&'a mut R> {
+    pub fn try_get_mut<'a, R: Asset>(&'a self, id: &AssetHandle<R>) -> Option<&'a mut R> {
         assert!(id.is_not_null(), "Tried to get_mut a null resource");
         let arena_handle = self.get_arena_handle::<R>();
         let object_arc = arena_handle
@@ -164,11 +161,11 @@ impl ResourceMap {
             .map(|obj| obj.downcast_mut::<R>().unwrap())
     }
 
-    pub fn len<R: Resource>(&self) -> usize {
+    pub fn len<R: Asset>(&self) -> usize {
         self.get_arena_handle_mut::<R>().len()
     }
 
-    pub fn is_empty<R: Resource>(&self) -> bool {
+    pub fn is_empty<R: Asset>(&self) -> bool {
         self.get_arena_handle_mut::<R>().is_empty()
     }
 
@@ -198,7 +195,7 @@ impl ResourceMap {
         Ok(())
     }
 
-    fn increment_resource_ref_count<R: Resource>(&mut self, id: ResourceId) {
+    fn increment_resource_ref_count<R: Asset>(&mut self, id: ResourceId) {
         let mut arena_handle = self.get_arena_handle_mut::<R>();
         let resource_mut = arena_handle
             .get_mut(
@@ -208,7 +205,7 @@ impl ResourceMap {
             .unwrap_or_else(|| panic!("Failed to fetch resource of type {}", type_name::<R>()));
         resource_mut.ref_count += 1;
     }
-    fn decrement_resource_ref_count<R: Resource>(&mut self, id: ResourceId) {
+    fn decrement_resource_ref_count<R: Asset>(&mut self, id: ResourceId) {
         let mut arena_handle = self.get_arena_handle_mut::<R>();
         let ref_count = {
             let resource_mut = arena_handle
@@ -243,19 +240,19 @@ impl ResourceMap {
     }
 }
 
-impl Drop for ResourceMap {
+impl Drop for AssetMap {
     fn drop(&mut self) {
         // Update any pending resources
         self.update();
     }
 }
 
-pub(super) trait AnyResource: Any + Resource {
+pub(super) trait AnyResource: Any + Asset {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
-impl<T: Any + Resource + 'static> AnyResource for T {
+impl<T: Any + Asset + 'static> AnyResource for T {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -276,7 +273,7 @@ pub(super) struct RefCounted {
     ref_count: u32,
 }
 impl RefCounted {
-    fn new(resource: impl Resource) -> Self {
+    fn new(resource: impl Asset) -> Self {
         Self {
             resource: Arc::new(resource),
             ref_count: 1,
@@ -314,25 +311,25 @@ pub(super) struct LoadedResources {
 }
 
 pub(crate) trait ResourceMapOperation: Send + Sync + 'static {
-    fn execute(&self, map: &mut ResourceMap);
+    fn execute(&self, map: &mut AssetMap);
 }
 
-pub struct ResourceHandle<R>
+pub struct AssetHandle<R>
 where
-    R: Resource,
+    R: Asset,
 {
     _marker: PhantomData<R>,
     pub(crate) id: ResourceId,
     pub(crate) operation_sender: Option<Sender<Box<dyn ResourceMapOperation>>>,
 }
 
-impl<R: Resource> std::fmt::Debug for ResourceHandle<R> {
+impl<R: Asset> std::fmt::Debug for AssetHandle<R> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.id.id.fmt(f)
     }
 }
 
-impl<R: Resource> ResourceHandle<R> {
+impl<R: Asset> AssetHandle<R> {
     pub fn null() -> Self {
         Self {
             _marker: PhantomData,
@@ -368,20 +365,20 @@ impl<R: Resource> ResourceHandle<R> {
     }
 
     fn inc_ref_count_operation(&self) -> Box<dyn ResourceMapOperation> {
-        struct IncResourceMapOperation<R: Resource>(ResourceId, PhantomData<R>);
+        struct IncResourceMapOperation<R: Asset>(ResourceId, PhantomData<R>);
 
-        impl<R: Resource> ResourceMapOperation for IncResourceMapOperation<R> {
-            fn execute(&self, map: &mut ResourceMap) {
+        impl<R: Asset> ResourceMapOperation for IncResourceMapOperation<R> {
+            fn execute(&self, map: &mut AssetMap) {
                 map.increment_resource_ref_count::<R>(self.0)
             }
         }
         Box::new(IncResourceMapOperation::<R>(self.id, PhantomData))
     }
     fn dec_ref_count_operation(&self) -> Box<dyn ResourceMapOperation> {
-        struct DecResourceMapOperation<R: Resource>(ResourceId, PhantomData<R>);
+        struct DecResourceMapOperation<R: Asset>(ResourceId, PhantomData<R>);
 
-        impl<R: Resource> ResourceMapOperation for DecResourceMapOperation<R> {
-            fn execute(&self, map: &mut ResourceMap) {
+        impl<R: Asset> ResourceMapOperation for DecResourceMapOperation<R> {
+            fn execute(&self, map: &mut AssetMap) {
                 map.decrement_resource_ref_count::<R>(self.0)
             }
         }
@@ -389,20 +386,20 @@ impl<R: Resource> ResourceHandle<R> {
     }
 }
 
-impl<R: Resource> PartialEq for ResourceHandle<R> {
+impl<R: Asset> PartialEq for AssetHandle<R> {
     fn eq(&self, other: &Self) -> bool {
         self.id.id == other.id.id
     }
 }
 
-impl<R: Resource> Eq for ResourceHandle<R> {}
+impl<R: Asset> Eq for AssetHandle<R> {}
 
-impl<R: Resource> std::hash::Hash for ResourceHandle<R> {
+impl<R: Asset> std::hash::Hash for AssetHandle<R> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
 }
-impl<R: Resource> Clone for ResourceHandle<R> {
+impl<R: Asset> Clone for AssetHandle<R> {
     fn clone(&self) -> Self {
         self.inc_ref_count();
         Self {
@@ -413,7 +410,7 @@ impl<R: Resource> Clone for ResourceHandle<R> {
     }
 }
 
-impl<R: Resource> Drop for ResourceHandle<R> {
+impl<R: Asset> Drop for AssetHandle<R> {
     fn drop(&mut self) {
         self.dec_ref_count()
     }

@@ -1,6 +1,6 @@
 use crate::utils;
+use engine::asset_map::{AssetHandle, AssetMap};
 use engine::math::shape::BoundingShape;
-use engine::resource_map::{ResourceHandle, ResourceMap};
 use engine::{
     LightType, MasterMaterial, MaterialDescription, MaterialDomain, MaterialInstance,
     MaterialInstanceDescription, MaterialParameterOffsetSize, Mesh, MeshCreateInfo,
@@ -41,9 +41,9 @@ impl Default for GltfLoadOptions {
     }
 }
 struct LoadedTextures {
-    white: ResourceHandle<Texture>,
-    black: ResourceHandle<Texture>,
-    all_textures: Vec<ResourceHandle<Texture>>,
+    white: AssetHandle<Texture>,
+    black: AssetHandle<Texture>,
+    all_textures: Vec<AssetHandle<Texture>>,
 }
 
 impl GltfLoader {
@@ -51,7 +51,7 @@ impl GltfLoader {
         path: P,
         gpu: &dyn Gpu,
         scene_renderer: &mut R,
-        resource_map: &mut ResourceMap,
+        resource_map: &mut AssetMap,
         options: GltfLoadOptions,
     ) -> anyhow::Result<Self> {
         let (document, buffers, mut images) = gltf::import(path)?;
@@ -73,7 +73,7 @@ impl GltfLoader {
     fn build_engine_scene(
         document: Document,
         allocated_materials: Vec<MaterialInstance>,
-        meshes: Vec<(ResourceHandle<Mesh>, Point3<f32>, Point3<f32>)>,
+        meshes: Vec<(AssetHandle<Mesh>, Point3<f32>, Point3<f32>)>,
     ) -> RenderScene {
         let mut engine_scene = RenderScene::new();
         for scene in document.scenes() {
@@ -86,10 +86,10 @@ impl GltfLoader {
 
     fn load_meshes(
         gpu: &dyn Gpu,
-        resource_map: &mut ResourceMap,
+        resource_map: &mut AssetMap,
         document: &Document,
         buffers: &[gltf::buffer::Data],
-    ) -> anyhow::Result<Vec<(ResourceHandle<Mesh>, Point3<f32>, Point3<f32>)>> {
+    ) -> anyhow::Result<Vec<(AssetHandle<Mesh>, Point3<f32>, Point3<f32>)>> {
         let mut meshes = vec![];
         for mesh in document.meshes() {
             let mut min = point![0.0f32, 0.0, 0.0];
@@ -164,8 +164,8 @@ impl GltfLoader {
     fn create_master_pbr_material<R: RenderingPipeline>(
         gpu: &dyn Gpu,
         scene_renderer: &mut R,
-        resource_map: &mut ResourceMap,
-    ) -> anyhow::Result<ResourceHandle<MasterMaterial>> {
+        resource_map: &mut AssetMap,
+    ) -> anyhow::Result<AssetHandle<MasterMaterial>> {
         let vertex_module = utils::read_file_to_vk_module(gpu, "./shaders/vertex_deferred.spirv")?;
         let fragment_module =
             utils::read_file_to_vk_module(gpu, "./shaders/metallic_roughness_pbr.spirv")?;
@@ -288,7 +288,7 @@ impl GltfLoader {
 
     fn load_textures(
         gpu: &dyn Gpu,
-        resource_map: &mut ResourceMap,
+        resource_map: &mut AssetMap,
         allocated_images: Vec<ImageHandle>,
         allocated_image_views: Vec<ImageViewHandle>,
         allocated_samplers: Vec<TextureSamplerSettings>,
@@ -381,7 +381,7 @@ impl GltfLoader {
 
     fn load_materials(
         gpu: &dyn Gpu,
-        pbr_master: ResourceHandle<MasterMaterial>,
+        pbr_master: AssetHandle<MasterMaterial>,
         textures: LoadedTextures,
         document: &Document,
     ) -> anyhow::Result<Vec<MaterialInstance>> {
@@ -479,7 +479,7 @@ fn handle_node(
     engine_scene: &mut RenderScene,
     allocated_materials: &Vec<MaterialInstance>,
     meshes: &Vec<(
-        ResourceHandle<Mesh>,
+        AssetHandle<Mesh>,
         nalgebra::OPoint<f32, nalgebra::Const<3>>,
         nalgebra::OPoint<f32, nalgebra::Const<3>>,
     )>,

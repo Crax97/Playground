@@ -26,8 +26,8 @@ use winit::dpi::{PhysicalPosition, Position};
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::input::key::Key;
 use engine::{
-    post_process_pass::FxaaPass, Backbuffer, CvarManager, DeferredRenderingPipeline, LightHandle,
-    MaterialInstance, RenderingPipeline, ResourceMap, TextureInput,
+    post_process_pass::FxaaPass, AssetMap, Backbuffer, CvarManager, DeferredRenderingPipeline,
+    LightHandle, MaterialInstance, RenderingPipeline, TextureInput,
 };
 use nalgebra::*;
 use winit::event::MouseButton;
@@ -74,7 +74,7 @@ pub struct KecsSceneTest {
     input: InputState,
     console: Console,
     cvar_manager: CvarManager,
-    resource_map: ResourceMap,
+    resource_map: AssetMap,
     time: Time,
     egui_support: EguiSupport,
 

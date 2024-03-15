@@ -6,7 +6,7 @@ mod sampler_allocator;
 use crate::{
     post_process_pass::{PostProcessPass, PostProcessResources},
     render_scene::render_structs::*,
-    Resource,
+    Asset,
 };
 use cascaded_shadow_map::*;
 use gbuffer::*;
@@ -23,7 +23,7 @@ use crate::{
     PipelineTarget, RenderScene, RenderingPipeline, ScenePrimitive, Texture,
 };
 
-use crate::resource_map::{ResourceHandle, ResourceMap};
+use crate::asset_map::{AssetHandle, AssetMap};
 use gpu::{
     render_pass_2::RenderPass2, AttachmentStoreOp, BeginRenderPassInfo2, Binding2,
     BufferCreateInfo, BufferUsageFlags, ColorAttachment, ColorLoadOp, CommandBuffer,
@@ -76,7 +76,7 @@ pub struct DeferredRenderingPipeline {
     max_frames_in_flight: usize,
     active_lights: Vec<GpuLightInfo>,
     light_povs: Vec<PointOfViewData>,
-    pub(crate) irradiance_map: Option<ResourceHandle<Texture>>,
+    pub(crate) irradiance_map: Option<AssetHandle<Texture>>,
     default_irradiance_map: Texture,
 
     cube_mesh: Mesh,
@@ -239,7 +239,7 @@ impl DeferredRenderingPipeline {
     pub(crate) fn main_render_loop(
         gpu: &dyn Gpu,
         primitives: &Vec<&ScenePrimitive>,
-        resource_map: &ResourceMap,
+        resource_map: &AssetMap,
         pipeline_target: PipelineTarget,
         render_pass: &mut RenderPass2,
         camera_index: u32,
@@ -288,7 +288,7 @@ impl DeferredRenderingPipeline {
         skybox_mesh: &Mesh,
         skybox_material: &MaterialInstance,
         skybox_master: &MasterMaterial,
-        resource_map: &ResourceMap,
+        resource_map: &AssetMap,
         sampler_allocator: &SamplerAllocator,
     ) -> anyhow::Result<()> {
         // let label = render_pass.begin_debug_region(
@@ -318,10 +318,7 @@ impl DeferredRenderingPipeline {
         Ok(())
     }
 
-    pub fn set_irradiance_texture(
-        &mut self,
-        irradiance_map: Option<ResourceHandle<crate::Texture>>,
-    ) {
+    pub fn set_irradiance_texture(&mut self, irradiance_map: Option<AssetHandle<crate::Texture>>) {
         self.irradiance_map = irradiance_map;
     }
 
@@ -331,7 +328,7 @@ impl DeferredRenderingPipeline {
         graphics_command_buffer: &mut CommandBuffer,
         final_scene_image: &RenderImage,
         gbuffer: &GBuffer,
-        resource_map: &ResourceMap,
+        resource_map: &AssetMap,
         render_size: Extent2D,
         current_buffers: &FrameBuffers,
         primitives: &Vec<&ScenePrimitive>,
@@ -863,7 +860,7 @@ fn draw_mesh_primitive(
     master: &MasterMaterial,
     primitive: &MeshPrimitive,
     model: Matrix4<f32>,
-    resource_map: &ResourceMap,
+    resource_map: &AssetMap,
     sampler_allocator: &SamplerAllocator,
     camera_index: u32,
 ) -> anyhow::Result<()> {
@@ -960,7 +957,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         graphics_command_buffer: &mut CommandBuffer,
         camera: &Camera,
         scene: &RenderScene,
-        resource_map: &ResourceMap,
+        resource_map: &AssetMap,
         cvar_manager: &CvarManager,
     ) -> anyhow::Result<ImageViewHandle> {
         if self.update_frustum {

@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
 use crate::{
+    asset_map::{AssetHandle, AssetMap},
     math::shape::BoundingShape,
     render_scene::{BinaryBvh, Bvh},
-    resource_map::{ResourceHandle, ResourceMap},
     CvarManager, Frustum,
 };
 use bevy_ecs::system::Resource;
@@ -21,7 +21,7 @@ use crate::{mesh::Mesh, Camera, MasterMaterial, MaterialDescription, MaterialIns
 
 #[derive(Clone)]
 pub struct ScenePrimitive {
-    pub mesh: ResourceHandle<Mesh>,
+    pub mesh: AssetHandle<Mesh>,
     pub materials: Vec<MaterialInstance>,
     pub transform: Matrix4<f32>,
     pub bounds: BoundingShape,
@@ -160,7 +160,7 @@ pub struct RenderScene {
     pub lights: Vec<Light>,
 
     skybox_material: Option<MaterialInstance>,
-    skybox_texture: Option<ResourceHandle<Texture>>,
+    skybox_texture: Option<AssetHandle<Texture>>,
     current_lights_iteration: u64,
 }
 
@@ -171,7 +171,7 @@ impl RenderScene {
         self.current_lights_iteration = self.current_lights_iteration.wrapping_add(1);
     }
 
-    pub fn get_skybox_texture_handle(&self) -> &Option<ResourceHandle<Texture>> {
+    pub fn get_skybox_texture_handle(&self) -> &Option<AssetHandle<Texture>> {
         &self.skybox_texture
     }
 
@@ -251,7 +251,7 @@ impl RenderScene {
         self.current_lights_iteration
     }
 
-    pub fn set_skybox_texture(&mut self, new_skybox_texture: Option<ResourceHandle<Texture>>) {
+    pub fn set_skybox_texture(&mut self, new_skybox_texture: Option<AssetHandle<Texture>>) {
         self.skybox_texture = new_skybox_texture;
     }
 
@@ -297,7 +297,7 @@ pub trait RenderingPipeline {
         graphics_command_buffer: &mut CommandBuffer,
         pov: &Camera,
         scene: &RenderScene,
-        resource_map: &ResourceMap,
+        resource_map: &AssetMap,
         cvar_manager: &CvarManager,
     ) -> anyhow::Result<ImageViewHandle>;
 

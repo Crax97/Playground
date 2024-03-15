@@ -1,7 +1,7 @@
 use gpu::Gpu;
 use nalgebra::vector;
 
-use crate::{Mesh, MeshPrimitiveCreateInfo, ResourceHandle, ResourceMap};
+use crate::{AssetHandle, AssetMap, Mesh, MeshPrimitiveCreateInfo};
 
 pub fn to_u8_slice<T>(vals: &[T]) -> &[u8] {
     unsafe { std::slice::from_raw_parts(vals.as_ptr() as *const u8, std::mem::size_of_val(vals)) }

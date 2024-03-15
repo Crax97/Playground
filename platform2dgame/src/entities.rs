@@ -14,7 +14,7 @@ use engine::{
         },
         PhysicsContext2D,
     },
-    CommonResources, ResourceMap, Texture,
+    AssetMap, CommonResources, Texture,
 };
 use gpu::Filter;
 use nalgebra::{point, vector};
@@ -31,7 +31,7 @@ pub struct Star;
 const SPRITE_SIZE: u32 = 8;
 pub fn load_level_system(
     gpu: Res<GpuDevice>,
-    mut resource_map: ResMut<ResourceMap>,
+    mut resource_map: ResMut<AssetMap>,
     mut physics_context: ResMut<PhysicsContext2D>,
     common_resources: Res<CommonResources>,
     mut commands: Commands,
@@ -124,7 +124,7 @@ fn spawn_player(
     gpu: &GpuDevice,
     entity: &Entity,
     common_resources: &CommonResources,
-    entities_texture: engine::ResourceHandle<Texture>,
+    entities_texture: engine::AssetHandle<Texture>,
     mut entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
     physics_context: &mut PhysicsContext2D,
 ) {
@@ -162,7 +162,7 @@ fn spawn_enemy(
     gpu: &GpuDevice,
     entity: &Entity,
     common_resources: &CommonResources,
-    entities_texture: engine::ResourceHandle<Texture>,
+    entities_texture: engine::AssetHandle<Texture>,
     mut entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
     physics_context: &mut PhysicsContext2D,
 ) {
@@ -197,7 +197,7 @@ fn spawn_terrain(
     gpu: &GpuDevice,
     entity: &Entity,
     common_resources: &CommonResources,
-    entities_texture: engine::ResourceHandle<Texture>,
+    entities_texture: engine::AssetHandle<Texture>,
     mut entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
     physics_context: &mut PhysicsContext2D,
 ) {
@@ -224,7 +224,7 @@ fn spawn_terrain(
 fn spawn_grass(
     gpu: &GpuDevice,
     common_resources: &CommonResources,
-    entities_texture: engine::ResourceHandle<Texture>,
+    entities_texture: engine::AssetHandle<Texture>,
     mut entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
 ) {
     entity_spawned.insert((SpriteComponent::new(
@@ -244,7 +244,7 @@ fn spawn_star(
     gpu: &GpuDevice,
     entity: &Entity,
     common_resources: &CommonResources,
-    entities_texture: engine::ResourceHandle<Texture>,
+    entities_texture: engine::AssetHandle<Texture>,
     mut entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
     physics_context: &mut PhysicsContext2D,
 ) {
@@ -276,7 +276,7 @@ fn spawn_platform(
     gpu: &GpuDevice,
     entity: &Entity,
     common_resources: &CommonResources,
-    entities_texture: engine::ResourceHandle<Texture>,
+    entities_texture: engine::AssetHandle<Texture>,
     mut entity_spawned: engine::bevy_ecs::system::EntityCommands<'_, '_, '_>,
     physics_context: &mut PhysicsContext2D,
 ) {

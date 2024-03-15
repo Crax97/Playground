@@ -1,9 +1,9 @@
-use std::clone;
 use std::ops::{Deref, DerefMut};
 
+use crate::editor::TypeEditor;
 use crate::math::shape::BoundingShape;
 use crate::{
-    bevy_ecs_app::CommonResources, resource_map::ResourceHandle, LightType, RenderScene,
+    asset_map::AssetHandle, bevy_ecs_app::CommonResources, LightType, RenderScene,
     ShadowConfiguration, Texture,
 };
 use bevy_ecs::reflect::ReflectComponent;
@@ -15,13 +15,14 @@ use bevy_ecs::{
 };
 use bevy_reflect::Reflect;
 use bytemuck::{Pod, Zeroable};
+use egui::Ui;
 use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
 use nalgebra::{
     point, vector, Matrix4, Point2, Point3, UnitQuaternion, UnitVector3, Vector2, Vector3, Vector4,
 };
 use winit::window::Window;
 
-use crate::{GpuDevice, MasterMaterial, MaterialInstance, Mesh};
+use crate::{AssetMap, GpuDevice, MasterMaterial, MaterialInstance, Mesh};
 
 #[derive(Resource)]
 pub struct EngineWindow(pub(crate) Window);
@@ -104,10 +105,24 @@ impl Transform2D {
 }
 #[derive(Component)]
 pub struct MeshComponent {
-    pub mesh: ResourceHandle<Mesh>,
+    pub mesh: AssetHandle<Mesh>,
     pub materials: Vec<MaterialInstance>,
     pub bounding_shape: BoundingShape,
 }
+
+impl Default for MeshComponent {
+    fn default() -> Self {
+        Self {
+            mesh: AssetHandle::null(),
+            materials: Default::default(),
+            bounding_shape: BoundingShape::Sphere {
+                radius: 0.0,
+                origin: Default::default(),
+            },
+        }
+    }
+}
+
 impl MeshComponent {
     fn bounds(&self) -> BoundingShape {
         self.bounding_shape
@@ -125,8 +140,8 @@ unsafe impl Pod for SpriteGpuData {}
 unsafe impl Zeroable for SpriteGpuData {}
 
 pub struct SpriteComponentDescription {
-    pub texture: ResourceHandle<Texture>,
-    pub material: ResourceHandle<MasterMaterial>,
+    pub texture: AssetHandle<Texture>,
+    pub material: AssetHandle<MasterMaterial>,
     pub atlas_offset: Vector2<u32>,
     pub atlas_size: Vector2<u32>,
     pub sprite_size: Vector2<f32>,
@@ -135,8 +150,8 @@ pub struct SpriteComponentDescription {
 
 #[derive(Component)]
 pub struct SpriteComponent {
-    pub texture: ResourceHandle<Texture>,
-    pub material: ResourceHandle<MasterMaterial>,
+    pub texture: AssetHandle<Texture>,
+    pub material: AssetHandle<MasterMaterial>,
     pub sprite_size: Vector2<f32>,
     pub z_layer: u32,
 
@@ -166,7 +181,7 @@ pub struct TestComponent {
 #[derive(Resource)]
 pub struct SceneSetup {
     pub skybox_material: Option<MaterialInstance>,
-    pub skybox_texture: Option<ResourceHandle<Texture>>,
+    pub skybox_texture: Option<AssetHandle<Texture>>,
 }
 
 impl SpriteComponent {
@@ -304,4 +319,19 @@ pub fn rendering_system_2d(
 
 pub fn init(schedule: &mut Schedule) {
     schedule.add_systems(rendering_system);
+}
+
+pub struct MeshComponentEditor;
+
+impl TypeEditor for MeshComponentEditor {
+    type EditedType = MeshComponent;
+
+    fn show_ui(&self, value: &mut Self::EditedType, ui: &mut egui::Ui) {}
+}
+
+fn resource_handle_editor<T: crate::asset_map::Asset>(
+    handle: &mut AssetHandle<T>,
+    asset_map: &mut AssetMap,
+    ui: &mut Ui,
+) {
 }

@@ -1,6 +1,6 @@
 use nalgebra::{point, Vector2, Vector3};
 
-use crate::{math::shape::BoundingShape, resource_map::Resource};
+use crate::{asset_map::Asset, math::shape::BoundingShape};
 use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
 
 use crate::utils::to_u8_slice;
@@ -137,7 +137,7 @@ impl Mesh {
     }
 }
 
-impl Resource for Mesh {
+impl Asset for Mesh {
     fn get_description(&self) -> &str {
         "Mesh"
     }

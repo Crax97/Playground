@@ -22,9 +22,9 @@ use crate::{
     loaders::FileSystemTextureLoader,
     physics::PhysicsContext2D,
     render_scene::camera::Camera,
-    utils, Backbuffer, CvarManager, DeferredRenderingPipeline, MasterMaterial, Mesh,
-    MeshCreateInfo, MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline, ResourceHandle,
-    ResourceMap, Texture, TextureInput, Time,
+    utils, AssetHandle, AssetMap, Backbuffer, CvarManager, DeferredRenderingPipeline,
+    MasterMaterial, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline,
+    Texture, TextureInput, Time,
 };
 
 const DEFAULT_DEFERRED_FS: &[u32] = glsl!(
@@ -129,14 +129,14 @@ pub struct BevyEcsAppWithLoop {
 
 #[derive(Resource)]
 pub struct CommonResources {
-    pub quad_mesh: ResourceHandle<Mesh>,
+    pub quad_mesh: AssetHandle<Mesh>,
 
-    pub white_texture: ResourceHandle<Texture>,
-    pub black_texture: ResourceHandle<Texture>,
+    pub white_texture: AssetHandle<Texture>,
+    pub black_texture: AssetHandle<Texture>,
 
-    pub default_material: ResourceHandle<MasterMaterial>,
-    pub default_material_transparency: ResourceHandle<MasterMaterial>,
-    pub default_sprite_material: ResourceHandle<MasterMaterial>,
+    pub default_material: AssetHandle<MasterMaterial>,
+    pub default_material_transparency: AssetHandle<MasterMaterial>,
+    pub default_sprite_material: AssetHandle<MasterMaterial>,
 }
 
 impl BevyEcsApp {
@@ -163,8 +163,8 @@ impl BevyEcsApp {
         &mut self.renderer
     }
 
-    pub fn resource_map(&mut self) -> Mut<'_, ResourceMap> {
-        self.world.get_resource_mut::<ResourceMap>().unwrap()
+    pub fn resource_map(&mut self) -> Mut<'_, AssetMap> {
+        self.world.get_resource_mut::<AssetMap>().unwrap()
     }
 
     pub fn startup_schedule(&mut self) -> &mut Schedule {
@@ -213,7 +213,7 @@ impl BevyEcsApp {
 
     fn create_common_resources(
         gpu: &dyn Gpu,
-        resource_map: &mut ResourceMap,
+        resource_map: &mut AssetMap,
     ) -> anyhow::Result<CommonResources> {
         let quad_mesh = {
             let mesh_data = MeshCreateInfo {
@@ -379,7 +379,7 @@ impl BevyEcsApp {
         })
     }
 
-    fn setup_resource_map(resource_map: &mut ResourceMap, gpu: Arc<dyn Gpu>) {
+    fn setup_resource_map(resource_map: &mut AssetMap, gpu: Arc<dyn Gpu>) {
         resource_map.install_resource_loader(FileSystemTextureLoader { gpu: gpu.clone() });
     }
 }
@@ -402,7 +402,7 @@ impl App for BevyEcsApp {
         let post_update_schedule = Schedule::new(PostUpdateSchedule);
 
         let mut world = World::new();
-        let mut resource_map = ResourceMap::new(app_state.gpu.clone());
+        let mut resource_map = AssetMap::new(app_state.gpu.clone());
 
         Self::setup_resource_map(&mut resource_map, app_state.gpu.clone());
 
@@ -454,10 +454,7 @@ impl App for BevyEcsApp {
             .get_resource_mut::<InputState>()
             .unwrap()
             .update(event);
-        self.world
-            .get_resource_mut::<ResourceMap>()
-            .unwrap()
-            .update();
+        self.world.get_resource_mut::<AssetMap>().unwrap().update();
 
         for plugin in &mut self.plugins {
             plugin.on_event(app_state, &mut self.world, event);
@@ -524,7 +521,7 @@ impl App for BevyEcsApp {
             .world
             .get_resource::<RenderScene>()
             .unwrap_or(&empty_scene);
-        let resource_map = self.world.get_resource::<ResourceMap>().unwrap();
+        let resource_map = self.world.get_resource::<AssetMap>().unwrap();
         let cvar_manager = self.world.get_resource::<CvarManager>().unwrap();
         let pov = if let Some(pov) = self.world.get_resource::<Camera>() {
             *pov
@@ -566,7 +563,7 @@ impl App for BevyEcsApp {
 
 fn setup_world_resources(
     world: &mut World,
-    resource_map: ResourceMap,
+    resource_map: AssetMap,
     cvar_manager: CvarManager,
     default_resources: CommonResources,
     app_state: &mut AppState,

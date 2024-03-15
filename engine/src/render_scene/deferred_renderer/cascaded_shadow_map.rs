@@ -7,8 +7,8 @@ use gpu::{
 use nalgebra::{point, vector, Matrix4, Point3};
 
 use crate::{
-    Camera, DeferredRenderingPipeline, FrameBuffers, Frustum, Light, LightType, PipelineTarget,
-    PointOfViewData, ResourceMap, TiledTexture2DPacker, TiledTexture2DSection,
+    AssetMap, Camera, DeferredRenderingPipeline, FrameBuffers, Frustum, Light, LightType,
+    PipelineTarget, PointOfViewData, TiledTexture2DPacker, TiledTexture2DSection,
 };
 
 use super::SamplerAllocator;
@@ -156,7 +156,7 @@ impl CascadedShadowMap {
         scene: &crate::RenderScene,
         command_buffer: &mut gpu::CommandBuffer,
         frame_buffers: &FrameBuffers,
-        resource_map: &ResourceMap,
+        resource_map: &AssetMap,
 
         light_povs: &Vec<PointOfViewData>,
         sampler_allocator: &SamplerAllocator,

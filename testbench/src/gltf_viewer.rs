@@ -24,8 +24,8 @@ use winit::dpi::{PhysicalPosition, Position};
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::input::key::Key;
 use engine::{
-    post_process_pass::FxaaPass, Backbuffer, CvarManager, DeferredRenderingPipeline, LightHandle,
-    MaterialInstance, RenderingPipeline, ResourceMap, TextureInput,
+    post_process_pass::FxaaPass, AssetMap, Backbuffer, CvarManager, DeferredRenderingPipeline,
+    LightHandle, MaterialInstance, RenderingPipeline, TextureInput,
 };
 use nalgebra::*;
 use winit::event::MouseButton;
@@ -72,7 +72,7 @@ pub struct GLTFViewer {
     input: InputState,
     console: Console,
     cvar_manager: CvarManager,
-    resource_map: ResourceMap,
+    resource_map: AssetMap,
     time: Time,
     egui_support: EguiSupport,
 
@@ -265,7 +265,7 @@ impl App for GLTFViewer {
         let args = GltfViewerArgs::parse();
         let time = Time::new();
 
-        let mut resource_map = ResourceMap::new(app_state.gpu.clone());
+        let mut resource_map = AssetMap::new(app_state.gpu.clone());
         let cube_mesh = utils::load_cube_to_resource_map(app_state.gpu(), &mut resource_map)?;
 
         // TODO: avoid duplicating this module creation

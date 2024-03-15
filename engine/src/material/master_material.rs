@@ -1,6 +1,6 @@
 use std::{collections::HashMap, hash::Hash, mem::size_of, num::NonZeroU32};
 
-use crate::resource_map::Resource;
+use crate::asset_map::Asset;
 use gpu::{
     BindingElement, BindingType, CullMode, FragmentStageInfo, FrontFace, ShaderModuleHandle,
     ShaderStage, VertexStageInfo,
@@ -60,7 +60,7 @@ impl Hash for MasterMaterial {
     }
 }
 
-impl Resource for MasterMaterial {
+impl Asset for MasterMaterial {
     fn get_description(&self) -> &str {
         &self.name
     }

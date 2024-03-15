@@ -1,5 +1,6 @@
 pub const SMALL_NUMBER: f32 = 0.005;
 pub mod app;
+pub mod asset_map;
 pub mod components;
 pub mod editor;
 pub mod game_scene;
@@ -9,7 +10,6 @@ pub mod loaders;
 pub mod math;
 pub mod physics;
 pub mod post_process_pass;
-pub mod resource_map;
 
 mod bevy_ecs_app;
 mod cvar_manager;
@@ -20,6 +20,7 @@ mod texture;
 mod time;
 mod utils;
 
+pub use asset_map::*;
 pub use bevy_ecs;
 pub use bevy_ecs_app::*;
 pub use bevy_reflect;
@@ -29,7 +30,6 @@ pub use kecs;
 use kecs::Entity;
 pub use material::*;
 pub use mesh::*;
-pub use resource_map::*;
 pub use texture::*;
 pub use time::*;
 pub use utils::*;

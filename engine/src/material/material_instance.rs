@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::resource_map::ResourceHandle;
+use crate::asset_map::AssetHandle;
 use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
 
 use crate::{texture::Texture, utils::to_u8_slice};
@@ -11,7 +11,7 @@ use super::master_material::MasterMaterial;
 pub struct MaterialInstanceDescription<'a> {
     pub name: &'a str,
     // These are optional, and if present will be bound to descriptor set 1
-    pub textures: Vec<ResourceHandle<Texture>>,
+    pub textures: Vec<AssetHandle<Texture>>,
     // These are optional, and if present will be bound to descriptor set 2
     // After the textures
     pub parameter_buffers: Vec<BufferHandle>,
@@ -19,14 +19,14 @@ pub struct MaterialInstanceDescription<'a> {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct MaterialInstance {
-    pub(crate) owner: ResourceHandle<MasterMaterial>,
-    pub(crate) textures: Vec<ResourceHandle<Texture>>,
+    pub(crate) owner: AssetHandle<MasterMaterial>,
+    pub(crate) textures: Vec<AssetHandle<Texture>>,
     pub(crate) parameter_buffers: Vec<BufferHandle>,
 }
 
 impl MaterialInstance {
     pub fn create_instance(
-        owner: ResourceHandle<MasterMaterial>,
+        owner: AssetHandle<MasterMaterial>,
         description: &MaterialInstanceDescription,
     ) -> anyhow::Result<MaterialInstance> {
         Ok(MaterialInstance {

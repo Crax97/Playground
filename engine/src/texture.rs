@@ -1,4 +1,4 @@
-use crate::resource_map::Resource;
+use crate::asset_map::Asset;
 use gpu::{
     AccessFlags, ComponentMapping, Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageFormat,
     ImageHandle, ImageSubresourceRange, ImageUsageFlags, ImageViewHandle, ImageViewType,
@@ -151,7 +151,7 @@ impl Texture {
     }
 }
 
-impl Resource for Texture {
+impl Asset for Texture {
     fn get_description(&self) -> &str {
         "Texture"
     }

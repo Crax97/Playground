@@ -6,8 +6,8 @@ use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop};
 
 use crate::{
     app::{app_state::AppState, App},
-    Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, RenderScene, RenderingPipeline,
-    ResourceMap, Time,
+    AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, RenderScene,
+    RenderingPipeline, Time,
 };
 
 #[derive(Clone)]
@@ -152,7 +152,7 @@ impl App for KecsApp {
     {
         let mut world = World::new();
         world.add_resource(Time::default());
-        world.add_resource(ResourceMap::new(app_state.gpu.clone()));
+        world.add_resource(AssetMap::new(app_state.gpu.clone()));
         world.add_resource(CvarManager::new());
         world.add_resource(RenderScene::new());
         world.add_resource(SimulationState::default());
@@ -274,7 +274,7 @@ impl App for KecsApp {
             .get_resource::<Camera>()
             .cloned()
             .unwrap_or_default();
-        let resource_map = self.world.get_resource::<ResourceMap>().unwrap();
+        let resource_map = self.world.get_resource::<AssetMap>().unwrap();
         let cvar_manager = self.world.get_resource::<CvarManager>().unwrap();
         if let Some(scene) = scene {
             let final_render = self.renderer.render(

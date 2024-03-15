@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use anyhow::bail;
-use engine::{Mesh, MeshPrimitiveCreateInfo, ResourceHandle, ResourceMap, Texture};
+use engine::{AssetHandle, AssetMap, Mesh, MeshPrimitiveCreateInfo, Texture};
 use image::DynamicImage;
 use log::{debug, info};
 use nalgebra::{point, vector, Vector2, Vector3};
@@ -140,8 +140,8 @@ pub fn load_cubemap_from_path<P: AsRef<Path>>(
 pub fn load_hdr_to_cubemap<P: AsRef<Path>>(
     gpu: &dyn Gpu,
     output_size: Extent2D,
-    cube_mesh: ResourceHandle<Mesh>,
-    resource_map: &mut ResourceMap,
+    cube_mesh: AssetHandle<Mesh>,
+    resource_map: &mut AssetMap,
     path: P,
 ) -> anyhow::Result<Texture> {
     let size = output_size;
@@ -201,8 +201,8 @@ fn cubemap_main_loop(
     input_texture_view: &ImageViewHandle,
     fragment_shader_to_apply: ShaderModuleHandle,
     size: Extent2D,
-    resource_map: &ResourceMap,
-    cube_mesh: &ResourceHandle<Mesh>,
+    resource_map: &AssetMap,
+    cube_mesh: &AssetHandle<Mesh>,
 ) -> Result<(ImageHandle, ImageViewHandle), anyhow::Error> {
     let vertex_module = read_file_to_vk_module(gpu, "./shaders/vertex_simple.spirv")?;
     let backing_image = gpu.make_image(
@@ -448,8 +448,8 @@ fn cubemap_main_loop(
 pub fn generate_irradiance_map(
     gpu: &dyn Gpu,
     source_cubemap: &Texture,
-    resource_map: &mut ResourceMap,
-    cube_mesh: &ResourceHandle<Mesh>,
+    resource_map: &mut AssetMap,
+    cube_mesh: &AssetHandle<Mesh>,
 ) -> anyhow::Result<Texture> {
     let size = Extent2D {
         width: 512,
@@ -471,8 +471,8 @@ pub fn generate_irradiance_map(
 
 pub fn load_cube_to_resource_map(
     gpu: &dyn Gpu,
-    resource_map: &mut ResourceMap,
-) -> anyhow::Result<ResourceHandle<engine::Mesh>> {
+    resource_map: &mut AssetMap,
+) -> anyhow::Result<AssetHandle<engine::Mesh>> {
     let mesh_create_info = engine::MeshCreateInfo {
         label: Some("cube"),
         primitives: &[MeshPrimitiveCreateInfo {

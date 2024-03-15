@@ -8,10 +8,10 @@ use engine::app::{app_state::*, bootstrap, App};
 use engine::loaders::FileSystemTextureLoader;
 use engine::math::shape::BoundingShape;
 use engine::{
-    Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, MaterialDescription,
+    AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, MaterialDescription,
     MaterialDomain, MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo,
-    MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline, ResourceMap, ScenePrimitive, Texture,
-    TextureInput, Time,
+    MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline, ScenePrimitive, Texture, TextureInput,
+    Time,
 };
 use gpu::{CommandBuffer, Offset2D, PresentMode, Rect2D, ShaderStage};
 use nalgebra::*;
@@ -36,7 +36,7 @@ pub struct PlanesApp {
     movement: Vector3<f32>,
     scene_renderer: DeferredRenderingPipeline,
     scene: RenderScene,
-    resource_map: ResourceMap,
+    resource_map: AssetMap,
     cvar_manager: CvarManager,
     egui_integration: EguiSupport,
 
@@ -52,7 +52,7 @@ impl App for PlanesApp {
     where
         Self: Sized,
     {
-        let mut resource_map = ResourceMap::new(app_state.gpu.clone());
+        let mut resource_map = AssetMap::new(app_state.gpu.clone());
         resource_map.install_resource_loader(FileSystemTextureLoader::new(app_state.gpu.clone()));
 
         let cvar_manager = CvarManager::new();

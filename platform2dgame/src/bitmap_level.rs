@@ -1,4 +1,4 @@
-use engine::{Resource, ResourceLoader};
+use engine::{Asset, ResourceLoader};
 use image::Rgb;
 
 pub struct BitmapLevelLoader;
@@ -25,7 +25,7 @@ pub struct BitmapLevel {
     pub entities: Vec<Entity>,
 }
 
-impl Resource for BitmapLevel {
+impl Asset for BitmapLevel {
     fn get_description(&self) -> &str {
         "Bitmap level"
     }
