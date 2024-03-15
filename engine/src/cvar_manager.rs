@@ -37,6 +37,8 @@ pub struct CvarManager {
     cvar_id_map: HashMap<&'static str, CvarId>,
 }
 
+impl kecs::Resource for CvarManager {}
+
 impl std::fmt::Display for CvarError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

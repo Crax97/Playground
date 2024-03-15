@@ -1,12 +1,13 @@
 use std::{borrow::Cow, ops::Deref, sync::Arc};
 
-use gpu::{CommandBuffer, Gpu};
+use gpu::{CommandBuffer, Gpu, Offset2D, Rect2D};
 use kecs::{Label, Resource, World};
 use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop};
 
 use crate::{
     app::{app_state::AppState, App},
-    Backbuffer, DeferredRenderingPipeline, Time,
+    Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, RenderScene, RenderingPipeline,
+    ResourceMap, Time,
 };
 
 #[derive(Clone)]
@@ -21,6 +22,62 @@ impl Deref for GpuDevice {
 }
 
 impl Resource for GpuDevice {}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq, PartialOrd, Ord)]
+pub enum SimulationStep {
+    #[default]
+    FirstTick,
+    Running,
+    Stopped,
+    Paused,
+
+    Idle,
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct SimulationState {
+    pub(crate) step: SimulationStep,
+}
+
+impl SimulationState {
+    pub fn play(&mut self) {
+        if self.step == SimulationStep::Paused {
+            self.step = SimulationStep::Running
+        } else {
+            self.step = SimulationStep::FirstTick;
+        }
+    }
+
+    pub fn stop(&mut self) {
+        self.step = SimulationStep::Stopped;
+    }
+
+    pub fn pause(&mut self) {
+        self.step = SimulationStep::Paused;
+    }
+
+    pub fn step(&self) -> SimulationStep {
+        self.step
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.step == SimulationStep::Paused
+    }
+
+    pub fn is_stopped(&self) -> bool {
+        self.step == SimulationStep::Stopped || self.step == SimulationStep::Idle
+    }
+
+    pub fn toggle_play_pause(&mut self) {
+        if self.is_paused() {
+            self.play()
+        } else {
+            self.pause()
+        }
+    }
+}
+
+impl Resource for SimulationState {}
 
 pub trait Plugin: 'static {
     fn on_start(&mut self, _world: &mut World) {}
@@ -45,11 +102,14 @@ pub trait Plugin: 'static {
     ) -> anyhow::Result<()> {
         Ok(())
     }
+
+    fn shutdown(&mut self, _gpu: &dyn Gpu) {}
 }
 
 pub struct KecsApp {
     pub world: World,
     plugins: Vec<Box<dyn Plugin>>,
+    renderer: DeferredRenderingPipeline,
 }
 
 impl KecsApp {
@@ -92,9 +152,16 @@ impl App for KecsApp {
     {
         let mut world = World::new();
         world.add_resource(Time::default());
+        world.add_resource(ResourceMap::new(app_state.gpu.clone()));
+        world.add_resource(CvarManager::new());
+        world.add_resource(RenderScene::new());
+        world.add_resource(SimulationState::default());
+        let combine_shader = DeferredRenderingPipeline::make_3d_combine_shader(app_state.gpu())?;
+        let renderer = DeferredRenderingPipeline::new(app_state.gpu(), combine_shader)?;
         Ok(Self {
             world,
             plugins: vec![],
+            renderer,
         })
     }
 
@@ -102,7 +169,6 @@ impl App for KecsApp {
         &mut self,
         _app_state: &mut crate::app::app_state::AppState,
     ) -> anyhow::Result<()> {
-        self.world.update(Self::START);
         for plugin in &mut self.plugins {
             plugin.on_start(&mut self.world);
         }
@@ -145,26 +211,47 @@ impl App for KecsApp {
     }
 
     fn update(&mut self, _app_state: &mut crate::app::app_state::AppState) -> anyhow::Result<()> {
-        // self.imgui_console
-        //     .update(self.world.get_resource::<InputState>().unwrap());
-        // self.imgui_console.imgui_update(
-        //     ui,
-        //     &mut self.world.get_resource_mut::<CvarManager>().unwrap(),
-        // );
-        self.world.update(Self::PRE_UPDATE);
+        let mut simulation = self
+            .world
+            .get_resource::<SimulationState>()
+            .cloned()
+            .unwrap();
+
         for plugin in &mut self.plugins {
             plugin.pre_update(&mut self.world);
         }
 
-        self.world.update(Self::UPDATE);
         for plugin in &mut self.plugins {
             plugin.update(&mut self.world);
         }
 
-        self.world.update(Self::POST_UPDATE);
         for plugin in &mut self.plugins {
             plugin.post_update(&mut self.world);
         }
+
+        let new_state = match simulation.step {
+            SimulationStep::FirstTick => {
+                self.world.update(Self::START);
+                SimulationStep::Running
+            }
+            SimulationStep::Running => {
+                self.world.update(Self::PRE_UPDATE);
+
+                self.world.update(Self::UPDATE);
+
+                self.world.update(Self::POST_UPDATE);
+                SimulationStep::Running
+            }
+            SimulationStep::Stopped => {
+                self.world.update(Self::END);
+                SimulationStep::Idle
+            }
+            SimulationStep::Paused => SimulationStep::Paused,
+            SimulationStep::Idle => SimulationStep::Idle,
+        };
+
+        simulation.step = new_state;
+        self.world.add_resource(simulation);
         Ok(())
     }
 
@@ -181,6 +268,36 @@ impl App for KecsApp {
             .gpu
             .start_command_buffer(gpu::QueueType::Graphics)?;
 
+        let scene = self.world.get_resource::<RenderScene>();
+        let camera = self
+            .world
+            .get_resource::<Camera>()
+            .cloned()
+            .unwrap_or_default();
+        let resource_map = self.world.get_resource::<ResourceMap>().unwrap();
+        let cvar_manager = self.world.get_resource::<CvarManager>().unwrap();
+        if let Some(scene) = scene {
+            let final_render = self.renderer.render(
+                app_state.gpu(),
+                &mut command_buffer,
+                &camera,
+                scene,
+                resource_map,
+                cvar_manager,
+            )?;
+            self.renderer.draw_textured_quad(
+                &mut command_buffer,
+                &backbuffer.image_view,
+                &final_render,
+                Rect2D {
+                    offset: Offset2D::default(),
+                    extent: backbuffer.size,
+                },
+                true,
+                None,
+            )?;
+        }
+
         for plugin in &mut self.plugins {
             plugin.draw(&mut self.world, app_state, backbuffer, &mut command_buffer)?;
         }
@@ -188,10 +305,10 @@ impl App for KecsApp {
         Ok(command_buffer)
     }
 
-    fn on_shutdown(&mut self, _app_state: &mut AppState) {
-        self.world.update(Self::END);
-        // for plugin in &mut self.plugins {
-        //     plugin.post_update(&mut self.world);
-        // }
+    fn on_shutdown(&mut self, app_state: &mut AppState) {
+        for plugin in &mut self.plugins {
+            plugin.shutdown(app_state.gpu());
+        }
+        self.renderer.destroy(app_state.gpu());
     }
 }

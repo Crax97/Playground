@@ -164,6 +164,8 @@ pub struct RenderScene {
     current_lights_iteration: u64,
 }
 
+impl kecs::Resource for RenderScene {}
+
 impl RenderScene {
     fn increment_light_counter(&mut self) {
         self.current_lights_iteration = self.current_lights_iteration.wrapping_add(1);

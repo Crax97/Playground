@@ -101,6 +101,18 @@ impl TypeEditor for TestComponentEditor {
 fn main() -> anyhow::Result<()> {
     let (mut app, evt_loop, state) = KecsApp::create()?;
 
+    let world = app.world_mut();
+    world.add_system(KecsApp::START, || {
+        println!("Start!");
+    });
+
+    world.add_system(KecsApp::UPDATE, || {
+        println!("Update!");
+    });
+
+    world.add_system(KecsApp::END, || {
+        println!("End!");
+    });
     let mut editor = EguiSceneEditor::new(&state.window, state.gpu())?;
     editor.register_type(&mut app.world, TestComponentEditor);
 

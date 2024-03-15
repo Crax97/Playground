@@ -85,6 +85,8 @@ pub struct Camera {
     pub mode: CameraMode,
 }
 
+impl kecs::Resource for Camera {}
+
 impl Default for Camera {
     fn default() -> Self {
         Self {

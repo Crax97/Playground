@@ -1,4 +1,4 @@
-use egui::Ui;
+use egui::{Separator, Ui};
 use gpu::Gpu;
 use kecs::{ComponentId, Entity, Resource, World};
 use log::warn;
@@ -6,11 +6,18 @@ use nalgebra::UnitQuaternion;
 use std::collections::HashMap;
 
 use crate::{
-    app::egui_support::EguiSupport, game_scene::SceneNodeId, kecs_app::Plugin, GameScene, Time,
+    app::egui_support::EguiSupport,
+    game_scene::SceneNodeId,
+    kecs_app::{Plugin, SimulationState, SimulationStep},
+    GameScene, Time,
 };
 use winit::window::Window;
 
 use super::ui_extension::UiExtension;
+
+const PLAY: &str = "\u{23F5}";
+const PAUSE: &str = "\u{23F8}";
+const STOP: &str = "\u{23F9}";
 
 pub trait TypeEditor {
     type EditedType: Default;
@@ -104,6 +111,9 @@ impl EguiSceneEditor {
 impl Plugin for EguiSceneEditor {
     fn on_start(&mut self, world: &mut kecs::World) {
         world.add_resource(CurrentEditorScene::default());
+
+        let status = world.get_resource_mut::<SimulationState>().unwrap();
+        status.step = SimulationStep::Idle;
     }
 
     fn on_event(
@@ -147,6 +157,15 @@ impl Plugin for EguiSceneEditor {
         let mut wants_to_add_entity = false;
 
         let context = self.egui_support.create_context();
+        egui::TopBottomPanel::top("toolbar").show(&context, |ui| {
+            // let _ = egui::menu::bar(ui, |ui| {});
+            egui::menu::bar(ui, |ui| {
+                egui::menu::menu_button(ui, "test", |ui| {});
+
+                ui.add(Separator::default().vertical());
+                play_pause_button(world, ui);
+            });
+        });
         let _ = egui::Window::new("Entities").show(&context, |ui| {
             let scene = world.get_resource_mut::<CurrentEditorScene>();
             if let Some(scene) = scene {
@@ -222,6 +241,27 @@ impl Plugin for EguiSceneEditor {
             .handle_platform_output(&app_state.window, output.platform_output);
 
         Ok(())
+    }
+    fn shutdown(&mut self, gpu: &dyn Gpu) {
+        self.egui_support.destroy(gpu);
+    }
+}
+
+fn play_pause_button(world: &mut kecs::KecsWorld, ui: &mut Ui) {
+    let status = world.get_resource_mut::<SimulationState>().unwrap();
+
+    if status.is_stopped() {
+        if ui.button(PLAY).clicked() {
+            status.play();
+        }
+    } else {
+        let play_pause = if status.is_paused() { PLAY } else { PAUSE };
+        if ui.button(play_pause).clicked() {
+            status.toggle_play_pause()
+        }
+        if ui.button(STOP).clicked() {
+            status.stop();
+        }
     }
 }
 
