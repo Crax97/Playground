@@ -22,9 +22,9 @@ use crate::{
     loaders::FileSystemTextureLoader,
     physics::PhysicsContext2D,
     render_scene::camera::Camera,
-    utils, AssetHandle, AssetMap, Backbuffer, CvarManager, DeferredRenderingPipeline,
-    MasterMaterial, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline,
-    Texture, TextureInput, Time,
+    utils, AssetHandle, AssetMap, Backbuffer, CvarManager, DeferredRenderingPipeline, GameScene,
+    MasterMaterial, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo, RenderingPipeline, Texture,
+    TextureInput, Time,
 };
 
 const DEFAULT_DEFERRED_FS: &[u32] = glsl!(
@@ -516,10 +516,10 @@ impl App for BevyEcsApp {
         let mut command_buffer = app_state
             .gpu
             .start_command_buffer(gpu::QueueType::Graphics)?;
-        let empty_scene = RenderScene::default();
+        let empty_scene = GameScene::default();
         let scene = self
             .world
-            .get_resource::<RenderScene>()
+            .get_resource::<GameScene>()
             .unwrap_or(&empty_scene);
         let resource_map = self.world.get_resource::<AssetMap>().unwrap();
         let cvar_manager = self.world.get_resource::<CvarManager>().unwrap();

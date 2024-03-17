@@ -7,9 +7,8 @@ use std::collections::HashMap;
 
 use crate::{
     app::egui_support::EguiSupport,
-    game_scene::SceneNodeId,
     kecs_app::{Plugin, SimulationState, SimulationStep},
-    EntityToSceneNode, GameScene, Time,
+    GameScene, PrimitiveHandle, Time,
 };
 use winit::window::Window;
 
@@ -46,7 +45,7 @@ impl<T: TypeEditor + 'static> ErasedTypeEditor for T {
 
 pub struct EguiSceneEditor {
     egui_support: EguiSupport,
-    current_node: Option<SceneNodeId>,
+    current_node: Option<PrimitiveHandle>,
     registered_types: HashMap<ComponentId, Box<dyn ErasedTypeEditor>>,
 }
 
@@ -70,14 +69,13 @@ impl EguiSceneEditor {
         }
     }
 
-    fn draw_scene_node(&self, ui: &mut Ui, scene: &mut GameScene, current_node: SceneNodeId) {
-        let node = scene.get_node_mut(current_node).unwrap();
+    fn draw_scene_node(&self, ui: &mut Ui, scene: &mut GameScene, current_node: PrimitiveHandle) {
+        let node = scene.get_mut(current_node);
 
         ui.text_edit_singleline(&mut node.label);
         ui.group(|ui| {
-            let mut node_transform = scene
-                .get_transform(current_node, crate::game_scene::TransformSpace::World)
-                .unwrap();
+            let mut node = scene.get_mut(current_node);
+            let node_transform = &mut node.transform;
             let mut changed_transform = false;
             changed_transform |=
                 ui.input_floats("Position", node_transform.position.coords.as_mut_slice());
@@ -93,11 +91,6 @@ impl EguiSceneEditor {
                     rotation_euler[1].to_radians(),
                     rotation_euler[2].to_radians(),
                 );
-                scene.set_transform(
-                    current_node,
-                    node_transform,
-                    crate::game_scene::TransformSpace::World,
-                );
             }
         });
     }
@@ -105,8 +98,6 @@ impl EguiSceneEditor {
 
 impl Plugin for EguiSceneEditor {
     fn on_start(&mut self, world: &mut kecs::World) {
-        world.add_resource(GameScene::default());
-
         let status = world.get_resource_mut::<SimulationState>().unwrap();
         status.step = SimulationStep::Idle;
     }
@@ -148,7 +139,6 @@ impl Plugin for EguiSceneEditor {
 
         self.egui_support.begin_frame(&app_state.window, time);
 
-        let mut current_selected_entity = None;
         let mut wants_to_add_entity = false;
 
         let context = self.egui_support.create_context();
@@ -164,10 +154,12 @@ impl Plugin for EguiSceneEditor {
         let _ = egui::Window::new("Entities").show(&context, |ui| {
             let scene = world.get_resource_mut::<GameScene>();
             if let Some(scene) = scene {
-                let roots = scene.root_nodes().cloned().collect::<Vec<_>>();
-                roots.into_iter().for_each(|root_node| {
-                    Self::draw_entity_outliner(ui, scene, root_node, &mut self.current_node);
-                });
+                scene
+                    .all_primitives()
+                    .into_iter()
+                    .for_each(|(handle, primitive)| {
+                        Self::draw_entity_outliner(ui, scene, handle, &mut self.current_node);
+                    });
 
                 if ui.button("Add New Entity").clicked() {
                     wants_to_add_entity = true;
@@ -175,23 +167,11 @@ impl Plugin for EguiSceneEditor {
 
                 ui.collapsing("Current Scene Node", |ui| {
                     if let Some(current_node) = self.current_node {
-                        current_selected_entity =
-                            Some(scene.get_node(current_node).unwrap().payload);
                         self.draw_scene_node(ui, scene, current_node);
                     }
                 });
-                if wants_to_add_entity {
-                    let entity = world.new_entity();
-
-                    let scene = world.get_resource_mut::<GameScene>().unwrap();
-                    let id = scene
-                        .add_node(entity)
-                        .label(format!("{:?}", entity))
-                        .build();
-
-                    world.add_component(entity, EntityToSceneNode { node_id: id })
-                }
             }
+            let current_selected_entity = None;
 
             egui::CollapsingHeader::new("Current Entity Components").show(ui, |ui| {
                 if let Some(entity) = current_selected_entity {
@@ -263,25 +243,25 @@ fn play_pause_button(world: &mut kecs::KecsWorld, ui: &mut Ui) {
 impl EguiSceneEditor {
     fn draw_entity_outliner(
         ui: &mut Ui,
-        scene: &mut GameScene,
-        current_node: SceneNodeId,
-        selected_node: &mut Option<SceneNodeId>,
+        scene: &GameScene,
+        current_node: PrimitiveHandle,
+        selected_node: &mut Option<PrimitiveHandle>,
     ) {
         let selected = selected_node.is_some_and(|n| n == current_node);
-        let node = scene.get_node_mut(current_node).unwrap();
+        let node = scene.get(current_node);
         let label = node.label.clone();
-        let children = scene
-            .get_children(current_node)
-            .unwrap()
-            .cloned()
-            .collect::<Vec<_>>();
+        // let children = scene
+        //     .get_children(current_node)
+        //     .unwrap()
+        //     .cloned()
+        //     .collect::<Vec<_>>();
 
         let clicked = egui::CollapsingHeader::new(label)
             .show_background(selected)
             .show(ui, |ui| {
-                for child in children {
-                    Self::draw_entity_outliner(ui, scene, child, selected_node);
-                }
+                // for child in children {
+                //     Self::draw_entity_outliner(ui, scene, child, selected_node);
+                // }
             })
             .header_response
             .clicked();

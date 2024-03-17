@@ -4,7 +4,7 @@ use crate::editor::TypeEditor;
 use crate::kecs_app::SharedAssetMap;
 use crate::math::shape::BoundingShape;
 use crate::{
-    asset_map::AssetHandle, bevy_ecs_app::CommonResources, LightType, RenderScene,
+    asset_map::AssetHandle, bevy_ecs_app::CommonResources, GameScene, LightType,
     ShadowConfiguration, Texture,
 };
 use bevy_ecs::reflect::ReflectComponent;
@@ -23,9 +23,7 @@ use nalgebra::{
 };
 use winit::window::Window;
 
-use crate::{
-    AssetMap, EntityToSceneNode, GameScene, GpuDevice, MasterMaterial, MaterialInstance, Mesh,
-};
+use crate::{AssetMap, GpuDevice, MasterMaterial, MaterialInstance, Mesh};
 
 #[derive(Resource)]
 pub struct EngineWindow(pub(crate) Window);
@@ -259,7 +257,7 @@ pub fn rendering_system(
     world: &World,
     mut commands: Commands,
 ) {
-    let mut scene = RenderScene::new();
+    let mut scene = GameScene::new();
     if let Some(setup) = world.get_resource::<SceneSetup>() {
         scene.set_skybox_material(setup.skybox_material.clone());
         scene.set_skybox_texture(setup.skybox_texture.clone());
@@ -295,54 +293,13 @@ pub fn rendering_system(
 }
 
 #[deprecated]
-pub fn rendering_system_kecs(
-    meshes: kecs::Query<(&MeshComponent, &EntityToSceneNode)>,
-    lights: kecs::Query<(&LightComponent, &Transform)>,
-    mut commands: kecs::Commands,
-    game_scene: kecs::ResMut<GameScene>,
-) {
-    let mut scene = RenderScene::new();
-    for (mesh_component, node_id) in meshes.iter() {
-        let transform = game_scene
-            .get_transform(node_id.node_id, crate::game_scene::TransformSpace::World)
-            .expect("No transform");
-        let bounds = mesh_component.bounds().transformed(transform.matrix());
-        scene.add_mesh(
-            crate::SceneMesh {
-                mesh: mesh_component.mesh.clone(),
-                materials: mesh_component.materials.clone(),
-                bounds,
-            },
-            transform,
-            None,
-        );
-    }
-    for (light, transform) in lights.iter() {
-        scene.add_light(
-            crate::SceneLightInfo {
-                ty: light.ty,
-                radius: light.radius,
-                color: light.color,
-                intensity: light.intensity,
-                enabled: light.enabled,
-                shadow_configuration: light.shadow_setup,
-            },
-            *transform,
-            None,
-        );
-    }
-
-    commands.add_resource(scene)
-}
-
-#[deprecated]
 pub fn rendering_system_2d(
     common_resources: Res<CommonResources>,
     sprites: Query<(&SpriteComponent, &Transform2D)>,
     world: &World,
     mut commands: Commands,
 ) {
-    let mut scene = RenderScene::new();
+    let mut scene = GameScene::new();
     if let Some(setup) = world.get_resource::<SceneSetup>() {
         scene.set_skybox_material(setup.skybox_material.clone());
         scene.set_skybox_texture(setup.skybox_texture.clone());

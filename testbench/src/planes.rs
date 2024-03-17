@@ -9,9 +9,9 @@ use engine::components::Transform;
 use engine::loaders::FileSystemTextureLoader;
 use engine::math::shape::BoundingShape;
 use engine::{
-    AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, MaterialDescription,
-    MaterialDomain, MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo,
-    MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline, SceneMesh, Texture, TextureInput,
+    AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, GameScene,
+    MaterialDescription, MaterialDomain, MaterialInstance, MaterialInstanceDescription, Mesh,
+    MeshCreateInfo, MeshPrimitiveCreateInfo, RenderingPipeline, SceneMesh, Texture, TextureInput,
     Time,
 };
 use gpu::{CommandBuffer, Offset2D, PresentMode, Rect2D, ShaderStage};
@@ -36,7 +36,7 @@ pub struct PlanesApp {
     dist: f32,
     movement: Vector3<f32>,
     scene_renderer: DeferredRenderingPipeline,
-    scene: RenderScene,
+    scene: GameScene,
     resource_map: AssetMap,
     cvar_manager: CvarManager,
     egui_integration: EguiSupport,
@@ -158,7 +158,7 @@ impl App for PlanesApp {
             .swapchain_mut()
             .select_present_mode(PresentMode::Mailbox)?;
 
-        let mut scene = RenderScene::new();
+        let mut scene = GameScene::new();
 
         let bounds = BoundingShape::BoundingBox {
             min: point![-1.0, -1.0, 0.0],

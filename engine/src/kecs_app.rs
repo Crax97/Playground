@@ -10,7 +10,7 @@ use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop};
 
 use crate::{
     app::{app_state::AppState, App},
-    AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, GameScene, RenderScene,
+    AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, GameScene,
     RenderingPipeline, Time,
 };
 
@@ -176,9 +176,8 @@ impl App for KecsApp {
         world.add_resource(Time::default());
         world.add_resource(SharedAssetMap::new(app_state.gpu.clone()));
         world.add_resource(CvarManager::new());
-        world.add_resource(RenderScene::new());
+        world.add_resource(GameScene::new());
         world.add_resource(SimulationState::default());
-        world.add_resource(GameScene::default());
         let combine_shader = DeferredRenderingPipeline::make_3d_combine_shader(app_state.gpu())?;
         let renderer = DeferredRenderingPipeline::new(app_state.gpu(), combine_shader)?;
         Ok(Self {
@@ -293,7 +292,7 @@ impl App for KecsApp {
             .gpu
             .start_command_buffer(gpu::QueueType::Graphics)?;
 
-        let scene = self.world.get_resource::<RenderScene>();
+        let scene = self.world.get_resource::<GameScene>();
         let camera = self
             .world
             .get_resource::<Camera>()

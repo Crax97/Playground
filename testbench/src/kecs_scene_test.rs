@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use bytemuck::{Pod, Zeroable};
 use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App, Console};
-use engine::components::{rendering_system_kecs, MeshComponentEditor};
+use engine::components::MeshComponentEditor;
 use engine::editor::ui_extension::UiExtension;
 use engine::editor::{EguiSceneEditor, TypeEditor};
 use engine::kecs_app::{KecsApp, SharedAssetMap};
@@ -131,7 +131,6 @@ fn main() -> anyhow::Result<()> {
     world.add_system(KecsApp::END, || {
         println!("End!");
     });
-    world.add_system(KecsApp::DRAW, rendering_system_kecs);
     let mut editor = EguiSceneEditor::new(&state.window, state.gpu())?;
     editor.register_type(&mut app.world, TestComponentEditor);
     editor.register_type(&mut app.world, MeshComponentEditor::new(asset_map));

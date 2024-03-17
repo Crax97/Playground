@@ -170,7 +170,7 @@ impl SceneLightInfo {
 pub struct PrimitiveHandle(pub Index);
 
 #[derive(Resource, Default)]
-pub struct RenderScene {
+pub struct GameScene {
     pub bvh: BinaryBvh<thunderdome::Index>,
     pub use_frustum_culling: bool,
     pub use_bvh: bool,
@@ -181,9 +181,9 @@ pub struct RenderScene {
     current_lights_iteration: u64,
 }
 
-impl kecs::Resource for RenderScene {}
+impl kecs::Resource for GameScene {}
 
-impl RenderScene {
+impl GameScene {
     fn increment_light_counter(&mut self) {
         self.current_lights_iteration = self.current_lights_iteration.wrapping_add(1);
     }
@@ -212,7 +212,7 @@ impl RenderScene {
     }
 }
 
-impl RenderScene {
+impl GameScene {
     pub fn new() -> Self {
         Self {
             bvh: Bvh::new(),
@@ -249,7 +249,7 @@ impl RenderScene {
                 .primitives
                 .iter()
                 .filter_map(|(_, p)| match &p.ty {
-                    ScenePrimitiveType::Mesh(m) => Some(p),
+                    ScenePrimitiveType::Mesh(_) => Some(p),
                     _ => None,
                 })
                 .collect();
@@ -259,7 +259,7 @@ impl RenderScene {
                 .iter()
                 .map(|id| &self.primitives[*id])
                 .map(|p| match &p.ty {
-                    ScenePrimitiveType::Mesh(m) => p,
+                    ScenePrimitiveType::Mesh(_) => p,
                     ScenePrimitiveType::Light(_) => panic!("BVH returned a light"),
                 })
                 .collect()
@@ -287,12 +287,9 @@ impl RenderScene {
             label: label.unwrap_or_else(|| {
                 match light.ty {
                     LightType::Point => "Point Light",
-                    LightType::Directional { size } => "Directional Light",
-                    LightType::Spotlight {
-                        inner_cone_degrees,
-                        outer_cone_degrees,
-                    } => "Spot Light",
-                    LightType::Rect { width, height } => "Rect Light",
+                    LightType::Directional { .. } => "Directional Light",
+                    LightType::Spotlight { .. } => "Spot Light",
+                    LightType::Rect { .. } => "Rect Light",
                 }
                 .to_string()
             }),
@@ -374,7 +371,7 @@ pub trait RenderingPipeline {
         gpu: &dyn Gpu,
         graphics_command_buffer: &mut CommandBuffer,
         pov: &Camera,
-        scene: &RenderScene,
+        scene: &GameScene,
         resource_map: &AssetMap,
         cvar_manager: &CvarManager,
     ) -> anyhow::Result<ImageViewHandle>;

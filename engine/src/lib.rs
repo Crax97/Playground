@@ -3,7 +3,6 @@ pub mod app;
 pub mod asset_map;
 pub mod components;
 pub mod editor;
-pub mod game_scene;
 pub mod input;
 pub mod kecs_app;
 pub mod loaders;
@@ -25,7 +24,6 @@ pub use bevy_ecs;
 pub use bevy_ecs_app::*;
 pub use bevy_reflect;
 pub use cvar_manager::*;
-use game_scene::{Scene, SceneNodeId};
 pub use kecs;
 use kecs::Entity;
 pub use material::*;
@@ -44,9 +42,3 @@ pub use render_scene::{camera::*, deferred_renderer::*, render_structs::*, scene
  * Conventions used
  * Coordinates: +Y is up, +Z is forward, -X is right (same as glTF)
  * */
-
-pub type GameScene = Scene<Entity>;
-
-pub struct EntityToSceneNode {
-    node_id: SceneNodeId,
-}

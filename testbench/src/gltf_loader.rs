@@ -3,9 +3,9 @@ use engine::asset_map::{AssetHandle, AssetMap};
 use engine::components::Transform;
 use engine::math::shape::BoundingShape;
 use engine::{
-    LightType, MasterMaterial, MaterialDescription, MaterialDomain, MaterialInstance,
+    GameScene, LightType, MasterMaterial, MaterialDescription, MaterialDomain, MaterialInstance,
     MaterialInstanceDescription, MaterialParameterOffsetSize, Mesh, MeshCreateInfo,
-    MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline, SceneMesh, Texture, TextureInput,
+    MeshPrimitiveCreateInfo, RenderingPipeline, SceneMesh, Texture, TextureInput,
     TextureSamplerSettings,
 };
 use gltf::image::Data;
@@ -29,7 +29,7 @@ pub struct PbrProperties {
 }
 
 pub struct GltfLoader {
-    engine_scene: RenderScene,
+    engine_scene: GameScene,
 }
 
 pub struct GltfLoadOptions {
@@ -75,8 +75,8 @@ impl GltfLoader {
         document: Document,
         allocated_materials: Vec<MaterialInstance>,
         meshes: Vec<(AssetHandle<Mesh>, Point3<f32>, Point3<f32>)>,
-    ) -> RenderScene {
-        let mut engine_scene = RenderScene::new();
+    ) -> GameScene {
+        let mut engine_scene = GameScene::new();
         for scene in document.scenes() {
             for node in scene.nodes() {
                 handle_node(node, &mut engine_scene, &allocated_materials, &meshes);
@@ -466,18 +466,18 @@ impl GltfLoader {
         Ok(allocated_materials)
     }
 
-    pub fn scene(&self) -> &engine::RenderScene {
+    pub fn scene(&self) -> &engine::GameScene {
         &self.engine_scene
     }
 
-    pub fn scene_mut(&mut self) -> &mut engine::RenderScene {
+    pub fn scene_mut(&mut self) -> &mut engine::GameScene {
         &mut self.engine_scene
     }
 }
 
 fn handle_node(
     node: gltf::Node<'_>,
-    engine_scene: &mut RenderScene,
+    engine_scene: &mut GameScene,
     allocated_materials: &Vec<MaterialInstance>,
     meshes: &Vec<(
         AssetHandle<Mesh>,

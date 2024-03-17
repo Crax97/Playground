@@ -19,8 +19,8 @@ use std::mem::size_of;
 
 use crate::{
     material::{MasterMaterial, MasterMaterialDescription},
-    Camera, CvarManager, Frustum, MaterialDescription, MaterialInstance, Mesh, MeshPrimitive,
-    PipelineTarget, RenderScene, RenderingPipeline, SceneMesh, Texture,
+    Camera, CvarManager, Frustum, GameScene, MaterialDescription, MaterialInstance, Mesh,
+    MeshPrimitive, PipelineTarget, RenderingPipeline, SceneMesh, Texture,
 };
 
 use crate::asset_map::{AssetHandle, AssetMap};
@@ -335,7 +335,7 @@ impl DeferredRenderingPipeline {
         current_buffers: &FrameBuffers,
         primitives: &Vec<&ScenePrimitive>,
         pov: &Camera,
-        scene: &RenderScene,
+        scene: &GameScene,
     ) -> anyhow::Result<()> {
         let GBuffer {
             depth_component,
@@ -756,7 +756,7 @@ impl DeferredRenderingPipeline {
         &mut self,
         gpu: &dyn Gpu,
         scene_camera: &Camera,
-        scene: &RenderScene,
+        scene: &GameScene,
     ) -> anyhow::Result<()> {
         self.active_lights.clear();
         self.light_povs.clear();
@@ -963,7 +963,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
         gpu: &dyn Gpu,
         graphics_command_buffer: &mut CommandBuffer,
         camera: &Camera,
-        scene: &RenderScene,
+        scene: &GameScene,
         resource_map: &AssetMap,
         cvar_manager: &CvarManager,
     ) -> anyhow::Result<ImageViewHandle> {

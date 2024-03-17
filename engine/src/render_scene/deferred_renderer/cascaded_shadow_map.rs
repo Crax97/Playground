@@ -154,7 +154,7 @@ impl CascadedShadowMap {
     pub(crate) fn render_shadow_atlas(
         &self,
         gpu: &dyn Gpu,
-        scene: &crate::RenderScene,
+        scene: &crate::GameScene,
         command_buffer: &mut gpu::CommandBuffer,
         frame_buffers: &FrameBuffers,
         resource_map: &AssetMap,
