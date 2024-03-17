@@ -6,7 +6,7 @@ mod sampler_allocator;
 use crate::{
     post_process_pass::{PostProcessPass, PostProcessResources},
     render_scene::render_structs::*,
-    Asset,
+    Asset, ScenePrimitive,
 };
 use cascaded_shadow_map::*;
 use gbuffer::*;
@@ -20,7 +20,7 @@ use std::mem::size_of;
 use crate::{
     material::{MasterMaterial, MasterMaterialDescription},
     Camera, CvarManager, Frustum, MaterialDescription, MaterialInstance, Mesh, MeshPrimitive,
-    PipelineTarget, RenderScene, RenderingPipeline, ScenePrimitive, Texture,
+    PipelineTarget, RenderScene, RenderingPipeline, SceneMesh, Texture,
 };
 
 use crate::asset_map::{AssetHandle, AssetMap};
@@ -249,6 +249,8 @@ impl DeferredRenderingPipeline {
         let mut total_primitives_rendered = 0;
         for primitive in primitives {
             {
+                let transform = &primitive.transform;
+                let primitive = primitive.ty.as_mesh();
                 let mesh = resource_map.get(&primitive.mesh);
                 for (material_idx, mesh_prim) in mesh.primitives.iter().enumerate() {
                     let material = &primitive.materials[material_idx];
@@ -257,8 +259,7 @@ impl DeferredRenderingPipeline {
 
                     // render_pass.set_cull_mode(master.cull_mode);
                     // render_pass.set_front_face(master.front_face);
-                    let model = primitive.transform;
-                    println!("DRAW");
+                    let model = transform.matrix();
                     draw_mesh_primitive(
                         gpu,
                         render_pass,
@@ -763,20 +764,25 @@ impl DeferredRenderingPipeline {
 
         let mut pov_idx = 1;
 
-        for (light_id, light) in scene.lights.iter().enumerate() {
+        for (light_id, (_, light)) in scene.all_enabled_lights().enumerate() {
+            let transform = &light.transform;
+            let light = light.ty.as_light();
             if !light.enabled {
                 continue;
             }
 
-            let mut gpu_light: GpuLightInfo = light.into();
+            let mut gpu_light: GpuLightInfo = light.to_gpu_data(&transform);
             if let Some(NewShadowMapAllocation {
                 povs,
                 shadow_map_index,
                 csm_split,
-            }) =
-                self.cascaded_shadow_map
-                    .add_light(light, scene_camera, pov_idx, light_id as u32)
-            {
+            }) = self.cascaded_shadow_map.add_light(
+                light,
+                transform,
+                scene_camera,
+                pov_idx,
+                light_id as u32,
+            ) {
                 pov_idx += povs.len() as u32;
                 self.light_povs.extend(povs.into_iter());
                 gpu_light.ty_shadow_map_idx_csm_split[1] = shadow_map_index as i32;

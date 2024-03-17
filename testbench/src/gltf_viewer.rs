@@ -8,13 +8,15 @@ use std::collections::HashMap;
 use bytemuck::{Pod, Zeroable};
 use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App, Console};
+use engine::components::Transform;
 use engine::editor::ui_extension::UiExtension;
-use engine::{egui, Light, LightType, ShadowConfiguration, Time};
+use engine::{egui, LightType, SceneLightInfo, ShadowConfiguration, Time};
 
 use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
 use engine_macros::glsl;
 use fps_camera::FpsCamera;
+use gltf::json::scene::UnitQuaternion;
 use gpu::{
     CommandBuffer, Extent2D, ImageFormat, Offset2D, PresentMode, Rect2D, ShaderModuleCreateInfo,
     ShaderModuleHandle, ShaderStage,
@@ -25,7 +27,7 @@ use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::input::key::Key;
 use engine::{
     post_process_pass::FxaaPass, AssetMap, Backbuffer, CvarManager, DeferredRenderingPipeline,
-    LightHandle, MaterialInstance, RenderingPipeline, TextureInput,
+    MaterialInstance, PrimitiveHandle, RenderingPipeline, TextureInput,
 };
 use nalgebra::*;
 use winit::event::MouseButton;
@@ -67,7 +69,7 @@ pub struct GLTFViewer {
     camera: FpsCamera,
     scene_renderer: DeferredRenderingPipeline,
     gltf_loader: GltfLoader,
-    camera_light: Option<LightHandle>,
+    camera_light: Option<PrimitiveHandle>,
 
     input: InputState,
     console: Console,
@@ -81,7 +83,7 @@ pub struct GLTFViewer {
 
 impl GLTFViewer {
     pub(crate) fn print_lights(&self) {
-        for light in self.gltf_loader.scene().all_lights() {
+        for (light, _) in self.gltf_loader.scene().all_lights() {
             println!("{light:?}");
         }
     }
@@ -104,9 +106,8 @@ impl GLTFViewer {
             self.gltf_loader
                 .scene()
                 .all_lights()
-                .iter()
-                .enumerate()
-                .for_each(|(i, l)| {
+                .for_each(|(handle, l)| {
+                    let l = l.ty.as_light();
                     let light_string = match l.ty {
                         LightType::Point => "Point light",
                         LightType::Directional { .. } => "Directional light",
@@ -114,12 +115,10 @@ impl GLTFViewer {
                         LightType::Rect { .. } => "Rect light",
                     };
 
-                    let handle = LightHandle(i);
-
                     if ui
                         .selectable_label(
                             self.camera_light.is_some_and(|l| l == handle),
-                            format!("{light_string} #{}", i),
+                            format!("{light_string} #{:?}", handle),
                         )
                         .clicked()
                     {
@@ -128,17 +127,25 @@ impl GLTFViewer {
                 });
 
             if let Some(cl) = self.camera_light {
-                let l = self.gltf_loader.scene_mut().edit_light(&cl);
+                let l = self.gltf_loader.scene_mut().get_mut(cl);
+                let transform = &mut l.transform;
+                let mut degrees_rot = transform.rotation.euler_angles();
+                let mut degrees_rot =
+                    [degrees_rot.0, degrees_rot.1, degrees_rot.2].map(|v| v.to_degrees());
+                let l = l.ty.as_light_mut();
                 ui.indent(
                     "cameralight
                 ",
                     |ui| {
                         ui.checkbox(&mut l.enabled, "Enabled");
-                        ui.input_floats("Position", &mut l.position.coords.data.0[0]);
-                        let mut degrees_rot = l.direction().map(|v| v.to_degrees());
-                        if ui.input_floats("Rotation", &mut degrees_rot.data.0[0]) {
+                        ui.input_floats("Position", &mut transform.position.coords.data.0[0]);
+
+                        if ui.input_floats("Rotation", &mut degrees_rot) {
                             let rad_rot = degrees_rot.map(|v| v.to_radians());
-                            l.set_direction(rad_rot);
+                            let rot = nalgebra::UnitQuaternion::from_euler_angles(
+                                rad_rot[0], rad_rot[1], rad_rot[2],
+                            );
+                            transform.rotation = rot;
                         }
 
                         ui.color_edit3("Color", &mut l.color.data.0[0]);
@@ -152,16 +159,13 @@ impl GLTFViewer {
                         }
                         match &mut l.ty {
                             LightType::Point => {}
-                            LightType::Directional { direction, size } => {
-                                ui.input_floats("Direction", &mut direction.data.0[0]);
+                            LightType::Directional { size } => {
                                 ui.input_floats("Shadow size", &mut size.data.0[0]);
                             }
                             LightType::Spotlight {
-                                direction,
                                 inner_cone_degrees,
                                 outer_cone_degrees,
                             } => {
-                                ui.input_floats("Direction", &mut direction.data.0[0]);
                                 ui.slider(
                                     "Outer cone",
                                     *inner_cone_degrees,
@@ -175,12 +179,7 @@ impl GLTFViewer {
                                     inner_cone_degrees,
                                 );
                             }
-                            LightType::Rect {
-                                direction,
-                                width,
-                                height,
-                            } => {
-                                ui.input_floats("Direction", &mut direction.data.0[0]);
+                            LightType::Rect { width, height } => {
                                 ui.slider("Width", 0.0, 100000.0, width);
                                 ui.slider("Height", 0.0, 100000.0, height);
                             }
@@ -191,57 +190,61 @@ impl GLTFViewer {
             ui.separator();
 
             if ui.button("Add new spotlight").clicked() {
-                self.gltf_loader.scene_mut().add_light(Light {
-                    ty: LightType::Spotlight {
-                        direction: vector![0.454, -0.324, -0.830],
-                        inner_cone_degrees: 15.0,
-                        outer_cone_degrees: 35.0,
+                self.gltf_loader.scene_mut().add_light(
+                    SceneLightInfo {
+                        ty: LightType::Spotlight {
+                            inner_cone_degrees: 15.0,
+                            outer_cone_degrees: 35.0,
+                        },
+                        radius: 100.0,
+                        color: vector![1.0, 1.0, 1.0],
+                        intensity: 10.0,
+                        enabled: true,
+                        shadow_configuration: Some(ShadowConfiguration {
+                            shadow_map_width: 512,
+                            shadow_map_height: 512,
+                            ..Default::default()
+                        }),
                     },
-                    position: point![9.766, -0.215, 2.078],
-                    radius: 100.0,
-                    color: vector![1.0, 1.0, 1.0],
-                    intensity: 10.0,
-                    enabled: true,
-                    shadow_configuration: Some(ShadowConfiguration {
-                        shadow_map_width: 512,
-                        shadow_map_height: 512,
-                        ..Default::default()
-                    }),
-                });
+                    Transform::default(),
+                );
             }
             if ui.button("Add new directional light").clicked() {
-                self.gltf_loader.scene_mut().add_light(Light {
-                    ty: LightType::Directional {
-                        direction: vector![0.454, -0.324, -0.830],
-                        size: vector![10.0, 10.0],
+                self.gltf_loader.scene_mut().add_light(
+                    SceneLightInfo {
+                        ty: LightType::Directional {
+                            size: vector![10.0, 10.0],
+                        },
+                        radius: 100.0,
+                        color: vector![1.0, 1.0, 1.0],
+                        intensity: 10.0,
+                        enabled: true,
+                        shadow_configuration: Some(ShadowConfiguration {
+                            shadow_map_width: 2048,
+                            shadow_map_height: 2048,
+                            depth_bias: 0.05,
+                            depth_slope: 1.0,
+                        }),
                     },
-                    position: point![9.766, -0.215, 2.078],
-                    radius: 100.0,
-                    color: vector![1.0, 1.0, 1.0],
-                    intensity: 10.0,
-                    enabled: true,
-                    shadow_configuration: Some(ShadowConfiguration {
-                        shadow_map_width: 2048,
-                        shadow_map_height: 2048,
-                        depth_bias: 0.05,
-                        depth_slope: 1.0,
-                    }),
-                });
+                    Transform::default(),
+                );
             }
             if ui.button("Add new point light").clicked() {
-                self.gltf_loader.scene_mut().add_light(Light {
-                    ty: LightType::Point,
-                    position: point![9.766, -0.215, 2.078],
-                    radius: 100.0,
-                    color: vector![1.0, 1.0, 1.0],
-                    intensity: 10.0,
-                    enabled: true,
-                    shadow_configuration: Some(ShadowConfiguration {
-                        shadow_map_width: 512,
-                        shadow_map_height: 512,
-                        ..Default::default()
-                    }),
-                });
+                self.gltf_loader.scene_mut().add_light(
+                    SceneLightInfo {
+                        ty: LightType::Point,
+                        radius: 100.0,
+                        color: vector![1.0, 1.0, 1.0],
+                        intensity: 10.0,
+                        enabled: true,
+                        shadow_configuration: Some(ShadowConfiguration {
+                            shadow_map_width: 512,
+                            shadow_map_height: 512,
+                            ..Default::default()
+                        }),
+                    },
+                    Transform::default(),
+                );
             }
         });
     }
@@ -354,24 +357,25 @@ impl App for GLTFViewer {
 
         let egui_support = EguiSupport::new(&app_state.window, app_state.gpu())?;
 
-        gltf_loader.scene_mut().add_light(Light {
-            ty: LightType::Directional {
-                direction: vector![-0.172285721, -0.374876559, 0.910925507],
-                size: vector![50.0, 50.0],
-            },
-            position: Default::default(),
-            radius: 1.0,
-            color: vector![1.0, 1.0, 1.0],
+        gltf_loader.scene_mut().add_light(
+            SceneLightInfo {
+                ty: LightType::Directional {
+                    size: vector![50.0, 50.0],
+                },
+                radius: 1.0,
+                color: vector![1.0, 1.0, 1.0],
 
-            intensity: 10.0,
-            enabled: true,
-            shadow_configuration: Some(ShadowConfiguration {
-                shadow_map_width: 2048,
-                shadow_map_height: 2048,
-                depth_bias: 0.05,
-                depth_slope: 1.0,
-            }),
-        });
+                intensity: 10.0,
+                enabled: true,
+                shadow_configuration: Some(ShadowConfiguration {
+                    shadow_map_width: 2048,
+                    shadow_map_height: 2048,
+                    depth_bias: 0.05,
+                    depth_slope: 1.0,
+                }),
+            },
+            Default::default(),
+        );
 
         let depth_draw = app_state.gpu.make_shader_module(&ShaderModuleCreateInfo {
             label: Some("Depth draw"),
@@ -613,12 +617,9 @@ impl App for GLTFViewer {
             if let Some(camera_light) = self.camera_light {
                 self.gltf_loader
                     .scene_mut()
-                    .edit_light(&camera_light)
+                    .get_mut(camera_light)
+                    .transform
                     .position = self.camera.location;
-                self.gltf_loader
-                    .scene_mut()
-                    .edit_light(&camera_light)
-                    .set_direction(self.camera.forward());
             }
         }
 

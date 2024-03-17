@@ -7,8 +7,9 @@ use gpu::{
 use nalgebra::{point, vector, Matrix4, Point3};
 
 use crate::{
-    AssetMap, Camera, DeferredRenderingPipeline, FrameBuffers, Frustum, Light, LightType,
-    PipelineTarget, PointOfViewData, TiledTexture2DPacker, TiledTexture2DSection,
+    components::Transform, AssetMap, Camera, DeferredRenderingPipeline, FrameBuffers, Frustum,
+    LightType, PipelineTarget, PointOfViewData, SceneLightInfo, TiledTexture2DPacker,
+    TiledTexture2DSection,
 };
 
 use super::SamplerAllocator;
@@ -181,10 +182,13 @@ impl CascadedShadowMap {
                     },
                 });
 
+            let lights = scene.all_enabled_lights().collect::<Vec<_>>();
+
             for shadow_map in &self.shadow_maps {
                 let caster_pov = shadow_map.type_num_maps_pov_lightid[2];
                 let pov_idx = shadow_map.type_num_maps_pov_lightid[2];
-                let light = &scene.lights[shadow_map.type_num_maps_pov_lightid[3] as usize];
+                let light = lights[shadow_map.type_num_maps_pov_lightid[3] as usize].1;
+                let light = light.ty.as_light();
                 // We subtract 1 because index 0 is reserved for the camera
                 let pov = &light_povs[caster_pov as usize - 1];
                 let frustum = if let LightType::Directional { .. } = light.ty {
@@ -245,7 +249,8 @@ impl CascadedShadowMap {
     // Returns the povs added for each shadow map added
     pub(crate) fn add_light(
         &mut self,
-        light: &Light,
+        light: &SceneLightInfo,
+        transform: &Transform,
         scene_camera: &crate::Camera,
         pov_idx: u32,
         light_id: u32,
@@ -272,9 +277,10 @@ impl CascadedShadowMap {
                 .texture_packer
                 .allocate(shadow_map_width * num_maps, shadow_map_height)
             {
-                let this_light_cameras = light.light_cameras();
+                let this_light_cameras = light.light_cameras(&transform);
                 let (povs, splits) = self.get_light_povs_and_splits(
                     light,
+                    transform,
                     scene_camera,
                     this_light_cameras,
                     &allocation,
@@ -317,13 +323,15 @@ impl CascadedShadowMap {
 
     fn get_light_povs_and_splits(
         &self,
-        l: &Light,
+        l: &SceneLightInfo,
+        transform: &Transform,
         scene_camera: &crate::Camera,
         light_povs: Vec<Camera>,
         allocation: &TiledTexture2DSection,
     ) -> (Vec<PointOfViewData>, Option<Vec<f32>>) {
+        let position = transform.position;
         match l.ty {
-            LightType::Directional { direction, .. } => {
+            LightType::Directional { .. } => {
                 let mut cascade_splits = Vec::with_capacity(MAX_CASCADES);
                 let mut splits = Vec::with_capacity(MAX_CASCADES);
 
@@ -395,7 +403,7 @@ impl CascadedShadowMap {
                     let min_extents = -max_extents;
 
                     let center = Point3::from(center);
-                    let light_dir = l.direction();
+                    let light_dir = transform.forward();
                     let view_matrix = Matrix4::look_at_rh(
                         &(center - light_dir * -min_extents.z * self.z_mult),
                         &center,
@@ -425,8 +433,8 @@ impl CascadedShadowMap {
                     }
 
                     povs.push(PointOfViewData {
-                        eye: point![l.position.x, l.position.y, l.position.z, 0.0],
-                        eye_forward: direction.to_homogeneous(),
+                        eye: point![position.x, position.y, position.z, 0.0],
+                        eye_forward: light_dir.to_homogeneous(),
                         view: view_matrix,
                         projection: light_ortho,
                     });

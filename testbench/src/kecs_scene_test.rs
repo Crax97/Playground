@@ -12,7 +12,7 @@ use engine::components::{rendering_system_kecs, MeshComponentEditor};
 use engine::editor::ui_extension::UiExtension;
 use engine::editor::{EguiSceneEditor, TypeEditor};
 use engine::kecs_app::{KecsApp, SharedAssetMap};
-use engine::{egui, Light, LightType, ShadowConfiguration, Time};
+use engine::{egui, LightType, SceneLightInfo, ShadowConfiguration, Time};
 
 use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
@@ -28,7 +28,7 @@ use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::input::key::Key;
 use engine::{
     post_process_pass::FxaaPass, AssetMap, Backbuffer, CvarManager, DeferredRenderingPipeline,
-    LightHandle, MaterialInstance, RenderingPipeline, TextureInput,
+    MaterialInstance, PrimitiveHandle, RenderingPipeline, TextureInput,
 };
 use nalgebra::*;
 use winit::event::MouseButton;
@@ -70,7 +70,7 @@ pub struct KecsSceneTest {
     camera: FpsCamera,
     scene_renderer: DeferredRenderingPipeline,
     gltf_loader: GltfLoader,
-    camera_light: Option<LightHandle>,
+    camera_light: Option<PrimitiveHandle>,
 
     input: InputState,
     console: Console,

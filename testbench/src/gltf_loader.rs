@@ -1,10 +1,11 @@
 use crate::utils;
 use engine::asset_map::{AssetHandle, AssetMap};
+use engine::components::Transform;
 use engine::math::shape::BoundingShape;
 use engine::{
     LightType, MasterMaterial, MaterialDescription, MaterialDomain, MaterialInstance,
     MaterialInstanceDescription, MaterialParameterOffsetSize, Mesh, MeshCreateInfo,
-    MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline, ScenePrimitive, Texture, TextureInput,
+    MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline, SceneMesh, Texture, TextureInput,
     TextureSamplerSettings,
 };
 use gltf::image::Data;
@@ -500,35 +501,44 @@ fn handle_node(
         use gltf::khr_lights_punctual::Kind as GltfLightKind;
         let light_type = match light.kind() {
             GltfLightKind::Directional => LightType::Directional {
-                direction: forward,
                 size: vector![20.0, 20.0],
             },
             GltfLightKind::Spot {
                 inner_cone_angle,
                 outer_cone_angle,
             } => LightType::Spotlight {
-                direction: forward,
                 inner_cone_degrees: inner_cone_angle.to_degrees(),
                 outer_cone_degrees: outer_cone_angle.to_degrees(),
             },
             GltfLightKind::Point => LightType::Point,
         };
-        engine_scene.add_light(engine::Light {
-            ty: light_type,
-            position: Point3::from(pos),
-            radius: 500.0,
-            color: Vector3::from_row_slice(&light.color()),
-            intensity: light.intensity() / 100.0,
-            enabled: true,
-            shadow_configuration: Some(engine::ShadowConfiguration {
-                shadow_map_width: 512,
-                shadow_map_height: 512,
+        engine_scene.add_light(
+            engine::SceneLightInfo {
+                ty: light_type,
+                radius: 500.0,
+                color: Vector3::from_row_slice(&light.color()),
+                intensity: light.intensity() / 100.0,
+                enabled: true,
+                shadow_configuration: Some(engine::ShadowConfiguration {
+                    shadow_map_width: 512,
+                    shadow_map_height: 512,
 
+                    ..Default::default()
+                }),
+            },
+            Transform {
+                position: Point3::from(pos),
+                rotation: rot,
                 ..Default::default()
-            }),
-        });
+            },
+        );
     } else if let Some(mesh) = node.mesh() {
-        let transform = Matrix4::new_translation(&pos)
+        let transform = Transform {
+            position: Point3::from(pos),
+            scale: Vector3::from(scale),
+            rotation: UnitQuaternion::from_matrix(&rot_matrix.fixed_resize(0.0)),
+        };
+        let transform_mat = Matrix4::new_translation(&pos)
             * Matrix4::new_nonuniform_scaling(&Vector3::from_row_slice(&scale))
             * rot_matrix;
 
@@ -541,13 +551,15 @@ fn handle_node(
 
         let (mesh, min, max) = meshes[mesh.index()].clone();
         // TODO: consider the bounding volumes of all mesh primitives when constructing the scene primitive
-        let bounds = BoundingShape::BoundingBox { min, max }.transformed(transform);
-        engine_scene.add(ScenePrimitive {
-            mesh,
-            materials,
+        let bounds = BoundingShape::BoundingBox { min, max }.transformed(transform_mat);
+        engine_scene.add_mesh(
+            SceneMesh {
+                mesh,
+                materials,
+                bounds,
+            },
             transform,
-            bounds,
-        });
+        );
     }
 
     for node in node.children() {

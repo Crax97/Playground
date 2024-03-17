@@ -2,13 +2,15 @@ use std::collections::HashSet;
 
 use crate::{
     asset_map::{AssetHandle, AssetMap},
+    components::Transform,
     math::shape::BoundingShape,
     render_scene::{BinaryBvh, Bvh},
     CvarManager, Frustum,
 };
 use bevy_ecs::system::Resource;
 use gpu::{CommandBuffer, Extent2D, Gpu, ImageFormat, ImageHandle, ImageViewHandle, Rect2D};
-use nalgebra::{vector, Matrix4, Point3, Vector2, Vector3};
+use nalgebra::{vector, Point3, Vector2, Vector3};
+use thunderdome::{Arena, Index};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -20,27 +22,62 @@ struct PerFrameData {
 use crate::{mesh::Mesh, Camera, MasterMaterial, MaterialDescription, MaterialInstance, Texture};
 
 #[derive(Clone)]
-pub struct ScenePrimitive {
+pub struct SceneMesh {
     pub mesh: AssetHandle<Mesh>,
     pub materials: Vec<MaterialInstance>,
-    pub transform: Matrix4<f32>,
     pub bounds: BoundingShape,
+}
+
+pub struct ScenePrimitive {
+    pub ty: ScenePrimitiveType,
+    pub transform: Transform,
+}
+
+pub enum ScenePrimitiveType {
+    Mesh(SceneMesh),
+    Light(SceneLightInfo),
+}
+impl ScenePrimitiveType {
+    pub fn as_light(&self) -> &SceneLightInfo {
+        match self {
+            ScenePrimitiveType::Light(l) => l,
+            _ => panic!("Primitive is not a light"),
+        }
+    }
+
+    pub fn as_light_mut(&mut self) -> &mut SceneLightInfo {
+        match self {
+            ScenePrimitiveType::Light(l) => l,
+            _ => panic!("Primitive is not a light"),
+        }
+    }
+
+    pub fn as_mesh(&self) -> &SceneMesh {
+        match self {
+            ScenePrimitiveType::Mesh(l) => l,
+            _ => panic!("Primitive is not a mesh"),
+        }
+    }
+
+    pub fn as_mesh_mut(&mut self) -> &mut SceneMesh {
+        match self {
+            ScenePrimitiveType::Mesh(l) => l,
+            _ => panic!("Primitive is not a mesh"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LightType {
     Point,
     Directional {
-        direction: Vector3<f32>,
         size: Vector2<f32>,
     },
     Spotlight {
-        direction: Vector3<f32>,
         inner_cone_degrees: f32,
         outer_cone_degrees: f32,
     },
     Rect {
-        direction: Vector3<f32>,
         width: f32,
         height: f32,
     },
@@ -66,43 +103,25 @@ impl Default for ShadowConfiguration {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Light {
+pub struct SceneLightInfo {
+    pub enabled: bool,
     pub ty: LightType,
-    pub position: Point3<f32>,
     pub radius: f32,
     pub color: Vector3<f32>,
     pub intensity: f32,
-
-    pub enabled: bool,
     pub shadow_configuration: Option<ShadowConfiguration>,
 }
-impl Light {
-    pub fn set_direction(&mut self, forward: Vector3<f32>) {
-        match &mut self.ty {
-            LightType::Point => {}
-            LightType::Directional { direction, .. }
-            | LightType::Spotlight { direction, .. }
-            | LightType::Rect { direction, .. } => *direction = forward,
-        }
-    }
-
-    pub fn direction(&self) -> Vector3<f32> {
-        match self.ty {
-            LightType::Point => vector![1.0, 0.0, 0.0],
-            LightType::Directional { direction, .. }
-            | LightType::Spotlight { direction, .. }
-            | LightType::Rect { direction, .. } => direction,
-        }
-    }
-
-    pub fn light_cameras(&self) -> Vec<Camera> {
+impl SceneLightInfo {
+    pub fn light_cameras(&self, transform: &Transform) -> Vec<Camera> {
+        let position = &transform.position;
+        let direction = transform.forward();
         const ZNEAR: f32 = 0.001;
         let mut povs = vec![];
         match self.ty {
             LightType::Point => {
                 let mut camera =
                     Camera::new_perspective(90.0, 1.0, 1.0, ZNEAR, self.radius.max(ZNEAR + 0.1));
-                camera.location = self.position;
+                camera.location = *position;
                 let directions = [
                     vector![1.0, 0.0, 0.0],
                     vector![-1.0, 0.0, 0.0],
@@ -118,17 +137,15 @@ impl Light {
                     povs.push(camera);
                 }
             }
-            LightType::Directional { direction, size } => {
+            LightType::Directional { size } => {
                 let mut camera =
                     Camera::new_orthographic(size.x, size.y, -self.radius * 0.5, self.radius * 0.5);
-                camera.location = self.position;
+                camera.location = *position;
                 camera.forward = direction;
                 povs.push(camera);
             }
             LightType::Spotlight {
-                direction,
-                outer_cone_degrees,
-                ..
+                outer_cone_degrees, ..
             } => {
                 let mut camera = Camera::new_perspective(
                     2.0 * outer_cone_degrees.max(0.01),
@@ -137,7 +154,7 @@ impl Light {
                     ZNEAR,
                     self.radius.max(ZNEAR + 0.01),
                 );
-                camera.location = self.position;
+                camera.location = *position;
                 camera.forward = direction;
                 povs.push(camera);
             }
@@ -148,16 +165,15 @@ impl Light {
     }
 }
 
-#[derive(Clone, Copy, Eq, Ord, PartialOrd, PartialEq)]
-pub struct LightHandle(pub usize);
+#[derive(Debug, Clone, Copy, Eq, Ord, PartialOrd, PartialEq)]
+pub struct PrimitiveHandle(pub Index);
 
 #[derive(Resource, Default)]
 pub struct RenderScene {
-    pub bvh: BinaryBvh<usize>,
+    pub bvh: BinaryBvh<thunderdome::Index>,
     pub use_frustum_culling: bool,
     pub use_bvh: bool,
-    pub primitives: Vec<ScenePrimitive>,
-    pub lights: Vec<Light>,
+    pub primitives: Arena<ScenePrimitive>,
 
     skybox_material: Option<MaterialInstance>,
     skybox_texture: Option<AssetHandle<Texture>>,
@@ -178,6 +194,21 @@ impl RenderScene {
     pub fn get_skybox_material(&self) -> &Option<MaterialInstance> {
         &self.skybox_material
     }
+
+    pub fn get(&self, handle: PrimitiveHandle) -> &ScenePrimitive {
+        &self.primitives[handle.0]
+    }
+
+    pub fn get_mut(&mut self, handle: PrimitiveHandle) -> &mut ScenePrimitive {
+        &mut self.primitives[handle.0]
+    }
+
+    pub fn all_lights(&self) -> impl Iterator<Item = (PrimitiveHandle, &ScenePrimitive)> {
+        self.all_primitives().filter_map(|(i, p)| match p.ty {
+            ScenePrimitiveType::Light(_) => Some((i, p)),
+            _ => None,
+        })
+    }
 }
 
 impl RenderScene {
@@ -186,8 +217,7 @@ impl RenderScene {
             bvh: Bvh::new(),
             use_frustum_culling: true,
             use_bvh: true,
-            primitives: vec![],
-            lights: vec![],
+            primitives: Default::default(),
             current_lights_iteration: 0,
 
             skybox_texture: None,
@@ -195,52 +225,74 @@ impl RenderScene {
         }
     }
 
-    pub fn add(&mut self, primitive: ScenePrimitive) {
-        let prim_index = self.primitives.len();
+    pub fn add_mesh(&mut self, primitive: SceneMesh, transform: Transform) -> PrimitiveHandle {
         let (aabb_min, aabb_max) = primitive.bounds.box_extremes();
-        self.primitives.push(primitive);
+        let prim_index = self.primitives.insert(ScenePrimitive {
+            ty: ScenePrimitiveType::Mesh(primitive),
+            transform,
+        });
         self.bvh.add(prim_index, aabb_min, aabb_max);
+
+        PrimitiveHandle(prim_index)
     }
 
     pub fn intersect_frustum(&self, frustum: &Frustum) -> Vec<&ScenePrimitive> {
         if !self.use_frustum_culling {
-            return self.primitives.iter().collect();
+            return self
+                .primitives
+                .iter()
+                .filter_map(|(_, p)| match &p.ty {
+                    ScenePrimitiveType::Mesh(m) => Some(p),
+                    _ => None,
+                })
+                .collect();
         } else if self.use_bvh {
             let indices = self.bvh.intersect_frustum_copy(frustum);
-            indices.iter().map(|id| &self.primitives[*id]).collect()
+            indices
+                .iter()
+                .map(|id| &self.primitives[*id])
+                .map(|p| match &p.ty {
+                    ScenePrimitiveType::Mesh(m) => p,
+                    ScenePrimitiveType::Light(_) => panic!("BVH returned a light"),
+                })
+                .collect()
         } else {
             self.primitives
                 .iter()
-                .filter(|prim| frustum.contains_shape(&prim.bounds))
+                .filter_map(|(_, prim)| match &prim.ty {
+                    ScenePrimitiveType::Mesh(m) if frustum.contains_shape(&m.bounds) => Some(prim),
+                    _ => None,
+                })
                 .collect()
         }
     }
 
-    pub fn add_light(&mut self, light: Light) -> LightHandle {
-        let idx = self.lights.len();
+    pub fn add_light(&mut self, light: SceneLightInfo, transform: Transform) -> PrimitiveHandle {
         self.increment_light_counter();
-        self.lights.push(light);
-        LightHandle(idx)
+        let idx = self.primitives.insert(ScenePrimitive {
+            ty: ScenePrimitiveType::Light(light),
+            transform,
+        });
+        PrimitiveHandle(idx)
     }
 
-    pub fn edit_light(&mut self, handle: &LightHandle) -> &mut Light {
-        self.increment_light_counter();
-        &mut self.lights[handle.0]
+    pub fn all_primitives(&self) -> impl Iterator<Item = (PrimitiveHandle, &ScenePrimitive)> {
+        self.primitives.iter().map(|(i, p)| (PrimitiveHandle(i), p))
     }
 
-    pub fn all_primitives(&self) -> &[ScenePrimitive] {
-        &self.primitives
-    }
-    pub fn all_lights(&self) -> &[Light] {
-        &self.lights
-    }
-
-    pub fn all_lights_mut(&mut self) -> &mut [Light] {
-        &mut self.lights
+    pub fn all_primitives_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (PrimitiveHandle, &mut ScenePrimitive)> {
+        self.primitives
+            .iter_mut()
+            .map(|(i, p)| (PrimitiveHandle(i), p))
     }
 
-    pub fn all_enabled_lights(&self) -> impl Iterator<Item = &Light> {
-        self.lights.iter().filter(|l| l.enabled)
+    pub fn all_enabled_lights(&self) -> impl Iterator<Item = (PrimitiveHandle, &ScenePrimitive)> {
+        self.all_primitives().filter_map(|(i, p)| match p.ty {
+            ScenePrimitiveType::Light(l) if l.enabled => Some((i, p)),
+            _ => None,
+        })
     }
 
     pub fn lights_iteration(&self) -> u64 {
@@ -263,10 +315,12 @@ impl RenderScene {
         let mut unique_material_instances = HashSet::new();
         std::mem::take(&mut self.primitives)
             .into_iter()
-            .for_each(|prim| {
-                prim.materials.into_iter().for_each(|inst| {
-                    unique_material_instances.insert(inst);
-                });
+            .for_each(|(_, prim)| {
+                if let ScenePrimitiveType::Mesh(prim) = prim.ty {
+                    prim.materials.into_iter().for_each(|inst| {
+                        unique_material_instances.insert(inst);
+                    });
+                }
             });
         unique_material_instances.into_iter().for_each(|inst| {
             inst.destroy(gpu);

@@ -1,8 +1,9 @@
 use bytemuck::{Pod, Zeroable};
-use gpu::BufferHandle;
-use nalgebra::{vector, Matrix4, Point4, Vector4};
+use gpu::{BufferHandle, Gpu};
+use nalgebra::{vector, Matrix4, Point3, Point4, Vector4};
+use rapier2d::math::Rotation;
 
-use crate::{Light, LightType};
+use crate::{components::Transform, LightType, SceneLightInfo};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -39,17 +40,18 @@ pub struct GpuLightInfo {
 unsafe impl Pod for GpuLightInfo {}
 unsafe impl Zeroable for GpuLightInfo {}
 
-impl From<&Light> for GpuLightInfo {
-    fn from(light: &Light) -> Self {
-        let (direction, extras, ty) = match light.ty {
+impl SceneLightInfo {
+    pub(crate) fn to_gpu_data(&self, transform: &Transform) -> GpuLightInfo {
+        let position = transform.position;
+        let direction = transform.forward();
+        let (direction, extras, ty) = match self.ty {
             LightType::Point => (Default::default(), Default::default(), 0),
-            LightType::Directional { direction, .. } => (
+            LightType::Directional { .. } => (
                 vector![direction.x, direction.y, direction.z, 0.0],
                 Default::default(),
                 1,
             ),
             LightType::Spotlight {
-                direction,
                 inner_cone_degrees,
                 outer_cone_degrees,
             } => (
@@ -62,24 +64,15 @@ impl From<&Light> for GpuLightInfo {
                 ],
                 2,
             ),
-            LightType::Rect {
-                direction,
-                width,
-                height,
-            } => (
+            LightType::Rect { width, height } => (
                 vector![direction.x, direction.y, direction.z, 0.0],
                 vector![width, height, 0.0, 0.0],
                 3,
             ),
         };
-        Self {
-            position_radius: vector![
-                light.position.x,
-                light.position.y,
-                light.position.z,
-                light.radius
-            ],
-            color: vector![light.color.x, light.color.y, light.color.z, light.intensity],
+        GpuLightInfo {
+            position_radius: vector![position.x, position.y, position.z, self.radius],
+            color: vector![self.color.x, self.color.y, self.color.z, self.intensity],
             direction,
             extras,
             ty_shadow_map_idx_csm_split: [ty, -1, -1, 0],

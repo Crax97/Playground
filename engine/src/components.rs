@@ -1,5 +1,4 @@
 use std::ops::{Deref, DerefMut};
-use std::sync::{Arc, RwLock};
 
 use crate::editor::TypeEditor;
 use crate::kecs_app::SharedAssetMap;
@@ -9,7 +8,6 @@ use crate::{
     ShadowConfiguration, Texture,
 };
 use bevy_ecs::reflect::ReflectComponent;
-use bevy_ecs::system::ResMut;
 use bevy_ecs::{
     component::Component,
     schedule::Schedule,
@@ -68,10 +66,21 @@ impl Default for Transform {
 }
 
 impl Transform {
+    pub fn new_translation(position: Point3<f32>) -> Self {
+        Self {
+            position,
+            ..Default::default()
+        }
+    }
     pub fn matrix(&self) -> Matrix4<f32> {
         Matrix4::new_translation(&self.position.to_homogeneous().xyz())
             * Matrix4::new_nonuniform_scaling(&self.scale)
             * self.rotation.to_homogeneous()
+    }
+
+    pub fn forward(&self) -> Vector3<f32> {
+        let matrix = self.rotation.to_rotation_matrix().to_homogeneous();
+        matrix.column(2).xyz()
     }
 }
 
@@ -106,6 +115,14 @@ impl Transform2D {
                 self.rotation.to_radians(),
             )
             .to_homogeneous()
+    }
+
+    fn to_3d(self) -> Transform {
+        Transform {
+            position: point![self.position.x, self.position.y, self.layer as f32],
+            rotation: UnitQuaternion::from_euler_angles(self.rotation.to_radians(), 0.0, 0.0),
+            scale: vector![self.scale.x, self.scale.y, 1.0],
+        }
     }
 }
 #[derive(Component)]
@@ -248,23 +265,27 @@ pub fn rendering_system(
     }
     for (mesh_component, transform) in meshes.iter() {
         let bounds = mesh_component.bounds().transformed(transform.matrix());
-        scene.add(crate::ScenePrimitive {
-            mesh: mesh_component.mesh.clone(),
-            materials: mesh_component.materials.clone(),
-            transform: transform.matrix(),
-            bounds,
-        });
+        scene.add_mesh(
+            crate::SceneMesh {
+                mesh: mesh_component.mesh.clone(),
+                materials: mesh_component.materials.clone(),
+                bounds,
+            },
+            *transform,
+        );
     }
     for (light, transform) in lights.iter() {
-        scene.add_light(crate::Light {
-            ty: light.ty,
-            position: transform.position,
-            radius: light.radius,
-            color: light.color,
-            intensity: light.intensity,
-            enabled: light.enabled,
-            shadow_configuration: light.shadow_setup,
-        });
+        scene.add_light(
+            crate::SceneLightInfo {
+                ty: light.ty,
+                radius: light.radius,
+                color: light.color,
+                intensity: light.intensity,
+                enabled: light.enabled,
+                shadow_configuration: light.shadow_setup,
+            },
+            *transform,
+        );
     }
 
     commands.insert_resource(scene)
@@ -281,23 +302,27 @@ pub fn rendering_system_kecs(
             .get_transform(node_id.node_id, crate::game_scene::TransformSpace::World)
             .expect("No transform");
         let bounds = mesh_component.bounds().transformed(transform.matrix());
-        scene.add(crate::ScenePrimitive {
-            mesh: mesh_component.mesh.clone(),
-            materials: mesh_component.materials.clone(),
-            transform: transform.matrix(),
-            bounds,
-        });
+        scene.add_mesh(
+            crate::SceneMesh {
+                mesh: mesh_component.mesh.clone(),
+                materials: mesh_component.materials.clone(),
+                bounds,
+            },
+            transform,
+        );
     }
     for (light, transform) in lights.iter() {
-        scene.add_light(crate::Light {
-            ty: light.ty,
-            position: transform.position,
-            radius: light.radius,
-            color: light.color,
-            intensity: light.intensity,
-            enabled: light.enabled,
-            shadow_configuration: light.shadow_setup,
-        });
+        scene.add_light(
+            crate::SceneLightInfo {
+                ty: light.ty,
+                radius: light.radius,
+                color: light.color,
+                intensity: light.intensity,
+                enabled: light.enabled,
+                shadow_configuration: light.shadow_setup,
+            },
+            *transform,
+        );
     }
 
     commands.add_resource(scene)
@@ -344,12 +369,14 @@ pub fn rendering_system_2d(
             ],
         };
         let bounds = bounds.transformed(transform.matrix());
-        scene.add(crate::ScenePrimitive {
-            mesh: common_resources.quad_mesh.clone(),
-            materials: vec![material_instance],
-            transform: transform.matrix(),
-            bounds,
-        });
+        scene.add_mesh(
+            crate::SceneMesh {
+                mesh: common_resources.quad_mesh.clone(),
+                materials: vec![material_instance],
+                bounds,
+            },
+            transform.to_3d(),
+        );
     }
 
     commands.insert_resource(scene)

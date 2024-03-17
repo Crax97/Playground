@@ -5,12 +5,13 @@ use std::borrow::Cow;
 use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App};
 
+use engine::components::Transform;
 use engine::loaders::FileSystemTextureLoader;
 use engine::math::shape::BoundingShape;
 use engine::{
     AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, MaterialDescription,
     MaterialDomain, MaterialInstance, MaterialInstanceDescription, Mesh, MeshCreateInfo,
-    MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline, ScenePrimitive, Texture, TextureInput,
+    MeshPrimitiveCreateInfo, RenderScene, RenderingPipeline, SceneMesh, Texture, TextureInput,
     Time,
 };
 use gpu::{CommandBuffer, Offset2D, PresentMode, Rect2D, ShaderStage};
@@ -163,41 +164,53 @@ impl App for PlanesApp {
             min: point![-1.0, -1.0, 0.0],
             max: point![1.0, 1.0, 1.0],
         };
-        scene.add(ScenePrimitive {
-            mesh: mesh.clone(),
-            materials: vec![mat_instance.clone()],
-            transform: Matrix4::identity(),
-            bounds,
-        });
-        scene.add(ScenePrimitive {
-            mesh: mesh.clone(),
-            materials: vec![mat_instance.clone()],
-            transform: Matrix4::new_translation(&vector![0.0, 0.0, 1.0]),
-            bounds,
-        });
-        scene.add(ScenePrimitive {
-            mesh,
-            materials: vec![mat_instance.clone()],
-            transform: Matrix4::new_translation(&vector![0.0, 0.0, -1.0]),
-            bounds,
-        });
+        scene.add_mesh(
+            SceneMesh {
+                mesh: mesh.clone(),
+                materials: vec![mat_instance.clone()],
+                bounds,
+            },
+            Transform::default(),
+        );
+        scene.add_mesh(
+            SceneMesh {
+                mesh: mesh.clone(),
+                materials: vec![mat_instance.clone()],
+                bounds,
+            },
+            Transform::new_translation(point![0.0, 0.0, 1.0]),
+        );
+        scene.add_mesh(
+            SceneMesh {
+                mesh,
+                materials: vec![mat_instance.clone()],
+                bounds,
+            },
+            Transform::new_translation(point![0.0, 0.0, -1.0]),
+        );
 
-        scene.add(ScenePrimitive {
-            mesh: cube.clone(),
-            materials: vec![mat_instance.clone()],
-            transform: Matrix4::new_scaling(1.0)
-                * Matrix4::new_translation(&vector![1.5, 0.0, 0.0]),
-            bounds,
-        });
+        scene.add_mesh(
+            SceneMesh {
+                mesh: cube.clone(),
+                materials: vec![mat_instance.clone()],
+                bounds,
+            },
+            Transform::new_translation(point![1.5, 0.0, 0.0]),
+        );
 
-        scene.add(ScenePrimitive {
-            mesh: cube,
-            materials: vec![mat_instance],
-            transform: Matrix4::new_translation(&vector![-1.5, 0.0, 0.0])
-                * Matrix4::new_scaling(-1.0),
+        scene.add_mesh(
+            SceneMesh {
+                mesh: cube,
+                materials: vec![mat_instance],
 
-            bounds,
-        });
+                bounds,
+            },
+            Transform {
+                position: point![-1.5, 0.0, 0.0],
+                scale: vector![-1.0, -1.0, -1.0],
+                ..Default::default()
+            },
+        );
 
         scene_renderer.ambient_color = vector![1.0, 1.0, 1.0];
         scene_renderer.ambient_intensity = 1.0;
