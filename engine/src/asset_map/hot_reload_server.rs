@@ -8,11 +8,11 @@ use notify::event::ModifyKind;
 use notify::{RecommendedWatcher, Watcher};
 
 use super::{ErasedResourceLoader, LoadedResources, ResourcePtr};
-use crate::ResourceId;
+use crate::AssetId;
 use crossbeam::channel::{unbounded, Receiver};
 
 pub(super) struct ReloadedResource {
-    pub id: ResourceId,
+    pub id: AssetId,
     pub new_resource: ResourcePtr,
 }
 pub(super) struct ReloadedResources {
@@ -22,7 +22,7 @@ pub(super) struct ReloadedResources {
 
 struct WatchedResource {
     pub resource_type: TypeId,
-    pub resource_id: ResourceId,
+    pub resource_id: AssetId,
     pub original_path: PathBuf,
 }
 
@@ -61,7 +61,7 @@ impl HotReloadServer {
         &mut self,
         path: &Path,
         resource_type: TypeId,
-        resource_id: ResourceId,
+        resource_id: AssetId,
     ) -> anyhow::Result<()> {
         let original_path = path.to_path_buf();
         let path = path.canonicalize()?;

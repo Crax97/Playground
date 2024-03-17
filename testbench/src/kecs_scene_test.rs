@@ -8,9 +8,10 @@ use std::collections::HashMap;
 use bytemuck::{Pod, Zeroable};
 use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App, Console};
+use engine::components::{rendering_system_kecs, MeshComponentEditor};
 use engine::editor::ui_extension::UiExtension;
 use engine::editor::{EguiSceneEditor, TypeEditor};
-use engine::kecs_app::KecsApp;
+use engine::kecs_app::{KecsApp, SharedAssetMap};
 use engine::{egui, Light, LightType, ShadowConfiguration, Time};
 
 use engine::input::InputState;
@@ -90,7 +91,7 @@ pub struct TestComponentEditor;
 impl TypeEditor for TestComponentEditor {
     type EditedType = TestComponent;
 
-    fn show_ui(&self, value: &mut Self::EditedType, ui: &mut egui::Ui) {
+    fn show_ui(&mut self, value: &mut Self::EditedType, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label("Text");
             ui.text_edit_singleline(&mut value.text);
@@ -100,8 +101,25 @@ impl TypeEditor for TestComponentEditor {
 
 fn main() -> anyhow::Result<()> {
     let (mut app, evt_loop, state) = KecsApp::create()?;
+    let asset_map = app.world.get_resource::<SharedAssetMap>().unwrap().clone();
+
+    {
+        GltfLoader::load(
+            "./TestScenes/FloatingCubes/FloatingCubes.gltf",
+            state.gpu(),
+            &mut app.renderer,
+            &mut asset_map.write(),
+            GltfLoadOptions::default(),
+        )?;
+    }
 
     let world = app.world_mut();
+
+    {
+        let mut asset_map = asset_map.write();
+        utils::load_cube_to_resource_map(state.gpu(), &mut asset_map)?;
+    }
+
     world.add_system(KecsApp::START, || {
         println!("Start!");
     });
@@ -113,8 +131,10 @@ fn main() -> anyhow::Result<()> {
     world.add_system(KecsApp::END, || {
         println!("End!");
     });
+    world.add_system(KecsApp::DRAW, rendering_system_kecs);
     let mut editor = EguiSceneEditor::new(&state.window, state.gpu())?;
     editor.register_type(&mut app.world, TestComponentEditor);
+    editor.register_type(&mut app.world, MeshComponentEditor::new(asset_map));
 
     app.add_plugin(editor);
 

@@ -1,12 +1,15 @@
 use std::ops::{Deref, DerefMut};
+use std::sync::{Arc, RwLock};
 
 use crate::editor::TypeEditor;
+use crate::kecs_app::SharedAssetMap;
 use crate::math::shape::BoundingShape;
 use crate::{
     asset_map::AssetHandle, bevy_ecs_app::CommonResources, LightType, RenderScene,
     ShadowConfiguration, Texture,
 };
 use bevy_ecs::reflect::ReflectComponent;
+use bevy_ecs::system::ResMut;
 use bevy_ecs::{
     component::Component,
     schedule::Schedule,
@@ -22,7 +25,9 @@ use nalgebra::{
 };
 use winit::window::Window;
 
-use crate::{AssetMap, GpuDevice, MasterMaterial, MaterialInstance, Mesh};
+use crate::{
+    AssetMap, EntityToSceneNode, GameScene, GpuDevice, MasterMaterial, MaterialInstance, Mesh,
+};
 
 #[derive(Resource)]
 pub struct EngineWindow(pub(crate) Window);
@@ -264,6 +269,39 @@ pub fn rendering_system(
 
     commands.insert_resource(scene)
 }
+pub fn rendering_system_kecs(
+    meshes: kecs::Query<(&MeshComponent, &EntityToSceneNode)>,
+    lights: kecs::Query<(&LightComponent, &Transform)>,
+    mut commands: kecs::Commands,
+    game_scene: kecs::ResMut<GameScene>,
+) {
+    let mut scene = RenderScene::new();
+    for (mesh_component, node_id) in meshes.iter() {
+        let transform = game_scene
+            .get_transform(node_id.node_id, crate::game_scene::TransformSpace::World)
+            .expect("No transform");
+        let bounds = mesh_component.bounds().transformed(transform.matrix());
+        scene.add(crate::ScenePrimitive {
+            mesh: mesh_component.mesh.clone(),
+            materials: mesh_component.materials.clone(),
+            transform: transform.matrix(),
+            bounds,
+        });
+    }
+    for (light, transform) in lights.iter() {
+        scene.add_light(crate::Light {
+            ty: light.ty,
+            position: transform.position,
+            radius: light.radius,
+            color: light.color,
+            intensity: light.intensity,
+            enabled: light.enabled,
+            shadow_configuration: light.shadow_setup,
+        });
+    }
+
+    commands.add_resource(scene)
+}
 
 pub fn rendering_system_2d(
     common_resources: Res<CommonResources>,
@@ -321,17 +359,115 @@ pub fn init(schedule: &mut Schedule) {
     schedule.add_systems(rendering_system);
 }
 
-pub struct MeshComponentEditor;
+pub struct MeshComponentEditor {
+    asset_map: SharedAssetMap,
+    mesh_picker: ResourceHandleEditor,
+    master_picker: ResourceHandleEditor,
+    texture_picker: ResourceHandleEditor,
+}
+
+impl MeshComponentEditor {
+    pub fn new(asset_map: SharedAssetMap) -> Self {
+        Self {
+            asset_map,
+            mesh_picker: ResourceHandleEditor::default(),
+            master_picker: ResourceHandleEditor::default(),
+            texture_picker: ResourceHandleEditor::default(),
+        }
+    }
+}
 
 impl TypeEditor for MeshComponentEditor {
     type EditedType = MeshComponent;
 
-    fn show_ui(&self, value: &mut Self::EditedType, ui: &mut egui::Ui) {}
+    fn show_ui(&mut self, value: &mut Self::EditedType, ui: &mut egui::Ui) {
+        let mut asset_map = self.asset_map.write();
+        egui::Grid::new("mesh_editor").show(ui, |ui| {
+            ui.label("Current mesh");
+            self.mesh_picker.show(&mut value.mesh, &mut asset_map, ui);
+            ui.end_row();
+
+            ui.label("Materials");
+            if ui.button("Add").clicked() {
+                value.materials.push(MaterialInstance::default());
+            }
+
+            ui.end_row();
+            egui::Grid::new("mats").show(ui, |ui| {
+                for material in &mut value.materials {
+                    self.master_picker
+                        .show(&mut material.owner, &mut asset_map, ui);
+                    egui::Grid::new("textures").show(ui, |ui| {
+                        if ui.button("Add Texture").clicked() {
+                            material.textures.push(Default::default());
+                        }
+                        for tex in &mut material.textures {
+                            self.texture_picker.show(tex, &mut asset_map, ui);
+                        }
+                        ui.end_row();
+                    });
+
+                    ui.end_row();
+                }
+            });
+        });
+    }
 }
 
-fn resource_handle_editor<T: crate::asset_map::Asset>(
-    handle: &mut AssetHandle<T>,
-    asset_map: &mut AssetMap,
-    ui: &mut Ui,
-) {
+#[derive(Default)]
+pub struct ResourceHandleEditor {
+    is_shown: bool,
+}
+
+impl ResourceHandleEditor {
+    pub fn show<T: crate::asset_map::Asset>(
+        &mut self,
+        handle: &mut AssetHandle<T>,
+        asset_map: &mut AssetMap,
+        ui: &mut Ui,
+    ) {
+        let button_label = if handle.is_null() {
+            "None".to_owned()
+        } else {
+            let metadata = asset_map.asset_metadata(handle);
+            metadata.name
+        };
+
+        if self.is_shown {
+            let mut selected_id = None;
+            egui::Window::new("Pick an asset")
+                .open(&mut self.is_shown)
+                .show(ui.ctx(), |ui| {
+                    egui::ScrollArea::new([true, false]).show(ui, |ui| {
+                        asset_map.iter_ids::<T>(|id, meta| {
+                            if ui.selectable_label(false, &meta.name).double_clicked() {
+                                selected_id = Some(id);
+                            }
+                        });
+                    });
+
+                    if ui.button("Load new asset").clicked() {
+                        let path = rfd::FileDialog::new()
+                            .set_title("Pick an asset")
+                            .pick_file();
+                        if let Some(path) = path {
+                            match asset_map.load::<T>(path) {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    log::error!("While loading asset: {e:?}");
+                                }
+                            }
+                        }
+                    }
+                });
+
+            if let Some(id) = selected_id {
+                *handle = asset_map.upcast_index(id);
+                self.is_shown = false;
+            }
+        }
+        if ui.button(button_label).clicked() {
+            self.is_shown = true;
+        }
+    }
 }

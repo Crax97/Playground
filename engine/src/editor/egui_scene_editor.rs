@@ -1,6 +1,6 @@
 use egui::{Separator, Ui};
 use gpu::Gpu;
-use kecs::{ComponentId, Entity, Resource, World};
+use kecs::{ComponentId, Entity, World};
 use log::warn;
 use nalgebra::UnitQuaternion;
 use std::collections::HashMap;
@@ -9,7 +9,7 @@ use crate::{
     app::egui_support::EguiSupport,
     game_scene::SceneNodeId,
     kecs_app::{Plugin, SimulationState, SimulationStep},
-    GameScene, Time,
+    EntityToSceneNode, GameScene, Time,
 };
 use winit::window::Window;
 
@@ -22,16 +22,16 @@ const STOP: &str = "\u{23F9}";
 pub trait TypeEditor {
     type EditedType: Default;
 
-    fn show_ui(&self, value: &mut Self::EditedType, ui: &mut Ui);
+    fn show_ui(&mut self, value: &mut Self::EditedType, ui: &mut Ui);
 }
 
 trait ErasedTypeEditor {
-    fn show_ui(&self, ui: &mut Ui, entity: Entity, world: &mut World);
+    fn show_ui(&mut self, ui: &mut Ui, entity: Entity, world: &mut World);
     fn add_component(&self, entity: Entity, world: &mut World);
 }
 
 impl<T: TypeEditor + 'static> ErasedTypeEditor for T {
-    fn show_ui(&self, ui: &mut Ui, entity: Entity, world: &mut World) {
+    fn show_ui(&mut self, ui: &mut Ui, entity: Entity, world: &mut World) {
         let component = world
             .get_component_mut::<T::EditedType>(entity)
             .expect("No component");
@@ -49,11 +49,6 @@ pub struct EguiSceneEditor {
     current_node: Option<SceneNodeId>,
     registered_types: HashMap<ComponentId, Box<dyn ErasedTypeEditor>>,
 }
-
-#[derive(Default)]
-struct CurrentEditorScene(GameScene);
-
-impl Resource for CurrentEditorScene {}
 
 impl EguiSceneEditor {
     pub fn new(window: &Window, gpu: &dyn Gpu) -> anyhow::Result<Self> {
@@ -110,7 +105,7 @@ impl EguiSceneEditor {
 
 impl Plugin for EguiSceneEditor {
     fn on_start(&mut self, world: &mut kecs::World) {
-        world.add_resource(CurrentEditorScene::default());
+        world.add_resource(GameScene::default());
 
         let status = world.get_resource_mut::<SimulationState>().unwrap();
         status.step = SimulationStep::Idle;
@@ -167,11 +162,11 @@ impl Plugin for EguiSceneEditor {
             });
         });
         let _ = egui::Window::new("Entities").show(&context, |ui| {
-            let scene = world.get_resource_mut::<CurrentEditorScene>();
+            let scene = world.get_resource_mut::<GameScene>();
             if let Some(scene) = scene {
-                let roots = scene.0.root_nodes().cloned().collect::<Vec<_>>();
+                let roots = scene.root_nodes().cloned().collect::<Vec<_>>();
                 roots.into_iter().for_each(|root_node| {
-                    Self::draw_entity_outliner(ui, &mut scene.0, root_node, &mut self.current_node);
+                    Self::draw_entity_outliner(ui, scene, root_node, &mut self.current_node);
                 });
 
                 if ui.button("Add New Entity").clicked() {
@@ -181,19 +176,20 @@ impl Plugin for EguiSceneEditor {
                 ui.collapsing("Current Scene Node", |ui| {
                     if let Some(current_node) = self.current_node {
                         current_selected_entity =
-                            Some(scene.0.get_node(current_node).unwrap().payload);
-                        self.draw_scene_node(ui, &mut scene.0, current_node);
+                            Some(scene.get_node(current_node).unwrap().payload);
+                        self.draw_scene_node(ui, scene, current_node);
                     }
                 });
                 if wants_to_add_entity {
                     let entity = world.new_entity();
 
-                    let scene = world.get_resource_mut::<CurrentEditorScene>().unwrap();
-                    scene
-                        .0
+                    let scene = world.get_resource_mut::<GameScene>().unwrap();
+                    let id = scene
                         .add_node(entity)
                         .label(format!("{:?}", entity))
                         .build();
+
+                    world.add_component(entity, EntityToSceneNode { node_id: id })
                 }
             }
 
@@ -218,11 +214,10 @@ impl Plugin for EguiSceneEditor {
                     let entity_info = world.get_entity_info(entity);
                     if let Some(info) = entity_info {
                         for (component, _) in info.components.iter() {
-                            egui::CollapsingHeader::new(component.name()).show(ui, |ui| {
-                                if let Some(editor) = self.registered_types.get(&component) {
-                                    editor.show_ui(ui, entity, world)
-                                }
-                            });
+                            if let Some(editor) = self.registered_types.get_mut(&component) {
+                                egui::CollapsingHeader::new(component.name())
+                                    .show(ui, |ui| editor.show_ui(ui, entity, world));
+                            }
                         }
                     }
                 }

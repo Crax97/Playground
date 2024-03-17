@@ -1,4 +1,8 @@
-use std::{borrow::Cow, ops::Deref, sync::Arc};
+use std::{
+    borrow::Cow,
+    ops::Deref,
+    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
+};
 
 use gpu::{CommandBuffer, Gpu, Offset2D, Rect2D};
 use kecs::{Label, Resource, World};
@@ -6,12 +10,28 @@ use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop};
 
 use crate::{
     app::{app_state::AppState, App},
-    AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, RenderScene,
+    AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, GameScene, RenderScene,
     RenderingPipeline, Time,
 };
 
 #[derive(Clone)]
 pub struct GpuDevice(Arc<dyn Gpu>);
+
+#[derive(Clone)]
+pub struct SharedAssetMap(Arc<RwLock<AssetMap>>);
+
+impl SharedAssetMap {
+    pub fn new(gpu: Arc<dyn Gpu>) -> Self {
+        Self(Arc::new(RwLock::new(AssetMap::new(gpu))))
+    }
+    pub fn read(&self) -> RwLockReadGuard<'_, AssetMap> {
+        self.0.read().expect("Failed to lock asset map")
+    }
+
+    pub fn write(&self) -> RwLockWriteGuard<'_, AssetMap> {
+        self.0.write().expect("Failed to lock asset map")
+    }
+}
 
 impl Deref for GpuDevice {
     type Target = dyn Gpu;
@@ -22,6 +42,7 @@ impl Deref for GpuDevice {
 }
 
 impl Resource for GpuDevice {}
+impl Resource for SharedAssetMap {}
 
 #[derive(Clone, Copy, Default, Eq, PartialEq, PartialOrd, Ord)]
 pub enum SimulationStep {
@@ -109,7 +130,7 @@ pub trait Plugin: 'static {
 pub struct KecsApp {
     pub world: World,
     plugins: Vec<Box<dyn Plugin>>,
-    renderer: DeferredRenderingPipeline,
+    pub renderer: DeferredRenderingPipeline,
 }
 
 impl KecsApp {
@@ -118,6 +139,7 @@ impl KecsApp {
     pub const UPDATE: Label = Label::new(2);
     pub const POST_UPDATE: Label = Label::new(3);
     pub const END: Label = Label::new(4);
+    pub const DRAW: Label = Label::new(5);
     pub fn create() -> anyhow::Result<(KecsApp, EventLoop<()>, AppState)> {
         let (app, evt_loop, state) = crate::app::create_app::<Self>()?;
 
@@ -152,10 +174,11 @@ impl App for KecsApp {
     {
         let mut world = World::new();
         world.add_resource(Time::default());
-        world.add_resource(AssetMap::new(app_state.gpu.clone()));
+        world.add_resource(SharedAssetMap::new(app_state.gpu.clone()));
         world.add_resource(CvarManager::new());
         world.add_resource(RenderScene::new());
         world.add_resource(SimulationState::default());
+        world.add_resource(GameScene::default());
         let combine_shader = DeferredRenderingPipeline::make_3d_combine_shader(app_state.gpu())?;
         let renderer = DeferredRenderingPipeline::new(app_state.gpu(), combine_shader)?;
         Ok(Self {
@@ -264,6 +287,8 @@ impl App for KecsApp {
         app_state: &'a mut crate::app::app_state::AppState,
         backbuffer: &crate::Backbuffer,
     ) -> anyhow::Result<gpu::CommandBuffer> {
+        self.world.update(Self::DRAW);
+
         let mut command_buffer = app_state
             .gpu
             .start_command_buffer(gpu::QueueType::Graphics)?;
@@ -274,7 +299,8 @@ impl App for KecsApp {
             .get_resource::<Camera>()
             .cloned()
             .unwrap_or_default();
-        let resource_map = self.world.get_resource::<AssetMap>().unwrap();
+        let resource_map = self.world.get_resource::<SharedAssetMap>().unwrap();
+        let resource_map = resource_map.read();
         let cvar_manager = self.world.get_resource::<CvarManager>().unwrap();
         if let Some(scene) = scene {
             let final_render = self.renderer.render(
@@ -282,7 +308,7 @@ impl App for KecsApp {
                 &mut command_buffer,
                 &camera,
                 scene,
-                resource_map,
+                &resource_map,
                 cvar_manager,
             )?;
             self.renderer.draw_textured_quad(
@@ -297,6 +323,7 @@ impl App for KecsApp {
                 None,
             )?;
         }
+        drop(resource_map);
 
         for plugin in &mut self.plugins {
             plugin.draw(&mut self.world, app_state, backbuffer, &mut command_buffer)?;

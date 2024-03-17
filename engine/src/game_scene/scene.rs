@@ -10,6 +10,8 @@ pub struct Scene<T: 'static> {
     roots: HashSet<SceneNodeId>,
 }
 
+impl<T: 'static> kecs::Resource for Scene<T> {}
+
 impl<T: 'static> Default for Scene<T> {
     fn default() -> Self {
         let mut nodes = Arena::new();

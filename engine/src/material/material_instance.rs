@@ -17,7 +17,7 @@ pub struct MaterialInstanceDescription<'a> {
     pub parameter_buffers: Vec<BufferHandle>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Default)]
 pub struct MaterialInstance {
     pub(crate) owner: AssetHandle<MasterMaterial>,
     pub(crate) textures: Vec<AssetHandle<Texture>>,

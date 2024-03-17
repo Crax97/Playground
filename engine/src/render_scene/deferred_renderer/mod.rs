@@ -258,6 +258,7 @@ impl DeferredRenderingPipeline {
                     // render_pass.set_cull_mode(master.cull_mode);
                     // render_pass.set_front_face(master.front_face);
                     let model = primitive.transform;
+                    println!("DRAW");
                     draw_mesh_primitive(
                         gpu,
                         render_pass,

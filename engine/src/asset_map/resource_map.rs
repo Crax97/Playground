@@ -17,6 +17,12 @@ pub trait Asset: Send + Sync + 'static {
     fn destroyed(&mut self, gpu: &dyn Gpu);
 }
 
+#[repr(transparent)]
+#[derive(Clone, Copy, Hash)]
+pub struct AssetId {
+    pub(crate) id: Option<Index>,
+}
+
 pub trait ResourceLoader: Send + Sync + 'static {
     type LoadedResource: Asset;
 
@@ -35,7 +41,10 @@ pub struct AssetMap {
     hot_reload_server: Option<HotReloadServer>,
 }
 
-impl kecs::Resource for AssetMap {}
+#[derive(Clone)]
+pub struct AssetMetadata {
+    pub name: String,
+}
 
 impl AssetMap {
     pub fn new(gpu: Arc<dyn Gpu>) -> Self {
@@ -53,15 +62,34 @@ impl AssetMap {
     pub fn add<R: Asset>(&mut self, resource: R) -> AssetHandle<R> {
         let id = {
             let mut handle = self.get_or_insert_arena_mut::<R>();
-            handle.insert(RefCounted::new(resource))
+            handle.insert(RefCountedAsset::new(resource, None))
         };
         AssetHandle {
             _marker: PhantomData,
-            id: ResourceId { id: Some(id) },
+            id: AssetId { id: Some(id) },
             operation_sender: Some(self.operations_sender.clone()),
         }
     }
 
+    pub fn iter_ids<R: Asset>(&mut self, mut fun: impl FnMut(AssetId, &AssetMetadata)) {
+        let map = self.get_or_insert_arena_mut::<R>();
+        map.iter()
+            .for_each(|(idx, asset)| fun(AssetId { id: Some(idx) }, &asset.metadata))
+    }
+
+    pub fn upcast_index<R: Asset>(&self, id: AssetId) -> AssetHandle<R> {
+        let handle = AssetHandle {
+            _marker: PhantomData,
+            id,
+            operation_sender: Some(self.operations_sender.clone()),
+        };
+
+        handle.inc_ref_count();
+
+        self.get(&handle);
+
+        handle
+    }
     pub fn install_resource_loader<L: ResourceLoader>(&mut self, loader: L) {
         let old = self
             .resource_loaders
@@ -83,9 +111,12 @@ impl AssetMap {
 
             let id = {
                 let mut handle = self.get_or_insert_arena_mut::<R>();
-                handle.insert(RefCounted::wrap(loaded_resource))
+                handle.insert(RefCountedAsset::wrap(
+                    loaded_resource,
+                    Some(path.as_ref().to_str().unwrap().to_string()),
+                ))
             };
-            let id = ResourceId { id: Some(id) };
+            let id = AssetId { id: Some(id) };
 
             if let Some(server) = &mut self.hot_reload_server {
                 server.watch(path.as_ref(), resource_type, id)?;
@@ -195,7 +226,7 @@ impl AssetMap {
         Ok(())
     }
 
-    fn increment_resource_ref_count<R: Asset>(&mut self, id: ResourceId) {
+    fn increment_resource_ref_count<R: Asset>(&mut self, id: AssetId) {
         let mut arena_handle = self.get_arena_handle_mut::<R>();
         let resource_mut = arena_handle
             .get_mut(
@@ -205,7 +236,7 @@ impl AssetMap {
             .unwrap_or_else(|| panic!("Failed to fetch resource of type {}", type_name::<R>()));
         resource_mut.ref_count += 1;
     }
-    fn decrement_resource_ref_count<R: Asset>(&mut self, id: ResourceId) {
+    fn decrement_resource_ref_count<R: Asset>(&mut self, id: AssetId) {
         let mut arena_handle = self.get_arena_handle_mut::<R>();
         let ref_count = {
             let resource_mut = arena_handle
@@ -238,6 +269,17 @@ impl AssetMap {
             );
         }
     }
+
+    pub fn asset_metadata<T: crate::asset_map::Asset>(
+        &self,
+        handle: &mut AssetHandle<T>,
+    ) -> AssetMetadata {
+        let arena = self.get_arena_handle::<T>();
+        let asset = arena
+            .get(handle.id.id.expect("handle is null!"))
+            .expect("Asset id is invalid");
+        asset.metadata.clone()
+    }
 }
 
 impl Drop for AssetMap {
@@ -262,28 +304,27 @@ impl<T: Any + Asset + 'static> AnyResource for T {
 }
 pub(super) type ResourcePtr = Arc<dyn AnyResource>;
 
-#[repr(transparent)]
-#[derive(Clone, Copy, Hash)]
-pub(crate) struct ResourceId {
-    pub(crate) id: Option<Index>,
-}
-
-pub(super) struct RefCounted {
+pub(super) struct RefCountedAsset {
     pub resource: ResourcePtr,
+    pub metadata: AssetMetadata,
     ref_count: u32,
 }
-impl RefCounted {
-    fn new(resource: impl Asset) -> Self {
+impl RefCountedAsset {
+    fn new(resource: impl Asset, name: Option<String>) -> Self {
+        let name = name.unwrap_or_else(|| resource.get_description().to_string());
         Self {
             resource: Arc::new(resource),
             ref_count: 1,
+            metadata: AssetMetadata { name },
         }
     }
 
-    fn wrap(resource: ResourcePtr) -> Self {
+    fn wrap(resource: ResourcePtr, name: Option<String>) -> Self {
+        let name = name.unwrap_or_else(|| resource.get_description().to_string());
         Self {
             resource,
             ref_count: 1,
+            metadata: AssetMetadata { name },
         }
     }
 }
@@ -303,7 +344,7 @@ where
     }
 }
 
-type Resources = Arena<RefCounted>;
+type Resources = Arena<RefCountedAsset>;
 
 #[derive(Default)]
 pub(super) struct LoadedResources {
@@ -319,7 +360,7 @@ where
     R: Asset,
 {
     _marker: PhantomData<R>,
-    pub(crate) id: ResourceId,
+    pub(crate) id: AssetId,
     pub(crate) operation_sender: Option<Sender<Box<dyn ResourceMapOperation>>>,
 }
 
@@ -329,11 +370,17 @@ impl<R: Asset> std::fmt::Debug for AssetHandle<R> {
     }
 }
 
+impl<R: Asset> Default for AssetHandle<R> {
+    fn default() -> Self {
+        Self::null()
+    }
+}
+
 impl<R: Asset> AssetHandle<R> {
     pub fn null() -> Self {
         Self {
             _marker: PhantomData,
-            id: ResourceId { id: None },
+            id: AssetId { id: None },
             operation_sender: None,
         }
     }
@@ -347,7 +394,9 @@ impl<R: Asset> AssetHandle<R> {
     }
 
     fn inc_ref_count(&self) {
-        assert!(self.is_not_null());
+        if self.is_null() {
+            return;
+        }
         self.operation_sender
             .as_ref()
             .expect("Handle is null()")
@@ -356,7 +405,9 @@ impl<R: Asset> AssetHandle<R> {
     }
 
     fn dec_ref_count(&self) {
-        assert!(self.is_not_null());
+        if self.is_null() {
+            return;
+        }
         self.operation_sender
             .as_ref()
             .expect("Handle is null()")
@@ -365,7 +416,7 @@ impl<R: Asset> AssetHandle<R> {
     }
 
     fn inc_ref_count_operation(&self) -> Box<dyn ResourceMapOperation> {
-        struct IncResourceMapOperation<R: Asset>(ResourceId, PhantomData<R>);
+        struct IncResourceMapOperation<R: Asset>(AssetId, PhantomData<R>);
 
         impl<R: Asset> ResourceMapOperation for IncResourceMapOperation<R> {
             fn execute(&self, map: &mut AssetMap) {
@@ -375,7 +426,7 @@ impl<R: Asset> AssetHandle<R> {
         Box::new(IncResourceMapOperation::<R>(self.id, PhantomData))
     }
     fn dec_ref_count_operation(&self) -> Box<dyn ResourceMapOperation> {
-        struct DecResourceMapOperation<R: Asset>(ResourceId, PhantomData<R>);
+        struct DecResourceMapOperation<R: Asset>(AssetId, PhantomData<R>);
 
         impl<R: Asset> ResourceMapOperation for DecResourceMapOperation<R> {
             fn execute(&self, map: &mut AssetMap) {

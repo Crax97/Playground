@@ -25,7 +25,7 @@ pub use bevy_ecs;
 pub use bevy_ecs_app::*;
 pub use bevy_reflect;
 pub use cvar_manager::*;
-use game_scene::Scene;
+use game_scene::{Scene, SceneNodeId};
 pub use kecs;
 use kecs::Entity;
 pub use material::*;
@@ -46,3 +46,7 @@ pub use render_scene::{camera::*, deferred_renderer::*, render_structs::*, scene
  * */
 
 pub type GameScene = Scene<Entity>;
+
+pub struct EntityToSceneNode {
+    node_id: SceneNodeId,
+}
