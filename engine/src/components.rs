@@ -252,6 +252,7 @@ impl SpriteComponent {
     }
 }
 
+#[deprecated]
 pub fn rendering_system(
     meshes: Query<(&MeshComponent, &Transform)>,
     lights: Query<(&LightComponent, &Transform)>,
@@ -272,6 +273,7 @@ pub fn rendering_system(
                 bounds,
             },
             *transform,
+            None,
         );
     }
     for (light, transform) in lights.iter() {
@@ -285,11 +287,14 @@ pub fn rendering_system(
                 shadow_configuration: light.shadow_setup,
             },
             *transform,
+            None,
         );
     }
 
     commands.insert_resource(scene)
 }
+
+#[deprecated]
 pub fn rendering_system_kecs(
     meshes: kecs::Query<(&MeshComponent, &EntityToSceneNode)>,
     lights: kecs::Query<(&LightComponent, &Transform)>,
@@ -309,6 +314,7 @@ pub fn rendering_system_kecs(
                 bounds,
             },
             transform,
+            None,
         );
     }
     for (light, transform) in lights.iter() {
@@ -322,12 +328,14 @@ pub fn rendering_system_kecs(
                 shadow_configuration: light.shadow_setup,
             },
             *transform,
+            None,
         );
     }
 
     commands.add_resource(scene)
 }
 
+#[deprecated]
 pub fn rendering_system_2d(
     common_resources: Res<CommonResources>,
     sprites: Query<(&SpriteComponent, &Transform2D)>,
@@ -376,6 +384,7 @@ pub fn rendering_system_2d(
                 bounds,
             },
             transform.to_3d(),
+            None,
         );
     }
 

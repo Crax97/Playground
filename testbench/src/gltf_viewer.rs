@@ -10,13 +10,12 @@ use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App, Console};
 use engine::components::Transform;
 use engine::editor::ui_extension::UiExtension;
-use engine::{egui, LightType, SceneLightInfo, ShadowConfiguration, Time};
+use engine::{egui, LightType, SceneLightInfo, ScenePrimitiveType, ShadowConfiguration, Time};
 
 use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
 use engine_macros::glsl;
 use fps_camera::FpsCamera;
-use gltf::json::scene::UnitQuaternion;
 use gpu::{
     CommandBuffer, Extent2D, ImageFormat, Offset2D, PresentMode, Rect2D, ShaderModuleCreateInfo,
     ShaderModuleHandle, ShaderStage,
@@ -69,7 +68,7 @@ pub struct GLTFViewer {
     camera: FpsCamera,
     scene_renderer: DeferredRenderingPipeline,
     gltf_loader: GltfLoader,
-    camera_light: Option<PrimitiveHandle>,
+    selected_primitive: Option<PrimitiveHandle>,
 
     input: InputState,
     console: Console,
@@ -91,7 +90,7 @@ impl GLTFViewer {
 
 impl GLTFViewer {
     fn lights_ui(&mut self, ui: &mut egui::Ui) {
-        ui.collapsing("Lighting settings", |ui| {
+        ui.collapsing("Scene Setup", |ui| {
             ui.separator();
 
             ui.color_edit3(
@@ -105,87 +104,84 @@ impl GLTFViewer {
 
             self.gltf_loader
                 .scene()
-                .all_lights()
-                .for_each(|(handle, l)| {
-                    let l = l.ty.as_light();
-                    let light_string = match l.ty {
-                        LightType::Point => "Point light",
-                        LightType::Directional { .. } => "Directional light",
-                        LightType::Spotlight { .. } => "Spot light",
-                        LightType::Rect { .. } => "Rect light",
-                    };
-
+                .all_primitives()
+                .for_each(|(handle, prim)| {
                     if ui
                         .selectable_label(
-                            self.camera_light.is_some_and(|l| l == handle),
-                            format!("{light_string} #{:?}", handle),
+                            self.selected_primitive.is_some_and(|l| l == handle),
+                            &prim.label,
                         )
                         .clicked()
                     {
-                        self.camera_light = Some(handle);
+                        self.selected_primitive = Some(handle);
                     }
                 });
 
-            if let Some(cl) = self.camera_light {
+            if let Some(cl) = self.selected_primitive {
                 let l = self.gltf_loader.scene_mut().get_mut(cl);
                 let transform = &mut l.transform;
-                let mut degrees_rot = transform.rotation.euler_angles();
+                let degrees_rot = transform.rotation.euler_angles();
                 let mut degrees_rot =
                     [degrees_rot.0, degrees_rot.1, degrees_rot.2].map(|v| v.to_degrees());
-                let l = l.ty.as_light_mut();
-                ui.indent(
-                    "cameralight
+                ui.collapsing("Transform", |ui| {
+                    ui.input_floats("Position", transform.position.coords.as_mut_slice());
+
+                    if ui.input_floats("Rotation", &mut degrees_rot) {
+                        let rad_rot = degrees_rot.map(|v| v.to_radians());
+                        let rot = nalgebra::UnitQuaternion::from_euler_angles(
+                            rad_rot[0], rad_rot[1], rad_rot[2],
+                        );
+                        transform.rotation = rot;
+                    }
+
+                    ui.input_floats("Scale", transform.scale.as_mut_slice());
+                });
+                if let ScenePrimitiveType::Light(l) = &mut l.ty {
+                    ui.indent(
+                        "cameralight
                 ",
-                    |ui| {
-                        ui.checkbox(&mut l.enabled, "Enabled");
-                        ui.input_floats("Position", &mut transform.position.coords.data.0[0]);
+                        |ui| {
+                            ui.checkbox(&mut l.enabled, "Enabled");
 
-                        if ui.input_floats("Rotation", &mut degrees_rot) {
-                            let rad_rot = degrees_rot.map(|v| v.to_radians());
-                            let rot = nalgebra::UnitQuaternion::from_euler_angles(
-                                rad_rot[0], rad_rot[1], rad_rot[2],
-                            );
-                            transform.rotation = rot;
-                        }
+                            ui.color_edit3("Color", &mut l.color.data.0[0]);
+                            ui.slider("Intensity", 0.0, 1000.0, &mut l.intensity);
+                            ui.slider("Radius", 0.0, 1000.0, &mut l.radius);
 
-                        ui.color_edit3("Color", &mut l.color.data.0[0]);
-                        ui.slider("Intensity", 0.0, 1000.0, &mut l.intensity);
-                        ui.slider("Radius", 0.0, 1000.0, &mut l.radius);
-
-                        if let Some(setup) = l.shadow_configuration.as_mut() {
-                            ui.separator();
-                            ui.slider("Depth Bias", -10.0, 10.0, &mut setup.depth_bias);
-                            ui.slider("Depth Slope", -10.0, 10.0, &mut setup.depth_slope);
-                        }
-                        match &mut l.ty {
-                            LightType::Point => {}
-                            LightType::Directional { size } => {
-                                ui.input_floats("Shadow size", &mut size.data.0[0]);
+                            if let Some(setup) = l.shadow_configuration.as_mut() {
+                                ui.separator();
+                                ui.slider("Depth Bias", -10.0, 10.0, &mut setup.depth_bias);
+                                ui.slider("Depth Slope", -10.0, 10.0, &mut setup.depth_slope);
                             }
-                            LightType::Spotlight {
-                                inner_cone_degrees,
-                                outer_cone_degrees,
-                            } => {
-                                ui.slider(
-                                    "Outer cone",
-                                    *inner_cone_degrees,
-                                    45.0,
-                                    outer_cone_degrees,
-                                );
-                                ui.slider(
-                                    "Inner cone",
-                                    0.0,
-                                    *outer_cone_degrees,
+                            match &mut l.ty {
+                                LightType::Point => {}
+                                LightType::Directional { size } => {
+                                    ui.input_floats("Shadow size", &mut size.data.0[0]);
+                                }
+                                LightType::Spotlight {
                                     inner_cone_degrees,
-                                );
+                                    outer_cone_degrees,
+                                } => {
+                                    ui.slider(
+                                        "Outer cone",
+                                        *inner_cone_degrees,
+                                        45.0,
+                                        outer_cone_degrees,
+                                    );
+                                    ui.slider(
+                                        "Inner cone",
+                                        0.0,
+                                        *outer_cone_degrees,
+                                        inner_cone_degrees,
+                                    );
+                                }
+                                LightType::Rect { width, height } => {
+                                    ui.slider("Width", 0.0, 100000.0, width);
+                                    ui.slider("Height", 0.0, 100000.0, height);
+                                }
                             }
-                            LightType::Rect { width, height } => {
-                                ui.slider("Width", 0.0, 100000.0, width);
-                                ui.slider("Height", 0.0, 100000.0, height);
-                            }
-                        }
-                    },
-                );
+                        },
+                    );
+                }
             }
             ui.separator();
 
@@ -207,6 +203,7 @@ impl GLTFViewer {
                         }),
                     },
                     Transform::default(),
+                    None,
                 );
             }
             if ui.button("Add new directional light").clicked() {
@@ -227,6 +224,7 @@ impl GLTFViewer {
                         }),
                     },
                     Transform::default(),
+                    None,
                 );
             }
             if ui.button("Add new point light").clicked() {
@@ -244,6 +242,7 @@ impl GLTFViewer {
                         }),
                     },
                     Transform::default(),
+                    None,
                 );
             }
         });
@@ -375,6 +374,7 @@ impl App for GLTFViewer {
                 }),
             },
             Default::default(),
+            None,
         );
 
         let depth_draw = app_state.gpu.make_shader_module(&ShaderModuleCreateInfo {
@@ -390,7 +390,7 @@ impl App for GLTFViewer {
             scene_renderer,
             gltf_loader,
             camera,
-            camera_light: None,
+            selected_primitive: None,
             console,
             input,
             cvar_manager,
@@ -614,7 +614,7 @@ impl App for GLTFViewer {
         }
 
         if self.input.is_mouse_button_pressed(MouseButton::Left) {
-            if let Some(camera_light) = self.camera_light {
+            if let Some(camera_light) = self.selected_primitive {
                 self.gltf_loader
                     .scene_mut()
                     .get_mut(camera_light)

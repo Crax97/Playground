@@ -1726,6 +1726,10 @@ fn make_fence(logical_device: &Device, signaled: bool) -> vk::Fence {
 fn ensure_map_is_empty<H: HasAssociatedHandle + Clone + std::fmt::Debug>(
     map: &AllocatedResourceMap<H>,
 ) {
+    if std::thread::panicking() {
+        // Don't clutter too much
+        return;
+    }
     if !map.is_empty() {
         map.for_each(|f| {
             error!(

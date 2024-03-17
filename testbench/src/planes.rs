@@ -171,6 +171,7 @@ impl App for PlanesApp {
                 bounds,
             },
             Transform::default(),
+            None,
         );
         scene.add_mesh(
             SceneMesh {
@@ -179,6 +180,7 @@ impl App for PlanesApp {
                 bounds,
             },
             Transform::new_translation(point![0.0, 0.0, 1.0]),
+            None,
         );
         scene.add_mesh(
             SceneMesh {
@@ -187,6 +189,7 @@ impl App for PlanesApp {
                 bounds,
             },
             Transform::new_translation(point![0.0, 0.0, -1.0]),
+            None,
         );
 
         scene.add_mesh(
@@ -196,6 +199,7 @@ impl App for PlanesApp {
                 bounds,
             },
             Transform::new_translation(point![1.5, 0.0, 0.0]),
+            None,
         );
 
         scene.add_mesh(
@@ -210,6 +214,7 @@ impl App for PlanesApp {
                 scale: vector![-1.0, -1.0, -1.0],
                 ..Default::default()
             },
+            None,
         );
 
         scene_renderer.ambient_color = vector![1.0, 1.0, 1.0];

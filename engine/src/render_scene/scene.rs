@@ -9,7 +9,7 @@ use crate::{
 };
 use bevy_ecs::system::Resource;
 use gpu::{CommandBuffer, Extent2D, Gpu, ImageFormat, ImageHandle, ImageViewHandle, Rect2D};
-use nalgebra::{vector, Point3, Vector2, Vector3};
+use nalgebra::{vector, Vector2, Vector3};
 use thunderdome::{Arena, Index};
 
 #[repr(C)]
@@ -31,6 +31,7 @@ pub struct SceneMesh {
 pub struct ScenePrimitive {
     pub ty: ScenePrimitiveType,
     pub transform: Transform,
+    pub label: String,
 }
 
 pub enum ScenePrimitiveType {
@@ -225,11 +226,17 @@ impl RenderScene {
         }
     }
 
-    pub fn add_mesh(&mut self, primitive: SceneMesh, transform: Transform) -> PrimitiveHandle {
+    pub fn add_mesh(
+        &mut self,
+        primitive: SceneMesh,
+        transform: Transform,
+        label: Option<String>,
+    ) -> PrimitiveHandle {
         let (aabb_min, aabb_max) = primitive.bounds.box_extremes();
         let prim_index = self.primitives.insert(ScenePrimitive {
             ty: ScenePrimitiveType::Mesh(primitive),
             transform,
+            label: label.unwrap_or("Mesh".to_owned()),
         });
         self.bvh.add(prim_index, aabb_min, aabb_max);
 
@@ -267,11 +274,28 @@ impl RenderScene {
         }
     }
 
-    pub fn add_light(&mut self, light: SceneLightInfo, transform: Transform) -> PrimitiveHandle {
+    pub fn add_light(
+        &mut self,
+        light: SceneLightInfo,
+        transform: Transform,
+        label: Option<String>,
+    ) -> PrimitiveHandle {
         self.increment_light_counter();
         let idx = self.primitives.insert(ScenePrimitive {
             ty: ScenePrimitiveType::Light(light),
             transform,
+            label: label.unwrap_or_else(|| {
+                match light.ty {
+                    LightType::Point => "Point Light",
+                    LightType::Directional { size } => "Directional Light",
+                    LightType::Spotlight {
+                        inner_cone_degrees,
+                        outer_cone_degrees,
+                    } => "Spot Light",
+                    LightType::Rect { width, height } => "Rect Light",
+                }
+                .to_string()
+            }),
         });
         PrimitiveHandle(idx)
     }

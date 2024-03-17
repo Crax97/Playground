@@ -531,6 +531,7 @@ fn handle_node(
                 rotation: rot,
                 ..Default::default()
             },
+            light.name().map(|s| s.to_string()),
         );
     } else if let Some(mesh) = node.mesh() {
         let transform = Transform {
@@ -549,16 +550,17 @@ fn handle_node(
             materials.push(material);
         }
 
-        let (mesh, min, max) = meshes[mesh.index()].clone();
+        let (mesh_handle, min, max) = meshes[mesh.index()].clone();
         // TODO: consider the bounding volumes of all mesh primitives when constructing the scene primitive
         let bounds = BoundingShape::BoundingBox { min, max }.transformed(transform_mat);
         engine_scene.add_mesh(
             SceneMesh {
-                mesh,
+                mesh: mesh_handle,
                 materials,
                 bounds,
             },
             transform,
+            mesh.name().map(|s| s.to_string()),
         );
     }
 
