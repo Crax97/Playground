@@ -62,6 +62,8 @@ impl Deref for GpuDevice {
     }
 }
 
+impl kecs::Resource for GpuDevice {}
+
 #[derive(Default, Clone)]
 pub struct AppTypeRegistry(Arc<RwLock<TypeRegistry>>);
 

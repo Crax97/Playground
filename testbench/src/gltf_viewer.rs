@@ -10,7 +10,9 @@ use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App, Console};
 use engine::components::Transform;
 use engine::editor::ui_extension::UiExtension;
-use engine::{egui, LightType, SceneLightInfo, ScenePrimitiveType, ShadowConfiguration, Time};
+use engine::{
+    egui, GameScene, LightType, SceneLightInfo, ScenePrimitiveType, ShadowConfiguration, Time,
+};
 
 use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
@@ -67,7 +69,7 @@ struct DepthDrawConstants {
 pub struct GLTFViewer {
     camera: FpsCamera,
     scene_renderer: DeferredRenderingPipeline,
-    gltf_loader: GltfLoader,
+    scene: GameScene,
     selected_primitive: Option<PrimitiveHandle>,
 
     input: InputState,
@@ -82,7 +84,7 @@ pub struct GLTFViewer {
 
 impl GLTFViewer {
     pub(crate) fn print_lights(&self) {
-        for (light, _) in self.gltf_loader.scene().all_lights() {
+        for (light, _) in self.scene.all_lights() {
             println!("{light:?}");
         }
     }
@@ -102,23 +104,20 @@ impl GLTFViewer {
                 &mut self.scene_renderer.ambient_intensity,
             );
 
-            self.gltf_loader
-                .scene()
-                .all_primitives()
-                .for_each(|(handle, prim)| {
-                    if ui
-                        .selectable_label(
-                            self.selected_primitive.is_some_and(|l| l == handle),
-                            &prim.label,
-                        )
-                        .clicked()
-                    {
-                        self.selected_primitive = Some(handle);
-                    }
-                });
+            self.scene.all_primitives().for_each(|(handle, prim)| {
+                if ui
+                    .selectable_label(
+                        self.selected_primitive.is_some_and(|l| l == handle),
+                        &prim.label,
+                    )
+                    .clicked()
+                {
+                    self.selected_primitive = Some(handle);
+                }
+            });
 
             if let Some(cl) = self.selected_primitive {
-                let l = self.gltf_loader.scene_mut().get_mut(cl);
+                let l = self.scene.get_mut(cl);
                 let transform = &mut l.transform;
                 let degrees_rot = transform.rotation.euler_angles();
                 let mut degrees_rot =
@@ -186,7 +185,7 @@ impl GLTFViewer {
             ui.separator();
 
             if ui.button("Add new spotlight").clicked() {
-                self.gltf_loader.scene_mut().add_light(
+                self.scene.add_light(
                     SceneLightInfo {
                         ty: LightType::Spotlight {
                             inner_cone_degrees: 15.0,
@@ -207,7 +206,7 @@ impl GLTFViewer {
                 );
             }
             if ui.button("Add new directional light").clicked() {
-                self.gltf_loader.scene_mut().add_light(
+                self.scene.add_light(
                     SceneLightInfo {
                         ty: LightType::Directional {
                             size: vector![10.0, 10.0],
@@ -228,7 +227,7 @@ impl GLTFViewer {
                 );
             }
             if ui.button("Add new point light").clicked() {
-                self.gltf_loader.scene_mut().add_light(
+                self.scene.add_light(
                     SceneLightInfo {
                         ty: LightType::Point,
                         radius: 100.0,
@@ -336,7 +335,7 @@ impl App for GLTFViewer {
             },
         )?;
 
-        let mut gltf_loader = GltfLoader::load(
+        let mut scene = GltfLoader::load(
             &args.gltf_file,
             app_state.gpu(),
             &mut scene_renderer,
@@ -346,9 +345,7 @@ impl App for GLTFViewer {
             },
         )?;
 
-        gltf_loader
-            .scene_mut()
-            .set_skybox_material(Some(skybox_instance));
+        scene.set_skybox_material(Some(skybox_instance));
 
         app_state
             .swapchain_mut()
@@ -356,7 +353,7 @@ impl App for GLTFViewer {
 
         let egui_support = EguiSupport::new(&app_state.window, app_state.gpu())?;
 
-        gltf_loader.scene_mut().add_light(
+        scene.add_light(
             SceneLightInfo {
                 ty: LightType::Directional {
                     size: vector![50.0, 50.0],
@@ -388,7 +385,7 @@ impl App for GLTFViewer {
 
         Ok(Self {
             scene_renderer,
-            gltf_loader,
+            scene,
             camera,
             selected_primitive: None,
             console,
@@ -483,15 +480,9 @@ impl App for GLTFViewer {
                     ui.input_float("Camera rotation speed", &mut self.camera.rotation_speed);
                     ui.input_float("Camera FOV", &mut self.camera.fov_degrees);
 
-                    ui.checkbox(
-                        &mut self.gltf_loader.scene_mut().use_frustum_culling,
-                        "Use frustum culling",
-                    );
+                    ui.checkbox(&mut self.scene.use_frustum_culling, "Use frustum culling");
 
-                    ui.checkbox(
-                        &mut self.gltf_loader.scene_mut().use_bvh,
-                        "Use BVH for frustum culling",
-                    );
+                    ui.checkbox(&mut self.scene.use_bvh, "Use BVH for frustum culling");
 
                     if ui.button("Reset camera").clicked() {
                         self.camera.location = Default::default();
@@ -615,11 +606,7 @@ impl App for GLTFViewer {
 
         if self.input.is_mouse_button_pressed(MouseButton::Left) {
             if let Some(camera_light) = self.selected_primitive {
-                self.gltf_loader
-                    .scene_mut()
-                    .get_mut(camera_light)
-                    .transform
-                    .position = self.camera.location;
+                self.scene.get_mut(camera_light).transform.position = self.camera.location;
             }
         }
 
@@ -644,7 +631,7 @@ impl App for GLTFViewer {
             app_state.gpu(),
             &mut command_buffer,
             &self.camera.camera(),
-            self.gltf_loader.scene(),
+            &self.scene,
             &self.resource_map,
             &self.cvar_manager,
         )?;
@@ -677,9 +664,7 @@ impl App for GLTFViewer {
 
     fn on_shutdown(&mut self, app_state: &mut AppState) {
         app_state.gpu().destroy_shader_module(self.depth_draw);
-        self.gltf_loader
-            .scene_mut()
-            .clean_resources(app_state.gpu());
+        self.scene.clean_resources(app_state.gpu());
         self.scene_renderer.destroy(app_state.gpu());
         self.egui_support.destroy(app_state.gpu());
     }

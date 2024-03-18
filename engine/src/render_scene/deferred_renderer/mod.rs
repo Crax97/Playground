@@ -96,6 +96,8 @@ pub struct DeferredRenderingPipeline {
     view_size: Extent2D,
 }
 
+impl kecs::Resource for DeferredRenderingPipeline {}
+
 impl DeferredRenderingPipeline {
     pub fn new(gpu: &dyn Gpu, combine_shader: ShaderModuleHandle) -> anyhow::Result<Self> {
         let mut frame_buffers = vec![];

@@ -178,6 +178,7 @@ impl App for KecsApp {
         world.add_resource(CvarManager::new());
         world.add_resource(GameScene::new());
         world.add_resource(SimulationState::default());
+        world.add_resource(GpuDevice(app_state.gpu.clone()));
         let combine_shader = DeferredRenderingPipeline::make_3d_combine_shader(app_state.gpu())?;
         let renderer = DeferredRenderingPipeline::new(app_state.gpu(), combine_shader)?;
         Ok(Self {

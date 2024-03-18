@@ -54,7 +54,7 @@ impl GltfLoader {
         scene_renderer: &mut R,
         resource_map: &mut AssetMap,
         options: GltfLoadOptions,
-    ) -> anyhow::Result<Self> {
+    ) -> anyhow::Result<GameScene> {
         let (document, buffers, mut images) = gltf::import(path)?;
 
         let pbr_master = Self::create_master_pbr_material(gpu, scene_renderer, resource_map)?;
@@ -68,7 +68,7 @@ impl GltfLoader {
         let mut engine_scene = Self::build_engine_scene(document, allocated_materials, meshes);
         engine_scene.use_bvh = options.use_bvh;
 
-        Ok(Self { engine_scene })
+        Ok(engine_scene)
     }
 
     fn build_engine_scene(
