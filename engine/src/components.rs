@@ -28,6 +28,8 @@ use crate::{AssetMap, GpuDevice, MasterMaterial, MaterialInstance, Mesh};
 #[derive(Resource)]
 pub struct EngineWindow(pub(crate) Window);
 
+impl kecs::Resource for EngineWindow {}
+
 impl Deref for EngineWindow {
     type Target = Window;
 

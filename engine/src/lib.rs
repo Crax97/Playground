@@ -3,6 +3,7 @@ pub mod app;
 pub mod asset_map;
 pub mod components;
 pub mod editor;
+pub mod fps_camera;
 pub mod input;
 pub mod kecs_app;
 pub mod loaders;

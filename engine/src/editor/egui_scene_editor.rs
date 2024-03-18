@@ -6,11 +6,18 @@ use nalgebra::UnitQuaternion;
 use std::collections::HashMap;
 
 use crate::{
-    app::egui_support::EguiSupport,
+    app::{app_state::AppState, egui_support::EguiSupport},
+    components::EngineWindow,
+    fps_camera::FpsCamera,
+    input::InputState,
     kecs_app::{Plugin, SimulationState, SimulationStep},
     GameScene, PrimitiveHandle, Time,
 };
-use winit::window::Window;
+use winit::{
+    dpi::{PhysicalPosition, Position},
+    event::MouseButton,
+    window::Window,
+};
 
 use super::ui_extension::UiExtension;
 
@@ -47,6 +54,8 @@ pub struct EguiSceneEditor {
     egui_support: EguiSupport,
     current_node: Option<PrimitiveHandle>,
     registered_types: HashMap<ComponentId, Box<dyn ErasedTypeEditor>>,
+    input: InputState,
+    camera: FpsCamera,
 }
 
 impl EguiSceneEditor {
@@ -55,6 +64,8 @@ impl EguiSceneEditor {
             egui_support: EguiSupport::new(window, gpu)?,
             current_node: None,
             registered_types: HashMap::new(),
+            input: InputState::default(),
+            camera: FpsCamera::default(),
         })
     }
 
@@ -108,6 +119,7 @@ impl Plugin for EguiSceneEditor {
         _world: &mut kecs::World,
         event: &winit::event::Event<()>,
     ) {
+        self.input.update(event);
         if let winit::event::Event::WindowEvent { event, .. } = event {
             self.egui_support
                 .handle_window_event(&app_state.window, event);
@@ -124,9 +136,46 @@ impl Plugin for EguiSceneEditor {
 
     fn pre_update(&mut self, _world: &mut kecs::World) {}
 
-    fn update(&mut self, _world: &mut kecs::World) {}
+    fn update(&mut self, world: &mut kecs::World, state: &mut AppState) {
+        if self.input.is_mouse_button_just_pressed(MouseButton::Right) {
+            state
+                .window
+                .set_cursor_grab(winit::window::CursorGrabMode::Confined)
+                .unwrap();
 
-    fn post_update(&mut self, _world: &mut kecs::World) {}
+            state.window.set_cursor_visible(false);
+        }
+
+        if self.input.is_mouse_button_just_released(MouseButton::Right) {
+            state
+                .window
+                .set_cursor_grab(winit::window::CursorGrabMode::None)
+                .unwrap();
+            state.window.set_cursor_visible(true);
+        }
+        if self
+            .input
+            .is_mouse_button_pressed(winit::event::MouseButton::Right)
+        {
+            let time = world.get_resource::<Time>().unwrap();
+            self.camera.update(&self.input, time.delta_frame());
+            let window_size = state.window.inner_size();
+
+            state
+                .window
+                .set_cursor_position(Position::Physical(PhysicalPosition {
+                    x: window_size.width as i32 / 2,
+                    y: window_size.height as i32 / 2,
+                }))
+                .expect("Failed to set cursor pos");
+        }
+
+        world.add_resource(self.camera.camera());
+    }
+
+    fn post_update(&mut self, _world: &mut kecs::World) {
+        self.input.end_frame();
+    }
 
     fn draw(
         &mut self,
@@ -154,12 +203,9 @@ impl Plugin for EguiSceneEditor {
         let _ = egui::Window::new("Entities").show(&context, |ui| {
             let scene = world.get_resource_mut::<GameScene>();
             if let Some(scene) = scene {
-                scene
-                    .all_primitives()
-                    .into_iter()
-                    .for_each(|(handle, primitive)| {
-                        Self::draw_entity_outliner(ui, scene, handle, &mut self.current_node);
-                    });
+                scene.all_primitives().for_each(|(handle, primitive)| {
+                    Self::draw_entity_outliner(ui, scene, handle, &mut self.current_node);
+                });
 
                 if ui.button("Add New Entity").clicked() {
                     wants_to_add_entity = true;

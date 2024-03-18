@@ -9,7 +9,8 @@ use kecs::{Label, Resource, World};
 use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop};
 
 use crate::{
-    app::{app_state::AppState, App},
+    app::{self, app_state::AppState, App},
+    components::EngineWindow,
     AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, GameScene,
     RenderingPipeline, Time,
 };
@@ -112,7 +113,7 @@ pub trait Plugin: 'static {
     }
 
     fn pre_update(&mut self, _world: &mut World) {}
-    fn update(&mut self, _world: &mut World) {}
+    fn update(&mut self, _world: &mut World, _state: &mut AppState) {}
     fn post_update(&mut self, _world: &mut World) {}
     fn draw(
         &mut self,
@@ -233,7 +234,7 @@ impl App for KecsApp {
         Ok(())
     }
 
-    fn update(&mut self, _app_state: &mut crate::app::app_state::AppState) -> anyhow::Result<()> {
+    fn update(&mut self, app_state: &mut crate::app::app_state::AppState) -> anyhow::Result<()> {
         let mut simulation = self
             .world
             .get_resource::<SimulationState>()
@@ -245,7 +246,7 @@ impl App for KecsApp {
         }
 
         for plugin in &mut self.plugins {
-            plugin.update(&mut self.world);
+            plugin.update(&mut self.world, app_state);
         }
 
         for plugin in &mut self.plugins {
