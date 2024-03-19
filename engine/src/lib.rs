@@ -26,7 +26,6 @@ pub use bevy_ecs_app::*;
 pub use bevy_reflect;
 pub use cvar_manager::*;
 pub use kecs;
-use kecs::Entity;
 pub use material::*;
 pub use mesh::*;
 pub use texture::*;
