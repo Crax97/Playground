@@ -18,7 +18,7 @@ pub trait Asset: Send + Sync + 'static {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, Hash)]
+#[derive(Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct AssetId {
     pub(crate) id: Option<Index>,
 }

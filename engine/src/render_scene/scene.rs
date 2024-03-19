@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, default};
 
 use crate::{
     asset_map::{AssetHandle, AssetMap},
@@ -28,13 +28,31 @@ pub struct SceneMesh {
     pub bounds: BoundingShape,
 }
 
+impl Default for SceneMesh {
+    fn default() -> Self {
+        Self {
+            mesh: Default::default(),
+            materials: Default::default(),
+            bounds: BoundingShape::Sphere {
+                radius: 0.0,
+                origin: Default::default(),
+            },
+        }
+    }
+}
+
+#[derive(Default)]
 pub struct ScenePrimitive {
     pub ty: ScenePrimitiveType,
     pub transform: Transform,
     pub label: String,
+    pub tags: Vec<String>,
 }
 
+#[derive(Default)]
 pub enum ScenePrimitiveType {
+    #[default]
+    Empty,
     Mesh(SceneMesh),
     Light(SceneLightInfo),
 }
@@ -68,8 +86,9 @@ impl ScenePrimitiveType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub enum LightType {
+    #[default]
     Point,
     Directional {
         size: Vector2<f32>,
@@ -103,7 +122,7 @@ impl Default for ShadowConfiguration {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct SceneLightInfo {
     pub enabled: bool,
     pub ty: LightType,
@@ -210,6 +229,21 @@ impl GameScene {
             _ => None,
         })
     }
+
+    pub fn add_primitive(&mut self, node: ScenePrimitive) -> PrimitiveHandle {
+        let extremes = match &node.ty {
+            ScenePrimitiveType::Mesh(mesh) => Some(mesh.bounds.box_extremes()),
+            _ => None,
+        };
+
+        let index = self.primitives.insert(node);
+
+        if let Some((aabb_min, aabb_max)) = extremes {
+            self.bvh.add(index, aabb_min, aabb_max);
+        }
+
+        PrimitiveHandle(index)
+    }
 }
 
 impl GameScene {
@@ -237,6 +271,7 @@ impl GameScene {
             ty: ScenePrimitiveType::Mesh(primitive),
             transform,
             label: label.unwrap_or("Mesh".to_owned()),
+            tags: Default::default(),
         });
         self.bvh.add(prim_index, aabb_min, aabb_max);
 
@@ -260,7 +295,9 @@ impl GameScene {
                 .map(|id| &self.primitives[*id])
                 .map(|p| match &p.ty {
                     ScenePrimitiveType::Mesh(_) => p,
-                    ScenePrimitiveType::Light(_) => panic!("BVH returned a light"),
+                    ScenePrimitiveType::Light(_) | ScenePrimitiveType::Empty => {
+                        panic!("BVH returned a light")
+                    }
                 })
                 .collect()
         } else {
@@ -293,6 +330,7 @@ impl GameScene {
                 }
                 .to_string()
             }),
+            tags: Default::default(),
         });
         PrimitiveHandle(idx)
     }

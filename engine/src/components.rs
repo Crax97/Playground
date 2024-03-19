@@ -1,6 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
-use crate::editor::TypeEditor;
+use crate::editor::{AssetPicker, TypeEditor};
 use crate::kecs_app::SharedAssetMap;
 use crate::math::shape::BoundingShape;
 use crate::{
@@ -356,18 +356,18 @@ pub fn init(schedule: &mut Schedule) {
 
 pub struct MeshComponentEditor {
     asset_map: SharedAssetMap,
-    mesh_picker: ResourceHandleEditor,
-    master_picker: ResourceHandleEditor,
-    texture_picker: ResourceHandleEditor,
+    mesh_picker: AssetPicker,
+    master_picker: AssetPicker,
+    texture_picker: AssetPicker,
 }
 
 impl MeshComponentEditor {
     pub fn new(asset_map: SharedAssetMap) -> Self {
         Self {
             asset_map,
-            mesh_picker: ResourceHandleEditor::default(),
-            master_picker: ResourceHandleEditor::default(),
-            texture_picker: ResourceHandleEditor::default(),
+            mesh_picker: AssetPicker::default(),
+            master_picker: AssetPicker::default(),
+            texture_picker: AssetPicker::default(),
         }
     }
 }
@@ -406,63 +406,5 @@ impl TypeEditor for MeshComponentEditor {
                 }
             });
         });
-    }
-}
-
-#[derive(Default)]
-pub struct ResourceHandleEditor {
-    is_shown: bool,
-}
-
-impl ResourceHandleEditor {
-    pub fn show<T: crate::asset_map::Asset>(
-        &mut self,
-        handle: &mut AssetHandle<T>,
-        asset_map: &mut AssetMap,
-        ui: &mut Ui,
-    ) {
-        let button_label = if handle.is_null() {
-            "None".to_owned()
-        } else {
-            let metadata = asset_map.asset_metadata(handle);
-            metadata.name
-        };
-
-        if self.is_shown {
-            let mut selected_id = None;
-            egui::Window::new("Pick an asset")
-                .open(&mut self.is_shown)
-                .show(ui.ctx(), |ui| {
-                    egui::ScrollArea::new([true, false]).show(ui, |ui| {
-                        asset_map.iter_ids::<T>(|id, meta| {
-                            if ui.selectable_label(false, &meta.name).double_clicked() {
-                                selected_id = Some(id);
-                            }
-                        });
-                    });
-
-                    if ui.button("Load new asset").clicked() {
-                        let path = rfd::FileDialog::new()
-                            .set_title("Pick an asset")
-                            .pick_file();
-                        if let Some(path) = path {
-                            match asset_map.load::<T>(path) {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    log::error!("While loading asset: {e:?}");
-                                }
-                            }
-                        }
-                    }
-                });
-
-            if let Some(id) = selected_id {
-                *handle = asset_map.upcast_index(id);
-                self.is_shown = false;
-            }
-        }
-        if ui.button(button_label).clicked() {
-            self.is_shown = true;
-        }
     }
 }
