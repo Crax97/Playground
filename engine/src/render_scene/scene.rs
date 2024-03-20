@@ -1,4 +1,4 @@
-use std::{collections::HashSet, default};
+use std::collections::HashSet;
 
 use crate::{
     asset_map::{AssetHandle, AssetMap},
@@ -10,6 +10,7 @@ use crate::{
 use bevy_ecs::system::Resource;
 use gpu::{CommandBuffer, Extent2D, Gpu, ImageFormat, ImageHandle, ImageViewHandle, Rect2D};
 use nalgebra::{vector, Vector2, Vector3};
+use serde::{Deserialize, Serialize};
 use thunderdome::{Arena, Index};
 
 #[repr(C)]
@@ -86,7 +87,7 @@ impl ScenePrimitiveType {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum LightType {
     #[default]
     Point,
@@ -103,7 +104,7 @@ pub enum LightType {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ShadowConfiguration {
     pub shadow_map_width: u32,
     pub shadow_map_height: u32,
@@ -122,7 +123,7 @@ impl Default for ShadowConfiguration {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SceneLightInfo {
     pub enabled: bool,
     pub ty: LightType,

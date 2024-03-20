@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use crate::asset_map::AssetHandle;
 use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
+use serde::Serialize;
 
 use crate::{texture::Texture, utils::to_u8_slice};
 

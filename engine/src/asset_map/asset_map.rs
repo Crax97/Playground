@@ -1,7 +1,10 @@
 use bevy_ecs::system::Resource as BevyResource;
+use bevy_ecs::world::World;
 use crossbeam::channel::{Receiver, Sender};
 use gpu::Gpu;
 use log::{error, info, warn};
+use serde::de::Visitor;
+use serde::{Deserialize, Serialize};
 use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::Formatter;
@@ -12,7 +15,9 @@ use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use thunderdome::{Arena, Index};
 use uuid::Uuid;
 
-use crate::immutable_string::ImmutableString;
+use crate::immutable_string::{ImmutableString, ImmutableStringVisitor};
+use crate::kecs_app::SharedAssetMap;
+use crate::WorldDeserialize;
 
 use super::hot_reload_server::HotReloadServer;
 
@@ -624,6 +629,38 @@ impl<R: Asset> Clone for AssetHandle<R> {
 impl<R: Asset> Drop for AssetHandle<R> {
     fn drop(&mut self) {
         self.dec_ref_count()
+    }
+}
+
+impl<R: Asset> Serialize for AssetHandle<R> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.name)
+    }
+}
+
+impl<'de, A: Asset> WorldDeserialize<'de> for AssetHandle<A>
+where
+    Self: Sized,
+{
+    fn deserialize(
+        deserializer: Box<dyn erased_serde::Deserializer<'de>>,
+        world: &kecs::World,
+    ) -> anyhow::Result<Self> {
+        let asset_map = world
+            .get_resource::<SharedAssetMap>()
+            .ok_or(anyhow::format_err!("Failed to find AsssetMap"))?;
+        let asset_map = asset_map.write();
+
+        let name: ImmutableString = serde::Deserialize::deserialize(deserializer)?;
+
+        Ok(Self {
+            _marker: PhantomData,
+            name,
+            operation_sender: Some(asset_map.operations_sender.clone()),
+        })
     }
 }
 

@@ -1,10 +1,48 @@
 use std::{ops::Deref, sync::Arc};
 
+use serde::{de::Visitor, Deserialize, Serialize};
+
 #[derive(Clone, Debug)]
 pub struct ImmutableString {
     content: ImmutableStringContent,
     id: u64,
     len: usize,
+}
+
+impl Serialize for ImmutableString {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self)
+    }
+}
+
+pub(crate) struct ImmutableStringVisitor;
+impl<'de> Visitor<'de> for ImmutableStringVisitor {
+    type Value = Arc<str>;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a str")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(v.into())
+    }
+}
+
+impl<'de> Deserialize<'de> for ImmutableString {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let str = deserializer.deserialize_str(ImmutableStringVisitor)?;
+
+        Ok(Self::new_dynamic(str))
+    }
 }
 
 #[derive(Clone, Debug)]

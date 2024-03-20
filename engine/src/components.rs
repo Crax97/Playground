@@ -21,6 +21,7 @@ use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
 use nalgebra::{
     point, vector, Matrix4, Point2, Point3, UnitQuaternion, UnitVector3, Vector2, Vector3, Vector4,
 };
+use serde::{Deserialize, Serialize};
 use winit::window::Window;
 
 use crate::{AssetMap, GpuDevice, MasterMaterial, MaterialInstance, Mesh};
@@ -48,7 +49,7 @@ impl DerefMut for EngineWindow {
 #[reflect(Component)]
 pub struct DebugName(pub String);
 
-#[derive(Component, Copy, Clone)]
+#[derive(Component, Copy, Clone, Serialize, Deserialize)]
 pub struct Transform {
     pub position: Point3<f32>,
     pub rotation: UnitQuaternion<f32>,
@@ -84,7 +85,7 @@ impl Transform {
     }
 }
 
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Transform2D {
     pub position: Point2<f32>,
     pub layer: u32,

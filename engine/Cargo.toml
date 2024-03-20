@@ -40,6 +40,9 @@ copypasta = "0.10.1"
 notify = "6.1.1"
 rhai = "1.17.1"
 serde = { version = "1.0.197", features = ["derive"] }
+rfd = "0.14.0"
+uuid = { version = "1.8.0", features = ["v4"] }
+erased-serde = "0.4.4"
 
 [dev-dependencies]
 approx = "0.5.1"

@@ -1,5 +1,7 @@
 use nalgebra::{point, Matrix4, Point3};
-#[derive(Clone, Copy, Debug)]
+use serde::Deserialize;
+use serde::Serialize;
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum BoundingShape {
     Sphere { radius: f32, origin: Point3<f32> },
     BoundingBox { min: Point3<f32>, max: Point3<f32> },
