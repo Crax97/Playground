@@ -1,7 +1,7 @@
 use bevy_ecs::system::Resource as BevyResource;
 use crossbeam::channel::{Receiver, Sender};
 use gpu::Gpu;
-use log::{error, info, warn};
+use log::{error, info, warn, Metadata};
 use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::Formatter;
@@ -80,6 +80,7 @@ pub enum AssetSource {
 pub struct AssetMetadata {
     pub name: String,
     pub source: AssetSource,
+    pub status: AssetStatus,
 }
 
 impl AssetMap {
@@ -124,10 +125,15 @@ impl AssetMap {
         let id = handle
             .resources
             .insert(RefCountedAsset::new(resource, None, AssetSource::Memory));
-        let name = ImmutableString::from(unique_name);
-        handle
-            .resource_statuses
-            .insert(name.clone(), ResourceStatus::Loaded(AssetId { id }));
+        let name = ImmutableString::from(&unique_name);
+        handle.resource_statuses.insert(
+            name.clone(),
+            AssetMetadata {
+                name: unique_name,
+                source: AssetSource::Memory,
+                status: AssetStatus::Loaded(AssetId { id }),
+            },
+        );
         AssetHandle::new(name, Some(sender))
     }
 
@@ -164,9 +170,14 @@ impl AssetMap {
                 let id = AssetId { id };
 
                 let name = ImmutableString::from(path.as_ref().to_str().unwrap());
-                handle
-                    .resource_statuses
-                    .insert(name.clone(), ResourceStatus::Loaded(id));
+                handle.resource_statuses.insert(
+                    name.clone(),
+                    AssetMetadata {
+                        name: name.to_string(),
+                        source: AssetSource::Disk,
+                        status: AssetStatus::Loaded(id),
+                    },
+                );
                 (id, name)
             };
 
@@ -251,9 +262,9 @@ impl AssetMap {
     pub fn try_get<'a, R: Asset>(&'a self, id: &AssetHandle<R>) -> Option<&'a R> {
         assert!(id.is_not_null(), "Tried to get a null resource");
         let arena_handle = self.get_arena_handle::<R>();
-        let status = arena_handle.resource_statuses.get(&id.name)?;
-        match status {
-            ResourceStatus::Loaded(id) => {
+        let metadata = arena_handle.resource_statuses.get(&id.name)?;
+        match metadata.status {
+            AssetStatus::Loaded(id) => {
                 let object_arc = arena_handle
                     .resources
                     .get(id.id)
@@ -264,7 +275,7 @@ impl AssetMap {
                     .map(|a| unsafe { a.as_ref() }.unwrap().as_any())
                     .map(|obj| obj.downcast_ref::<R>().unwrap())
             }
-            ResourceStatus::Unloaded => {
+            AssetStatus::Unloaded => {
                 panic!("Resource is not loaded")
             }
         }
@@ -272,9 +283,9 @@ impl AssetMap {
     pub fn try_get_mut<'a, R: Asset>(&'a self, id: &AssetHandle<R>) -> Option<&'a mut R> {
         assert!(id.is_not_null(), "Tried to get_mut a null resource");
         let arena_handle = self.get_arena_handle::<R>();
-        let status = arena_handle.resource_statuses.get(&id.name)?;
-        match status {
-            ResourceStatus::Loaded(id) => {
+        let metadata = arena_handle.resource_statuses.get(&id.name)?;
+        match metadata.status {
+            AssetStatus::Loaded(id) => {
                 let object_arc = arena_handle
                     .resources
                     .get(id.id)
@@ -284,7 +295,7 @@ impl AssetMap {
                     .map(|a| unsafe { a.as_mut() }.unwrap().as_any_mut())
                     .map(|obj| obj.downcast_mut::<R>().unwrap())
             }
-            ResourceStatus::Unloaded => {
+            AssetStatus::Unloaded => {
                 panic!("Resource is not loaded");
             }
         }
@@ -326,15 +337,15 @@ impl AssetMap {
 
     fn increment_resource_ref_count<R: Asset>(&mut self, name: ImmutableString) {
         let mut arena_handle = self.get_arena_handle_mut::<R>();
-        if let Some(status) = arena_handle.resource_statuses.get(&name).copied() {
-            match status {
-                ResourceStatus::Loaded(id) => {
+        if let Some(metadata) = arena_handle.resource_statuses.get(&name) {
+            match metadata.status {
+                AssetStatus::Loaded(id) => {
                     let resource_mut = arena_handle.resources.get_mut(id.id).unwrap_or_else(|| {
                         panic!("Failed to fetch resource of type {}", type_name::<R>())
                     });
                     resource_mut.ref_count += 1;
                 }
-                ResourceStatus::Unloaded => {
+                AssetStatus::Unloaded => {
                     drop(arena_handle);
                     self.reload::<R>(name.deref())
                         .expect("Failed to reload asset");
@@ -349,14 +360,14 @@ impl AssetMap {
     fn decrement_resource_ref_count<R: Asset>(&mut self, name: ImmutableString) {
         let mut arena_handle = self.get_arena_handle_mut::<R>();
 
-        let status = *arena_handle
+        let metadata = arena_handle
             .resource_statuses
             .get(&name)
             .expect("Failed to resolve asset id");
 
-        let id = match status {
-            ResourceStatus::Loaded(id) => id,
-            ResourceStatus::Unloaded => {
+        let id = match metadata.status {
+            AssetStatus::Loaded(id) => id,
+            AssetStatus::Unloaded => {
                 panic!("Resource is already unloaded")
             }
         };
@@ -385,7 +396,9 @@ impl AssetMap {
 
             arena_handle
                 .resource_statuses
-                .insert(name.clone(), ResourceStatus::Unloaded);
+                .get_mut(&name)
+                .unwrap()
+                .status = AssetStatus::Unloaded;
 
             info!("Deleted resource {name} of type {}", type_name::<R>());
         }
@@ -396,16 +409,11 @@ impl AssetMap {
         handle: &mut AssetHandle<T>,
     ) -> AssetMetadata {
         let arena = self.get_arena_handle::<T>();
-        let status = arena
+        let metadata = arena
             .resource_statuses
             .get(&handle.name)
             .expect("Failed to resolve asset id");
-        let id = match status {
-            ResourceStatus::Loaded(id) => id,
-            ResourceStatus::Unloaded => panic!("Resource not loaded"),
-        };
-        let asset = arena.resources.get(id.id).expect("Asset id is invalid");
-        asset.metadata.clone()
+        metadata.clone()
     }
 
     fn try_load_resource_metadata(&mut self, path: std::path::PathBuf) -> anyhow::Result<()> {
@@ -430,7 +438,14 @@ impl AssetMap {
             let mut map = self.get_or_insert_arena_mut_erased(*ty);
             let name = ImmutableString::from(path);
             info!("Added resource metadata for {name}");
-            map.resource_statuses.insert(name, ResourceStatus::Unloaded);
+            map.resource_statuses.insert(
+                name,
+                AssetMetadata {
+                    name: path.to_string(),
+                    source: AssetSource::Disk,
+                    status: AssetStatus::Unloaded,
+                },
+            );
         } else {
             info!("No loader found for {path}: extension {extension}");
         }
@@ -463,7 +478,6 @@ pub(super) type ResourcePtr = Arc<dyn AnyResource>;
 
 pub(crate) struct RefCountedAsset {
     pub(crate) resource: ResourcePtr,
-    pub metadata: AssetMetadata,
     ref_count: u32,
 }
 impl RefCountedAsset {
@@ -472,7 +486,6 @@ impl RefCountedAsset {
         Self {
             resource: Arc::new(resource),
             ref_count: 0,
-            metadata: AssetMetadata { name, source },
         }
     }
 
@@ -481,7 +494,6 @@ impl RefCountedAsset {
         Self {
             resource,
             ref_count: 0,
-            metadata: AssetMetadata { name, source },
         }
     }
 }
@@ -509,11 +521,11 @@ where
 #[derive(Default)]
 pub(crate) struct Resources {
     pub(crate) resources: Arena<RefCountedAsset>,
-    pub(crate) resource_statuses: HashMap<ImmutableString, ResourceStatus>,
+    pub(crate) resource_statuses: HashMap<ImmutableString, AssetMetadata>,
 }
 
 #[derive(Clone, Copy)]
-pub enum ResourceStatus {
+pub enum AssetStatus {
     Loaded(AssetId),
     Unloaded,
 }
