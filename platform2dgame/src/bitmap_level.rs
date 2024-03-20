@@ -69,4 +69,8 @@ impl ResourceLoader for BitmapLevelLoader {
         }
         Ok(level)
     }
+
+    fn accepts_extension(&self, extension: &str) -> bool {
+        false
+    }
 }

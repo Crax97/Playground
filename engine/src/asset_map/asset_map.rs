@@ -1,7 +1,7 @@
 use bevy_ecs::system::Resource as BevyResource;
 use crossbeam::channel::{Receiver, Sender};
 use gpu::Gpu;
-use log::{error, info};
+use log::{error, info, warn};
 use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::Formatter;
@@ -56,6 +56,7 @@ pub trait ResourceLoader: Send + Sync + 'static {
     type LoadedResource: Asset;
 
     fn load(&self, path: &Path) -> anyhow::Result<Self::LoadedResource>;
+    fn accepts_extension(&self, extension: &str) -> bool;
 }
 
 #[derive(BevyResource)]
@@ -92,6 +93,25 @@ impl AssetMap {
             gpu,
             hot_reload_server: Some(HotReloadServer::new()),
         }
+    }
+
+    pub fn install(&mut self, base_path: impl AsRef<Path>) -> anyhow::Result<()> {
+        let base = std::fs::read_dir(base_path)?;
+        for entry in base {
+            match entry {
+                Ok(entry) => {
+                    let ty = entry.file_type()?;
+                    if ty.is_file() {
+                        self.try_load_resource_metadata(entry.path())?;
+                    } else {
+                        self.install(entry.path())?;
+                    }
+                }
+                Err(e) => warn!("Could not open file: {e:?}"),
+            }
+        }
+
+        Ok(())
     }
 
     pub fn add<R: Asset>(&mut self, resource: R, name: Option<impl AsRef<str>>) -> AssetHandle<R> {
@@ -198,18 +218,24 @@ impl AssetMap {
             .unwrap()
     }
     fn get_or_insert_arena_mut<R: Asset>(&mut self) -> RwLockWriteGuard<Resources> {
+        self.get_or_insert_arena_mut_erased(TypeId::of::<R>())
+    }
+    fn get_arena_handle_mut<R: Asset>(&self) -> RwLockWriteGuard<Resources> {
+        self.get_arena_handle_mut_erased(TypeId::of::<R>())
+    }
+    fn get_arena_handle_mut_erased(&self, ty: TypeId) -> RwLockWriteGuard<Resources> {
         self.loaded_resources
             .resources
-            .entry(TypeId::of::<R>())
-            .or_default()
+            .get(&ty)
+            .unwrap()
             .write()
             .unwrap()
     }
-    fn get_arena_handle_mut<R: Asset>(&self) -> RwLockWriteGuard<Resources> {
+    fn get_or_insert_arena_mut_erased(&mut self, ty: TypeId) -> RwLockWriteGuard<Resources> {
         self.loaded_resources
             .resources
-            .get(&TypeId::of::<R>())
-            .unwrap()
+            .entry(ty)
+            .or_default()
             .write()
             .unwrap()
     }
@@ -381,6 +407,36 @@ impl AssetMap {
         let asset = arena.resources.get(id.id).expect("Asset id is invalid");
         asset.metadata.clone()
     }
+
+    fn try_load_resource_metadata(&mut self, path: std::path::PathBuf) -> anyhow::Result<()> {
+        let extension = path
+            .extension()
+            .ok_or(anyhow::format_err!("Could not get asset extension"))?;
+        let extension = extension.to_str().ok_or(anyhow::format_err!(
+            "Could not convert OsStr extension to str"
+        ))?;
+        let path = path
+            .to_str()
+            .ok_or(anyhow::format_err!("Failed to convert OsStr path to str"))?;
+
+        let mut resource_ty = None;
+        for (ty, loader) in &self.resource_loaders {
+            if loader.accepts_extension_erased(extension) {
+                resource_ty = Some(ty);
+            }
+        }
+
+        if let Some(ty) = resource_ty {
+            let mut map = self.get_or_insert_arena_mut_erased(*ty);
+            let name = ImmutableString::from(path);
+            info!("Added resource metadata for {name}");
+            map.resource_statuses.insert(name, ResourceStatus::Unloaded);
+        } else {
+            info!("No loader found for {path}: extension {extension}");
+        }
+
+        Ok(())
+    }
 }
 
 impl Drop for AssetMap {
@@ -432,6 +488,7 @@ impl RefCountedAsset {
 
 pub(super) trait ErasedResourceLoader: Send + Sync + 'static {
     fn load_erased(&self, path: &Path) -> anyhow::Result<ResourcePtr>;
+    fn accepts_extension_erased(&self, extension: &str) -> bool;
 }
 
 impl<T: ResourceLoader> ErasedResourceLoader for T
@@ -442,6 +499,10 @@ where
         let inner = self.load(path)?;
 
         Ok(Arc::new(inner))
+    }
+
+    fn accepts_extension_erased(&self, extension: &str) -> bool {
+        self.accepts_extension(extension)
     }
 }
 

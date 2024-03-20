@@ -44,4 +44,8 @@ impl ResourceLoader for FileSystemTextureLoader {
             ImageViewType::Type2D,
         )
     }
+
+    fn accepts_extension(&self, extension: &str) -> bool {
+        matches!(extension, "png" | "jpg" | "jpeg")
+    }
 }

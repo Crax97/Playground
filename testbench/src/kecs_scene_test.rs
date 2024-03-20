@@ -110,7 +110,7 @@ fn main() -> anyhow::Result<()> {
         asset_map
             .write()
             .install_resource_loader(FileSystemTextureLoader::new(state.gpu.clone()));
-        asset_map.write().load::<Texture>("images/texture.jpg")?;
+        asset_map.write().install("assets/")?;
     }
 
     let scene = GltfLoader::load(
