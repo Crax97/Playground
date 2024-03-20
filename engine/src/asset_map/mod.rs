@@ -1,5 +1,5 @@
-pub mod resource_map;
+pub mod asset_map;
 
 mod hot_reload_server;
 
-pub use resource_map::*;
+pub use asset_map::*;

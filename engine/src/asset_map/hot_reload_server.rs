@@ -93,6 +93,7 @@ impl HotReloadServer {
 
             for resource in resources.resources {
                 let resource_slot = resource_map
+                    .resources
                     .get_mut(resource.id.id.unwrap())
                     .expect("Could not find resource");
                 let mut old_resource =

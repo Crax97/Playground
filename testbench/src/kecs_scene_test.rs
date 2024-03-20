@@ -14,7 +14,8 @@ use engine::editor::ui_extension::UiExtension;
 use engine::editor::{EguiSceneEditor, TypeEditor};
 use engine::kecs::{Commands, Res, ResMut};
 use engine::kecs_app::{KecsApp, SharedAssetMap};
-use engine::{egui, GpuDevice, LightType, SceneLightInfo, ShadowConfiguration, Time};
+use engine::loaders::FileSystemTextureLoader;
+use engine::{egui, GpuDevice, LightType, SceneLightInfo, ShadowConfiguration, Texture, Time};
 
 use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
@@ -104,6 +105,13 @@ impl TypeEditor for TestComponentEditor {
 fn main() -> anyhow::Result<()> {
     let (mut app, evt_loop, state) = KecsApp::create()?;
     let asset_map = app.world.get_resource::<SharedAssetMap>().unwrap().clone();
+
+    {
+        asset_map
+            .write()
+            .install_resource_loader(FileSystemTextureLoader::new(state.gpu.clone()));
+        asset_map.write().load::<Texture>("images/texture.jpg")?;
+    }
 
     let scene = GltfLoader::load(
         "./TestScenes/FloatingCubes/FloatingCubes.gltf",

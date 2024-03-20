@@ -117,7 +117,7 @@ impl App for PlanesApp {
 
         let egui_integration = EguiSupport::new(&app_state.window, app_state.gpu())?;
         let mesh = Mesh::new(app_state.gpu(), &mesh_data)?;
-        let mesh = resource_map.add(mesh);
+        let mesh = resource_map.add(mesh, Some("quad mesh"));
 
         let texture = resource_map.load::<Texture>("images/texture.jpg")?;
         let mut scene_renderer = DeferredRenderingPipeline::new(
@@ -144,7 +144,7 @@ impl App for PlanesApp {
         )?;
 
         let texture_inputs = vec![texture];
-        let material = resource_map.add(master);
+        let material = resource_map.add(master, Some("david texture"));
         let mat_instance = MaterialInstance::create_instance(
             material,
             &MaterialInstanceDescription {

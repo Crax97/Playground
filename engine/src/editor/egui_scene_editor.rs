@@ -8,9 +8,10 @@ use std::collections::HashMap;
 use crate::{
     app::{app_state::AppState, egui_support::EguiSupport},
     fps_camera::FpsCamera,
+    immutable_string::ImmutableString,
     input::InputState,
     kecs_app::{Plugin, SharedAssetMap, SimulationState, SimulationStep},
-    AssetHandle, AssetId, AssetMap, GameScene, PrimitiveHandle, SceneLightInfo, ScenePrimitive,
+    AssetHandle, AssetMap, GameScene, PrimitiveHandle, SceneLightInfo, ScenePrimitive,
     ScenePrimitiveType, Time,
 };
 use winit::{
@@ -177,7 +178,7 @@ impl EguiSceneEditor {
         egui::TopBottomPanel::top("toolbar").show(&context, |ui| {
             // let _ = egui::menu::bar(ui, |ui| {});
             egui::menu::bar(ui, |ui| {
-                egui::menu::menu_button(ui, "test", |ui| {});
+                egui::menu::menu_button(ui, "test", |_| {});
 
                 ui.add(Separator::default().vertical());
                 play_pause_button(world, ui);
@@ -526,7 +527,7 @@ pub fn vec_ui<T: Default>(
 #[derive(Default)]
 pub struct AssetPicker {
     is_shown: bool,
-    selected_id: Option<AssetId>,
+    selected_id: Option<ImmutableString>,
     picker_id: Option<Id>,
 }
 
@@ -537,12 +538,7 @@ impl AssetPicker {
         asset_map: &mut AssetMap,
         ui: &mut Ui,
     ) {
-        let button_label = if handle.is_null() {
-            "None".to_owned()
-        } else {
-            let metadata = asset_map.asset_metadata(handle);
-            metadata.name
-        };
+        let button_label = handle.to_string();
 
         let mut open = self.is_shown;
         if open && self.picker_id.is_some_and(|id| id == ui.id()) {
@@ -554,9 +550,9 @@ impl AssetPicker {
                         .max_width(300.0)
                         .show(ui, |ui| {
                             ui.fill_width();
-                            asset_map.iter_ids::<T>(|id, meta| {
-                                let highlight = self.selected_id.is_some_and(|i| i == id);
-                                if ui.selectable_label(highlight, &meta.name).clicked() {
+                            asset_map.iter_ids::<T>(|id, _| {
+                                let highlight = self.selected_id.as_ref().is_some_and(|i| i == &id);
+                                if ui.selectable_label(highlight, id.to_string()).clicked() {
                                     self.selected_id = Some(id);
                                 }
                             });
@@ -572,10 +568,9 @@ impl AssetPicker {
                         )
                         .clicked()
                     {
-                        if let Some(id) = self.selected_id {
+                        if let Some(id) = self.selected_id.take() {
                             *handle = asset_map.upcast_index(id);
                             self.is_shown = false;
-                            self.selected_id = None;
                             self.picker_id = None;
                         }
                     }

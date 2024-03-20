@@ -579,6 +579,6 @@ pub fn load_cube_to_resource_map(
         }],
     };
     let cube_mesh = Mesh::new(gpu, &mesh_create_info)?;
-    let cube_mesh_handle = resource_map.add(cube_mesh);
+    let cube_mesh_handle = resource_map.add(cube_mesh, Some("cube"));
     Ok(cube_mesh_handle)
 }

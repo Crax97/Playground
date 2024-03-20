@@ -256,7 +256,7 @@ impl BevyEcsApp {
             };
 
             let mesh = Mesh::new(gpu, &mesh_data)?;
-            resource_map.add(mesh)
+            resource_map.add(mesh, Some("cube"))
         };
 
         let white_texture = Texture::new_with_data(
@@ -277,8 +277,8 @@ impl BevyEcsApp {
             gpu::ImageFormat::Rgba8,
             gpu::ImageViewType::Type2D,
         )?;
-        let white_texture = resource_map.add(white_texture);
-        let black_texture = resource_map.add(black_texture);
+        let white_texture = resource_map.add(white_texture, Some("white texture"));
+        let black_texture = resource_map.add(black_texture, Some("black texture"));
 
         let vertex_module = gpu.make_shader_module(&ShaderModuleCreateInfo {
             label: Some("Default vertex shader"),
@@ -366,9 +366,13 @@ impl BevyEcsApp {
                 shader_stage: ShaderStage::FRAGMENT,
             }],
         })?;
-        let default_material = resource_map.add(default_material);
-        let default_material_transparency = resource_map.add(default_material_transparency);
-        let default_sprite_material = resource_map.add(default_sprite_material);
+        let default_material = resource_map.add(default_material, Some("default material"));
+        let default_material_transparency = resource_map.add(
+            default_material_transparency,
+            Some("default transparent material"),
+        );
+        let default_sprite_material =
+            resource_map.add(default_sprite_material, Some("default sprite material"));
 
         Ok(CommonResources {
             quad_mesh,

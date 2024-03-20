@@ -291,8 +291,8 @@ impl App for GLTFViewer {
             &mut resource_map,
             &cube_mesh,
         )?;
-        let david_texture = resource_map.add(david_texture);
-        let irradiance_map = resource_map.add(irradiance_map);
+        let david_texture = resource_map.add(david_texture, Some("David texture"));
+        let irradiance_map = resource_map.add(irradiance_map, Some("Irradiance map"));
 
         let mut scene_renderer = DeferredRenderingPipeline::new(
             app_state.gpu(),
@@ -322,7 +322,7 @@ impl App for GLTFViewer {
                 cull_mode: gpu::CullMode::None,
             },
         )?;
-        let skybox_master = resource_map.add(skybox_material);
+        let skybox_master = resource_map.add(skybox_material, Some("Skybox material"));
 
         let skybox_textures = vec![david_texture];
 

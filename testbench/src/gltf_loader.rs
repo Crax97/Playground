@@ -157,7 +157,7 @@ impl GltfLoader {
                 primitives: &primitive_create_infos,
             };
             let gpu_mesh = Mesh::new(gpu, &create_info)?;
-            meshes.push((resource_map.add(gpu_mesh), min, max));
+            meshes.push((resource_map.add(gpu_mesh, Some(&label)), min, max));
         }
         Ok(meshes)
     }
@@ -233,7 +233,7 @@ impl GltfLoader {
             },
         )?;
 
-        Ok(resource_map.add(pbr_master))
+        Ok(resource_map.add(pbr_master, Some("PBR Master material")))
     }
 
     fn load_images(
@@ -297,11 +297,14 @@ impl GltfLoader {
     ) -> anyhow::Result<LoadedTextures> {
         let mut all_textures = vec![];
         for texture in document.textures() {
-            all_textures.push(resource_map.add(Texture {
-                image: allocated_images[texture.source().index()],
-                view: allocated_image_views[texture.source().index()],
-                sampler_settings: allocated_samplers[texture.sampler().index().unwrap_or(0)],
-            }))
+            all_textures.push(resource_map.add(
+                Texture {
+                    image: allocated_images[texture.source().index()],
+                    view: allocated_image_views[texture.source().index()],
+                    sampler_settings: allocated_samplers[texture.sampler().index().unwrap_or(0)],
+                },
+                texture.name(),
+            ))
         }
         let white = Texture::new_with_data(
             gpu,
@@ -312,7 +315,7 @@ impl GltfLoader {
             gpu::ImageFormat::Rgba8,
             ImageViewType::Type2D,
         )?;
-        let white = resource_map.add(white);
+        let white = resource_map.add(white, Some("white texture"));
         let black = Texture::new_with_data(
             gpu,
             1,
@@ -322,7 +325,7 @@ impl GltfLoader {
             gpu::ImageFormat::Rgba8,
             ImageViewType::Type2D,
         )?;
-        let black = resource_map.add(black);
+        let black = resource_map.add(black, Some("white texture"));
 
         Ok(LoadedTextures {
             white,
