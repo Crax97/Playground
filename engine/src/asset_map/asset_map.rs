@@ -6,6 +6,7 @@ use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::marker::PhantomData;
+use std::ops::Deref;
 use std::path::Path;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use thunderdome::{Arena, Index};
@@ -34,18 +35,21 @@ impl<R: Asset> AssetHandle<R> {
         name: ImmutableString,
         operation_sender: Option<Sender<Box<dyn ResourceMapOperation>>>,
     ) -> Self {
-        Self {
+        let me = Self {
             _marker: PhantomData,
             name,
             operation_sender,
-        }
+        };
+        me.inc_ref_count();
+
+        me
     }
 }
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct AssetId {
-    pub(crate) id: Option<Index>,
+    pub(crate) id: Index,
 }
 
 pub trait ResourceLoader: Send + Sync + 'static {
@@ -101,15 +105,30 @@ impl AssetMap {
             .resources
             .insert(RefCountedAsset::new(resource, None, AssetSource::Memory));
         let name = ImmutableString::from(unique_name);
-        handle.names.insert(name.clone(), AssetId { id: Some(id) });
-        AssetHandle {
-            _marker: PhantomData,
-            name,
-            operation_sender: Some(sender),
+        handle
+            .resource_statuses
+            .insert(name.clone(), ResourceStatus::Loaded(AssetId { id }));
+        AssetHandle::new(name, Some(sender))
+    }
+
+    pub fn load<R: Asset>(
+        &mut self,
+        name: impl Into<ImmutableString>,
+    ) -> anyhow::Result<AssetHandle<R>> {
+        let name = name.into();
+        let contained = {
+            let handle = self.get_or_insert_arena_mut::<R>();
+            handle.resource_statuses.contains_key(&name)
+        };
+        if contained {
+            let sender = self.operations_sender.clone();
+            Ok(AssetHandle::new(name, Some(sender)))
+        } else {
+            self.reload(name.deref())
         }
     }
 
-    pub fn load<R: Asset>(&mut self, path: impl AsRef<Path>) -> anyhow::Result<AssetHandle<R>> {
+    pub fn reload<R: Asset>(&mut self, path: impl AsRef<Path>) -> anyhow::Result<AssetHandle<R>> {
         let resource_type = TypeId::of::<R>();
         if let Some(loader) = self.resource_loaders.get(&resource_type) {
             let sender = self.operations_sender.clone();
@@ -122,10 +141,12 @@ impl AssetMap {
                     Some(path.as_ref().to_str().unwrap().to_string()),
                     AssetSource::Disk,
                 ));
-                let id = AssetId { id: Some(id) };
+                let id = AssetId { id };
 
                 let name = ImmutableString::from(path.as_ref().to_str().unwrap());
-                handle.names.insert(name.clone(), id);
+                handle
+                    .resource_statuses
+                    .insert(name.clone(), ResourceStatus::Loaded(id));
                 (id, name)
             };
 
@@ -133,11 +154,7 @@ impl AssetMap {
                 server.watch(path.as_ref(), resource_type, id)?;
             }
 
-            Ok(AssetHandle {
-                _marker: PhantomData,
-                name,
-                operation_sender: Some(sender),
-            })
+            Ok(AssetHandle::new(name, Some(sender)))
         } else {
             Err(anyhow::format_err!(
                 "No loader for resource type {:?}",
@@ -146,17 +163,11 @@ impl AssetMap {
         }
     }
 
-    pub fn iter_ids<R: Asset>(&mut self, mut fun: impl FnMut(ImmutableString, &AssetMetadata)) {
+    pub fn iter_ids<R: Asset>(&mut self, mut fun: impl FnMut(ImmutableString)) {
         let map = self.get_or_insert_arena_mut::<R>();
-        map.names.iter().for_each(|(name, id)| {
-            fun(
-                name.clone(),
-                &map.resources
-                    .get(id.id.expect("Could not find asset during iteration!"))
-                    .expect("Failed to find asset")
-                    .metadata,
-            )
-        })
+        map.resource_statuses
+            .keys()
+            .for_each(|name| fun(name.clone()))
     }
 
     pub fn upcast_index<R: Asset>(&self, id: ImmutableString) -> AssetHandle<R> {
@@ -190,7 +201,7 @@ impl AssetMap {
         self.loaded_resources
             .resources
             .entry(TypeId::of::<R>())
-            .or_insert_with(RwLock::default)
+            .or_default()
             .write()
             .unwrap()
     }
@@ -214,29 +225,43 @@ impl AssetMap {
     pub fn try_get<'a, R: Asset>(&'a self, id: &AssetHandle<R>) -> Option<&'a R> {
         assert!(id.is_not_null(), "Tried to get a null resource");
         let arena_handle = self.get_arena_handle::<R>();
-        let id = arena_handle.names.get(&id.name)?;
-        let object_arc = arena_handle
-            .resources
-            .get(id.id?)
-            .map(|r| r.resource.clone());
+        let status = arena_handle.resource_statuses.get(&id.name)?;
+        match status {
+            ResourceStatus::Loaded(id) => {
+                let object_arc = arena_handle
+                    .resources
+                    .get(id.id)
+                    .map(|r| r.resource.clone());
 
-        object_arc
-            .map(|a| Arc::as_ptr(&a))
-            .map(|a| unsafe { a.as_ref() }.unwrap().as_any())
-            .map(|obj| obj.downcast_ref::<R>().unwrap())
+                object_arc
+                    .map(|a| Arc::as_ptr(&a))
+                    .map(|a| unsafe { a.as_ref() }.unwrap().as_any())
+                    .map(|obj| obj.downcast_ref::<R>().unwrap())
+            }
+            ResourceStatus::Unloaded => {
+                panic!("Resource is not loaded")
+            }
+        }
     }
     pub fn try_get_mut<'a, R: Asset>(&'a self, id: &AssetHandle<R>) -> Option<&'a mut R> {
         assert!(id.is_not_null(), "Tried to get_mut a null resource");
         let arena_handle = self.get_arena_handle::<R>();
-        let id = arena_handle.names.get(&id.name)?;
-        let object_arc = arena_handle
-            .resources
-            .get(id.id?)
-            .map(|r| r.resource.clone());
-        object_arc
-            .map(|a| Arc::as_ptr(&a).cast_mut())
-            .map(|a| unsafe { a.as_mut() }.unwrap().as_any_mut())
-            .map(|obj| obj.downcast_mut::<R>().unwrap())
+        let status = arena_handle.resource_statuses.get(&id.name)?;
+        match status {
+            ResourceStatus::Loaded(id) => {
+                let object_arc = arena_handle
+                    .resources
+                    .get(id.id)
+                    .map(|r| r.resource.clone());
+                object_arc
+                    .map(|a| Arc::as_ptr(&a).cast_mut())
+                    .map(|a| unsafe { a.as_mut() }.unwrap().as_any_mut())
+                    .map(|obj| obj.downcast_mut::<R>().unwrap())
+            }
+            ResourceStatus::Unloaded => {
+                panic!("Resource is not loaded");
+            }
+        }
     }
 
     pub fn len<R: Asset>(&self) -> usize {
@@ -275,33 +300,45 @@ impl AssetMap {
 
     fn increment_resource_ref_count<R: Asset>(&mut self, name: ImmutableString) {
         let mut arena_handle = self.get_arena_handle_mut::<R>();
-        let id = *arena_handle
-            .names
-            .get(&name)
-            .expect("Failed to resolve asset id");
-        let resource_mut = arena_handle
-            .resources
-            .get_mut(
-                id.id
-                    .expect("Tried to increment the refcount of a null() resource"),
-            )
-            .unwrap_or_else(|| panic!("Failed to fetch resource of type {}", type_name::<R>()));
-        resource_mut.ref_count += 1;
+        if let Some(status) = arena_handle.resource_statuses.get(&name).copied() {
+            match status {
+                ResourceStatus::Loaded(id) => {
+                    let resource_mut = arena_handle.resources.get_mut(id.id).unwrap_or_else(|| {
+                        panic!("Failed to fetch resource of type {}", type_name::<R>())
+                    });
+                    resource_mut.ref_count += 1;
+                }
+                ResourceStatus::Unloaded => {
+                    drop(arena_handle);
+                    self.reload::<R>(name.deref())
+                        .expect("Failed to reload asset");
+                }
+            }
+        } else {
+            drop(arena_handle);
+            self.reload::<R>(name.deref())
+                .expect("Failed to reload asset");
+        }
     }
     fn decrement_resource_ref_count<R: Asset>(&mut self, name: ImmutableString) {
         let mut arena_handle = self.get_arena_handle_mut::<R>();
 
-        let id = *arena_handle
-            .names
+        let status = *arena_handle
+            .resource_statuses
             .get(&name)
             .expect("Failed to resolve asset id");
+
+        let id = match status {
+            ResourceStatus::Loaded(id) => id,
+            ResourceStatus::Unloaded => {
+                panic!("Resource is already unloaded")
+            }
+        };
+
         let ref_count = {
             let resource_mut = arena_handle
                 .resources
-                .get_mut(
-                    id.id
-                        .expect("Tried to decrement the refcount of null() resource"),
-                )
+                .get_mut(id.id)
                 .unwrap_or_else(|| panic!("Failed to fetch resource of type {}", type_name::<R>()));
             resource_mut.ref_count -= 1;
 
@@ -309,12 +346,9 @@ impl AssetMap {
         };
 
         if ref_count == 0 {
-            let mut removed_resource = arena_handle
-                .resources
-                .remove(id.id.unwrap())
-                .unwrap_or_else(|| {
-                    panic!("Failed to remove resource of type {}", type_name::<R>())
-                });
+            let mut removed_resource = arena_handle.resources.remove(id.id).unwrap_or_else(|| {
+                panic!("Failed to remove resource of type {}", type_name::<R>())
+            });
 
             let resource = Arc::get_mut(&mut removed_resource.resource)
                 .unwrap()
@@ -323,11 +357,11 @@ impl AssetMap {
                 .expect("Failed to downcast to resource");
             resource.destroyed(self.gpu.as_ref());
 
-            info!(
-                "Deleted resource {} of type {}",
-                resource.get_description(),
-                type_name::<R>()
-            );
+            arena_handle
+                .resource_statuses
+                .insert(name.clone(), ResourceStatus::Unloaded);
+
+            info!("Deleted resource {name} of type {}", type_name::<R>());
         }
     }
 
@@ -336,14 +370,15 @@ impl AssetMap {
         handle: &mut AssetHandle<T>,
     ) -> AssetMetadata {
         let arena = self.get_arena_handle::<T>();
-        let id = arena
-            .names
+        let status = arena
+            .resource_statuses
             .get(&handle.name)
             .expect("Failed to resolve asset id");
-        let asset = arena
-            .resources
-            .get(id.id.expect("Id is null"))
-            .expect("Asset id is invalid");
+        let id = match status {
+            ResourceStatus::Loaded(id) => id,
+            ResourceStatus::Unloaded => panic!("Resource not loaded"),
+        };
+        let asset = arena.resources.get(id.id).expect("Asset id is invalid");
         asset.metadata.clone()
     }
 }
@@ -355,7 +390,7 @@ impl Drop for AssetMap {
     }
 }
 
-pub(super) trait AnyResource: Any + Asset {
+pub(crate) trait AnyResource: Any + Asset {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
@@ -371,7 +406,7 @@ impl<T: Any + Asset + 'static> AnyResource for T {
 pub(super) type ResourcePtr = Arc<dyn AnyResource>;
 
 pub(crate) struct RefCountedAsset {
-    pub resource: ResourcePtr,
+    pub(crate) resource: ResourcePtr,
     pub metadata: AssetMetadata,
     ref_count: u32,
 }
@@ -380,7 +415,7 @@ impl RefCountedAsset {
         let name = name.unwrap_or_else(|| resource.get_description().to_string());
         Self {
             resource: Arc::new(resource),
-            ref_count: 1,
+            ref_count: 0,
             metadata: AssetMetadata { name, source },
         }
     }
@@ -389,7 +424,7 @@ impl RefCountedAsset {
         let name = name.unwrap_or_else(|| resource.get_description().to_string());
         Self {
             resource,
-            ref_count: 1,
+            ref_count: 0,
             metadata: AssetMetadata { name, source },
         }
     }
@@ -413,7 +448,13 @@ where
 #[derive(Default)]
 pub(crate) struct Resources {
     pub(crate) resources: Arena<RefCountedAsset>,
-    pub(crate) names: HashMap<ImmutableString, AssetId>,
+    pub(crate) resource_statuses: HashMap<ImmutableString, ResourceStatus>,
+}
+
+#[derive(Clone, Copy)]
+pub enum ResourceStatus {
+    Loaded(AssetId),
+    Unloaded,
 }
 
 #[derive(Default)]

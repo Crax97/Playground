@@ -9,8 +9,7 @@ use kecs::{Label, Resource, World};
 use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop};
 
 use crate::{
-    app::{self, app_state::AppState, App},
-    components::EngineWindow,
+    app::{app_state::AppState, App},
     AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, GameScene,
     RenderingPipeline, Time,
 };
@@ -276,12 +275,16 @@ impl App for KecsApp {
 
         simulation.step = new_state;
         self.world.add_resource(simulation);
+
         Ok(())
     }
 
     fn end_frame(&mut self, _app_state: &crate::app::app_state::AppState) {
         let time = self.world.get_resource_mut::<Time>().unwrap();
         time.end_frame();
+
+        let asset_map = self.world.get_resource_mut::<SharedAssetMap>().unwrap();
+        asset_map.write().update();
     }
     fn draw<'a>(
         &'a mut self,

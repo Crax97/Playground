@@ -94,7 +94,7 @@ impl HotReloadServer {
             for resource in resources.resources {
                 let resource_slot = resource_map
                     .resources
-                    .get_mut(resource.id.id.unwrap())
+                    .get_mut(resource.id.id)
                     .expect("Could not find resource");
                 let mut old_resource =
                     std::mem::replace(&mut resource_slot.resource, resource.new_resource);

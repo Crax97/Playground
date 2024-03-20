@@ -550,7 +550,7 @@ impl AssetPicker {
                         .max_width(300.0)
                         .show(ui, |ui| {
                             ui.fill_width();
-                            asset_map.iter_ids::<T>(|id, _| {
+                            asset_map.iter_ids::<T>(|id| {
                                 let highlight = self.selected_id.as_ref().is_some_and(|i| i == &id);
                                 if ui.selectable_label(highlight, id.to_string()).clicked() {
                                     self.selected_id = Some(id);
@@ -580,7 +580,7 @@ impl AssetPicker {
                             .set_title("Pick an asset")
                             .pick_file();
                         if let Some(path) = path {
-                            match asset_map.load::<T>(path) {
+                            match asset_map.load::<T>(path.to_str().unwrap()) {
                                 Ok(_) => {}
                                 Err(e) => {
                                     log::error!("While loading asset: {e:?}");
