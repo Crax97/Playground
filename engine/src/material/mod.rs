@@ -1,5 +1,6 @@
 mod master_material;
 mod material_instance;
+mod material_v2;
 
 use std::collections::HashMap;
 
@@ -7,8 +8,9 @@ use gpu::{CullMode, ImageFormat, ShaderModuleHandle, ShaderStage};
 pub use material_instance::*;
 
 pub use master_material::*;
+use serde::{Deserialize, Serialize};
 
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum MaterialDomain {
     Surface,
     PostProcess,
