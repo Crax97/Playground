@@ -408,7 +408,7 @@ impl App for BevyEcsApp {
         let post_update_schedule = Schedule::new(PostUpdateSchedule);
 
         let mut world = World::new();
-        let mut resource_map = AssetMap::new(app_state.gpu.clone());
+        let mut resource_map = AssetMap::new(app_state.gpu.clone(), true);
 
         Self::setup_resource_map(&mut resource_map, app_state.gpu.clone());
 

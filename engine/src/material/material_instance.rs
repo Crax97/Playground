@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
-use crate::asset_map::AssetHandle;
+use crate::{asset_map::AssetHandle, Asset};
 use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{texture::Texture, utils::to_u8_slice};
 
@@ -18,10 +18,12 @@ pub struct MaterialInstanceDescription<'a> {
     pub parameter_buffers: Vec<BufferHandle>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub struct MaterialInstance {
     pub(crate) owner: AssetHandle<MasterMaterial>,
     pub(crate) textures: Vec<AssetHandle<Texture>>,
+
+    #[serde(skip)]
     pub(crate) parameter_buffers: Vec<BufferHandle>,
 }
 

@@ -22,7 +22,7 @@ struct PerFrameData {
 
 use crate::{mesh::Mesh, Camera, MasterMaterial, MaterialDescription, MaterialInstance, Texture};
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SceneMesh {
     pub mesh: AssetHandle<Mesh>,
     pub materials: Vec<MaterialInstance>,
@@ -42,7 +42,7 @@ impl Default for SceneMesh {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct ScenePrimitive {
     pub ty: ScenePrimitiveType,
     pub transform: Transform,
@@ -50,7 +50,7 @@ pub struct ScenePrimitive {
     pub tags: Vec<String>,
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub enum ScenePrimitiveType {
     #[default]
     Empty,

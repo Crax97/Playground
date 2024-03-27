@@ -1,25 +1,23 @@
 use bevy_ecs::system::Resource as BevyResource;
-use bevy_ecs::world::World;
 use crossbeam::channel::{Receiver, Sender};
 use gpu::Gpu;
 use log::{error, info, warn};
-use serde::de::Visitor;
 use serde::{Deserialize, Serialize};
 use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::path::Path;
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use thunderdome::{Arena, Index};
 use uuid::Uuid;
 
-use crate::immutable_string::{ImmutableString, ImmutableStringVisitor};
-use crate::kecs_app::SharedAssetMap;
-use crate::WorldDeserialize;
+use crate::immutable_string::ImmutableString;
 
 use super::hot_reload_server::HotReloadServer;
+
+pub(crate) type OperationSender = Sender<Box<dyn ResourceMapOperation>>;
 
 pub trait Asset: Send + Sync + 'static {
     fn get_description(&self) -> &str;
@@ -32,22 +30,33 @@ where
 {
     _marker: PhantomData<R>,
     pub(crate) name: ImmutableString,
-    pub(crate) operation_sender: Option<Sender<Box<dyn ResourceMapOperation>>>,
+    pub(crate) ty: Arc<OnceLock<OperationSender>>,
 }
 
 impl<R: Asset> AssetHandle<R> {
-    pub(crate) fn new(
-        name: ImmutableString,
-        operation_sender: Option<Sender<Box<dyn ResourceMapOperation>>>,
-    ) -> Self {
+    pub(crate) fn new(name: ImmutableString, operation_sender: OperationSender) -> Self {
+        let lock = OnceLock::new();
+        lock.set(operation_sender)
+            .expect("Failed to set an empty OnceLock");
         let me = Self {
             _marker: PhantomData,
             name,
-            operation_sender,
+            ty: Arc::new(lock),
         };
         me.inc_ref_count();
 
         me
+    }
+
+    fn try_init(&self, operations_sender: &OperationSender) {
+        let mut was_init = true;
+        self.ty.get_or_init(|| {
+            was_init = false;
+            operations_sender.clone()
+        });
+        if !was_init {
+            self.inc_ref_count();
+        }
     }
 }
 
@@ -78,7 +87,7 @@ pub struct AssetMetadata {
 
 #[derive(BevyResource)]
 pub struct AssetMap {
-    loaded_resources: LoadedResources,
+    loaded_resources: RwLock<LoadedResources>,
     gpu: Arc<dyn Gpu>,
     operations_receiver: Receiver<Box<dyn ResourceMapOperation>>,
     operations_sender: Sender<Box<dyn ResourceMapOperation>>,
@@ -88,15 +97,16 @@ pub struct AssetMap {
     hot_reload_server: Option<HotReloadServer>,
 }
 impl AssetMap {
-    pub fn new(gpu: Arc<dyn Gpu>) -> Self {
+    pub fn new(gpu: Arc<dyn Gpu>, enable_hot_reload: bool) -> Self {
         let (operations_sender, operations_receiver) = crossbeam::channel::unbounded();
+
         Self {
-            loaded_resources: LoadedResources::default(),
+            loaded_resources: RwLock::default(),
             operations_receiver,
             operations_sender,
             resource_loaders: HashMap::new(),
             gpu,
-            hot_reload_server: Some(HotReloadServer::new()),
+            hot_reload_server: enable_hot_reload.then(HotReloadServer::new),
         }
     }
 
@@ -139,7 +149,7 @@ impl AssetMap {
                 },
             },
         );
-        AssetHandle::new(name, Some(sender))
+        AssetHandle::new(name, sender)
     }
 
     pub fn load<R: Asset>(
@@ -153,13 +163,20 @@ impl AssetMap {
         };
         if contained {
             let sender = self.operations_sender.clone();
-            Ok(AssetHandle::new(name, Some(sender)))
+            Ok(AssetHandle::new(name, sender))
         } else {
             self.reload(name.deref())
         }
     }
 
     pub fn reload<R: Asset>(&mut self, path: impl AsRef<Path>) -> anyhow::Result<AssetHandle<R>> {
+        self.reload_inner(path)
+    }
+
+    fn reload_inner<R: Asset>(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<AssetHandle<R>, anyhow::Error> {
         let resource_type = TypeId::of::<R>();
         if let Some(loader) = self.resource_loaders.get(&resource_type) {
             let sender = self.operations_sender.clone();
@@ -184,11 +201,15 @@ impl AssetMap {
                 (id, name)
             };
 
-            if let Some(server) = &mut self.hot_reload_server {
-                server.watch(path.as_ref(), resource_type, id)?;
+            if self.hot_reload_server.is_some() {
+                self.operations_sender.send(self.watch_path_operation(
+                    path.as_ref().to_owned(),
+                    TypeId::of::<R>(),
+                    id,
+                ))?;
             }
 
-            Ok(AssetHandle::new(name, Some(sender)))
+            Ok(AssetHandle::new(name, sender))
         } else {
             Err(anyhow::format_err!(
                 "No loader for resource type {:?}",
@@ -203,7 +224,7 @@ impl AssetMap {
     }
 
     pub fn upcast_index<R: Asset>(&self, id: ImmutableString) -> AssetHandle<R> {
-        let handle = AssetHandle::new(id, Some(self.operations_sender.clone()));
+        let handle = AssetHandle::new(id, self.operations_sender.clone());
         handle.inc_ref_count();
         handle
     }
@@ -222,34 +243,44 @@ impl AssetMap {
     }
 
     fn get_arena_handle<R: Asset>(&self) -> RwLockReadGuard<Resources> {
-        self.loaded_resources
+        let loaded_resources = self.loaded_resources.read().unwrap();
+
+        let guard = loaded_resources
             .resources
             .get(&TypeId::of::<R>())
             .unwrap()
             .read()
-            .unwrap()
+            .unwrap();
+        unsafe { std::mem::transmute(guard) }
     }
-    fn get_or_insert_arena_mut<R: Asset>(&mut self) -> RwLockWriteGuard<Resources> {
+    fn get_or_insert_arena_mut<R: Asset>(&self) -> RwLockWriteGuard<Resources> {
         self.get_or_insert_arena_mut_erased(TypeId::of::<R>())
     }
     fn get_arena_handle_mut<R: Asset>(&self) -> RwLockWriteGuard<Resources> {
         self.get_arena_handle_mut_erased(TypeId::of::<R>())
     }
     fn get_arena_handle_mut_erased(&self, ty: TypeId) -> RwLockWriteGuard<Resources> {
-        self.loaded_resources
+        let loaded_resources = self.loaded_resources.write().unwrap();
+
+        let guard = loaded_resources
             .resources
             .get(&ty)
             .unwrap()
             .write()
-            .unwrap()
+            .unwrap();
+
+        unsafe { std::mem::transmute(guard) }
     }
-    fn get_or_insert_arena_mut_erased(&mut self, ty: TypeId) -> RwLockWriteGuard<Resources> {
-        self.loaded_resources
+    fn get_or_insert_arena_mut_erased(&self, ty: TypeId) -> RwLockWriteGuard<Resources> {
+        let mut loaded_resources = self.loaded_resources.write().unwrap();
+
+        let guard = loaded_resources
             .resources
             .entry(ty)
             .or_default()
             .write()
-            .unwrap()
+            .unwrap();
+        unsafe { std::mem::transmute(guard) }
     }
 
     pub fn get<R: Asset>(&self, id: &AssetHandle<R>) -> &R {
@@ -262,6 +293,7 @@ impl AssetMap {
 
     pub fn try_get<'a, R: Asset>(&'a self, id: &AssetHandle<R>) -> Option<&'a R> {
         assert!(id.is_not_null(), "Tried to get a null resource");
+        id.try_init(&self.operations_sender);
         let arena_handle = self.get_arena_handle::<R>();
         let metadata = arena_handle.asset_metadata.get(&id.name)?;
         match metadata.status {
@@ -277,12 +309,14 @@ impl AssetMap {
                     .map(|obj| obj.downcast_ref::<R>().unwrap())
             }
             AssetStatus::Unloaded => {
-                panic!("Resource is not loaded")
+                self.reload_inner::<R>(id.name.to_string()).ok()?;
+                self.try_get(id)
             }
         }
     }
     pub fn try_get_mut<'a, R: Asset>(&'a self, id: &AssetHandle<R>) -> Option<&'a mut R> {
         assert!(id.is_not_null(), "Tried to get_mut a null resource");
+        id.try_init(&self.operations_sender);
         let arena_handle = self.get_arena_handle::<R>();
         let metadata = arena_handle.asset_metadata.get(&id.name)?;
         match metadata.status {
@@ -297,7 +331,8 @@ impl AssetMap {
                     .map(|obj| obj.downcast_mut::<R>().unwrap())
             }
             AssetStatus::Unloaded => {
-                panic!("Resource is not loaded");
+                self.reload_inner::<R>(id.name.to_string()).ok()?;
+                self.try_get_mut(id)
             }
         }
     }
@@ -326,11 +361,8 @@ impl AssetMap {
 
     fn update_hot_reload(&mut self) -> anyhow::Result<()> {
         if let Some(server) = &mut self.hot_reload_server {
-            server.update(
-                &self.resource_loaders,
-                &mut self.loaded_resources,
-                &self.gpu,
-            )?;
+            let mut loaded_resources = self.loaded_resources.write().unwrap();
+            server.update(&self.resource_loaders, &mut loaded_resources, &self.gpu)?;
         }
 
         Ok(())
@@ -393,7 +425,7 @@ impl AssetMap {
 
     pub fn asset_metadata<T: crate::asset_map::Asset>(
         &self,
-        handle: &mut AssetHandle<T>,
+        handle: &AssetHandle<T>,
     ) -> AssetMetadata {
         let arena = self.get_arena_handle::<T>();
         let metadata = arena
@@ -438,6 +470,37 @@ impl AssetMap {
         }
 
         Ok(())
+    }
+
+    fn watch_path_operation(
+        &self,
+        path: PathBuf,
+        resource_type: TypeId,
+        asset_id: AssetId,
+    ) -> Box<dyn ResourceMapOperation> {
+        struct WatchPathOperation {
+            path: PathBuf,
+            resource_type: TypeId,
+            asset_id: AssetId,
+        }
+
+        impl ResourceMapOperation for WatchPathOperation {
+            fn execute(&self, map: &mut AssetMap) {
+                let server = map
+                    .hot_reload_server
+                    .as_mut()
+                    .expect("Failed to get hot reload server");
+                server
+                    .watch(&self.path, self.resource_type, self.asset_id)
+                    .expect("CHANGE Me");
+            }
+        }
+
+        Box::new(WatchPathOperation {
+            path,
+            resource_type,
+            asset_id,
+        })
     }
 }
 
@@ -546,7 +609,7 @@ impl<R: Asset> AssetHandle<R> {
         Self {
             _marker: PhantomData,
             name: ImmutableString::EMPTY,
-            operation_sender: None,
+            ty: Arc::new(OnceLock::new()),
         }
     }
 
@@ -562,22 +625,23 @@ impl<R: Asset> AssetHandle<R> {
         if self.is_null() {
             return;
         }
-        self.operation_sender
-            .as_ref()
-            .expect("Handle is null()")
-            .send(self.inc_ref_count_operation())
-            .unwrap_or_else(|err| error!("Failed to send increment operation: {err}"));
+
+        if let Some(sender) = self.ty.get() {
+            sender
+                .send(self.inc_ref_count_operation())
+                .unwrap_or_else(|err| error!("Failed to send increment operation: {err}"));
+        }
     }
 
     fn dec_ref_count(&self) {
         if self.is_null() {
             return;
         }
-        self.operation_sender
-            .as_ref()
-            .expect("Handle is null()")
-            .send(self.dec_ref_count_operation())
-            .unwrap_or_else(|err| error!("Failed to send decrement operation: {err}"));
+        if let Some(sender) = self.ty.get() {
+            sender
+                .send(self.dec_ref_count_operation())
+                .unwrap_or_else(|err| error!("Failed to send increment operation: {err}"));
+        }
     }
 
     fn inc_ref_count_operation(&self) -> Box<dyn ResourceMapOperation> {
@@ -621,7 +685,7 @@ impl<R: Asset> Clone for AssetHandle<R> {
         Self {
             _marker: self._marker,
             name: self.name.clone(),
-            operation_sender: self.operation_sender.clone(),
+            ty: self.ty.clone(),
         }
     }
 }
@@ -641,173 +705,109 @@ impl<R: Asset> Serialize for AssetHandle<R> {
     }
 }
 
-impl<'de, A: Asset> WorldDeserialize<'de> for AssetHandle<A>
+impl<'de, A: Asset> Deserialize<'de> for AssetHandle<A>
 where
     Self: Sized,
 {
-    fn deserialize(
-        deserializer: Box<dyn erased_serde::Deserializer<'de>>,
-        world: &kecs::World,
-    ) -> anyhow::Result<Self> {
-        let asset_map = world
-            .get_resource::<SharedAssetMap>()
-            .ok_or(anyhow::format_err!("Failed to find AsssetMap"))?;
-        let asset_map = asset_map.write();
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let name = ImmutableString::deserialize(deserializer)?;
 
-        let name: ImmutableString = serde::Deserialize::deserialize(deserializer)?;
-
-        Ok(Self {
+        Ok(AssetHandle {
             _marker: PhantomData,
             name,
-            operation_sender: Some(asset_map.operations_sender.clone()),
+            ty: Arc::new(OnceLock::new()),
         })
     }
 }
 
-// #[cfg(test)]
-// mod test {
-//     use super::{Resource, ResourceMap};
-//     use crate::ResourceHandle;
+#[cfg(test)]
+mod test {
+    use gpu::{make_gpu, Gpu, GpuConfiguration};
 
-//     struct TestResource {
-//         val: u32,
-//     }
+    use super::{Asset, AssetMap};
+    use crate::{AssetHandle, AssetStatus, ResourceLoader};
 
-//     impl Resource for TestResource {
-//         fn get_description(&self) -> &str {
-//             "test resource"
-//         }
-//         fn destroyed(&mut self) {
-//             println!("TestResource destroyed");
-//         }
-//     }
-//     struct TestResource2 {
-//         val2: u32,
-//     }
+    struct TestAsset {
+        val: u32,
+    }
 
-//     impl Resource for TestResource2 {
-//         fn get_description(&self) -> &str {
-//             "test resource 2"
-//         }
-//         fn destroyed(&mut self) {
-//             println!("TestResource2 destroyed");
-//         }
-//     }
+    impl Asset for TestAsset {
+        fn get_description(&self) -> &str {
+            "test resource"
+        }
+        fn destroyed(&mut self, _gpu: &dyn Gpu) {
+            println!("TestAsset destroyed");
+        }
+    }
 
-//     #[test]
-//     fn test_get() {
-//         let mut map: ResourceMap = ResourceMap::new();
-//         let id: ResourceHandle<TestResource> = map.add(TestResource { val: 10 });
+    #[test]
+    fn asset_create() {
+        let gpu = make_gpu(GpuConfiguration {
+            app_name: "test",
+            pipeline_cache_path: None,
+            enable_debug_utilities: true,
+            window: None,
+        })
+        .unwrap();
+        let mut map: AssetMap = AssetMap::new(gpu, false);
+        let id: AssetHandle<TestAsset> = map.add(TestAsset { val: 10 }, None::<&str>);
 
-//         assert_eq!(map.get(&id).val, 10);
-//     }
+        assert_eq!(map.get(&id).val, 10);
+    }
 
-//     #[test]
-//     fn test_drop() {
-//         let mut map = ResourceMap::new();
-//         let id_2 = map.add(TestResource { val: 14 });
-//         let id_3 = map.add(TestResource2 { val2: 142 });
-//         {
-//             let id = map.add(TestResource { val: 10 });
-//             assert_eq!(map.get(&id).val, 10);
-//             assert_eq!(map.get(&id_2).val, 14);
+    #[test]
+    fn asset_serde() {
+        let gpu = make_gpu(GpuConfiguration {
+            app_name: "test",
+            pipeline_cache_path: None,
+            enable_debug_utilities: true,
+            window: None,
+        })
+        .unwrap();
 
-//             assert_eq!(map.len::<TestResource>(), 2);
-//         }
+        struct TestAssetLoader;
 
-//         map.update();
+        impl ResourceLoader for TestAssetLoader {
+            type LoadedResource = TestAsset;
 
-//         assert_eq!(map.len::<TestResource>(), 1);
-//         assert_eq!(map.len::<TestResource2>(), 1);
-//         assert_eq!(map.get(&id_2).val, 14);
-//         assert_eq!(map.get(&id_3).val2, 142);
-//     }
+            fn load(&self, path: &std::path::Path) -> anyhow::Result<Self::LoadedResource> {
+                if path.to_str().unwrap() == "a" {
+                    Ok(TestAsset { val: 10 })
+                } else {
+                    Ok(TestAsset { val: 15 })
+                }
+            }
 
-//     #[test]
-//     fn test_shuffle_memory() {
-//         let (mut map, id_2) = {
-//             let mut map = ResourceMap::new();
-//             let id_2 = map.add(TestResource { val: 14 });
-//             (map, id_2)
-//         };
+            fn accepts_extension(&self, _extension: &str) -> bool {
+                true
+            }
+        }
+        let mut map: AssetMap = AssetMap::new(gpu, false);
+        map.install_resource_loader(TestAssetLoader);
+        let id: AssetHandle<TestAsset> = map.load("a").unwrap();
 
-//         {
-//             let id = map.add(TestResource { val: 10 });
+        let st = ron::to_string(&id).unwrap();
+        println!("{}", st);
 
-//             map.update();
-//             let do_checks = |map: ResourceMap| {
-//                 assert_eq!(map.get(&id).val, 10);
-//                 assert_eq!(map.get(&id_2).val, 14);
+        map.update();
 
-//                 assert_eq!(map.len::<TestResource>(), 2);
-//                 map
-//             };
+        let id_2 = ron::from_str::<AssetHandle<TestAsset>>(&st).unwrap();
 
-//             map.update();
-//             map = do_checks(map);
-//         }
+        let meta = map.asset_metadata(&id_2);
 
-//         map.update();
-//         assert_eq!(map.len::<TestResource>(), 1);
-//         assert_eq!(map.get(&id_2).val, 14);
-//     }
+        assert_eq!(map.get(&id_2).val, 10);
 
-//     #[test]
-//     fn test_other_map() {
-//         let mut map_1 = ResourceMap::new();
-//         let id_1 = map_1.add(TestResource { val: 1 });
-//         drop(map_1);
+        map.update();
 
-//         let map_2 = ResourceMap::new();
-//         let value = map_2.try_get(&id_1);
-//         assert!(value.is_none());
-//     }
-
-//     #[test]
-//     fn nested_resources() {
-//         struct B;
-//         impl Resource for B {
-//             fn get_description(&self) -> &str {
-//                 "B"
-//             }
-//             fn destroyed(&mut self) {
-//                 println!("B destroyed");
-//             }
-//         }
-
-//         struct A {
-//             handle_1: ResourceHandle<B>,
-//             handle_2: ResourceHandle<B>,
-//         }
-//         impl Resource for A {
-//             fn get_description(&self) -> &str {
-//                 "A"
-//             }
-//             fn destroyed(&mut self) {
-//                 println!("A destroyed");
-//             }
-//         }
-
-//         let mut map = ResourceMap::new();
-//         let h1 = map.add(B);
-//         let h2 = map.add(B);
-
-//         let ha = map.add(A {
-//             handle_1: h1.clone(),
-//             handle_2: h2.clone(),
-//         });
-
-//         assert_eq!(map.get(&ha).handle_1, h1);
-//         assert_eq!(map.get(&ha).handle_2, h2);
-
-//         drop(ha);
-//         drop(h1);
-//         drop(h2);
-//         map.update();
-//         // Need to update again because B's are released after A's, so they're destroyed on the
-//         // next update call
-//         map.update();
-//         assert!(map.get_arena_handle::<A>().is_empty());
-//         assert!(map.get_arena_handle::<B>().is_empty());
-//     }
-// }
+        assert!(matches!(
+            meta.status,
+            AssetStatus::Loaded {
+                id: _,
+                ref_count: 1
+            }
+        ));
+    }
+}

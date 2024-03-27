@@ -22,7 +22,7 @@ pub struct SharedAssetMap(Arc<RwLock<AssetMap>>);
 
 impl SharedAssetMap {
     pub fn new(gpu: Arc<dyn Gpu>) -> Self {
-        Self(Arc::new(RwLock::new(AssetMap::new(gpu))))
+        Self(Arc::new(RwLock::new(AssetMap::new(gpu, true))))
     }
     pub fn read(&self) -> RwLockReadGuard<'_, AssetMap> {
         self.0.read().expect("Failed to lock asset map")
