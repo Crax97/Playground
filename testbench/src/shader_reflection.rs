@@ -30,6 +30,10 @@ layout(set = 0, binding = 0, std140) uniform GlobalData {
     Global globals;
 };
 
+layout(set = 1, binding = 1, std140) uniform FooFighters {
+    Foo foo;
+};
+
 layout(set = 1, binding = 0) uniform sampler2D some_texture;
 
 
@@ -114,7 +118,10 @@ fn print_uniform_info_recursive(
 ) {
     for (name, info) in uniform_variables {
         let sep = "\t".repeat(depth);
-        println!("{sep}{}: offset {} size {}", name, info.offset, info.size);
+        println!(
+            "{sep}{}: layout(set={}, binding={}) offset {} abs offset {} size {}",
+            name, info.set, info.binding, info.offset, info.absolute_offset, info.size
+        );
 
         print_uniform_info_recursive(&info.inner_members, depth + 1);
     }

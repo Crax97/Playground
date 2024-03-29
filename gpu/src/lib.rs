@@ -1749,7 +1749,10 @@ pub struct PushConstantBlockDescription {
 pub struct UniformVariableDescription {
     pub name: String,
     pub offset: u32,
+    pub absolute_offset: u32,
     pub size: u32,
+    pub set: u32,
+    pub binding: u32,
 
     pub inner_members: HashMap<String, UniformVariableDescription>,
 }
@@ -1763,4 +1766,9 @@ pub struct ShaderInfo {
     pub descriptor_layouts: Vec<DescriptorSetDescription>,
     pub push_constant_ranges: Vec<PushConstantBlockDescription>,
     pub uniform_variables: HashMap<String, UniformVariableDescription>,
+}
+impl ShaderInfo {
+    pub fn combined(self, other: ShaderInfo) -> Self {
+        todo!()
+    }
 }

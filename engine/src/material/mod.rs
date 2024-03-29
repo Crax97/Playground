@@ -1,6 +1,6 @@
 mod master_material;
 mod material_instance;
-mod material_v2;
+pub mod material_v2;
 
 use std::collections::HashMap;
 

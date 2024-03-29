@@ -1560,14 +1560,21 @@ impl VkGpu {
             info.outputs.push(shader_output);
         }
 
-        for set in spirv_module
+        for (set_idx, set) in spirv_module
             .enumerate_descriptor_sets(None)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?
+            .iter()
+            .enumerate()
         {
             let mut set_description = DescriptorSetDescription { bindings: vec![] };
 
-            for binding in &set.bindings {
-                let members = parse_members(&binding.block.members);
+            for (binding_idx, binding) in set.bindings.iter().enumerate() {
+                let members = parse_members(
+                    &binding.block.members,
+                    0,
+                    set_idx as u32,
+                    binding_idx as u32,
+                );
                 info.uniform_variables.extend(members.into_iter());
                 let binding = DescriptorBindingInfo {
                     name: binding.name.clone(),
@@ -1742,14 +1749,25 @@ fn ensure_map_is_empty<H: HasAssociatedHandle + Clone + std::fmt::Debug>(
 
 fn parse_members(
     members: &[spirv_reflect::types::variable::ReflectBlockVariable],
+    current_offset: u32,
+    set: u32,
+    binding: u32,
 ) -> HashMap<String, UniformVariableDescription> {
     let mut map = HashMap::new();
     for member in members {
         let uniform_description = UniformVariableDescription {
             name: member.name.clone(),
             offset: member.offset,
+            absolute_offset: current_offset + member.offset,
             size: member.size,
-            inner_members: parse_members(&member.members),
+            inner_members: parse_members(
+                &member.members,
+                current_offset + member.offset,
+                set,
+                binding,
+            ),
+            set,
+            binding,
         };
         map.insert(member.name.clone(), uniform_description);
     }

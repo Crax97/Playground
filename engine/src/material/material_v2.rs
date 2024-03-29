@@ -1,12 +1,26 @@
-use egui::ahash::HashMap;
-use gpu::ShaderModuleHandle;
-use serde::{Deserialize, Serialize};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    time::SystemTime,
+};
 
-use crate::{immutable_string::ImmutableString, Asset, AssetHandle, MaterialDomain, Texture};
+use gpu::{
+    render_pass_2::RenderPass2, Binding2, BufferCreateInfo, BufferHandle, BufferUsageFlags,
+    CommandBuffer, CullMode, FrontFace, Gpu, MemoryDomain, ShaderModuleHandle,
+    UniformVariableDescription,
+};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::{
+    ensure_vec_length, immutable_string::ImmutableString, Asset, AssetHandle, AssetMap,
+    MaterialDomain, PipelineTarget, ShaderPermutation, Texture,
+};
+
+pub const MATERIAL_PARAMETER_SLOT: u32 = 1;
 
 pub struct Shader {
-    name: ImmutableString,
-    handle: ShaderModuleHandle,
+    pub name: ImmutableString,
+    pub handle: ShaderModuleHandle,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -18,11 +32,28 @@ pub enum MaterialParameter {
 
 #[derive(Serialize, Deserialize)]
 pub struct Material2 {
+    pub(crate) uuid: Uuid,
     pub name: ImmutableString,
     pub vertex_shader: AssetHandle<Shader>,
     pub fragment_shader: AssetHandle<Shader>,
     pub domain: MaterialDomain,
-    pub parameters: HashMap<String, MaterialParameter>,
+    pub(crate) parameters: HashMap<String, MaterialParameter>,
+
+    #[serde(skip)]
+    pub(crate) last_tick_change: u128,
+}
+
+impl Material2 {
+    pub fn uuid(&self) -> Uuid {
+        self.uuid
+    }
+    pub fn set_parameter(&mut self, name: impl Into<String>, parameter: MaterialParameter) {
+        self.parameters.insert(name.into(), parameter);
+        self.last_tick_change = std::time::SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Failed to compute time from epoch")
+            .as_millis();
+    }
 }
 
 impl Asset for Shader {

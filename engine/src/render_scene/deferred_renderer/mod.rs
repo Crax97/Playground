@@ -1,5 +1,6 @@
 mod cascaded_shadow_map;
 mod gbuffer;
+mod material_data_manager;
 mod render_image;
 mod sampler_allocator;
 
