@@ -7,6 +7,7 @@ use engine::app::{app_state::*, bootstrap, App};
 
 use engine::components::Transform;
 use engine::loaders::FileSystemTextureLoader;
+use engine::material_v2::{Material2, MaterialBuilder, Shader};
 use engine::math::shape::BoundingShape;
 use engine::{
     AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, GameScene,
@@ -125,34 +126,30 @@ impl App for PlanesApp {
             DeferredRenderingPipeline::make_3d_combine_shader(app_state.gpu.as_ref())?,
         )?;
 
-        let master = scene_renderer.create_material(
-            app_state.gpu(),
-            MaterialDescription {
-                name: "Simple",
-                domain: MaterialDomain::Surface,
-                fragment_module,
-                vertex_module,
-                texture_inputs: &[TextureInput {
-                    name: "texSampler".to_owned(),
-                    format: gpu::ImageFormat::Rgba8,
-                    shader_stage: ShaderStage::FRAGMENT,
-                }],
-                material_parameters: Default::default(),
-                parameter_shader_visibility: ShaderStage::FRAGMENT,
-                cull_mode: gpu::CullMode::Back,
+        let vertex_shader = resource_map.add(
+            Shader {
+                name: "Simple VS".into(),
+                handle: vertex_module,
             },
-        )?;
+            Some("Simple VS"),
+        );
 
-        let texture_inputs = vec![texture];
-        let material = resource_map.add(master, Some("david texture"));
-        let mat_instance = MaterialInstance::create_instance(
-            material,
-            &MaterialInstanceDescription {
-                name: "simple inst",
-                textures: texture_inputs,
-                parameter_buffers: vec![],
+        let fragment_shader = resource_map.add(
+            Shader {
+                name: "Simple FS".into(),
+                handle: fragment_module,
             },
-        )?;
+            Some("Simple FS"),
+        );
+        let material =
+            MaterialBuilder::new(vertex_shader, fragment_shader, MaterialDomain::Surface)
+                .parameter(
+                    "texSampler",
+                    engine::material_v2::MaterialParameter::Texture(texture),
+                )
+                .name("SimpleMaterial")
+                .build();
+        let material = resource_map.add(material, Some("SimpleMaterial"));
 
         app_state
             .swapchain_mut()
@@ -167,7 +164,7 @@ impl App for PlanesApp {
         scene.add_mesh(
             SceneMesh {
                 mesh: mesh.clone(),
-                materials: vec![mat_instance.clone()],
+                materials: vec![material.clone()],
                 bounds,
             },
             Transform::default(),
@@ -176,7 +173,7 @@ impl App for PlanesApp {
         scene.add_mesh(
             SceneMesh {
                 mesh: mesh.clone(),
-                materials: vec![mat_instance.clone()],
+                materials: vec![material.clone()],
                 bounds,
             },
             Transform::new_translation(point![0.0, 0.0, 1.0]),
@@ -185,7 +182,7 @@ impl App for PlanesApp {
         scene.add_mesh(
             SceneMesh {
                 mesh,
-                materials: vec![mat_instance.clone()],
+                materials: vec![material.clone()],
                 bounds,
             },
             Transform::new_translation(point![0.0, 0.0, -1.0]),
@@ -195,7 +192,7 @@ impl App for PlanesApp {
         scene.add_mesh(
             SceneMesh {
                 mesh: cube.clone(),
-                materials: vec![mat_instance.clone()],
+                materials: vec![material.clone()],
                 bounds,
             },
             Transform::new_translation(point![1.5, 0.0, 0.0]),
@@ -205,7 +202,7 @@ impl App for PlanesApp {
         scene.add_mesh(
             SceneMesh {
                 mesh: cube,
-                materials: vec![mat_instance],
+                materials: vec![material],
 
                 bounds,
             },

@@ -1,6 +1,7 @@
 use crate::utils;
 use engine::asset_map::{AssetHandle, AssetMap};
 use engine::components::Transform;
+use engine::material_v2::{Material2, MaterialBuilder, Shader};
 use engine::math::shape::BoundingShape;
 use engine::{
     GameScene, LightType, MasterMaterial, MaterialDescription, MaterialDomain, MaterialInstance,
@@ -57,12 +58,36 @@ impl GltfLoader {
     ) -> anyhow::Result<GameScene> {
         let (document, buffers, mut images) = gltf::import(path)?;
 
-        let pbr_master = Self::create_master_pbr_material(gpu, scene_renderer, resource_map)?;
+        let vertex_module = utils::read_file_to_vk_module(gpu, "./shaders/vertex_deferred.spirv")?;
+        let fragment_module =
+            utils::read_file_to_vk_module(gpu, "./shaders/metallic_roughness_pbr.spirv")?;
+        let vertex_module = resource_map.add(
+            Shader {
+                name: "PBR Vertex".into(),
+                handle: vertex_module,
+            },
+            Some("PBR Vertex"),
+        );
+
+        let fragment_module = resource_map.add(
+            Shader {
+                name: "PBR Fragment".into(),
+                handle: fragment_module,
+            },
+            Some("PBR Fragment"),
+        );
         let (images, image_views) = Self::load_images(gpu, &mut images)?;
         let samplers = Self::load_samplers(&document)?;
         let textures =
             Self::load_textures(gpu, resource_map, images, image_views, samplers, &document)?;
-        let allocated_materials = Self::load_materials(gpu, pbr_master, textures, &document)?;
+        let allocated_materials = Self::load_materials(
+            gpu,
+            vertex_module,
+            fragment_module,
+            resource_map,
+            textures,
+            &document,
+        )?;
         let meshes = Self::load_meshes(gpu, resource_map, &document, &buffers)?;
 
         let mut engine_scene = Self::build_engine_scene(document, allocated_materials, meshes);
@@ -73,7 +98,7 @@ impl GltfLoader {
 
     fn build_engine_scene(
         document: Document,
-        allocated_materials: Vec<MaterialInstance>,
+        allocated_materials: Vec<AssetHandle<Material2>>,
         meshes: Vec<(AssetHandle<Mesh>, Point3<f32>, Point3<f32>)>,
     ) -> GameScene {
         let mut engine_scene = GameScene::new();
@@ -160,80 +185,6 @@ impl GltfLoader {
             meshes.push((resource_map.add(gpu_mesh, Some(&label)), min, max));
         }
         Ok(meshes)
-    }
-
-    fn create_master_pbr_material<R: RenderingPipeline>(
-        gpu: &dyn Gpu,
-        scene_renderer: &mut R,
-        resource_map: &mut AssetMap,
-    ) -> anyhow::Result<AssetHandle<MasterMaterial>> {
-        let vertex_module = utils::read_file_to_vk_module(gpu, "./shaders/vertex_deferred.spirv")?;
-        let fragment_module =
-            utils::read_file_to_vk_module(gpu, "./shaders/metallic_roughness_pbr.spirv")?;
-
-        let mut params = HashMap::new();
-        params.insert(
-            "base_color".to_owned(),
-            MaterialParameterOffsetSize {
-                offset: 0,
-                size: size_of::<Vector4<f32>>(),
-            },
-        );
-        params.insert(
-            "metallic_roughness".to_owned(),
-            MaterialParameterOffsetSize {
-                offset: size_of::<Vector4<f32>>(),
-                size: size_of::<Vector4<f32>>(),
-            },
-        );
-        params.insert(
-            "emissive_color".to_owned(),
-            MaterialParameterOffsetSize {
-                offset: size_of::<Vector4<f32>>() * 2,
-                size: size_of::<Vector4<f32>>(),
-            },
-        );
-        let pbr_master = scene_renderer.create_material(
-            gpu,
-            MaterialDescription {
-                name: "PbrMaterial",
-                domain: MaterialDomain::Surface,
-                fragment_module,
-                vertex_module,
-                texture_inputs: &[
-                    TextureInput {
-                        name: "base_texture".to_owned(),
-                        format: gpu::ImageFormat::Rgba8,
-                        shader_stage: ShaderStage::FRAGMENT,
-                    },
-                    TextureInput {
-                        name: "normal_texture".to_owned(),
-                        format: gpu::ImageFormat::Rgba8,
-                        shader_stage: ShaderStage::FRAGMENT,
-                    },
-                    TextureInput {
-                        name: "occlusion_texture".to_owned(),
-                        format: gpu::ImageFormat::Rgba8,
-                        shader_stage: ShaderStage::FRAGMENT,
-                    },
-                    TextureInput {
-                        name: "emissive_texture".to_owned(),
-                        format: gpu::ImageFormat::Rgba8,
-                        shader_stage: ShaderStage::FRAGMENT,
-                    },
-                    TextureInput {
-                        name: "metallic_roughness".to_owned(),
-                        format: gpu::ImageFormat::Rgba8,
-                        shader_stage: ShaderStage::FRAGMENT,
-                    },
-                ],
-                material_parameters: params,
-                parameter_shader_visibility: ShaderStage::FRAGMENT,
-                cull_mode: gpu::CullMode::Back,
-            },
-        )?;
-
-        Ok(resource_map.add(pbr_master, Some("PBR Master material")))
     }
 
     fn load_images(
@@ -385,10 +336,12 @@ impl GltfLoader {
 
     fn load_materials(
         gpu: &dyn Gpu,
-        pbr_master: AssetHandle<MasterMaterial>,
+        pbr_vertex: AssetHandle<Shader>,
+        pbr_fragment: AssetHandle<Shader>,
+        asset_map: &mut AssetMap,
         textures: LoadedTextures,
         document: &Document,
-    ) -> anyhow::Result<Vec<MaterialInstance>> {
+    ) -> anyhow::Result<Vec<AssetHandle<Material2>>> {
         let LoadedTextures {
             white,
             black,
@@ -434,36 +387,48 @@ impl GltfLoader {
                 metallic_roughness.clone(),
             ];
 
-            let material_instance = MaterialInstance::create_instance(
-                pbr_master.clone(),
-                &MaterialInstanceDescription {
-                    name: &format!(
-                        "PbrMaterial Instance #{}",
-                        gltf_material.index().unwrap_or(0),
-                    ),
-                    textures,
-                    parameter_buffers: vec![MaterialInstance::create_material_parameter_buffer(
-                        "PBR Data",
-                        gpu,
-                        std::mem::size_of::<PbrProperties>(),
-                    )?],
-                },
-            )?;
+            let name = gltf_material.name().unwrap_or("GLTF Material");
+            let material_instance = MaterialBuilder::new(
+                pbr_vertex.clone(),
+                pbr_fragment.clone(),
+                MaterialDomain::Surface,
+            )
+            .name(name);
             let metallic = gltf_material.pbr_metallic_roughness().metallic_factor();
             let roughness = gltf_material.pbr_metallic_roughness().roughness_factor();
             let emissive = gltf_material.emissive_factor();
-            material_instance.write_parameters(
-                gpu,
-                PbrProperties {
-                    base_color: Vector4::from_column_slice(
-                        &gltf_material.pbr_metallic_roughness().base_color_factor(),
-                    ),
-                    metallic_roughness: vector![metallic, roughness, 0.0, 1.0],
-                    emissive_color: vector![emissive[0], emissive[1], emissive[2], 1.0],
-                },
-                0,
-            )?;
-            allocated_materials.push(material_instance);
+            let material_instance = material_instance
+                .parameter(
+                    "baseColorSampler",
+                    engine::material_v2::MaterialParameter::Texture(base_texture),
+                )
+                .parameter(
+                    "normalSampler",
+                    engine::material_v2::MaterialParameter::Texture(normal_texture),
+                )
+                .parameter(
+                    "occlusionSampler",
+                    engine::material_v2::MaterialParameter::Texture(occlusion_texture),
+                )
+                .parameter(
+                    "emissiveSampler",
+                    engine::material_v2::MaterialParameter::Texture(emissive_texture),
+                )
+                .parameter(
+                    "pbrProperties.metallicRoughness",
+                    engine::material_v2::MaterialParameter::Color([metallic, roughness, 0.0, 0.0]),
+                )
+                .parameter(
+                    "pbrProperties.emissiveFactor",
+                    engine::material_v2::MaterialParameter::Color([
+                        emissive[0],
+                        emissive[1],
+                        emissive[2],
+                        0.0,
+                    ]),
+                );
+            let material = asset_map.add(material_instance.build(), Some(name));
+            allocated_materials.push(material);
         }
 
         Ok(allocated_materials)
@@ -481,7 +446,7 @@ impl GltfLoader {
 fn handle_node(
     node: gltf::Node<'_>,
     engine_scene: &mut GameScene,
-    allocated_materials: &Vec<MaterialInstance>,
+    allocated_materials: &Vec<AssetHandle<Material2>>,
     meshes: &Vec<(
         AssetHandle<Mesh>,
         nalgebra::OPoint<f32, nalgebra::Const<3>>,

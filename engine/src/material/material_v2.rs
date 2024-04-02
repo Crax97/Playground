@@ -66,6 +66,22 @@ impl MaterialBuilder {
         self.parameters.insert(name.into(), parameter);
         self
     }
+
+    pub fn build(self) -> Material2 {
+        let uuid = Uuid::new_v4();
+        let name = self
+            .name
+            .unwrap_or_else(|| ImmutableString::from(format!("Material {uuid}")));
+        Material2 {
+            uuid,
+            name,
+            vertex_shader: self.vertex_shader,
+            fragment_shader: self.fragment_shader,
+            domain: self.domain,
+            parameters: self.parameters,
+            last_tick_change: 0,
+        }
+    }
 }
 
 impl Material2 {

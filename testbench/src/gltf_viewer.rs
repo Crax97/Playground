@@ -10,6 +10,7 @@ use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App, Console};
 use engine::components::Transform;
 use engine::editor::ui_extension::UiExtension;
+use engine::material_v2::{MaterialBuilder, Shader};
 use engine::{
     egui, GameScene, LightType, SceneLightInfo, ScenePrimitiveType, ShadowConfiguration, Time,
 };
@@ -304,36 +305,31 @@ impl App for GLTFViewer {
             .add_post_process_pass(FxaaPass::new(app_state.gpu.as_ref(), &mut cvar_manager)?);
 
         scene_renderer.set_irradiance_texture(Some(irradiance_map));
-
-        let skybox_material = scene_renderer.create_material(
-            app_state.gpu(),
-            engine::MaterialDescription {
-                name: "skybox material",
-                domain: engine::MaterialDomain::Surface,
-                texture_inputs: &[TextureInput {
-                    name: "Cubemap".to_owned(),
-                    format: ImageFormat::Rgba8,
-                    shader_stage: ShaderStage::ALL_GRAPHICS,
-                }],
-                material_parameters: HashMap::new(),
-                fragment_module: skybox_fragment,
-                vertex_module,
-                parameter_shader_visibility: ShaderStage::ALL_GRAPHICS,
-                cull_mode: gpu::CullMode::None,
+        let vertex_shader = resource_map.add(
+            Shader {
+                name: "Skybox VS".into(),
+                handle: vertex_module,
             },
-        )?;
-        let skybox_master = resource_map.add(skybox_material, Some("Skybox material"));
-
-        let skybox_textures = vec![david_texture];
-
-        let skybox_instance = MaterialInstance::create_instance(
-            skybox_master,
-            &engine::MaterialInstanceDescription {
-                name: "david skybox",
-                textures: skybox_textures,
-                ..Default::default()
+            Some("Skybox VS"),
+        );
+        let fragment_shader = resource_map.add(
+            Shader {
+                name: "Skybox FS".into(),
+                handle: skybox_fragment,
             },
-        )?;
+            Some("Skybox FS"),
+        );
+        let skybox_instance = MaterialBuilder::new(
+            vertex_shader,
+            fragment_shader,
+            engine::MaterialDomain::Surface,
+        )
+        .parameter(
+            "Cubemap",
+            engine::material_v2::MaterialParameter::Texture(david_texture),
+        )
+        .build();
+        let skybox_instance = resource_map.add(skybox_instance, Some("Skybox Material"));
 
         let mut scene = GltfLoader::load(
             &args.gltf_file,
