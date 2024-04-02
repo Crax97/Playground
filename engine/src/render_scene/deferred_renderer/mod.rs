@@ -5,6 +5,7 @@ mod render_image;
 mod sampler_allocator;
 
 use crate::{
+    material_v2::Material2,
     post_process_pass::{PostProcessPass, PostProcessResources},
     render_scene::render_structs::*,
     Asset, ScenePrimitive,
@@ -21,7 +22,7 @@ use std::mem::size_of;
 use crate::{
     material::{MasterMaterial, MasterMaterialDescription},
     Camera, CvarManager, Frustum, GameScene, MaterialDescription, MaterialInstance, Mesh,
-    MeshPrimitive, PipelineTarget, RenderingPipeline, SceneMesh, Texture,
+    MeshPrimitive, PipelineTarget, RenderingPipeline, Texture,
 };
 
 use crate::asset_map::{AssetHandle, AssetMap};
@@ -33,6 +34,8 @@ use gpu::{
     ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage, VertexBindingInfo, VertexStageInfo,
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
+
+use self::material_data_manager::MaterialDataManager;
 
 const SCREEN_QUAD: &[u32] = glsl!(
     kind = vertex,
@@ -95,6 +98,8 @@ pub struct DeferredRenderingPipeline {
     screen_quad_flipped: ShaderModuleHandle,
     early_z_pass_enabled: bool,
     view_size: Extent2D,
+
+    material_cache: MaterialDataManager,
 }
 
 impl kecs::Resource for DeferredRenderingPipeline {}
@@ -209,6 +214,7 @@ impl DeferredRenderingPipeline {
             frustum: Frustum::default(),
             drawcalls_last_frame: 0,
             cascaded_shadow_map,
+            material_cache: MaterialDataManager::default(),
         })
     }
 
@@ -242,6 +248,7 @@ impl DeferredRenderingPipeline {
     pub(crate) fn main_render_loop(
         gpu: &dyn Gpu,
         primitives: &Vec<&ScenePrimitive>,
+        material_cache: &mut MaterialDataManager,
         resource_map: &AssetMap,
         pipeline_target: PipelineTarget,
         render_pass: &mut RenderPass2,
@@ -257,8 +264,6 @@ impl DeferredRenderingPipeline {
                 let mesh = resource_map.get(&primitive.mesh);
                 for (material_idx, mesh_prim) in mesh.primitives.iter().enumerate() {
                     let material = &primitive.materials[material_idx];
-                    let master = resource_map.get(&material.owner);
-                    bind_master_material(master, pipeline_target, render_pass, frame_buffers);
 
                     // render_pass.set_cull_mode(master.cull_mode);
                     // render_pass.set_front_face(master.front_face);
@@ -266,8 +271,9 @@ impl DeferredRenderingPipeline {
                     draw_mesh_primitive(
                         gpu,
                         render_pass,
+                        material_cache,
                         material,
-                        master,
+                        pipeline_target,
                         mesh_prim,
                         model,
                         resource_map,
@@ -290,9 +296,9 @@ impl DeferredRenderingPipeline {
         gpu: &dyn Gpu,
         camera_location: &Point3<f32>,
         render_pass: &mut RenderPass2,
+        material_cache: &mut MaterialDataManager,
         skybox_mesh: &Mesh,
-        skybox_material: &MaterialInstance,
-        skybox_master: &MasterMaterial,
+        skybox_material: &AssetHandle<Material2>,
         resource_map: &AssetMap,
         sampler_allocator: &SamplerAllocator,
     ) -> anyhow::Result<()> {
@@ -311,8 +317,9 @@ impl DeferredRenderingPipeline {
         draw_mesh_primitive(
             gpu,
             render_pass,
+            material_cache,
             skybox_material,
-            skybox_master,
+            PipelineTarget::ColorAndDepth,
             &skybox_mesh.primitives[0],
             skybox_transform,
             resource_map,
@@ -328,18 +335,18 @@ impl DeferredRenderingPipeline {
     }
 
     fn main_pass(
-        &self,
+        &mut self,
         gpu: &dyn Gpu,
         graphics_command_buffer: &mut CommandBuffer,
         final_scene_image: &RenderImage,
         gbuffer: &GBuffer,
         resource_map: &AssetMap,
         render_size: Extent2D,
-        current_buffers: &FrameBuffers,
         primitives: &Vec<&ScenePrimitive>,
         pov: &Camera,
         scene: &GameScene,
     ) -> anyhow::Result<()> {
+        let current_buffers = &self.frame_buffers[self.in_flight_frame];
         let GBuffer {
             depth_component,
             position_component,
@@ -374,9 +381,11 @@ impl DeferredRenderingPipeline {
                 early_z.set_color_output_enabled(false);
                 early_z.set_enable_depth_test(true);
                 early_z.set_depth_write_enabled(true);
+
                 Self::main_render_loop(
                     gpu,
                     primitives,
+                    &mut self.material_cache,
                     resource_map,
                     PipelineTarget::DepthOnly,
                     &mut early_z,
@@ -434,20 +443,13 @@ impl DeferredRenderingPipeline {
                     });
 
                 if let Some(material) = scene.get_skybox_material() {
-                    let skybox_master = resource_map.get(&material.owner);
-                    bind_master_material(
-                        skybox_master,
-                        PipelineTarget::ColorAndDepth,
-                        &mut gbuffer_output,
-                        current_buffers,
-                    );
                     Self::draw_skybox(
                         gpu,
                         &pov.location,
                         &mut gbuffer_output,
+                        &mut self.material_cache,
                         &self.cube_mesh,
                         material,
-                        skybox_master,
                         resource_map,
                         &self.sampler_allocator,
                     )?;
@@ -466,6 +468,7 @@ impl DeferredRenderingPipeline {
                 Self::main_render_loop(
                     gpu,
                     primitives,
+                    &mut self.material_cache,
                     resource_map,
                     PipelineTarget::ColorAndDepth,
                     &mut gbuffer_output,
@@ -866,8 +869,9 @@ fn bind_master_material(
 fn draw_mesh_primitive(
     gpu: &dyn Gpu,
     render_pass: &mut RenderPass2,
-    material: &MaterialInstance,
-    master: &MasterMaterial,
+    material_cache: &mut MaterialDataManager,
+    material: &AssetHandle<Material2>,
+    pipeline_target: PipelineTarget,
     primitive: &MeshPrimitive,
     model: Matrix4<f32>,
     resource_map: &AssetMap,
@@ -875,32 +879,16 @@ fn draw_mesh_primitive(
     camera_index: u32,
 ) -> anyhow::Result<()> {
     render_pass.set_index_buffer(primitive.index_buffer, IndexType::Uint32, 0);
-
-    let mut user_bindings = vec![];
-    user_bindings.extend(&mut master.texture_inputs.iter().enumerate().map(|(i, _)| {
-        let texture_parameter = &material.textures[i];
-        let tex = resource_map.get(texture_parameter);
-
-        let sampler_handle = sampler_allocator.get(gpu, &tex.sampler_settings);
-
-        Binding2 {
-            ty: gpu::DescriptorBindingType2::ImageView {
-                image_view_handle: tex.view,
-                sampler_handle,
-            },
-            write: false,
-        }
-    }));
-    for user_buffer in &material.parameter_buffers {
-        user_bindings.push(Binding2 {
-            ty: gpu::DescriptorBindingType2::UniformBuffer {
-                handle: *user_buffer,
-                offset: 0,
-                range: gpu::WHOLE_SIZE as _,
-            },
-            write: false,
-        });
-    }
+    let material = resource_map.get(&material);
+    let data = material_cache.get_data(gpu, &material, resource_map)?;
+    data.bind(
+        gpu,
+        material,
+        pipeline_target,
+        render_pass,
+        resource_map,
+        sampler_allocator,
+    );
 
     render_pass.set_vertex_buffers(
         &[
@@ -947,7 +935,6 @@ fn draw_mesh_primitive(
         ],
         &[0, 0, 0, 0, 0],
     );
-    render_pass.bind_resources_2(1, &user_bindings);
     render_pass.push_constants(
         0,
         0,
@@ -994,41 +981,44 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         let projection = camera.projection();
 
-        let current_buffers = &self.frame_buffers[self.in_flight_frame];
+        {
+            let current_buffers = &self.frame_buffers[self.in_flight_frame];
 
-        let mut per_frame_data = vec![PointOfViewData {
-            eye: Point4::new(
-                camera.location[0],
-                camera.location[1],
-                camera.location[2],
-                0.0,
-            ),
-            eye_forward: vector![camera.forward.x, camera.forward.y, camera.forward.z, 0.0],
-            view: camera.view(),
-            projection,
-        }];
+            let mut per_frame_data = vec![PointOfViewData {
+                eye: Point4::new(
+                    camera.location[0],
+                    camera.location[1],
+                    camera.location[2],
+                    0.0,
+                ),
+                eye_forward: vector![camera.forward.x, camera.forward.y, camera.forward.z, 0.0],
+                view: camera.view(),
+                projection,
+            }];
 
-        per_frame_data.extend_from_slice(&self.light_povs);
+            per_frame_data.extend_from_slice(&self.light_povs);
 
-        gpu.write_buffer(
-            &current_buffers.camera_buffer,
-            0,
-            bytemuck::cast_slice(&per_frame_data),
-        )
-        .unwrap();
+            gpu.write_buffer(
+                &current_buffers.camera_buffer,
+                0,
+                bytemuck::cast_slice(&per_frame_data),
+            )
+            .unwrap();
 
-        // let slices = pov.split_into_slices(4);
-        // let slices = slices.iter().map(|sl| sl.near).collect::<Vec<_>>();
+            // let slices = pov.split_into_slices(4);
+            // let slices = slices.iter().map(|sl| sl.near).collect::<Vec<_>>();
 
-        self.cascaded_shadow_map.render_shadow_atlas(
-            gpu,
-            scene,
-            graphics_command_buffer,
-            current_buffers,
-            resource_map,
-            &self.light_povs,
-            &self.sampler_allocator,
-        )?;
+            self.cascaded_shadow_map.render_shadow_atlas(
+                gpu,
+                scene,
+                graphics_command_buffer,
+                current_buffers,
+                resource_map,
+                &mut self.material_cache,
+                &self.light_povs,
+                &self.sampler_allocator,
+            )?;
+        }
 
         let gbuffer = self.get_gbuffer(gpu);
         self.drawcalls_last_frame = primitives.len() as u64;
@@ -1039,7 +1029,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             &gbuffer,
             resource_map,
             self.view_size,
-            current_buffers,
             &primitives,
             camera,
             scene,

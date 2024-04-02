@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use crate::{
     asset_map::{AssetHandle, AssetMap},
     components::Transform,
+    material_v2::Material2,
     math::shape::BoundingShape,
     render_scene::{BinaryBvh, Bvh},
     CvarManager, Frustum,
@@ -25,7 +26,7 @@ use crate::{mesh::Mesh, Camera, MasterMaterial, MaterialDescription, MaterialIns
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SceneMesh {
     pub mesh: AssetHandle<Mesh>,
-    pub materials: Vec<MaterialInstance>,
+    pub materials: Vec<AssetHandle<Material2>>,
     pub bounds: BoundingShape,
 }
 
@@ -196,7 +197,7 @@ pub struct GameScene {
     pub use_bvh: bool,
     pub primitives: Arena<ScenePrimitive>,
 
-    skybox_material: Option<MaterialInstance>,
+    skybox_material: Option<AssetHandle<Material2>>,
     skybox_texture: Option<AssetHandle<Texture>>,
     current_lights_iteration: u64,
 }
@@ -212,7 +213,7 @@ impl GameScene {
         &self.skybox_texture
     }
 
-    pub fn get_skybox_material(&self) -> &Option<MaterialInstance> {
+    pub fn get_skybox_material(&self) -> &Option<AssetHandle<Material2>> {
         &self.skybox_material
     }
 
@@ -367,7 +368,7 @@ impl GameScene {
         self.skybox_texture = new_skybox_texture;
     }
 
-    pub fn set_skybox_material(&mut self, new_skybox_material: Option<MaterialInstance>) {
+    pub fn set_skybox_material(&mut self, new_skybox_material: Option<AssetHandle<Material2>>) {
         self.skybox_material = new_skybox_material;
     }
 
@@ -382,9 +383,6 @@ impl GameScene {
                     });
                 }
             });
-        unique_material_instances.into_iter().for_each(|inst| {
-            inst.destroy(gpu);
-        })
     }
 }
 

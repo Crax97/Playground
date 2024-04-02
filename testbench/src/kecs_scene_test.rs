@@ -2,40 +2,38 @@ mod fps_camera;
 mod gltf_loader;
 mod utils;
 
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::ops::{Deref, DerefMut};
+
+
+
 
 use bytemuck::{Pod, Zeroable};
 use engine::app::egui_support::EguiSupport;
-use engine::app::{app_state::*, bootstrap, App, Console};
+use engine::app::{App, Console};
 use engine::components::MeshComponentEditor;
-use engine::editor::ui_extension::UiExtension;
+
 use engine::editor::{EguiSceneEditor, TypeEditor};
-use engine::kecs::{Commands, Res, ResMut};
+
 use engine::kecs_app::{KecsApp, SharedAssetMap};
 use engine::loaders::FileSystemTextureLoader;
-use engine::{egui, GpuDevice, LightType, SceneLightInfo, ShadowConfiguration, Texture, Time};
+use engine::{egui, Time};
 
 use engine::input::InputState;
-use engine::post_process_pass::TonemapPass;
+
 use engine_macros::glsl;
 use fps_camera::FpsCamera;
 use gpu::{
-    CommandBuffer, Extent2D, Gpu, ImageFormat, Offset2D, PresentMode, Rect2D,
-    ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage,
+    ShaderModuleHandle,
 };
-use winit::dpi::{PhysicalPosition, Position};
+
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
-use engine::input::key::Key;
+
 use engine::{
-    post_process_pass::FxaaPass, AssetMap, Backbuffer, CvarManager, DeferredRenderingPipeline,
-    MaterialInstance, PrimitiveHandle, RenderingPipeline, TextureInput,
+    AssetMap, CvarManager, DeferredRenderingPipeline, PrimitiveHandle,
 };
 use nalgebra::*;
-use winit::event::MouseButton;
-use winit::event_loop::EventLoop;
+
+
 
 use clap::Parser;
 

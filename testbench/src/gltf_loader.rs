@@ -498,7 +498,7 @@ fn handle_node(
     let forward = rot_matrix.column(2);
 
     // gltf specifies light directions to be in -z
-    let forward = -vector![forward[0], forward[1], forward[2]];
+    let _forward = -vector![forward[0], forward[1], forward[2]];
 
     if let Some(light) = node.light() {
         use gltf::khr_lights_punctual::Kind as GltfLightKind;

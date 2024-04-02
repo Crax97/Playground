@@ -25,6 +25,7 @@ pub(crate) trait MaterialData {
     );
 }
 
+#[derive(Default)]
 pub(crate) struct MaterialDataManager {
     data: HashMap<Uuid, MaterialDataInfo>,
 }
@@ -169,7 +170,7 @@ fn create_parameter_buffer(
     uniform_bindings: &mut HashMap<String, MaterialUniformVariableLayout>,
     gpu: &dyn Gpu,
 ) -> anyhow::Result<Option<BufferHandle>> {
-    uniform_bindings.retain(|k, parameter| parameter.set == 1 && parameter.binding == 1);
+    uniform_bindings.retain(|_k, parameter| parameter.set == 1 && parameter.binding == 1);
     if uniform_bindings.len() == 0 {
         return Ok(None);
     }

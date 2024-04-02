@@ -11,7 +11,6 @@ pub mod math;
 pub mod physics;
 pub mod post_process_pass;
 
-mod bevy_ecs_app;
 mod cvar_manager;
 mod material;
 mod mesh;
@@ -21,9 +20,6 @@ mod time;
 mod utils;
 
 pub use asset_map::*;
-pub use bevy_ecs;
-pub use bevy_ecs_app::*;
-pub use bevy_reflect;
 pub use cvar_manager::*;
 pub use kecs;
 pub use material::*;

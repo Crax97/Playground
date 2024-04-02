@@ -7,8 +7,6 @@ pub use rapier2d;
 
 use rapier2d::prelude::*;
 
-use crate::components::Transform2D;
-
 #[derive(Resource)]
 pub struct PhysicsContext2D {
     pub gravity: Vector2<f32>,
@@ -218,32 +216,4 @@ impl Default for PhysicsContext2D {
 
 pub fn update_physics_2d_context(mut context: ResMut<PhysicsContext2D>) {
     context.update();
-}
-
-pub fn update_positions_before_physics_system(
-    mut context: ResMut<PhysicsContext2D>,
-    mut query: Query<(&Transform2D, &RigidBody2DHandle)>,
-) {
-    for (transform, body_handle) in query.iter_mut() {
-        if let Some(body) = context.rigid_body_set.get_mut(body_handle.0) {
-            body.set_position(
-                Isometry2::new(transform.position.coords, transform.rotation),
-                true,
-            );
-        }
-    }
-}
-pub fn update_positions_after_physics_system(
-    context: Res<PhysicsContext2D>,
-    mut query: Query<(&mut Transform2D, &RigidBody2DHandle)>,
-) {
-    for (mut transform, body_handle) in query.iter_mut() {
-        if let Some(body) = context.rigid_body_set.get(body_handle.0) {
-            transform.position = point![
-                body.position().translation.vector.x,
-                body.position().translation.vector.y
-            ];
-            transform.rotation = body.position().rotation.angle();
-        }
-    }
 }

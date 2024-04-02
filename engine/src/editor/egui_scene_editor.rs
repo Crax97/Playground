@@ -292,11 +292,7 @@ impl EguiSceneEditor {
             ui.label("Materials");
             ui.end_row();
             vec_ui(ui, &mut m.materials, |ui, mat_inst| {
-                asset_picker.show(&mut mat_inst.owner, asset_map, ui);
-                ui.end_row();
-                vec_ui(ui, &mut mat_inst.textures, |ui, tex| {
-                    asset_picker.show(tex, asset_map, ui);
-                })
+                ui.label("todo...");
             });
 
             ui.end_row();

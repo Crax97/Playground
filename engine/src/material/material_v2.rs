@@ -1,20 +1,10 @@
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    time::SystemTime,
-};
+use std::{collections::HashMap, time::SystemTime};
 
-use gpu::{
-    render_pass_2::RenderPass2, Binding2, BufferCreateInfo, BufferHandle, BufferUsageFlags,
-    CommandBuffer, CullMode, FrontFace, Gpu, MemoryDomain, ShaderModuleHandle,
-    UniformVariableDescription,
-};
+use gpu::{Gpu, ShaderModuleHandle};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{
-    ensure_vec_length, immutable_string::ImmutableString, Asset, AssetHandle, AssetMap,
-    MaterialDomain, PipelineTarget, ShaderPermutation, Texture,
-};
+use crate::{immutable_string::ImmutableString, Asset, AssetHandle, MaterialDomain, Texture};
 
 pub const MATERIAL_PARAMETER_SLOT: u32 = 1;
 
@@ -41,6 +31,41 @@ pub struct Material2 {
 
     #[serde(skip)]
     pub(crate) last_tick_change: u128,
+}
+
+pub struct MaterialBuilder {
+    name: Option<ImmutableString>,
+    vertex_shader: AssetHandle<Shader>,
+    fragment_shader: AssetHandle<Shader>,
+    domain: MaterialDomain,
+    parameters: HashMap<String, MaterialParameter>,
+}
+
+impl MaterialBuilder {
+    pub fn new(
+        vertex_shader: AssetHandle<Shader>,
+        fragment_shader: AssetHandle<Shader>,
+        domain: MaterialDomain,
+    ) -> Self {
+        Self {
+            vertex_shader,
+            fragment_shader,
+            domain,
+
+            parameters: HashMap::new(),
+            name: None,
+        }
+    }
+
+    pub fn name(mut self, name: impl Into<ImmutableString>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    pub fn parameter(mut self, name: impl Into<String>, parameter: MaterialParameter) -> Self {
+        self.parameters.insert(name.into(), parameter);
+        self
+    }
 }
 
 impl Material2 {

@@ -12,7 +12,7 @@ use crate::{
     TiledTexture2DSection,
 };
 
-use super::SamplerAllocator;
+use super::{material_data_manager::MaterialDataManager, SamplerAllocator};
 
 pub const SHADOW_ATLAS_TILE_SIZE: u32 = 128;
 pub const SHADOW_ATLAS_WIDTH: u32 = SHADOW_ATLAS_TILE_SIZE * 70;
@@ -158,6 +158,7 @@ impl CascadedShadowMap {
         command_buffer: &mut gpu::CommandBuffer,
         frame_buffers: &FrameBuffers,
         resource_map: &AssetMap,
+        material_cache: &mut MaterialDataManager,
 
         light_povs: &Vec<PointOfViewData>,
         sampler_allocator: &SamplerAllocator,
@@ -222,6 +223,7 @@ impl CascadedShadowMap {
                 DeferredRenderingPipeline::main_render_loop(
                     gpu,
                     &primitives,
+                    material_cache,
                     resource_map,
                     PipelineTarget::DepthOnly,
                     &mut shadow_atlas_pass,

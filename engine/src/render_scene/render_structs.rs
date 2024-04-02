@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
-use gpu::{BufferHandle, Gpu};
-use nalgebra::{vector, Matrix4, Point3, Point4, Vector4};
-use rapier2d::math::Rotation;
+use gpu::{BufferHandle};
+use nalgebra::{vector, Matrix4, Point4, Vector4};
+
 
 use crate::{components::Transform, LightType, SceneLightInfo};
 

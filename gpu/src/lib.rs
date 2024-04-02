@@ -1768,7 +1768,7 @@ pub struct ShaderInfo {
     pub uniform_variables: HashMap<String, UniformVariableDescription>,
 }
 impl ShaderInfo {
-    pub fn combined(self, other: ShaderInfo) -> Self {
+    pub fn combined(self, _other: ShaderInfo) -> Self {
         todo!()
     }
 }

@@ -1,8 +1,7 @@
 use engine_macros::*;
 use gpu::{
-    make_gpu, BeginComputePassInfo, Binding, Binding2, BufferCreateInfo, BufferUsageFlags,
+    make_gpu, BeginComputePassInfo, Binding2, BufferCreateInfo, BufferUsageFlags,
     ComputePassFlags, GpuConfiguration, MemoryDomain, QueueType, ShaderModuleCreateInfo,
-    ShaderStage,
 };
 use std::mem::{size_of, size_of_val};
 
