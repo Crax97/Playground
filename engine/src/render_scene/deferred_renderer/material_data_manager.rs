@@ -282,7 +282,7 @@ impl MaterialData for SparseMaterialData {
         render_pass.set_vertex_shader(asset_map.get(&material.vertex_shader).handle);
 
         if pipeline_target != PipelineTarget::DepthOnly {
-            render_pass.set_vertex_shader(asset_map.get(&material.fragment_shader).handle);
+            render_pass.set_fragment_shader(asset_map.get(&material.fragment_shader).handle);
         }
     }
 }

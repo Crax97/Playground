@@ -35,7 +35,7 @@ use gpu::{
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 
-use self::material_data_manager::MaterialDataManager;
+use self::material_data_manager::{MaterialData, MaterialDataManager};
 
 const SCREEN_QUAD: &[u32] = glsl!(
     kind = vertex,
@@ -268,6 +268,18 @@ impl DeferredRenderingPipeline {
                     // render_pass.set_cull_mode(master.cull_mode);
                     // render_pass.set_front_face(master.front_face);
                     let model = transform.matrix();
+
+                    render_pass.bind_resources_2(
+                        0,
+                        &[Binding2 {
+                            ty: gpu::DescriptorBindingType2::StorageBuffer {
+                                handle: frame_buffers.camera_buffer,
+                                offset: 0,
+                                range: gpu::WHOLE_SIZE as _,
+                            },
+                            write: false,
+                        }],
+                    );
                     draw_mesh_primitive(
                         gpu,
                         render_pass,
@@ -828,42 +840,6 @@ impl DeferredRenderingPipeline {
 
         Ok(())
     }
-}
-
-fn bind_master_material(
-    master: &MasterMaterial,
-    pipeline_target: PipelineTarget,
-    render_pass: &mut RenderPass2,
-    frame_buffers: &FrameBuffers,
-) {
-    let permutation = master
-        .get_permutation(pipeline_target)
-        .expect("failed to fetch permutation {pipeline_target:?}");
-    render_pass.set_vertex_shader(permutation.vertex_shader);
-    if let Some(fragment_shader) = &permutation.fragment_shader {
-        render_pass.set_fragment_shader(*fragment_shader);
-    }
-    render_pass.bind_resources_2(
-        0,
-        &[
-            Binding2 {
-                ty: gpu::DescriptorBindingType2::StorageBuffer {
-                    handle: frame_buffers.camera_buffer,
-                    offset: 0,
-                    range: gpu::WHOLE_SIZE as _,
-                },
-                write: false,
-            },
-            Binding2 {
-                ty: gpu::DescriptorBindingType2::UniformBuffer {
-                    handle: frame_buffers.light_buffer,
-                    offset: 0,
-                    range: (100 * size_of::<ObjectDrawInfo>()) as u64,
-                },
-                write: false,
-            },
-        ],
-    );
 }
 
 fn draw_mesh_primitive(
