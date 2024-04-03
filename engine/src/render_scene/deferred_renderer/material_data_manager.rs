@@ -13,7 +13,7 @@ use crate::{ensure_vec_length, AssetMap, PipelineTarget};
 
 use super::SamplerAllocator;
 
-pub(crate) trait MaterialData {
+pub(crate) trait MaterialData: std::fmt::Debug {
     fn bind(
         &self,
         gpu: &dyn Gpu,
@@ -35,21 +35,21 @@ struct MaterialDataInfo {
     last_update_tick: u128,
 }
 
+#[derive(Debug)]
 pub(crate) struct SparseMaterialData {
     parameter_buffer: Option<BufferHandle>,
     textures: HashMap<String, MaterialTextureLayout>,
     uniforms: HashMap<String, MaterialUniformVariableLayout>,
 }
 
+#[derive(Debug)]
 struct MaterialUniformVariableLayout {
     offset: usize,
     size: usize,
-    set: u32,
-    binding: u32,
 }
 
+#[derive(Debug)]
 struct MaterialTextureLayout {
-    set: u32,
     binding: u32,
 }
 
@@ -170,7 +170,6 @@ fn create_parameter_buffer(
     uniform_bindings: &mut HashMap<String, MaterialUniformVariableLayout>,
     gpu: &dyn Gpu,
 ) -> anyhow::Result<Option<BufferHandle>> {
-    uniform_bindings.retain(|_k, parameter| parameter.set == 1 && parameter.binding == 1);
     if uniform_bindings.is_empty() {
         return Ok(None);
     }
@@ -195,13 +194,16 @@ fn find_texture_bindings(
     texture_bindings: &mut HashMap<String, MaterialTextureLayout>,
     layout: &gpu::ShaderInfo,
 ) {
-    for (set_idx, set) in layout.descriptor_layouts.iter().enumerate() {
+    let material_parameters = layout
+        .descriptor_layouts
+        .iter()
+        .find(|l| l.index as u32 == MATERIAL_PARAMETER_SLOT);
+    if let Some(set) = material_parameters {
         for (binding_idx, binding) in set.bindings.iter().enumerate() {
             if let gpu::BindingType::CombinedImageSampler = binding.ty {
                 texture_bindings.insert(
                     binding.name.clone(),
                     MaterialTextureLayout {
-                        set: set_idx as u32,
                         binding: binding_idx as u32,
                     },
                 );
@@ -215,7 +217,10 @@ fn find_uniform_variables_recursive(
     uniform_bindings: &mut HashMap<String, MaterialUniformVariableLayout>,
     shader_variables: &HashMap<String, UniformVariableDescription>,
 ) {
-    for (name, var) in shader_variables {
+    for (name, var) in shader_variables
+        .iter()
+        .filter(|(_, var)| var.set == MATERIAL_PARAMETER_SLOT)
+    {
         let current_var = current_scope.clone() + name.as_str();
         if var.inner_members.is_empty() {
             uniform_bindings.insert(
@@ -223,8 +228,6 @@ fn find_uniform_variables_recursive(
                 MaterialUniformVariableLayout {
                     offset: var.absolute_offset as usize,
                     size: var.size as usize,
-                    set: 0,
-                    binding: 0,
                 },
             );
         } else {

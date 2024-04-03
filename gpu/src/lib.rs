@@ -1733,6 +1733,7 @@ pub struct DescriptorBindingInfo {
 #[derive(Clone, Hash, Eq, Ord, PartialOrd, PartialEq, Debug)]
 pub struct DescriptorSetDescription {
     pub bindings: Vec<DescriptorBindingInfo>,
+    pub index: usize,
 }
 
 #[derive(Clone, Hash, Eq, Ord, PartialOrd, PartialEq, Debug, Default)]

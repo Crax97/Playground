@@ -55,7 +55,6 @@ use crate::Handle;
 
 use log::{debug, error, info, trace, warn};
 use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
-use thiserror::Error;
 use winit::window::Window;
 
 use crate::{
@@ -206,26 +205,34 @@ pub struct VkGpu {
     pub(crate) staging_buffer: RwLock<VkStagingBuffer>,
 }
 
-#[derive(Error, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub enum GpuError {
-    #[error("No physical devices were found on this machine")]
     NoPhysicalDevices,
-
-    #[error("A suitable device with the requested capabilities was not found")]
     NoSuitableDevice,
-
-    #[error("One or more queue families aren't supported")]
     NoQueueFamilyFound(Option<(u32, vk::QueueFamilyProperties)>),
-
-    #[error("Invalid queue family")]
     InvalidQueueFamilies(QueueFamilies),
-
-    #[error("Invalid queue family")]
     NullHandle(HandleType),
-
-    #[error("Generic error")]
     Generic(String),
 }
+
+impl std::fmt::Display for GpuError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GpuError::NoPhysicalDevices => f.write_str("No suitable physical device"),
+            GpuError::NoSuitableDevice => f.write_str("No suitable logical device"),
+            GpuError::NoQueueFamilyFound(q) => {
+                f.write_fmt(format_args!("Failed to find queue familiy: {q:?}"))
+            }
+            GpuError::InvalidQueueFamilies(fam) => {
+                f.write_fmt(format_args!("Invalid queue famiyly: {fam:?}"))
+            }
+            GpuError::NullHandle(ty) => f.write_fmt(format_args!("Null {ty:?} handle")),
+            GpuError::Generic(_) => todo!(),
+        }
+    }
+}
+
+impl std::error::Error for GpuError {}
 
 pub type GpuResult<T> = Result<T, GpuError>;
 
@@ -1511,6 +1518,20 @@ impl VkGpu {
             shader_info,
         )?;
 
+        if let Some(debug_utils) = &self.state.debug_utilities {
+            let name = CString::new(create_info.label.unwrap_or("Shader"))
+                .expect("Could not create CString");
+            unsafe {
+                debug_utils.set_debug_utils_object_name(
+                    self.state.logical_device.handle(),
+                    &DebugUtilsObjectNameInfoEXT::builder()
+                        .object_type(<vk::ShaderModule as vk::Handle>::TYPE)
+                        .object_handle(vk::Handle::as_raw(shader.inner))
+                        .object_name(name.as_c_str()),
+                )?;
+            }
+        }
+
         Ok(shader)
     }
 
@@ -1595,21 +1616,18 @@ impl VkGpu {
             info.outputs.push(shader_output);
         }
 
-        for (set_idx, set) in spirv_module
+        for set in spirv_module
             .enumerate_descriptor_sets(None)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?
             .iter()
-            .enumerate()
         {
-            let mut set_description = DescriptorSetDescription { bindings: vec![] };
+            let mut set_description = DescriptorSetDescription {
+                bindings: vec![],
+                index: set.set as usize,
+            };
 
             for (binding_idx, binding) in set.bindings.iter().enumerate() {
-                let members = parse_members(
-                    &binding.block.members,
-                    0,
-                    set_idx as u32,
-                    binding_idx as u32,
-                );
+                let members = parse_members(&binding.block.members, 0, set.set, binding_idx as u32);
                 info.uniform_variables.extend(members.into_iter());
                 let binding = DescriptorBindingInfo {
                     name: binding.name.clone(),

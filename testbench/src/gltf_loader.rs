@@ -4,9 +4,8 @@ use engine::components::Transform;
 use engine::material_v2::{Material2, MaterialBuilder, Shader};
 use engine::math::shape::BoundingShape;
 use engine::{
-    GameScene, LightType, MaterialDomain, Mesh, MeshCreateInfo,
-    MeshPrimitiveCreateInfo, RenderingPipeline, SceneMesh, Texture,
-    TextureSamplerSettings,
+    GameScene, LightType, MaterialDomain, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo,
+    RenderingPipeline, SceneMesh, Texture, TextureSamplerSettings,
 };
 use gltf::image::Data;
 use gltf::Document;
@@ -16,7 +15,6 @@ use gpu::{
     MemoryDomain, SamplerAddressMode,
 };
 use nalgebra::{point, vector, Matrix4, Point3, Quaternion, UnitQuaternion, Vector3, Vector4};
-
 
 use std::path::Path;
 
@@ -412,6 +410,10 @@ impl GltfLoader {
                 .parameter(
                     "emissiveSampler",
                     engine::material_v2::MaterialParameter::Texture(emissive_texture),
+                )
+                .parameter(
+                    "metallicRoughnessSampler",
+                    engine::material_v2::MaterialParameter::Texture(metallic_roughness.clone()),
                 )
                 .parameter(
                     "pbrProperties.metallicRoughness",

@@ -4,7 +4,6 @@ mod utils;
 
 use std::borrow::Cow;
 
-
 use bytemuck::{Pod, Zeroable};
 use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App, Console};
@@ -28,7 +27,8 @@ use winit::dpi::{PhysicalPosition, Position};
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::input::key::Key;
 use engine::{
-    post_process_pass::FxaaPass, AssetMap, Backbuffer, CvarManager, DeferredRenderingPipeline, PrimitiveHandle, RenderingPipeline,
+    post_process_pass::FxaaPass, AssetMap, Backbuffer, CvarManager, DeferredRenderingPipeline,
+    PrimitiveHandle, RenderingPipeline,
 };
 use nalgebra::*;
 use winit::event::MouseButton;
@@ -324,7 +324,7 @@ impl App for GLTFViewer {
             engine::MaterialDomain::Surface,
         )
         .parameter(
-            "Cubemap",
+            "baseColorSampler",
             engine::material_v2::MaterialParameter::Texture(david_texture),
         )
         .build();

@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::ffi::CString;
 use std::rc::Rc;
 
+use anyhow::Context;
 use ash::vk::{
     self, DebugUtilsLabelEXT, DependencyFlags, PipelineInputAssemblyStateCreateFlags, StructureType,
 };
@@ -15,7 +16,7 @@ use crate::vulkan::render_graph::{
 use crate::vulkan::*;
 use crate::*;
 
-use self::gpu::GpuResult;
+use self::gpu::{GpuError, GpuResult};
 
 use super::gpu::GpuThreadSharedState;
 
@@ -408,21 +409,18 @@ impl VkCommandBuffer {
             .buffer_memory_barriers
             .iter()
             .map(|b| self.state.resolve_resource::<VkBuffer>(&b.buffer))
-            .into_iter()
             .collect::<GpuResult<Vec<_>>>()?;
 
         let vk_images: Vec<_> = barrier_info
             .image_memory_barriers
             .iter()
             .map(|b| self.state.resolve_resource::<VkImage>(&b.image))
-            .into_iter()
             .collect::<GpuResult<Vec<_>>>()?;
 
         let buffer_memory_barriers = barrier_info
             .buffer_memory_barriers
             .iter()
-            .zip(vk_buffers.into_iter())
-            .into_iter()
+            .zip(vk_buffers)
             .map(|(b, buffer)| vk::BufferMemoryBarrier {
                 s_type: StructureType::BUFFER_MEMORY_BARRIER,
                 p_next: std::ptr::null(),
@@ -438,7 +436,7 @@ impl VkCommandBuffer {
         let image_memory_barriers: Vec<_> = barrier_info
             .image_memory_barriers
             .iter()
-            .zip(vk_images.into_iter())
+            .zip(vk_images)
             .map(|(b, image)| vk::ImageMemoryBarrier {
                 s_type: StructureType::IMAGE_MEMORY_BARRIER,
                 p_next: std::ptr::null(),
@@ -636,13 +634,17 @@ impl compute_pass::Impl for VkComputePassCommand {
     fn bind_resources_2(&mut self, set: usize, resources: &[Binding2]) -> anyhow::Result<()> {
         let bindings = resources
             .iter()
-            .filter(|r| !r.write)
-            .map(|r| {
+            .enumerate()
+            .filter(|(i, r)| !r.write)
+            .map(|(i, r)| {
                 Ok(match r.ty {
                     DescriptorBindingType2::UniformBuffer { handle, .. }
                     | DescriptorBindingType2::StorageBuffer { handle, .. } => ShaderInput {
                         resource: Resource::Buffer(
-                            self.state.resolve_resource::<VkBuffer>(&handle)?.inner,
+                            self.state
+                                .resolve_resource::<VkBuffer>(&handle)
+                                .context(format!("Binding location {i}"))?
+                                .inner,
                         ),
                     },
                     DescriptorBindingType2::ImageView {
@@ -650,9 +652,13 @@ impl compute_pass::Impl for VkComputePassCommand {
                     } => {
                         let view = self
                             .state
-                            .resolve_resource::<VkImageView>(&image_view_handle)?;
+                            .resolve_resource::<VkImageView>(&image_view_handle)
+                            .context(format!("Binding location {i}"))?;
                         let handle = view.owner_image;
-                        let image = self.state.resolve_resource::<VkImage>(&handle)?;
+                        let image = self
+                            .state
+                            .resolve_resource::<VkImage>(&handle)
+                            .context("Binding location {i}")?;
 
                         ShaderInput {
                             resource: Resource::Image(
@@ -663,7 +669,10 @@ impl compute_pass::Impl for VkComputePassCommand {
                         }
                     }
                     DescriptorBindingType2::StorageImage { handle } => {
-                        let view = self.state.resolve_resource::<VkImageView>(&handle)?;
+                        let view = self
+                            .state
+                            .resolve_resource::<VkImageView>(&handle)
+                            .context(format!("Binding location {i}"))?;
                         let handle = view.owner_image;
                         let image = self.state.resolve_resource::<VkImage>(&handle)?;
 
@@ -677,17 +686,20 @@ impl compute_pass::Impl for VkComputePassCommand {
                     }
                 })
             })
-            .into_iter()
             .collect::<GpuResult<Vec<_>>>()?;
         let written = resources
             .iter()
-            .filter(|r| r.write)
-            .map(|r| {
+            .enumerate()
+            .filter(|(_, r)| r.write)
+            .map(|(i, r)| {
                 Ok(match r.ty {
                     DescriptorBindingType2::UniformBuffer { handle, .. }
                     | DescriptorBindingType2::StorageBuffer { handle, .. } => ShaderInput {
                         resource: Resource::Buffer(
-                            self.state.resolve_resource::<VkBuffer>(&handle)?.inner,
+                            self.state
+                                .resolve_resource::<VkBuffer>(&handle)
+                                .context(format!("Binding location {i}"))?
+                                .inner,
                         ),
                     },
                     DescriptorBindingType2::ImageView {
@@ -695,9 +707,13 @@ impl compute_pass::Impl for VkComputePassCommand {
                     } => {
                         let view = self
                             .state
-                            .resolve_resource::<VkImageView>(&image_view_handle)?;
+                            .resolve_resource::<VkImageView>(&image_view_handle)
+                            .context(format!("Binding location {i}"))?;
                         let handle = view.owner_image;
-                        let image = self.state.resolve_resource::<VkImage>(&handle)?;
+                        let image = self
+                            .state
+                            .resolve_resource::<VkImage>(&handle)
+                            .context("Binding location {i}")?;
 
                         ShaderInput {
                             resource: Resource::Image(
@@ -707,9 +723,11 @@ impl compute_pass::Impl for VkComputePassCommand {
                             ),
                         }
                     }
-
                     DescriptorBindingType2::StorageImage { handle } => {
-                        let view = self.state.resolve_resource::<VkImageView>(&handle)?;
+                        let view = self
+                            .state
+                            .resolve_resource::<VkImageView>(&handle)
+                            .context(format!("Binding location {i}"))?;
                         let handle = view.owner_image;
                         let image = self.state.resolve_resource::<VkImage>(&handle)?;
 
@@ -723,7 +741,6 @@ impl compute_pass::Impl for VkComputePassCommand {
                     }
                 })
             })
-            .into_iter()
             .collect::<GpuResult<Vec<_>>>()?;
         self.pass_info
             .all_read_resources
@@ -892,7 +909,6 @@ impl VkRenderPass2 {
                             flags: view.flags.into(),
                         })
                     })
-                    .into_iter()
                     .collect::<GpuResult<Vec<_>>>()?,
                 depth_attachment: info
                     .depth_attachment
@@ -946,6 +962,46 @@ impl VkRenderPass2 {
 
             current_subpass: 0,
         })
+    }
+
+    fn validate_bindings(&self, bindings: &[Binding2]) -> anyhow::Result<()> {
+        for (i, binding) in bindings.iter().enumerate() {
+            match binding.ty {
+                DescriptorBindingType2::UniformBuffer { handle, .. } => {
+                    if handle.is_null() {
+                        return Err(GpuError::NullHandle(HandleType::Buffer))
+                            .with_context(|| format!("binding {i}"));
+                    }
+                }
+                DescriptorBindingType2::StorageBuffer { handle, .. } => {
+                    if handle.is_null() {
+                        return Err(GpuError::NullHandle(HandleType::Buffer))
+                            .with_context(|| format!("binding {i}"));
+                    }
+                }
+                DescriptorBindingType2::StorageImage { handle } => {
+                    if handle.is_null() {
+                        return Err(GpuError::NullHandle(HandleType::ImageView))
+                            .with_context(|| format!("binding {i}"));
+                    }
+                }
+                DescriptorBindingType2::ImageView {
+                    image_view_handle,
+                    sampler_handle,
+                } => {
+                    if image_view_handle.is_null() {
+                        return Err(GpuError::NullHandle(HandleType::ImageView))
+                            .with_context(|| format!("binding {i}"));
+                    }
+
+                    if sampler_handle.is_null() {
+                        return Err(GpuError::NullHandle(HandleType::Sampler))
+                            .with_context(|| format!("binding {i}"));
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1047,6 +1103,8 @@ impl crate::render_pass_2::Impl for VkRenderPass2 {
         }
     }
     fn bind_resources_2(&mut self, set: u32, bindings: &[Binding2]) -> anyhow::Result<()> {
+        self.validate_bindings(bindings)
+            .with_context(|| format!("In descriptor set {set}"))?;
         let mut state = self.command_buffer_state.borrow_mut();
         if state.descriptor_state.sets.len() <= (set as _) {
             state

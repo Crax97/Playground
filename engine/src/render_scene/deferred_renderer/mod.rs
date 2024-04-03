@@ -17,12 +17,12 @@ use sampler_allocator::*;
 
 use anyhow::Context;
 use engine_macros::glsl;
-use std::mem::size_of;
+use std::{mem::size_of, ops::Deref};
 
 use crate::{
     material::{MasterMaterial, MasterMaterialDescription},
-    Camera, CvarManager, Frustum, GameScene, MaterialDescription, Mesh,
-    MeshPrimitive, PipelineTarget, RenderingPipeline, Texture,
+    Camera, CvarManager, Frustum, GameScene, MaterialDescription, Mesh, MeshPrimitive,
+    PipelineTarget, RenderingPipeline, Texture,
 };
 
 use crate::asset_map::{AssetHandle, AssetMap};
@@ -930,7 +930,15 @@ fn draw_mesh_primitive(
         }]),
         ShaderStage::ALL_GRAPHICS,
     );
-    render_pass.draw_indexed(primitive.index_count, 1, 0, 0, 0)
+    render_pass
+        .draw_indexed(primitive.index_count, 1, 0, 0, 0)
+        .with_context(|| {
+            format!(
+                "Drawing with material {:?} using data {:?}",
+                material.name.deref(),
+                data
+            )
+        })
 }
 
 impl RenderingPipeline for DeferredRenderingPipeline {
