@@ -307,11 +307,11 @@ impl App for TriangleApp {
             let mut compute_pass = compute.start_compute_pass(&BeginComputePassInfo {
                 label: Some("Output color"),
                 flags: ComputePassFlags::ASYNC,
-            });
+            })?;
 
-            compute_pass.bind_resources_2(0, &[Binding2::storage_image(self.mul_texture_view)]);
+            compute_pass.bind_resources_2(0, &[Binding2::storage_image(self.mul_texture_view)])?;
             compute_pass.set_compute_shader(self.compute_module);
-            compute_pass.dispatch(1, 1, 1);
+            compute_pass.dispatch(1, 1, 1)?;
         }
 
         let mut command_buffer = gpu.start_command_buffer(gpu::QueueType::Graphics)?;
@@ -326,7 +326,7 @@ impl App for TriangleApp {
                 depth_attachment: None,
                 stencil_attachment: None,
                 render_area: backbuffer.whole_area(),
-            });
+            })?;
 
             let projection = Matrix4::<f32>::new_perspective(
                 backbuffer.size.width as f32 / backbuffer.size.height as f32,
@@ -373,7 +373,7 @@ impl App for TriangleApp {
                     Binding2::image_view(self.david_image_view, self.david_sampler),
                     Binding2::image_view(self.mul_texture_view, self.david_sampler),
                 ],
-            );
+            )?;
             pass.set_cull_mode(CullMode::None);
             pass.push_constants(
                 0,

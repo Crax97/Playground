@@ -1,7 +1,7 @@
 use engine_macros::*;
 use gpu::{
-    make_gpu, BeginComputePassInfo, Binding2, BufferCreateInfo, BufferUsageFlags,
-    ComputePassFlags, GpuConfiguration, MemoryDomain, QueueType, ShaderModuleCreateInfo,
+    make_gpu, BeginComputePassInfo, Binding2, BufferCreateInfo, BufferUsageFlags, ComputePassFlags,
+    GpuConfiguration, MemoryDomain, QueueType, ShaderModuleCreateInfo,
 };
 use std::mem::{size_of, size_of_val};
 
@@ -69,7 +69,7 @@ fn main() -> anyhow::Result<()> {
         let mut compute_pass = command_buffer.start_compute_pass(&BeginComputePassInfo {
             label: Some("Summing numbers"),
             flags: ComputePassFlags::default(),
-        });
+        })?;
         compute_pass.set_compute_shader(compute_module);
         compute_pass.bind_resources_2(
             0,
@@ -91,9 +91,9 @@ fn main() -> anyhow::Result<()> {
                     write: true,
                 },
             ],
-        );
+        )?;
 
-        compute_pass.dispatch(1, 1, 1);
+        compute_pass.dispatch(1, 1, 1)?;
     }
     gpu.submit_work();
     gpu.wait_device_idle()?;

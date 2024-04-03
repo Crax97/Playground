@@ -6,7 +6,7 @@ use std::{
     sync::{RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
-use crate::{Handle, HandleType};
+use crate::{vulkan::gpu::GpuError, Handle, HandleType};
 
 pub trait HasAssociatedHandle {
     type AssociatedHandle: Handle;
@@ -103,9 +103,11 @@ impl GpuResourceMap {
     pub fn resolve<T: HasAssociatedHandle + Clone + 'static>(
         &self,
         handle: &T::AssociatedHandle,
-    ) -> T {
-        assert!(!handle.is_null());
-        self.get_map().resolve(handle)
+    ) -> Result<T, GpuError> {
+        if handle.is_null() {
+            return Err(GpuError::NullHandle(T::AssociatedHandle::handle_type()));
+        }
+        Ok(self.get_map().resolve(handle))
     }
 
     pub fn mutate<T: HasAssociatedHandle + Clone + 'static, F: FnMut(&mut T)>(
@@ -186,10 +188,14 @@ impl<T: Sized + Send + Sync + 'static> LifetimedCache<T> {
             .for_each(f);
     }
 
-    pub fn ensure_existing<C: FnOnce() -> T>(&self, hash: u64, creation_func: C) {
+    pub fn ensure_existing<C: FnOnce() -> anyhow::Result<T>>(
+        &self,
+        hash: u64,
+        creation_func: C,
+    ) -> anyhow::Result<()> {
         let mut map = self.map.write().unwrap();
         if let std::collections::hash_map::Entry::Vacant(e) = map.entry(hash) {
-            let resource = creation_func();
+            let resource = creation_func()?;
             e.insert(Lifetimed {
                 resource,
                 current_lifetime: self.resource_lifetime,
@@ -197,30 +203,37 @@ impl<T: Sized + Send + Sync + 'static> LifetimedCache<T> {
         } else if let Some(lifetimed) = map.get_mut(&hash) {
             lifetimed.current_lifetime = self.resource_lifetime;
         }
+
+        Ok(())
     }
 
-    pub fn use_ref<D: std::hash::Hash, R, U: FnOnce(&T) -> R, C: FnOnce() -> T>(
+    pub fn use_ref<D: std::hash::Hash, R, U: FnOnce(&T) -> R, C: FnOnce() -> anyhow::Result<T>>(
         &self,
         description: &D,
         use_fun: U,
         creation_func: C,
-    ) -> R {
+    ) -> anyhow::Result<R> {
         let hash = quick_hash(description);
 
-        self.ensure_existing(hash, creation_func);
-        unsafe { self.use_ref_raw(&hash, use_fun) }
+        self.ensure_existing(hash, creation_func)?;
+        Ok(unsafe { self.use_ref_raw(&hash, use_fun) })
     }
 
-    pub fn use_ref_mut<D: std::hash::Hash, R, U: FnMut(&mut T) -> R, C: FnOnce() -> T>(
+    pub fn use_ref_mut<
+        D: std::hash::Hash,
+        R,
+        U: FnMut(&mut T) -> R,
+        C: FnOnce() -> anyhow::Result<T>,
+    >(
         &self,
         description: &D,
         use_fun: U,
         creation_func: C,
-    ) -> R {
+    ) -> anyhow::Result<R> {
         let hash = quick_hash(description);
 
-        self.ensure_existing(hash, creation_func);
-        unsafe { self.use_ref_mut_raw(&hash, use_fun) }
+        self.ensure_existing(hash, creation_func)?;
+        Ok(unsafe { self.use_ref_mut_raw(&hash, use_fun) })
     }
 
     /// # Safety
@@ -261,22 +274,21 @@ impl<T: Sized + Send + Sync + 'static> LifetimedCache<T> {
 }
 
 impl<T: Sized + Copy + Send + Sync + 'static> LifetimedCache<T> {
-    pub fn get<D: std::hash::Hash, C: FnOnce() -> T>(
+    pub fn get<D: std::hash::Hash, C: FnOnce() -> anyhow::Result<T>>(
         &self,
         description: &D,
         creation_func: C,
-    ) -> T {
+    ) -> anyhow::Result<T> {
         self.use_ref(description, |r| *r, creation_func)
     }
 }
 
 impl<T: Sized + Clone + Send + Sync + 'static> LifetimedCache<T> {
-    pub fn get_clone<D: std::hash::Hash, C: FnOnce() -> T>(
+    pub fn get_clone<D: std::hash::Hash, C: FnOnce() -> anyhow::Result<T>>(
         &self,
         description: &D,
         creation_func: C,
-    ) -> T {
-        self.use_ref(description, |r| r.clone(), creation_func)
-            .clone()
+    ) -> anyhow::Result<T> {
+        self.use_ref(description, Clone::clone, creation_func)
     }
 }

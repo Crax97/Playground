@@ -318,7 +318,7 @@ fn cubemap_main_loop(
                         extent: size,
                     },
                     label: Some("Cubemap main loop"),
-                });
+                })?;
             render_pass_command.set_vertex_shader(vertex_module);
             render_pass_command.set_fragment_shader(fragment_shader_to_apply);
 
@@ -341,7 +341,7 @@ fn cubemap_main_loop(
                     },
                     write: false,
                 }],
-            );
+            )?;
 
             render_pass_command.set_index_buffer(
                 mesh.primitives[0].index_buffer,

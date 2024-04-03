@@ -22,7 +22,7 @@ pub(crate) trait MaterialData {
         render_pass: &mut RenderPass2,
         asset_map: &AssetMap,
         sampler_allocator: &SamplerAllocator,
-    );
+    ) -> anyhow::Result<()>;
 }
 
 #[derive(Default)]
@@ -134,8 +134,8 @@ impl MaterialDataManager {
 
         let vs_shader = asset_map.get(&material.vertex_shader);
         let fs_shader = asset_map.get(&material.fragment_shader);
-        let vs_layout = gpu.get_shader_info(&vs_shader.handle);
-        let fs_layout = gpu.get_shader_info(&fs_shader.handle);
+        let vs_layout = gpu.get_shader_info(&vs_shader.handle)?;
+        let fs_layout = gpu.get_shader_info(&fs_shader.handle)?;
 
         let mut uniforms = HashMap::new();
         let mut textures = HashMap::new();
@@ -171,7 +171,7 @@ fn create_parameter_buffer(
     gpu: &dyn Gpu,
 ) -> anyhow::Result<Option<BufferHandle>> {
     uniform_bindings.retain(|_k, parameter| parameter.set == 1 && parameter.binding == 1);
-    if uniform_bindings.len() == 0 {
+    if uniform_bindings.is_empty() {
         return Ok(None);
     }
 
@@ -246,7 +246,7 @@ impl MaterialData for SparseMaterialData {
         render_pass: &mut RenderPass2,
         asset_map: &AssetMap,
         sampler_allocator: &SamplerAllocator,
-    ) {
+    ) -> anyhow::Result<()> {
         let mut bindings = vec![];
 
         if let Some(buffer) = self.parameter_buffer {
@@ -277,13 +277,14 @@ impl MaterialData for SparseMaterialData {
             }
         }
 
-        render_pass.bind_resources_2(MATERIAL_PARAMETER_SLOT, &bindings);
+        render_pass.bind_resources_2(MATERIAL_PARAMETER_SLOT, &bindings)?;
 
         render_pass.set_vertex_shader(asset_map.get(&material.vertex_shader).handle);
 
         if pipeline_target != PipelineTarget::DepthOnly {
             render_pass.set_fragment_shader(asset_map.get(&material.fragment_shader).handle);
         }
+        Ok(())
     }
 }
 

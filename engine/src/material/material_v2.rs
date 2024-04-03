@@ -1,6 +1,6 @@
 use std::{collections::HashMap, time::SystemTime};
 
-use gpu::{Gpu, ShaderModuleHandle};
+use gpu::ShaderModuleHandle;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

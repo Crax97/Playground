@@ -39,12 +39,12 @@ pub trait CommandBufferPassBegin {
     fn create_render_pass_2_impl(
         &mut self,
         info: &BeginRenderPassInfo2,
-    ) -> Box<dyn render_pass_2::Impl>;
+    ) -> anyhow::Result<Box<dyn render_pass_2::Impl>>;
 
     fn create_compute_pass_impl(
         &mut self,
         info: &BeginComputePassInfo,
-    ) -> Box<dyn compute_pass::Impl>;
+    ) -> anyhow::Result<Box<dyn compute_pass::Impl>>;
 }
 
 macro_rules! expand_impl {
@@ -180,28 +180,31 @@ pub mod command_buffer_2 {
 
     define_pimpl_type!(CommandBuffer : CommandBufferPassBegin {
         fn push_constants(&mut self, index: u32, offset: u32, data: &[u8], shader_stage: ShaderStage);
-        fn bind_resources(&mut self, set: u32, bindings: &[Binding]);
+        fn bind_resources(&mut self, set: u32, bindings: &[Binding]) -> anyhow::Result<()>;
         fn insert_debug_label(&self, label: &str, color: [f32; 4]);
     });
 
     impl CommandBuffer {
-        pub fn start_render_pass_2<'c>(&'c mut self, info: &BeginRenderPassInfo2) -> RenderPass2 {
-            let inner = self.pimpl.create_render_pass_2_impl(info);
-            RenderPass2 {
+        pub fn start_render_pass_2<'c>(
+            &'c mut self,
+            info: &BeginRenderPassInfo2,
+        ) -> anyhow::Result<RenderPass2> {
+            let inner = self.pimpl.create_render_pass_2_impl(info)?;
+            Ok(RenderPass2 {
                 pimpl: inner,
                 parent: self,
-            }
+            })
         }
 
         pub fn start_compute_pass<'c>(
             &'c mut self,
             info: &BeginComputePassInfo,
-        ) -> ComputePass<'c> {
-            let inner = self.pimpl.create_compute_pass_impl(info);
-            ComputePass {
+        ) -> anyhow::Result<ComputePass<'c>> {
+            let inner = self.pimpl.create_compute_pass_impl(info)?;
+            Ok(ComputePass {
                 pimpl: inner,
                 parent: self,
-            }
+            })
         }
 
         pub fn pimpl(&self) -> &Box<dyn Impl> {
@@ -239,7 +242,7 @@ pub mod render_pass_2 {
     When enabled, a valid fragment shader must be set */
      fn set_early_discard_enabled(&mut self, allow_early_discard: bool);
 
-    fn bind_resources_2(&mut self, set: u32, bindings: &[Binding2]);
+    fn bind_resources_2(&mut self, set: u32, bindings: &[Binding2]) -> anyhow::Result<()>;
 
      fn draw_indexed(
         &mut self,
@@ -271,8 +274,8 @@ pub mod compute_pass {
 
     define_pass_type!(ComputePass {
         fn set_compute_shader(&mut self, compute_shader: ShaderModuleHandle);
-        fn bind_resources_2(&mut self, set: usize, resources: &[Binding2]);
-        fn dispatch(&mut self, group_size_x: u32, group_size_y: u32, group_size_z: u32);
+        fn bind_resources_2(&mut self, set: usize, resources: &[Binding2]) -> anyhow::Result<()>;
+        fn dispatch(&mut self, group_size_x: u32, group_size_y: u32, group_size_z: u32) -> anyhow::Result<()>;
     });
 }
 
@@ -384,7 +387,7 @@ pub trait Gpu: Send + Sync + AsAnyArc + 'static {
         &self,
         info: &ShaderModuleCreateInfo,
     ) -> anyhow::Result<ShaderModuleHandle>;
-    fn get_shader_info(&self, shader_handle: &ShaderModuleHandle) -> ShaderInfo;
+    fn get_shader_info(&self, shader_handle: &ShaderModuleHandle) -> anyhow::Result<ShaderInfo>;
     fn destroy_shader_module(&self, shader_module: ShaderModuleHandle);
 
     fn transition_image_layout(

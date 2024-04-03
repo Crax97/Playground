@@ -4,9 +4,8 @@ use engine::components::Transform;
 use engine::material_v2::{Material2, MaterialBuilder, Shader};
 use engine::math::shape::BoundingShape;
 use engine::{
-    GameScene, LightType, MasterMaterial, MaterialDescription, MaterialDomain, MaterialInstance,
-    MaterialInstanceDescription, MaterialParameterOffsetSize, Mesh, MeshCreateInfo,
-    MeshPrimitiveCreateInfo, RenderingPipeline, SceneMesh, Texture, TextureInput,
+    GameScene, LightType, MaterialDomain, Mesh, MeshCreateInfo,
+    MeshPrimitiveCreateInfo, RenderingPipeline, SceneMesh, Texture,
     TextureSamplerSettings,
 };
 use gltf::image::Data;
@@ -14,11 +13,11 @@ use gltf::Document;
 use gpu::{
     ComponentMapping, Filter, Gpu, ImageAspectFlags, ImageCreateInfo, ImageHandle,
     ImageSubresourceRange, ImageUsageFlags, ImageViewCreateInfo, ImageViewHandle, ImageViewType,
-    MemoryDomain, SamplerAddressMode, ShaderStage,
+    MemoryDomain, SamplerAddressMode,
 };
 use nalgebra::{point, vector, Matrix4, Point3, Quaternion, UnitQuaternion, Vector3, Vector4};
-use std::collections::HashMap;
-use std::mem::size_of;
+
+
 use std::path::Path;
 
 #[repr(C)]
@@ -52,7 +51,7 @@ impl GltfLoader {
     pub fn load<P: AsRef<Path>, R: RenderingPipeline>(
         path: P,
         gpu: &dyn Gpu,
-        scene_renderer: &mut R,
+        _scene_renderer: &mut R,
         resource_map: &mut AssetMap,
         options: GltfLoadOptions,
     ) -> anyhow::Result<GameScene> {
@@ -335,7 +334,7 @@ impl GltfLoader {
     }
 
     fn load_materials(
-        gpu: &dyn Gpu,
+        _gpu: &dyn Gpu,
         pbr_vertex: AssetHandle<Shader>,
         pbr_fragment: AssetHandle<Shader>,
         asset_map: &mut AssetMap,
@@ -379,7 +378,7 @@ impl GltfLoader {
                 white.clone()
             };
 
-            let textures = vec![
+            let _textures = vec![
                 base_texture.clone(),
                 normal_texture.clone(),
                 occlusion_texture.clone(),

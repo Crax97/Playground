@@ -219,7 +219,15 @@ pub enum GpuError {
 
     #[error("Invalid queue family")]
     InvalidQueueFamilies(QueueFamilies),
+
+    #[error("Invalid queue family")]
+    NullHandle(HandleType),
+
+    #[error("Generic error")]
+    Generic(String),
 }
+
+pub type GpuResult<T> = Result<T, GpuError>;
 
 #[derive(Clone, Copy, Debug)]
 pub struct QueueFamily {
@@ -288,27 +296,29 @@ impl GpuThreadSharedState {
     pub(crate) fn resolve_resource<T: HasAssociatedHandle + Clone + 'static>(
         &self,
         source: &T::AssociatedHandle,
-    ) -> T {
+    ) -> Result<T, GpuError> {
         self.allocated_resources().resolve(source)
     }
     pub(crate) fn get_graphics_pipeline_dynamic(
         &self,
         pipeline_state: &GraphicsPipelineState2,
         layout: vk::PipelineLayout,
-    ) -> vk::Pipeline {
+    ) -> anyhow::Result<vk::Pipeline> {
         self.graphics_pipeline_cache.get(&pipeline_state, || {
-            self.create_graphics_pipeline_dynamic(pipeline_state, layout)
+            let pipeline = self.create_graphics_pipeline_dynamic(pipeline_state, layout)?;
+            Ok(pipeline)
         })
     }
     fn create_graphics_pipeline_dynamic(
         &self,
         pipeline_state: &GraphicsPipelineState2,
         layout: vk::PipelineLayout,
-    ) -> vk::Pipeline {
+    ) -> GpuResult<vk::Pipeline> {
         assert!(pipeline_state.vertex_shader.is_valid());
         let mut stages = vec![];
         let main_name = std::ffi::CString::new("main").unwrap();
-        let vertex_shader = self.resolve_resource::<VkShaderModule>(&pipeline_state.vertex_shader);
+        let vertex_shader =
+            self.resolve_resource::<VkShaderModule>(&pipeline_state.vertex_shader)?;
         stages.push(vk::PipelineShaderStageCreateInfo {
             s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
             p_next: std::ptr::null(),
@@ -320,7 +330,7 @@ impl GpuThreadSharedState {
         });
         if !pipeline_state.fragment_shader.is_null() {
             let fragment_shader =
-                self.resolve_resource::<VkShaderModule>(&pipeline_state.fragment_shader);
+                self.resolve_resource::<VkShaderModule>(&pipeline_state.fragment_shader)?;
             stages.push(vk::PipelineShaderStageCreateInfo {
                 s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
                 p_next: std::ptr::null(),
@@ -394,14 +404,19 @@ impl GpuThreadSharedState {
         };
         let dynamic_state = pipeline_state.dynamic_state();
 
-        let color_formats = pipeline_state
+        let color_attachments = pipeline_state
             .color_attachments
             .iter()
-            .map(|attach| {
-                self.resolve_resource::<VkImageView>(&attach.image_view)
-                    .format
-                    .to_vk()
-            })
+            .map(|a| self.resolve_resource::<VkImageView>(&a.image_view))
+            .collect::<Vec<_>>();
+
+        let color_attachments = color_attachments
+            .into_iter()
+            .collect::<GpuResult<Vec<_>>>()?;
+
+        let color_formats = color_attachments
+            .iter()
+            .map(|attach| attach.format.to_vk())
             .collect::<Vec<_>>();
         let depth_format = pipeline_state.depth_format;
         let stencil_format = ImageFormat::Undefined.to_vk();
@@ -433,22 +448,24 @@ impl GpuThreadSharedState {
             base_pipeline_index: 0,
         };
         let pipeline = unsafe {
-            self.logical_device.create_graphics_pipelines(
+            match self.logical_device.create_graphics_pipelines(
                 self.vk_pipeline_cache,
                 &[create_info],
                 get_allocation_callbacks(),
-            )
-        }
-        .expect("Failed to create pipelines");
+            ) {
+                Ok(pipelines) => Ok(pipelines[0]),
+                Err((_, e)) => Err(GpuError::from(e)),
+            }
+        }?;
         info!("Created a new graphics pipeline");
-        pipeline[0]
+        Ok(pipeline)
     }
 
     fn create_compute_pipeline(
         &self,
         pipeline_state: &ComputePipelineState,
         layout: vk::PipelineLayout,
-    ) -> vk::Pipeline {
+    ) -> GpuResult<vk::Pipeline> {
         let main_name = std::ffi::CString::new("main").unwrap();
         let stage = vk::PipelineShaderStageCreateInfo {
             s_type: StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -456,7 +473,7 @@ impl GpuThreadSharedState {
             flags: vk::PipelineShaderStageCreateFlags::empty(),
             stage: vk::ShaderStageFlags::COMPUTE,
             module: self
-                .resolve_resource::<VkShaderModule>(&pipeline_state.shader)
+                .resolve_resource::<VkShaderModule>(&pipeline_state.shader)?
                 .inner,
             p_name: main_name.as_ptr(),
             p_specialization_info: std::ptr::null(),
@@ -470,26 +487,28 @@ impl GpuThreadSharedState {
             base_pipeline_handle: vk::Pipeline::null(),
             base_pipeline_index: 0,
         };
-
         let pipeline = unsafe {
-            self.logical_device.create_compute_pipelines(
+            match self.logical_device.create_compute_pipelines(
                 self.vk_pipeline_cache,
                 &[create_info],
                 get_allocation_callbacks(),
-            )
-        }
-        .expect("Failed to create pipelines");
+            ) {
+                Ok(pipelines) => Ok(pipelines[0]),
+                Err((_, e)) => Err(GpuError::from(e)),
+            }
+        }?;
         info!("Created a new compute pipeline");
-        pipeline[0]
+        Ok(pipeline)
     }
 
     pub(crate) fn get_compute_pipeline(
         &self,
         pipeline_state: &ComputePipelineState,
         layout: vk::PipelineLayout,
-    ) -> vk::Pipeline {
+    ) -> anyhow::Result<vk::Pipeline> {
         self.compute_pipeline_cache.get(pipeline_state, || {
-            self.create_compute_pipeline(pipeline_state, layout)
+            let pipeline = self.create_compute_pipeline(pipeline_state, layout)?;
+            Ok(pipeline)
         })
     }
 
@@ -497,7 +516,7 @@ impl GpuThreadSharedState {
         &self,
         info: &DescriptorSetInfo2,
         layout: vk::DescriptorSetLayout,
-    ) -> DescriptorSetAllocation {
+    ) -> anyhow::Result<DescriptorSetAllocation> {
         let descriptor_set_bindings = info.descriptor_set_layout();
 
         let pool_hash = quick_hash(info);
@@ -611,98 +630,105 @@ impl GpuThreadSharedState {
                     pool_index,
                 }
             },
-            Vec::new,
+            || Ok(Vec::new()),
         )
     }
 
     pub(crate) fn get_pipeline_layout(
         &self,
         descriptor_state: &DescriptorSetState,
-    ) -> vk::PipelineLayout {
+    ) -> anyhow::Result<vk::PipelineLayout> {
         self.pipeline_layout_cache.get(descriptor_state, || {
-            self.create_pipeline_layout(descriptor_state, &self.descriptor_set_layout_cache)
+            let layout =
+                self.create_pipeline_layout(descriptor_state, &self.descriptor_set_layout_cache)?;
+            Ok(layout)
         })
     }
 
-    fn write_descriptor_set(&self, set: vk::DescriptorSet, info: &DescriptorSetInfo2) {
+    fn write_descriptor_set(
+        &self,
+        set: vk::DescriptorSet,
+        info: &DescriptorSetInfo2,
+    ) -> anyhow::Result<()> {
         let mut buffer_descriptors = vec![];
         let mut image_descriptors = vec![];
-        info.bindings.iter().for_each(|b| match &b.ty {
-            crate::DescriptorBindingType::StorageBuffer {
-                handle,
-                offset,
-                range,
-            } => buffer_descriptors.push((
-                b.location,
-                DescriptorBufferInfo {
-                    buffer: self.resolve_resource::<VkBuffer>(handle).inner,
-                    offset: *offset,
-                    range: if *range as vk::DeviceSize == crate::WHOLE_SIZE {
-                        vk::WHOLE_SIZE
-                    } else {
-                        *range as _
+        for b in &info.bindings {
+            match &b.ty {
+                crate::DescriptorBindingType::StorageBuffer {
+                    handle,
+                    offset,
+                    range,
+                } => buffer_descriptors.push((
+                    b.location,
+                    DescriptorBufferInfo {
+                        buffer: self.resolve_resource::<VkBuffer>(handle)?.inner,
+                        offset: *offset,
+                        range: if *range as vk::DeviceSize == crate::WHOLE_SIZE {
+                            vk::WHOLE_SIZE
+                        } else {
+                            *range as _
+                        },
                     },
-                },
-                vk::DescriptorType::STORAGE_BUFFER,
-            )),
-            crate::DescriptorBindingType::UniformBuffer {
-                handle,
-                offset,
-                range,
-            } => buffer_descriptors.push((
-                b.location,
-                DescriptorBufferInfo {
-                    buffer: self.resolve_resource::<VkBuffer>(handle).inner,
-                    offset: *offset,
-                    range: if *range as vk::DeviceSize == crate::WHOLE_SIZE {
-                        vk::WHOLE_SIZE
-                    } else {
-                        *range as _
+                    vk::DescriptorType::STORAGE_BUFFER,
+                )),
+                crate::DescriptorBindingType::UniformBuffer {
+                    handle,
+                    offset,
+                    range,
+                } => buffer_descriptors.push((
+                    b.location,
+                    DescriptorBufferInfo {
+                        buffer: self.resolve_resource::<VkBuffer>(handle)?.inner,
+                        offset: *offset,
+                        range: if *range as vk::DeviceSize == crate::WHOLE_SIZE {
+                            vk::WHOLE_SIZE
+                        } else {
+                            *range as _
+                        },
                     },
-                },
-                vk::DescriptorType::UNIFORM_BUFFER,
-            )),
-            crate::DescriptorBindingType::ImageView {
-                image_view_handle,
-                sampler_handle,
-                layout,
-            } => image_descriptors.push((
-                b.location,
-                DescriptorImageInfo {
-                    sampler: self.resolve_resource::<VkSampler>(sampler_handle).inner,
-                    image_view: self
-                        .resolve_resource::<VkImageView>(image_view_handle)
-                        .inner,
-                    image_layout: layout.to_vk(),
-                },
-                vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            )),
-            crate::DescriptorBindingType::InputAttachment {
-                image_view_handle,
-                layout,
-            } => image_descriptors.push((
-                b.location,
-                DescriptorImageInfo {
-                    sampler: vk::Sampler::null(),
-                    image_view: self
-                        .resolve_resource::<VkImageView>(image_view_handle)
-                        .inner,
-                    image_layout: layout.to_vk(),
-                },
-                vk::DescriptorType::INPUT_ATTACHMENT,
-            )),
-            crate::DescriptorBindingType::StorageImage { handle: image } => {
-                image_descriptors.push((
+                    vk::DescriptorType::UNIFORM_BUFFER,
+                )),
+                crate::DescriptorBindingType::ImageView {
+                    image_view_handle,
+                    sampler_handle,
+                    layout,
+                } => image_descriptors.push((
+                    b.location,
+                    DescriptorImageInfo {
+                        sampler: self.resolve_resource::<VkSampler>(sampler_handle)?.inner,
+                        image_view: self
+                            .resolve_resource::<VkImageView>(image_view_handle)?
+                            .inner,
+                        image_layout: layout.to_vk(),
+                    },
+                    vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                )),
+                crate::DescriptorBindingType::InputAttachment {
+                    image_view_handle,
+                    layout,
+                } => image_descriptors.push((
                     b.location,
                     DescriptorImageInfo {
                         sampler: vk::Sampler::null(),
-                        image_view: self.resolve_resource::<VkImageView>(image).inner,
-                        image_layout: vk::ImageLayout::GENERAL,
+                        image_view: self
+                            .resolve_resource::<VkImageView>(image_view_handle)?
+                            .inner,
+                        image_layout: layout.to_vk(),
                     },
-                    vk::DescriptorType::STORAGE_IMAGE,
-                ))
+                    vk::DescriptorType::INPUT_ATTACHMENT,
+                )),
+                crate::DescriptorBindingType::StorageImage { handle: image } => image_descriptors
+                    .push((
+                        b.location,
+                        DescriptorImageInfo {
+                            sampler: vk::Sampler::null(),
+                            image_view: self.resolve_resource::<VkImageView>(image)?.inner,
+                            image_layout: vk::ImageLayout::GENERAL,
+                        },
+                        vk::DescriptorType::STORAGE_IMAGE,
+                    )),
             }
-        });
+        }
 
         let mut write_descriptor_sets = vec![];
 
@@ -738,19 +764,22 @@ impl GpuThreadSharedState {
             self.logical_device
                 .update_descriptor_sets(&write_descriptor_sets, &[]);
         }
+        Ok(())
     }
 
     fn create_pipeline_layout(
         &self,
         info: &DescriptorSetState,
         descriptor_set_layout_cache: &LifetimedCache<vk::DescriptorSetLayout>,
-    ) -> vk::PipelineLayout {
+    ) -> GpuResult<vk::PipelineLayout> {
         info!("Creating a new Pipeline Layout");
 
         let mut descriptor_set_layouts = vec![];
         for set in &info.sets {
-            let layout =
-                descriptor_set_layout_cache.get(set, || self.create_descriptor_set_layout(set));
+            let layout = descriptor_set_layout_cache.get(set, || {
+                let layout = self.create_descriptor_set_layout(set)?;
+                Ok(layout)
+            })?;
             descriptor_set_layouts.push(layout);
         }
         let constant_ranges = info
@@ -773,53 +802,56 @@ impl GpuThreadSharedState {
             p_push_constant_ranges: constant_ranges.as_ptr() as *const _,
         };
 
-        unsafe {
+        let layout = unsafe {
             self.logical_device
-                .create_pipeline_layout(&create_info, get_allocation_callbacks())
-                .expect("Failed to create pipeline layout")
-        }
+                .create_pipeline_layout(&create_info, get_allocation_callbacks())?
+        };
+        Ok(layout)
     }
     pub(crate) fn get_descriptor_sets(
         &self,
         descriptor_set_state: &DescriptorSetState,
-    ) -> Vec<vk::DescriptorSet> {
+    ) -> anyhow::Result<Vec<vk::DescriptorSet>> {
         let mut descriptors = vec![];
 
         for set_info in &descriptor_set_state.sets {
-            let layout = self
-                .descriptor_set_layout_cache
-                .get(set_info, || self.create_descriptor_set_layout(set_info));
+            let layout = self.descriptor_set_layout_cache.get(set_info, || {
+                let layout = self.create_descriptor_set_layout(set_info)?;
+                Ok(layout)
+            })?;
             let descriptor = self.descriptor_set_cache.use_ref(
                 &set_info,
                 |s| s.set,
                 || {
-                    let set = self.create_descriptor_set(set_info, layout);
-                    self.write_descriptor_set(set.set, set_info);
-                    set
+                    let set = self.create_descriptor_set(set_info, layout)?;
+                    self.write_descriptor_set(set.set, set_info)?;
+                    Ok(set)
                 },
-            );
-            descriptors.push(descriptor)
+            )?;
+            descriptors.push(descriptor);
         }
 
-        descriptors
+        Ok(descriptors)
     }
 
-    fn create_descriptor_set_layout(&self, info: &DescriptorSetInfo2) -> vk::DescriptorSetLayout {
+    fn create_descriptor_set_layout(
+        &self,
+        info: &DescriptorSetInfo2,
+    ) -> GpuResult<vk::DescriptorSetLayout> {
         let descriptor_set_bindings = info.descriptor_set_layout().vk_set_layout_bindings();
         info!("Created a new descriptor set layout");
         unsafe {
-            self.logical_device
-                .create_descriptor_set_layout(
-                    &vk::DescriptorSetLayoutCreateInfo {
-                        s_type: StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                        p_next: std::ptr::null(),
-                        flags: vk::DescriptorSetLayoutCreateFlags::empty(),
-                        binding_count: descriptor_set_bindings.len() as _,
-                        p_bindings: descriptor_set_bindings.as_ptr(),
-                    },
-                    None,
-                )
-                .expect("Failure in descriptor set layout creation")
+            let layout = self.logical_device.create_descriptor_set_layout(
+                &vk::DescriptorSetLayoutCreateInfo {
+                    s_type: StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                    p_next: std::ptr::null(),
+                    flags: vk::DescriptorSetLayoutCreateFlags::empty(),
+                    binding_count: descriptor_set_bindings.len() as _,
+                    p_bindings: descriptor_set_bindings.as_ptr(),
+                },
+                None,
+            )?;
+            Ok(layout)
         }
     }
 
@@ -828,9 +860,10 @@ impl GpuThreadSharedState {
         &self,
         render_pass_info: &BeginRenderPassInfo,
         render_pass: vk::RenderPass,
-    ) -> vk::Framebuffer {
+    ) -> anyhow::Result<vk::Framebuffer> {
         self.framebuffer_cache.get(render_pass_info, || {
-            self.create_framebuffer(render_pass_info, render_pass)
+            let fb = self.create_framebuffer(render_pass_info, render_pass)?;
+            Ok(fb)
         })
     }
 
@@ -839,15 +872,17 @@ impl GpuThreadSharedState {
         &self,
         render_pass_info: &BeginRenderPassInfo,
         render_pass: vk::RenderPass,
-    ) -> vk::Framebuffer {
-        let mut attachments = render_pass_info
+    ) -> GpuResult<vk::Framebuffer> {
+        let attachments = render_pass_info
             .color_attachments
             .iter()
-            .map(|att| self.resolve_resource::<VkImageView>(&att.image_view).inner)
+            .map(|att| self.resolve_resource::<VkImageView>(&att.image_view))
             .collect::<Vec<_>>();
+        let attachments = attachments.into_iter().collect::<GpuResult<Vec<_>>>()?;
+        let mut attachments = attachments.into_iter().map(|v| v.inner).collect::<Vec<_>>();
         if let Some(ref depth) = render_pass_info.depth_attachment {
             attachments.push(
-                self.resolve_resource::<VkImageView>(&depth.image_view)
+                self.resolve_resource::<VkImageView>(&depth.image_view)?
                     .inner,
             );
         }
@@ -862,11 +897,11 @@ impl GpuThreadSharedState {
             height: render_pass_info.render_area.extent.height,
             layers: 1,
         };
-        unsafe {
+        let fb = unsafe {
             self.logical_device
-                .create_framebuffer(&create_info, get_allocation_callbacks())
-                .expect("Failed to create framebuffer")
-        }
+                .create_framebuffer(&create_info, get_allocation_callbacks())?
+        };
+        Ok(fb)
     }
 }
 
@@ -1635,7 +1670,7 @@ impl VkGpu {
     pub fn resolve_resource<H: HasAssociatedHandle + Clone + 'static>(
         &self,
         handle: &H::AssociatedHandle,
-    ) -> H {
+    ) -> GpuResult<H> {
         self.state.resolve_resource(handle)
     }
 }
@@ -2016,12 +2051,14 @@ impl VkGpu {
             image,
             subresource_range,
         };
-        command_buffer.pipeline_barrier(&PipelineBarrierInfo {
-            src_stage_mask: old_layout.stage_mask,
-            dst_stage_mask: new_layout.stage_mask,
-            image_memory_barriers: &[memory_barrier],
-            ..Default::default()
-        });
+        command_buffer
+            .pipeline_barrier(&PipelineBarrierInfo {
+                src_stage_mask: old_layout.stage_mask,
+                dst_stage_mask: new_layout.stage_mask,
+                image_memory_barriers: &[memory_barrier],
+                ..Default::default()
+            })
+            .expect("Failed to pipeline barrier");
     }
 
     pub fn create_command_buffer(&self, queue_type: QueueType) -> VkResult<VkCommandBuffer> {
@@ -2331,7 +2368,7 @@ impl Gpu for VkGpu {
     }
 
     fn write_buffer(&self, buffer: &BufferHandle, offset: u64, data: &[u8]) -> anyhow::Result<()> {
-        let buffer = self.allocated_resources().resolve(buffer);
+        let buffer = self.allocated_resources().resolve(buffer)?;
         self.write_buffer_data_with_offset(&buffer, offset, data)?;
         Ok(())
     }
@@ -2342,7 +2379,7 @@ impl Gpu for VkGpu {
         offset: u64,
         size: usize,
     ) -> anyhow::Result<Vec<u8>> {
-        let buffer = self.resolve_resource::<VkBuffer>(output_buffer);
+        let buffer = self.resolve_resource::<VkBuffer>(output_buffer)?;
         assert!(size > 0, "Cannot read 0 bytes on a buffer");
         assert!(offset < buffer.allocation.size);
         assert!(size as u64 + offset <= buffer.allocation.size);
@@ -2450,7 +2487,7 @@ impl Gpu for VkGpu {
     ) -> anyhow::Result<()> {
         let offset = region.offset;
         let extent = region.extent;
-        let vk_image = self.resolve_resource::<VkImage>(handle);
+        let vk_image = self.resolve_resource::<VkImage>(handle)?;
 
         let device = &self.state.logical_device;
 
@@ -2500,7 +2537,7 @@ impl Gpu for VkGpu {
         &self,
         info: &ImageViewCreateInfo,
     ) -> anyhow::Result<crate::ImageViewHandle> {
-        let image = self.resolve_resource::<VkImage>(&info.image);
+        let image = self.resolve_resource::<VkImage>(&info.image)?;
         let view = {
             let create_info: &ImageViewCreateInfo = info;
 
@@ -2573,10 +2610,11 @@ impl Gpu for VkGpu {
         Ok(handle)
     }
 
-    fn get_shader_info(&self, shader_handle: &ShaderModuleHandle) -> ShaderInfo {
-        self.resolve_resource::<VkShaderModule>(shader_handle)
+    fn get_shader_info(&self, shader_handle: &ShaderModuleHandle) -> anyhow::Result<ShaderInfo> {
+        Ok(self
+            .resolve_resource::<VkShaderModule>(shader_handle)?
             .shader_info
-            .clone()
+            .clone())
     }
 
     fn transition_image_layout(
@@ -2748,5 +2786,17 @@ impl Gpu for VkGpu {
             .store(next_command_pools, std::sync::atomic::Ordering::Relaxed);
         self.clear_in_flight_frame_state(next_command_pools)
             .expect("Failed to clear the command pools");
+    }
+}
+
+impl From<anyhow::Error> for GpuError {
+    fn from(value: anyhow::Error) -> Self {
+        GpuError::Generic(value.to_string())
+    }
+}
+
+impl From<vk::Result> for GpuError {
+    fn from(value: vk::Result) -> Self {
+        GpuError::Generic(value.to_string())
     }
 }

@@ -1,6 +1,6 @@
 use bevy_ecs::{
     component::Component,
-    system::{Query, Res, ResMut, Resource},
+    system::{ResMut, Resource},
 };
 use nalgebra::{Isometry2, Point2, UnitVector2, Vector2};
 pub use rapier2d;

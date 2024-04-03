@@ -69,7 +69,7 @@ impl PostProcessPass for TonemapPass {
                 },
                 write: false,
             }],
-        );
+        )?;
         post_process_pass.set_vertex_shader(*resources.screen_quad);
         post_process_pass.set_fragment_shader(self.shader_handle);
         post_process_pass.draw(4, 1, 0, 0)
@@ -155,7 +155,7 @@ impl PostProcessPass for FxaaPass {
                 },
                 write: false,
             }],
-        );
+        )?;
         let rcp_frame = vector![
             resources.render_size.width as f32,
             resources.render_size.height as f32

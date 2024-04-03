@@ -3,7 +3,7 @@ mod gltf_loader;
 mod utils;
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+
 
 use bytemuck::{Pod, Zeroable};
 use engine::app::egui_support::EguiSupport;
@@ -20,16 +20,15 @@ use engine::post_process_pass::TonemapPass;
 use engine_macros::glsl;
 use fps_camera::FpsCamera;
 use gpu::{
-    CommandBuffer, Extent2D, ImageFormat, Offset2D, PresentMode, Rect2D, ShaderModuleCreateInfo,
-    ShaderModuleHandle, ShaderStage,
+    CommandBuffer, Extent2D, Offset2D, PresentMode, Rect2D, ShaderModuleCreateInfo,
+    ShaderModuleHandle,
 };
 use winit::dpi::{PhysicalPosition, Position};
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 use engine::input::key::Key;
 use engine::{
-    post_process_pass::FxaaPass, AssetMap, Backbuffer, CvarManager, DeferredRenderingPipeline,
-    MaterialInstance, PrimitiveHandle, RenderingPipeline, TextureInput,
+    post_process_pass::FxaaPass, AssetMap, Backbuffer, CvarManager, DeferredRenderingPipeline, PrimitiveHandle, RenderingPipeline,
 };
 use nalgebra::*;
 use winit::event::MouseButton;

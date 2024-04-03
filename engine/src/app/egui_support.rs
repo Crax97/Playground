@@ -677,7 +677,7 @@ impl EguiSupport {
             depth_attachment: None,
             stencil_attachment: None,
             render_area: backbuffer.whole_area(),
-        });
+        })?;
         self.prepare_render_pass(
             &mut render_pass,
             [backbuffer.size.width as f32, backbuffer.size.height as f32],
@@ -718,7 +718,7 @@ impl EguiSupport {
                         render_pass.bind_resources_2(
                             0,
                             &[Binding2::image_view(texture, self.default_sampler)],
-                        );
+                        )?;
 
                         render_pass.draw_indexed(
                             mesh.indices.len() as _,

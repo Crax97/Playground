@@ -7,15 +7,14 @@ use engine::app::{app_state::*, bootstrap, App};
 
 use engine::components::Transform;
 use engine::loaders::FileSystemTextureLoader;
-use engine::material_v2::{Material2, MaterialBuilder, Shader};
+use engine::material_v2::{MaterialBuilder, Shader};
 use engine::math::shape::BoundingShape;
 use engine::{
-    AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, GameScene,
-    MaterialDescription, MaterialDomain, MaterialInstance, MaterialInstanceDescription, Mesh,
-    MeshCreateInfo, MeshPrimitiveCreateInfo, RenderingPipeline, SceneMesh, Texture, TextureInput,
+    AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, GameScene, MaterialDomain, Mesh,
+    MeshCreateInfo, MeshPrimitiveCreateInfo, RenderingPipeline, SceneMesh, Texture,
     Time,
 };
-use gpu::{CommandBuffer, Offset2D, PresentMode, Rect2D, ShaderStage};
+use gpu::{CommandBuffer, Offset2D, PresentMode, Rect2D};
 use nalgebra::*;
 use winit::{event::ElementState, event_loop::EventLoop};
 #[repr(C)]

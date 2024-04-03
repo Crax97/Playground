@@ -345,7 +345,10 @@ impl VkSwapchain {
                 <ImageViewHandle as crate::Handle>::null()
             });
         for (i, image) in self.current_swapchain_images.iter().enumerate() {
-            let vk_image = resources.resolve::<VkImage>(image).inner;
+            let vk_image = resources
+                .resolve::<VkImage>(image)
+                .expect("Failed to resolve swapchain image")
+                .inner;
             let view_info = ash::vk::ImageViewCreateInfo {
                 s_type: StructureType::IMAGE_VIEW_CREATE_INFO,
                 p_next: std::ptr::null(),

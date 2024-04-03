@@ -26,94 +26,98 @@ impl GBuffer {
         set: u32,
         base_slot: u32,
     ) {
-        render_pass.bind_resources(
-            set,
-            &[
-                Binding {
-                    ty: gpu::DescriptorBindingType::InputAttachment {
-                        image_view_handle: self.position_component.view,
-                        layout: ImageLayout::ShaderReadOnly,
+        render_pass
+            .bind_resources(
+                set,
+                &[
+                    Binding {
+                        ty: gpu::DescriptorBindingType::InputAttachment {
+                            image_view_handle: self.position_component.view,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        binding_stage: ShaderStage::FRAGMENT,
+                        location: base_slot,
                     },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: base_slot,
-                },
-                Binding {
-                    ty: gpu::DescriptorBindingType::InputAttachment {
-                        image_view_handle: self.normal_component.view,
-                        layout: ImageLayout::ShaderReadOnly,
+                    Binding {
+                        ty: gpu::DescriptorBindingType::InputAttachment {
+                            image_view_handle: self.normal_component.view,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        binding_stage: ShaderStage::FRAGMENT,
+                        location: base_slot + 1,
                     },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: base_slot + 1,
-                },
-                Binding {
-                    ty: gpu::DescriptorBindingType::InputAttachment {
-                        image_view_handle: self.diffuse_component.view,
-                        layout: ImageLayout::ShaderReadOnly,
+                    Binding {
+                        ty: gpu::DescriptorBindingType::InputAttachment {
+                            image_view_handle: self.diffuse_component.view,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        binding_stage: ShaderStage::FRAGMENT,
+                        location: base_slot + 2,
                     },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: base_slot + 2,
-                },
-                Binding {
-                    ty: gpu::DescriptorBindingType::InputAttachment {
-                        image_view_handle: self.emissive_component.view,
-                        layout: ImageLayout::ShaderReadOnly,
+                    Binding {
+                        ty: gpu::DescriptorBindingType::InputAttachment {
+                            image_view_handle: self.emissive_component.view,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        binding_stage: ShaderStage::FRAGMENT,
+                        location: base_slot + 3,
                     },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: base_slot + 3,
-                },
-                Binding {
-                    ty: gpu::DescriptorBindingType::InputAttachment {
-                        image_view_handle: self.pbr_component.view,
-                        layout: ImageLayout::ShaderReadOnly,
+                    Binding {
+                        ty: gpu::DescriptorBindingType::InputAttachment {
+                            image_view_handle: self.pbr_component.view,
+                            layout: ImageLayout::ShaderReadOnly,
+                        },
+                        binding_stage: ShaderStage::FRAGMENT,
+                        location: base_slot + 4,
                     },
-                    binding_stage: ShaderStage::FRAGMENT,
-                    location: base_slot + 4,
-                },
-            ],
-        );
+                ],
+            )
+            .expect("Failed to bind gbuffer");
     }
 
     #[allow(dead_code)]
     pub fn bind_as_shader_resource(&self, render_pass: &mut RenderPass2, set: u32) {
-        render_pass.bind_resources_2(
-            set,
-            &[
-                Binding2 {
-                    ty: gpu::DescriptorBindingType2::ImageView {
-                        image_view_handle: self.position_component.view,
-                        sampler_handle: self.gbuffer_sampler,
+        render_pass
+            .bind_resources_2(
+                set,
+                &[
+                    Binding2 {
+                        ty: gpu::DescriptorBindingType2::ImageView {
+                            image_view_handle: self.position_component.view,
+                            sampler_handle: self.gbuffer_sampler,
+                        },
+                        write: false,
                     },
-                    write: false,
-                },
-                Binding2 {
-                    ty: gpu::DescriptorBindingType2::ImageView {
-                        image_view_handle: self.normal_component.view,
-                        sampler_handle: self.gbuffer_sampler,
+                    Binding2 {
+                        ty: gpu::DescriptorBindingType2::ImageView {
+                            image_view_handle: self.normal_component.view,
+                            sampler_handle: self.gbuffer_sampler,
+                        },
+                        write: false,
                     },
-                    write: false,
-                },
-                Binding2 {
-                    ty: gpu::DescriptorBindingType2::ImageView {
-                        image_view_handle: self.diffuse_component.view,
-                        sampler_handle: self.gbuffer_sampler,
+                    Binding2 {
+                        ty: gpu::DescriptorBindingType2::ImageView {
+                            image_view_handle: self.diffuse_component.view,
+                            sampler_handle: self.gbuffer_sampler,
+                        },
+                        write: false,
                     },
-                    write: false,
-                },
-                Binding2 {
-                    ty: gpu::DescriptorBindingType2::ImageView {
-                        image_view_handle: self.emissive_component.view,
-                        sampler_handle: self.gbuffer_sampler,
+                    Binding2 {
+                        ty: gpu::DescriptorBindingType2::ImageView {
+                            image_view_handle: self.emissive_component.view,
+                            sampler_handle: self.gbuffer_sampler,
+                        },
+                        write: false,
                     },
-                    write: false,
-                },
-                Binding2 {
-                    ty: gpu::DescriptorBindingType2::ImageView {
-                        image_view_handle: self.pbr_component.view,
-                        sampler_handle: self.gbuffer_sampler,
+                    Binding2 {
+                        ty: gpu::DescriptorBindingType2::ImageView {
+                            image_view_handle: self.pbr_component.view,
+                            sampler_handle: self.gbuffer_sampler,
+                        },
+                        write: false,
                     },
-                    write: false,
-                },
-            ],
-        );
+                ],
+            )
+            .expect("Failed to bind gbuffer");
     }
 }

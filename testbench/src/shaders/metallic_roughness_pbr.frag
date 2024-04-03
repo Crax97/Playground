@@ -10,14 +10,15 @@ struct PbrProperties {
     vec3 emissiveFactor;
 };
 
-layout(set = 1, binding = 0) uniform sampler2D baseColorSampler;
-layout(set = 1, binding = 1) uniform sampler2D normalSampler;
-layout(set = 1, binding = 2) uniform sampler2D occlusionSampler;
-layout(set = 1, binding = 3) uniform sampler2D emissiveSampler;
-layout(set = 1, binding = 4) uniform sampler2D metallicRoughnessSampler;
-layout(set = 1, binding = 5, std140) uniform PbrPropertiesBlock {
+layout(set = 1, binding = 0, std140) uniform PbrPropertiesBlock {
     PbrProperties pbrProperties;
 };
+layout(set = 1, binding = 1) uniform sampler2D baseColorSampler;
+layout(set = 1, binding = 2) uniform sampler2D normalSampler;
+layout(set = 1, binding = 3) uniform sampler2D occlusionSampler;
+layout(set = 1, binding = 4) uniform sampler2D emissiveSampler;
+layout(set = 1, binding = 5) uniform sampler2D metallicRoughnessSampler;
+
 
 layout(location = 0) out vec4 outPosition;
 layout(location = 1) out vec4 outNormal;

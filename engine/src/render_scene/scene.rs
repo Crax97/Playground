@@ -21,7 +21,7 @@ struct PerFrameData {
     projection: nalgebra::Matrix4<f32>,
 }
 
-use crate::{mesh::Mesh, Camera, MasterMaterial, MaterialDescription, MaterialInstance, Texture};
+use crate::{mesh::Mesh, Camera, MasterMaterial, MaterialDescription, Texture};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SceneMesh {
@@ -372,7 +372,7 @@ impl GameScene {
         self.skybox_material = new_skybox_material;
     }
 
-    pub fn clean_resources(&mut self, gpu: &dyn Gpu) {
+    pub fn clean_resources(&mut self, _gpu: &dyn Gpu) {
         let mut unique_material_instances = HashSet::new();
         std::mem::take(&mut self.primitives)
             .into_iter()

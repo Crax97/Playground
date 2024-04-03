@@ -248,7 +248,7 @@ impl App for TriangleApp {
                 depth_attachment: None,
                 stencil_attachment: None,
                 render_area: backbuffer.whole_area(),
-            });
+            })?;
 
             let projection = Matrix4::<f32>::new_perspective(
                 backbuffer.size.width as f32 / backbuffer.size.height as f32,
@@ -295,7 +295,7 @@ impl App for TriangleApp {
                     self.david_image_view,
                     self.david_sampler,
                 )],
-            );
+            )?;
             pass.set_cull_mode(CullMode::None);
             pass.push_constants(
                 0,

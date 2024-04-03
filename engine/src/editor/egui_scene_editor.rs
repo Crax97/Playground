@@ -291,7 +291,7 @@ impl EguiSceneEditor {
 
             ui.label("Materials");
             ui.end_row();
-            vec_ui(ui, &mut m.materials, |ui, mat_inst| {
+            vec_ui(ui, &mut m.materials, |ui, _mat_inst| {
                 ui.label("todo...");
             });
 

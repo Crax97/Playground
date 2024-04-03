@@ -21,7 +21,7 @@ use std::mem::size_of;
 
 use crate::{
     material::{MasterMaterial, MasterMaterialDescription},
-    Camera, CvarManager, Frustum, GameScene, MaterialDescription, MaterialInstance, Mesh,
+    Camera, CvarManager, Frustum, GameScene, MaterialDescription, Mesh,
     MeshPrimitive, PipelineTarget, RenderingPipeline, Texture,
 };
 
@@ -271,15 +271,25 @@ impl DeferredRenderingPipeline {
 
                     render_pass.bind_resources_2(
                         0,
-                        &[Binding2 {
-                            ty: gpu::DescriptorBindingType2::StorageBuffer {
-                                handle: frame_buffers.camera_buffer,
-                                offset: 0,
-                                range: gpu::WHOLE_SIZE as _,
+                        &[
+                            Binding2 {
+                                ty: gpu::DescriptorBindingType2::StorageBuffer {
+                                    handle: frame_buffers.camera_buffer,
+                                    offset: 0,
+                                    range: gpu::WHOLE_SIZE as _,
+                                },
+                                write: false,
                             },
-                            write: false,
-                        }],
-                    );
+                            Binding2 {
+                                ty: gpu::DescriptorBindingType2::StorageBuffer {
+                                    handle: frame_buffers.light_buffer,
+                                    offset: 0,
+                                    range: gpu::WHOLE_SIZE as _,
+                                },
+                                write: false,
+                            },
+                        ],
+                    )?;
                     draw_mesh_primitive(
                         gpu,
                         render_pass,
@@ -386,7 +396,7 @@ impl DeferredRenderingPipeline {
                             extent: render_size,
                             ..Default::default()
                         },
-                    });
+                    })?;
                 early_z.set_cull_mode(gpu::CullMode::Back);
                 early_z.set_depth_compare_op(gpu::CompareOp::LessEqual);
 
@@ -452,7 +462,7 @@ impl DeferredRenderingPipeline {
                             offset: gpu::Offset2D::default(),
                             extent: render_size,
                         },
-                    });
+                    })?;
 
                 if let Some(material) = scene.get_skybox_material() {
                     Self::draw_skybox(
@@ -506,7 +516,7 @@ impl DeferredRenderingPipeline {
                             extent: render_size,
                             ..Default::default()
                         },
-                    });
+                    })?;
                 let csm_buffers = &self.cascaded_shadow_map.csm_buffers[self.in_flight_frame];
                 gbuffer.bind_as_shader_resource(&mut combine_pass, 0);
                 combine_pass.bind_resources_2(
@@ -566,7 +576,7 @@ impl DeferredRenderingPipeline {
                             write: false,
                         },
                     ],
-                );
+                )?;
 
                 combine_pass.set_front_face(gpu::FrontFace::ClockWise);
                 combine_pass.set_cull_mode(gpu::CullMode::None);
@@ -621,7 +631,7 @@ impl DeferredRenderingPipeline {
                 depth_attachment: None,
                 stencil_attachment: None,
                 render_area: viewport,
-            });
+            })?;
         present_render_pass.bind_resources_2(
             0,
             &[Binding2 {
@@ -631,7 +641,7 @@ impl DeferredRenderingPipeline {
                 },
                 write: false,
             }],
-        );
+        )?;
 
         let screen_quad = if flip_render_target {
             self.screen_quad_flipped
@@ -698,7 +708,7 @@ impl DeferredRenderingPipeline {
                                 offset: Offset2D::default(),
                                 extent: render_size,
                             },
-                        });
+                        })?;
                     post_process_pass.set_cull_mode(gpu::CullMode::None);
                     post_process_pass.set_enable_depth_test(false);
                     post_process_pass.set_depth_write_enabled(false);
@@ -864,7 +874,7 @@ fn draw_mesh_primitive(
         render_pass,
         resource_map,
         sampler_allocator,
-    );
+    )?;
 
     render_pass.set_vertex_buffers(
         &[

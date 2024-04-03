@@ -181,7 +181,7 @@ impl CascadedShadowMap {
                             height: SHADOW_ATLAS_HEIGHT,
                         },
                     },
-                });
+                })?;
 
             let lights = scene.all_enabled_lights().collect::<Vec<_>>();
 

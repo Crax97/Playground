@@ -4,25 +4,23 @@ use crate::editor::{AssetPicker, TypeEditor};
 use crate::kecs_app::SharedAssetMap;
 use crate::material_v2::Material2;
 use crate::math::shape::BoundingShape;
-use crate::{asset_map::AssetHandle, GameScene, LightType, ShadowConfiguration, Texture};
+use crate::{asset_map::AssetHandle, LightType, ShadowConfiguration, Texture};
 use bevy_ecs::reflect::ReflectComponent;
 use bevy_ecs::{
     component::Component,
-    schedule::Schedule,
-    system::{Commands, Query, Res, Resource},
-    world::World,
+    system::{Resource},
 };
 use bevy_reflect::Reflect;
-use bytemuck::{Pod, Zeroable};
 
-use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
+
+
 use nalgebra::{
-    point, vector, Matrix4, Point2, Point3, UnitQuaternion, UnitVector3, Vector2, Vector3, Vector4,
+    vector, Matrix4, Point3, UnitQuaternion, Vector2, Vector3,
 };
 use serde::{Deserialize, Serialize};
 use winit::window::Window;
 
-use crate::{MasterMaterial, MaterialInstance, Mesh};
+use crate::{MasterMaterial, Mesh};
 
 pub struct EngineWindow(pub(crate) Window);
 
@@ -175,7 +173,7 @@ impl TypeEditor for MeshComponentEditor {
 
             ui.end_row();
             egui::Grid::new("mats").show(ui, |ui| {
-                for material in &mut value.materials {
+                for _material in &mut value.materials {
                     egui::Grid::new("parameters").show(ui, |ui| {
                         ui.label("todo...");
                         ui.end_row();
