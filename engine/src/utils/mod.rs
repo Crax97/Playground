@@ -1,5 +1,8 @@
 pub mod immutable_string;
 mod texture_packer;
+mod tick;
+
+pub use tick::Tick;
 
 pub use texture_packer::*;
 

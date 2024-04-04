@@ -8,7 +8,7 @@ use crate::{
     material_v2::Material2,
     post_process_pass::{PostProcessPass, PostProcessResources},
     render_scene::render_structs::*,
-    Asset, ScenePrimitive,
+    Asset, ScenePrimitive, Tick,
 };
 use cascaded_shadow_map::*;
 use gbuffer::*;
@@ -35,7 +35,7 @@ use gpu::{
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 
-use self::material_data_manager::{MaterialData, MaterialDataManager};
+use self::material_data_manager::MaterialDataManager;
 
 const SCREEN_QUAD: &[u32] = glsl!(
     kind = vertex,

@@ -416,6 +416,10 @@ impl GltfLoader {
                     engine::material_v2::MaterialParameter::Texture(metallic_roughness.clone()),
                 )
                 .parameter(
+                    "pbrProperties.baseColor",
+                    engine::material_v2::MaterialParameter::Color([1.0, 1.0, 1.0, 1.0]),
+                )
+                .parameter(
                     "pbrProperties.metallicRoughness",
                     engine::material_v2::MaterialParameter::Color([metallic, roughness, 0.0, 0.0]),
                 )

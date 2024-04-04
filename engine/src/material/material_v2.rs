@@ -1,10 +1,10 @@
-use std::{collections::HashMap, time::SystemTime};
+use std::collections::HashMap;
 
 use gpu::ShaderModuleHandle;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{immutable_string::ImmutableString, Asset, AssetHandle, MaterialDomain, Texture};
+use crate::{immutable_string::ImmutableString, Asset, AssetHandle, MaterialDomain, Texture, Tick};
 
 pub const MATERIAL_PARAMETER_SLOT: u32 = 1;
 
@@ -30,7 +30,7 @@ pub struct Material2 {
     pub(crate) parameters: HashMap<String, MaterialParameter>,
 
     #[serde(skip)]
-    pub(crate) last_tick_change: u128,
+    pub(crate) last_tick_change: Tick,
 }
 
 pub struct MaterialBuilder {
@@ -79,7 +79,7 @@ impl MaterialBuilder {
             fragment_shader: self.fragment_shader,
             domain: self.domain,
             parameters: self.parameters,
-            last_tick_change: 0,
+            last_tick_change: Tick::now(),
         }
     }
 }
@@ -90,10 +90,7 @@ impl Material2 {
     }
     pub fn set_parameter(&mut self, name: impl Into<String>, parameter: MaterialParameter) {
         self.parameters.insert(name.into(), parameter);
-        self.last_tick_change = std::time::SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("Failed to compute time from epoch")
-            .as_millis();
+        self.last_tick_change = Tick::now();
     }
 }
 

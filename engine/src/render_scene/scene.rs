@@ -6,7 +6,7 @@ use crate::{
     material_v2::Material2,
     math::shape::BoundingShape,
     render_scene::{BinaryBvh, Bvh},
-    CvarManager, Frustum,
+    CvarManager, Frustum, Tick,
 };
 use bevy_ecs::system::Resource;
 use gpu::{CommandBuffer, Extent2D, Gpu, ImageFormat, ImageHandle, ImageViewHandle, Rect2D};

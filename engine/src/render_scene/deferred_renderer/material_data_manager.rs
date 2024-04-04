@@ -8,8 +8,8 @@ use gpu::{
 };
 use uuid::Uuid;
 
-use crate::material_v2::*;
 use crate::{ensure_vec_length, AssetMap, PipelineTarget};
+use crate::{material_v2::*, Tick};
 
 use super::SamplerAllocator;
 
@@ -32,7 +32,7 @@ pub(crate) struct MaterialDataManager {
 
 struct MaterialDataInfo {
     data: SparseMaterialData,
-    last_update_tick: u128,
+    last_update_tick: Tick,
 }
 
 #[derive(Debug)]
@@ -67,7 +67,7 @@ impl MaterialDataManager {
                     let data = Self::init_material_backing_data(material, gpu, asset_map)?;
                     let info = MaterialDataInfo {
                         data,
-                        last_update_tick: material.last_tick_change,
+                        last_update_tick: Tick::MAX,
                     };
                     Ok(slot.insert(info))
                 }
@@ -75,6 +75,7 @@ impl MaterialDataManager {
         let info = info?;
         if info.last_update_tick != material.last_tick_change {
             Self::update_material_data(material, info, gpu, asset_map)?;
+            info.last_update_tick = material.last_tick_change;
         }
         Ok(&info.data)
     }

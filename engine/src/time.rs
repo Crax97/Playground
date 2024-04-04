@@ -2,6 +2,8 @@ use std::time::*;
 
 use bevy_ecs::system::Resource;
 
+use crate::Tick;
+
 #[derive(Resource, Clone)]
 pub struct Time {
     app_start: Instant,
@@ -9,6 +11,7 @@ pub struct Time {
     delta: f32,
     since_app_start: f32,
     frame_counter: u64,
+    current_tick: Tick,
 }
 
 impl kecs::Resource for Time {}
@@ -22,6 +25,7 @@ impl Time {
             delta: 0.0,
             since_app_start: 0.0,
             frame_counter: 0,
+            current_tick: Tick::now(),
         }
     }
 
@@ -41,6 +45,7 @@ impl Time {
 
     pub fn end_frame(&mut self) {
         self.frame_counter += 1;
+        self.current_tick = Tick::now();
     }
 
     pub fn since_app_start(&self) -> f32 {
@@ -53,6 +58,10 @@ impl Time {
 
     pub fn frames_since_start(&self) -> u64 {
         self.frame_counter
+    }
+
+    pub fn current_tick(&self) -> Tick {
+        self.current_tick
     }
 }
 
