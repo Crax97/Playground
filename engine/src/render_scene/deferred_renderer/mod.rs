@@ -1046,6 +1046,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
     }
 
     fn destroy(&mut self, gpu: &dyn Gpu) {
+        self.material_cache.destroy(gpu);
         self.cascaded_shadow_map.destroy(gpu);
         self.default_irradiance_map.destroyed(gpu);
         self.cube_mesh.destroyed(gpu);

@@ -25,6 +25,8 @@ pub(crate) trait MaterialData: std::fmt::Debug {
         asset_map: &AssetMap,
         sampler_allocator: &SamplerAllocator,
     ) -> anyhow::Result<()>;
+
+    fn destroy(&mut self, gpu: &dyn Gpu);
 }
 
 #[derive(Default)]
@@ -80,6 +82,12 @@ impl MaterialDataManager {
             info.last_update_tick = material.last_tick_change;
         }
         Ok(&info.data)
+    }
+
+    pub(crate) fn destroy(&mut self, gpu: &dyn Gpu) {
+        for info in self.data.values_mut() {
+            info.data.destroy(gpu);
+        }
     }
 
     fn update_material_data(
@@ -292,13 +300,10 @@ impl MaterialData for SparseMaterialData {
         }
         Ok(())
     }
+
+    fn destroy(&mut self, gpu: &dyn Gpu) {
+        if let Some(param_buffer) = self.parameter_buffer {
+            gpu.destroy_buffer(param_buffer);
+        }
+    }
 }
-
-/*
-usage
-let material = load_material(...);
-
-let material_data = get_material_data(&material);
-material_data.bind(command_buffer);
-
-*/

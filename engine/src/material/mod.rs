@@ -111,7 +111,7 @@ impl Asset for Shader {
         &self.name
     }
 
-    fn destroyed(&mut self, gpu: &dyn gpu::Gpu) {
+    fn destroyed(&self, gpu: &dyn gpu::Gpu) {
         gpu.destroy_shader_module(self.handle)
     }
 }
@@ -121,5 +121,5 @@ impl Asset for Material {
         &self.name
     }
 
-    fn destroyed(&mut self, _gpu: &dyn gpu::Gpu) {}
+    fn destroyed(&self, _gpu: &dyn gpu::Gpu) {}
 }

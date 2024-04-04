@@ -142,7 +142,7 @@ impl Asset for Mesh {
         "Mesh"
     }
 
-    fn destroyed(&mut self, gpu: &dyn Gpu) {
+    fn destroyed(&self, gpu: &dyn Gpu) {
         for prim in &self.primitives {
             gpu.destroy_buffer(prim.position_component);
             gpu.destroy_buffer(prim.normal_component);

@@ -21,7 +21,7 @@ pub(crate) type OperationSender = Sender<Box<dyn ResourceMapOperation>>;
 
 pub trait Asset: Send + Sync + 'static {
     fn get_description(&self) -> &str;
-    fn destroyed(&mut self, gpu: &dyn Gpu);
+    fn destroyed(&self, gpu: &dyn Gpu);
 }
 
 pub struct AssetHandle<R>
@@ -506,8 +506,13 @@ impl AssetMap {
 
 impl Drop for AssetMap {
     fn drop(&mut self) {
-        // Update any pending resources
-        self.update();
+        let resources = self.loaded_resources.read().unwrap();
+        for res_map in resources.resources.values() {
+            let mut res_map = res_map.write().unwrap();
+            for (_, asset) in res_map.resources.iter_mut() {
+                asset.resource.destroyed(self.gpu.as_ref())
+            }
+        }
     }
 }
 
@@ -738,7 +743,7 @@ mod test {
         fn get_description(&self) -> &str {
             "test resource"
         }
-        fn destroyed(&mut self, _gpu: &dyn Gpu) {
+        fn destroyed(&self, _gpu: &dyn Gpu) {
             println!("TestAsset destroyed");
         }
     }
