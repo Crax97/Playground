@@ -8,7 +8,7 @@ use nalgebra::{point, vector, Matrix4, Point3};
 
 use crate::{
     components::Transform, AssetMap, Camera, DeferredRenderingPipeline, FrameBuffers, Frustum,
-    LightType, PipelineTarget, PointOfViewData, SceneLightInfo, Tick, TiledTexture2DPacker,
+    LightType, PipelineTarget, PointOfViewData, SceneLightInfo, TiledTexture2DPacker,
     TiledTexture2DSection,
 };
 

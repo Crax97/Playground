@@ -438,14 +438,6 @@ impl GltfLoader {
 
         Ok(allocated_materials)
     }
-
-    pub fn scene(&self) -> &engine::GameScene {
-        &self.engine_scene
-    }
-
-    pub fn scene_mut(&mut self) -> &mut engine::GameScene {
-        &mut self.engine_scene
-    }
 }
 
 fn handle_node(

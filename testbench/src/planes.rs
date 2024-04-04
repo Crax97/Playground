@@ -12,7 +12,7 @@ use engine::math::shape::BoundingShape;
 use engine::{
     AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, GameScene,
     MaterialDomain, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo, RenderingPipeline, SceneMesh,
-    Texture, Tick, Time,
+    Texture, Time,
 };
 use gpu::{CommandBuffer, Offset2D, PresentMode, Rect2D};
 use nalgebra::*;

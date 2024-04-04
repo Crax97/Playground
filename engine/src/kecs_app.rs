@@ -11,7 +11,7 @@ use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop};
 use crate::{
     app::{app_state::AppState, App},
     AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, GameScene,
-    RenderingPipeline, Tick, Time,
+    RenderingPipeline, Time,
 };
 
 #[derive(Clone)]

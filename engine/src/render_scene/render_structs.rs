@@ -1,7 +1,6 @@
 use bytemuck::{Pod, Zeroable};
-use gpu::{BufferHandle};
+use gpu::BufferHandle;
 use nalgebra::{vector, Matrix4, Point4, Vector4};
-
 
 use crate::{components::Transform, LightType, SceneLightInfo};
 
@@ -41,7 +40,7 @@ unsafe impl Pod for GpuLightInfo {}
 unsafe impl Zeroable for GpuLightInfo {}
 
 impl SceneLightInfo {
-    pub(crate) fn to_gpu_data(&self, transform: &Transform) -> GpuLightInfo {
+    pub(crate) fn to_gpu_data(self, transform: &Transform) -> GpuLightInfo {
         let position = transform.position;
         let direction = transform.forward();
         let (direction, extras, ty) = match self.ty {

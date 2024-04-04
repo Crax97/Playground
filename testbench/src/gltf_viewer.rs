@@ -11,7 +11,7 @@ use engine::components::Transform;
 use engine::editor::ui_extension::UiExtension;
 use engine::material_v2::{MaterialBuilder, Shader};
 use engine::{
-    egui, GameScene, LightType, SceneLightInfo, ScenePrimitiveType, ShadowConfiguration, Tick, Time,
+    egui, GameScene, LightType, SceneLightInfo, ScenePrimitiveType, ShadowConfiguration, Time,
 };
 
 use engine::input::InputState;

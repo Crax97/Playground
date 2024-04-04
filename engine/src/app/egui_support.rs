@@ -844,7 +844,7 @@ impl EguiSupport {
 
     fn free_textures(&mut self, gpu: &dyn Gpu, delta: &TexturesDelta) {
         for free in &delta.free {
-            if let Some(egui_texture) = self.textures.remove(&free) {
+            if let Some(egui_texture) = self.textures.remove(free) {
                 free_texture(gpu, &egui_texture);
             }
         }
@@ -978,7 +978,7 @@ impl EguiSupport {
                     return;
                 } else if is_paste_command(self.raw_input.modifiers, logical_key) {
                     log::trace!("Paste is currently not supported");
-                    if let Some(contents) = self.clipboard_context.get_contents().ok() {
+                    if let Ok(contents) = self.clipboard_context.get_contents() {
                         if !contents.is_empty() {
                             self.raw_input.events.push(egui::Event::Paste(contents));
                         }
@@ -1085,9 +1085,9 @@ impl EguiSupport {
 }
 
 fn is_printable_char(chr: char) -> bool {
-    let is_in_private_use_area = '\u{e000}' <= chr && chr <= '\u{f8ff}'
-        || '\u{f0000}' <= chr && chr <= '\u{ffffd}'
-        || '\u{100000}' <= chr && chr <= '\u{10fffd}';
+    let is_in_private_use_area = ('\u{e000}'..='\u{f8ff}').contains(&chr)
+        || ('\u{f0000}'..='\u{ffffd}').contains(&chr)
+        || ('\u{100000}'..='\u{10fffd}').contains(&chr);
 
     !is_in_private_use_area && !chr.is_ascii_control()
 }

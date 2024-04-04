@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::{asset_map::AssetHandle};
+use crate::asset_map::AssetHandle;
 use gpu::{BufferCreateInfo, BufferHandle, BufferUsageFlags, Gpu, MemoryDomain};
 use serde::{Deserialize, Serialize};
 

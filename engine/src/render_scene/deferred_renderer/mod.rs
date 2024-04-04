@@ -8,7 +8,7 @@ use crate::{
     material_v2::Material2,
     post_process_pass::{PostProcessPass, PostProcessResources},
     render_scene::render_structs::*,
-    Asset, ScenePrimitive, Tick,
+    Asset, ScenePrimitive,
 };
 use cascaded_shadow_map::*;
 use gbuffer::*;
@@ -680,7 +680,7 @@ impl DeferredRenderingPipeline {
         let mut current_postprocess = 0;
 
         let final_color_output = {
-            let final_color_output = {
+            {
                 for pass in &self.post_process_stack {
                     let (pass_color_target, previous_pass_result) = if current_postprocess == 0 {
                         (
@@ -731,9 +731,7 @@ impl DeferredRenderingPipeline {
                 } else {
                     post_process_backbuffer_2
                 }
-            };
-
-            final_color_output
+            }
         };
         Ok(final_color_output)
     }
@@ -799,7 +797,7 @@ impl DeferredRenderingPipeline {
                 continue;
             }
 
-            let mut gpu_light: GpuLightInfo = light.to_gpu_data(&transform);
+            let mut gpu_light: GpuLightInfo = light.to_gpu_data(transform);
             if let Some(NewShadowMapAllocation {
                 povs,
                 shadow_map_index,

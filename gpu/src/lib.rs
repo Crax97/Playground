@@ -173,6 +173,8 @@ macro_rules! define_pass_type {
 }
 
 pub mod command_buffer_2 {
+    use std::ops::Deref;
+
     use crate::{
         compute_pass::ComputePass, render_pass_2::RenderPass2, BeginComputePassInfo,
         BeginRenderPassInfo2, Binding, CommandBufferPassBegin, ShaderStage,
@@ -185,8 +187,8 @@ pub mod command_buffer_2 {
     });
 
     impl CommandBuffer {
-        pub fn start_render_pass_2<'c>(
-            &'c mut self,
+        pub fn start_render_pass_2(
+            &mut self,
             info: &BeginRenderPassInfo2,
         ) -> anyhow::Result<RenderPass2> {
             let inner = self.pimpl.create_render_pass_2_impl(info)?;
@@ -196,10 +198,10 @@ pub mod command_buffer_2 {
             })
         }
 
-        pub fn start_compute_pass<'c>(
-            &'c mut self,
+        pub fn start_compute_pass(
+            &mut self,
             info: &BeginComputePassInfo,
-        ) -> anyhow::Result<ComputePass<'c>> {
+        ) -> anyhow::Result<ComputePass> {
             let inner = self.pimpl.create_compute_pass_impl(info)?;
             Ok(ComputePass {
                 pimpl: inner,
@@ -207,8 +209,8 @@ pub mod command_buffer_2 {
             })
         }
 
-        pub fn pimpl(&self) -> &Box<dyn Impl> {
-            &self.pimpl
+        pub fn pimpl(&self) -> &dyn Impl {
+            self.pimpl.deref()
         }
     }
 }
