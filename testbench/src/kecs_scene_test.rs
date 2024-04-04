@@ -2,10 +2,6 @@ mod fps_camera;
 mod gltf_loader;
 mod utils;
 
-
-
-
-
 use bytemuck::{Pod, Zeroable};
 use engine::app::egui_support::EguiSupport;
 use engine::app::{App, Console};
@@ -21,19 +17,12 @@ use engine::input::InputState;
 
 use engine_macros::glsl;
 use fps_camera::FpsCamera;
-use gpu::{
-    ShaderModuleHandle,
-};
-
+use gpu::ShaderModuleHandle;
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
 
-use engine::{
-    AssetMap, CvarManager, DeferredRenderingPipeline, PrimitiveHandle,
-};
+use engine::{AssetMap, CvarManager, DeferredRenderingPipeline, PrimitiveHandle};
 use nalgebra::*;
-
-
 
 use clap::Parser;
 

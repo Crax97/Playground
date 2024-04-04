@@ -7,7 +7,7 @@ use engine::app::{app_state::*, bootstrap, App};
 
 use engine::components::Transform;
 use engine::loaders::FileSystemTextureLoader;
-use engine::material_v2::{MaterialBuilder, Shader};
+use engine::material::{MaterialBuilder, Shader};
 use engine::math::shape::BoundingShape;
 use engine::{
     AssetMap, Backbuffer, Camera, CvarManager, DeferredRenderingPipeline, GameScene,
@@ -144,7 +144,7 @@ impl App for PlanesApp {
             MaterialBuilder::new(vertex_shader, fragment_shader, MaterialDomain::Surface)
                 .parameter(
                     "texSampler",
-                    engine::material_v2::MaterialParameter::Texture(texture),
+                    engine::material::MaterialParameter::Texture(texture),
                 )
                 .name("SimpleMaterial")
                 .build();

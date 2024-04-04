@@ -9,7 +9,7 @@ use engine::app::egui_support::EguiSupport;
 use engine::app::{app_state::*, bootstrap, App, Console};
 use engine::components::Transform;
 use engine::editor::ui_extension::UiExtension;
-use engine::material_v2::{MaterialBuilder, Shader};
+use engine::material::{MaterialBuilder, Shader};
 use engine::{
     egui, GameScene, LightType, SceneLightInfo, ScenePrimitiveType, ShadowConfiguration, Time,
 };
@@ -325,7 +325,7 @@ impl App for GLTFViewer {
         )
         .parameter(
             "baseColorSampler",
-            engine::material_v2::MaterialParameter::Texture(david_texture),
+            engine::material::MaterialParameter::Texture(david_texture),
         )
         .build();
         let skybox_instance = resource_map.add(skybox_instance, Some("Skybox Material"));

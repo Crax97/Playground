@@ -1,7 +1,7 @@
 use crate::utils;
 use engine::asset_map::{AssetHandle, AssetMap};
 use engine::components::Transform;
-use engine::material_v2::{Material2, MaterialBuilder, Shader};
+use engine::material::{Material, MaterialBuilder, Shader};
 use engine::math::shape::BoundingShape;
 use engine::{
     GameScene, LightType, MaterialDomain, Mesh, MeshCreateInfo, MeshPrimitiveCreateInfo,
@@ -95,7 +95,7 @@ impl GltfLoader {
 
     fn build_engine_scene(
         document: Document,
-        allocated_materials: Vec<AssetHandle<Material2>>,
+        allocated_materials: Vec<AssetHandle<Material>>,
         meshes: Vec<(AssetHandle<Mesh>, Point3<f32>, Point3<f32>)>,
     ) -> GameScene {
         let mut engine_scene = GameScene::new();
@@ -338,7 +338,7 @@ impl GltfLoader {
         asset_map: &mut AssetMap,
         textures: LoadedTextures,
         document: &Document,
-    ) -> anyhow::Result<Vec<AssetHandle<Material2>>> {
+    ) -> anyhow::Result<Vec<AssetHandle<Material>>> {
         let LoadedTextures {
             white,
             black,
@@ -397,35 +397,35 @@ impl GltfLoader {
             let material_instance = material_instance
                 .parameter(
                     "baseColorSampler",
-                    engine::material_v2::MaterialParameter::Texture(base_texture),
+                    engine::material::MaterialParameter::Texture(base_texture),
                 )
                 .parameter(
                     "normalSampler",
-                    engine::material_v2::MaterialParameter::Texture(normal_texture),
+                    engine::material::MaterialParameter::Texture(normal_texture),
                 )
                 .parameter(
                     "occlusionSampler",
-                    engine::material_v2::MaterialParameter::Texture(occlusion_texture),
+                    engine::material::MaterialParameter::Texture(occlusion_texture),
                 )
                 .parameter(
                     "emissiveSampler",
-                    engine::material_v2::MaterialParameter::Texture(emissive_texture),
+                    engine::material::MaterialParameter::Texture(emissive_texture),
                 )
                 .parameter(
                     "metallicRoughnessSampler",
-                    engine::material_v2::MaterialParameter::Texture(metallic_roughness.clone()),
+                    engine::material::MaterialParameter::Texture(metallic_roughness.clone()),
                 )
                 .parameter(
                     "pbrProperties.baseColor",
-                    engine::material_v2::MaterialParameter::Color([1.0, 1.0, 1.0, 1.0]),
+                    engine::material::MaterialParameter::Color([1.0, 1.0, 1.0, 1.0]),
                 )
                 .parameter(
                     "pbrProperties.metallicRoughness",
-                    engine::material_v2::MaterialParameter::Color([metallic, roughness, 0.0, 0.0]),
+                    engine::material::MaterialParameter::Color([metallic, roughness, 0.0, 0.0]),
                 )
                 .parameter(
                     "pbrProperties.emissiveFactor",
-                    engine::material_v2::MaterialParameter::Color([
+                    engine::material::MaterialParameter::Color([
                         emissive[0],
                         emissive[1],
                         emissive[2],
@@ -443,7 +443,7 @@ impl GltfLoader {
 fn handle_node(
     node: gltf::Node<'_>,
     engine_scene: &mut GameScene,
-    allocated_materials: &Vec<AssetHandle<Material2>>,
+    allocated_materials: &Vec<AssetHandle<Material>>,
     meshes: &Vec<(
         AssetHandle<Mesh>,
         nalgebra::OPoint<f32, nalgebra::Const<3>>,

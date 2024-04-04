@@ -9,15 +9,17 @@ use gpu::{
 use uuid::Uuid;
 
 use crate::{ensure_vec_length, AssetMap, PipelineTarget};
-use crate::{material_v2::*, Tick};
+use crate::{material::*, Tick};
 
 use super::SamplerAllocator;
+
+pub const MATERIAL_PARAMETER_SLOT: u32 = 1;
 
 pub(crate) trait MaterialData: std::fmt::Debug {
     fn bind(
         &self,
         gpu: &dyn Gpu,
-        material: &Material2,
+        material: &Material,
         permutation: PipelineTarget,
         render_pass: &mut RenderPass2,
         asset_map: &AssetMap,
@@ -57,7 +59,7 @@ impl MaterialDataManager {
     pub(crate) fn get_data(
         &mut self,
         gpu: &dyn Gpu,
-        material: &Material2,
+        material: &Material,
         asset_map: &AssetMap,
     ) -> anyhow::Result<&dyn MaterialData> {
         let info: Result<&mut MaterialDataInfo, anyhow::Error> =
@@ -81,7 +83,7 @@ impl MaterialDataManager {
     }
 
     fn update_material_data(
-        material: &Material2,
+        material: &Material,
         info: &mut MaterialDataInfo,
         gpu: &dyn Gpu,
         asset_map: &AssetMap,
@@ -124,7 +126,7 @@ impl MaterialDataManager {
     }
 
     fn init_material_backing_data(
-        material: &Material2,
+        material: &Material,
         gpu: &dyn Gpu,
         asset_map: &AssetMap,
     ) -> anyhow::Result<SparseMaterialData> {
@@ -167,7 +169,7 @@ impl MaterialDataManager {
 
 // All parameters go into set 1 binding 0
 fn create_parameter_buffer(
-    material: &Material2,
+    material: &Material,
     uniform_bindings: &mut HashMap<String, MaterialUniformVariableLayout>,
     gpu: &dyn Gpu,
 ) -> anyhow::Result<Option<BufferHandle>> {
@@ -245,7 +247,7 @@ impl MaterialData for SparseMaterialData {
     fn bind(
         &self,
         gpu: &dyn Gpu,
-        material: &Material2,
+        material: &Material,
         pipeline_target: PipelineTarget,
         render_pass: &mut RenderPass2,
         asset_map: &AssetMap,

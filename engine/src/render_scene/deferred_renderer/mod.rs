@@ -5,7 +5,7 @@ mod render_image;
 mod sampler_allocator;
 
 use crate::{
-    material_v2::Material2,
+    material::Material,
     post_process_pass::{PostProcessPass, PostProcessResources},
     render_scene::render_structs::*,
     Asset, ScenePrimitive,
@@ -20,9 +20,8 @@ use engine_macros::glsl;
 use std::{mem::size_of, ops::Deref};
 
 use crate::{
-    material::{MasterMaterial, MasterMaterialDescription},
-    Camera, CvarManager, Frustum, GameScene, MaterialDescription, Mesh, MeshPrimitive,
-    PipelineTarget, RenderingPipeline, Texture,
+    Camera, CvarManager, Frustum, GameScene, Mesh, MeshPrimitive, PipelineTarget,
+    RenderingPipeline, Texture,
 };
 
 use crate::asset_map::{AssetHandle, AssetMap};
@@ -320,7 +319,7 @@ impl DeferredRenderingPipeline {
         render_pass: &mut RenderPass2,
         material_cache: &mut MaterialDataManager,
         skybox_mesh: &Mesh,
-        skybox_material: &AssetHandle<Material2>,
+        skybox_material: &AssetHandle<Material>,
         resource_map: &AssetMap,
         sampler_allocator: &SamplerAllocator,
     ) -> anyhow::Result<()> {
@@ -854,7 +853,7 @@ fn draw_mesh_primitive(
     gpu: &dyn Gpu,
     render_pass: &mut RenderPass2,
     material_cache: &mut MaterialDataManager,
-    material: &AssetHandle<Material2>,
+    material: &AssetHandle<Material>,
     pipeline_target: PipelineTarget,
     primitive: &MeshPrimitive,
     model: Matrix4<f32>,
@@ -1040,32 +1039,6 @@ impl RenderingPipeline for DeferredRenderingPipeline {
 
         self.in_flight_frame = (1 + self.in_flight_frame) % self.max_frames_in_flight;
         Ok(final_color_output.view)
-    }
-
-    fn create_material(
-        &mut self,
-        _gpu: &dyn Gpu,
-        material_description: MaterialDescription,
-    ) -> anyhow::Result<MasterMaterial> {
-        let master_description = MasterMaterialDescription {
-            name: material_description.name,
-            domain: material_description.domain,
-            texture_inputs: material_description.texture_inputs,
-            material_parameters: material_description.material_parameters,
-            vertex_info: &VertexStageInfo {
-                entry_point: "main",
-                module: material_description.vertex_module,
-            },
-            fragment_info: &FragmentStageInfo {
-                entry_point: "main",
-                module: material_description.fragment_module,
-            },
-            cull_mode: gpu::CullMode::Back,
-            front_face: gpu::FrontFace::CounterClockWise,
-            parameters_visibility: material_description.parameter_shader_visibility,
-        };
-
-        MasterMaterial::new(&master_description)
     }
 
     fn on_resolution_changed(&mut self, new_resolution: Extent2D) {

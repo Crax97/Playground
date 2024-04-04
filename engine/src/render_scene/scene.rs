@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::{
     asset_map::{AssetHandle, AssetMap},
     components::Transform,
-    material_v2::Material2,
+    material::Material,
     math::shape::BoundingShape,
     render_scene::{BinaryBvh, Bvh},
     CvarManager, Frustum,
@@ -21,12 +21,12 @@ struct PerFrameData {
     projection: nalgebra::Matrix4<f32>,
 }
 
-use crate::{mesh::Mesh, Camera, MasterMaterial, MaterialDescription, Texture};
+use crate::{mesh::Mesh, Camera, Texture};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SceneMesh {
     pub mesh: AssetHandle<Mesh>,
-    pub materials: Vec<AssetHandle<Material2>>,
+    pub materials: Vec<AssetHandle<Material>>,
     pub bounds: BoundingShape,
 }
 
@@ -197,7 +197,7 @@ pub struct GameScene {
     pub use_bvh: bool,
     pub primitives: Arena<ScenePrimitive>,
 
-    skybox_material: Option<AssetHandle<Material2>>,
+    skybox_material: Option<AssetHandle<Material>>,
     skybox_texture: Option<AssetHandle<Texture>>,
     current_lights_iteration: u64,
 }
@@ -213,7 +213,7 @@ impl GameScene {
         &self.skybox_texture
     }
 
-    pub fn get_skybox_material(&self) -> &Option<AssetHandle<Material2>> {
+    pub fn get_skybox_material(&self) -> &Option<AssetHandle<Material>> {
         &self.skybox_material
     }
 
@@ -368,7 +368,7 @@ impl GameScene {
         self.skybox_texture = new_skybox_texture;
     }
 
-    pub fn set_skybox_material(&mut self, new_skybox_material: Option<AssetHandle<Material2>>) {
+    pub fn set_skybox_material(&mut self, new_skybox_material: Option<AssetHandle<Material>>) {
         self.skybox_material = new_skybox_material;
     }
 
@@ -416,9 +416,4 @@ pub trait RenderingPipeline {
     fn on_resolution_changed(&mut self, new_resolution: Extent2D);
 
     fn destroy(&mut self, gpu: &dyn Gpu);
-    fn create_material(
-        &mut self,
-        gpu: &dyn Gpu,
-        material_description: MaterialDescription,
-    ) -> anyhow::Result<MasterMaterial>;
 }

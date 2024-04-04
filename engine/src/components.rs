@@ -2,25 +2,18 @@ use std::ops::{Deref, DerefMut};
 
 use crate::editor::{AssetPicker, TypeEditor};
 use crate::kecs_app::SharedAssetMap;
-use crate::material_v2::Material2;
+use crate::material::Material;
 use crate::math::shape::BoundingShape;
 use crate::{asset_map::AssetHandle, LightType, ShadowConfiguration, Texture};
 use bevy_ecs::reflect::ReflectComponent;
-use bevy_ecs::{
-    component::Component,
-    system::{Resource},
-};
+use bevy_ecs::{component::Component, system::Resource};
 use bevy_reflect::Reflect;
 
-
-
-use nalgebra::{
-    vector, Matrix4, Point3, UnitQuaternion, Vector2, Vector3,
-};
+use nalgebra::{vector, Matrix4, Point3, UnitQuaternion, Vector3};
 use serde::{Deserialize, Serialize};
 use winit::window::Window;
 
-use crate::{MasterMaterial, Mesh};
+use crate::Mesh;
 
 pub struct EngineWindow(pub(crate) Window);
 
@@ -81,7 +74,7 @@ impl Transform {
 #[derive(Component)]
 pub struct MeshComponent {
     pub mesh: AssetHandle<Mesh>,
-    pub materials: Vec<AssetHandle<Material2>>,
+    pub materials: Vec<AssetHandle<Material>>,
     pub bounding_shape: BoundingShape,
 }
 
@@ -102,15 +95,6 @@ impl MeshComponent {
     fn bounds(&self) -> BoundingShape {
         self.bounding_shape
     }
-}
-
-pub struct SpriteComponentDescription {
-    pub texture: AssetHandle<Texture>,
-    pub material: AssetHandle<MasterMaterial>,
-    pub atlas_offset: Vector2<u32>,
-    pub atlas_size: Vector2<u32>,
-    pub sprite_size: Vector2<f32>,
-    pub z_layer: u32,
 }
 
 #[derive(Component)]
@@ -134,7 +118,7 @@ pub struct TestComponent {
 
 #[derive(Resource)]
 pub struct SceneSetup {
-    pub skybox_material: Option<AssetHandle<Material2>>,
+    pub skybox_material: Option<AssetHandle<Material>>,
     pub skybox_texture: Option<AssetHandle<Texture>>,
 }
 
