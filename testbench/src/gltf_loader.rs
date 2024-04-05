@@ -88,7 +88,6 @@ impl GltfLoader {
         let meshes = Self::load_meshes(gpu, resource_map, &document, &buffers)?;
 
         let mut engine_scene = Self::build_engine_scene(document, allocated_materials, meshes);
-        engine_scene.use_bvh = options.use_bvh;
 
         Ok(engine_scene)
     }

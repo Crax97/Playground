@@ -125,8 +125,6 @@ pub struct SceneSetup {
 pub struct MeshComponentEditor {
     asset_map: SharedAssetMap,
     mesh_picker: AssetPicker,
-    master_picker: AssetPicker,
-    texture_picker: AssetPicker,
 }
 
 impl MeshComponentEditor {
@@ -134,8 +132,6 @@ impl MeshComponentEditor {
         Self {
             asset_map,
             mesh_picker: AssetPicker::default(),
-            master_picker: AssetPicker::default(),
-            texture_picker: AssetPicker::default(),
         }
     }
 }
@@ -157,12 +153,8 @@ impl TypeEditor for MeshComponentEditor {
 
             ui.end_row();
             egui::Grid::new("mats").show(ui, |ui| {
-                for _material in &mut value.materials {
-                    egui::Grid::new("parameters").show(ui, |ui| {
-                        ui.label("todo...");
-                        ui.end_row();
-                    });
-
+                for material in &mut value.materials {
+                    self.mesh_picker.show(material, &mut asset_map, ui);
                     ui.end_row();
                 }
             });

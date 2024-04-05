@@ -1,18 +1,29 @@
-use std::collections::HashSet;
+use std::marker::PhantomData;
 
 use crate::{
     asset_map::{AssetHandle, AssetMap},
     components::Transform,
     material::Material,
     math::shape::BoundingShape,
-    render_scene::{BinaryBvh, Bvh},
+    render_scene::BinaryBvh,
     CvarManager, Frustum,
 };
 use bevy_ecs::system::Resource;
 use gpu::{CommandBuffer, Extent2D, Gpu, ImageFormat, ImageHandle, ImageViewHandle, Rect2D};
 use nalgebra::{vector, Vector2, Vector3};
-use serde::{Deserialize, Serialize};
+use serde::{de::Visitor, Deserialize, Serialize};
 use thunderdome::{Arena, Index};
+
+#[derive(Serialize, Deserialize, Resource, Default)]
+pub struct GameScene {
+    pub scene: SceneContent,
+
+    skybox_material: Option<AssetHandle<Material>>,
+    skybox_texture: Option<AssetHandle<Texture>>,
+
+    #[serde(skip)]
+    current_lights_iteration: u64,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -190,16 +201,18 @@ impl SceneLightInfo {
 #[derive(Debug, Clone, Copy, Eq, Ord, PartialOrd, PartialEq)]
 pub struct PrimitiveHandle(pub Index);
 
-#[derive(Resource, Default)]
-pub struct GameScene {
+#[derive(Default)]
+pub struct SceneContent {
     pub bvh: BinaryBvh<thunderdome::Index>,
-    pub use_frustum_culling: bool,
-    pub use_bvh: bool,
     pub primitives: Arena<ScenePrimitive>,
+}
 
-    skybox_material: Option<AssetHandle<Material>>,
-    skybox_texture: Option<AssetHandle<Texture>>,
-    current_lights_iteration: u64,
+#[derive(Default, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Debug)]
+pub enum IntersectionMode {
+    #[default]
+    Bvh,
+    Frustum,
+    None,
 }
 
 impl kecs::Resource for GameScene {}
@@ -218,11 +231,11 @@ impl GameScene {
     }
 
     pub fn get(&self, handle: PrimitiveHandle) -> &ScenePrimitive {
-        &self.primitives[handle.0]
+        &self.scene.primitives[handle.0]
     }
 
     pub fn get_mut(&mut self, handle: PrimitiveHandle) -> &mut ScenePrimitive {
-        &mut self.primitives[handle.0]
+        &mut self.scene.primitives[handle.0]
     }
 
     pub fn all_lights(&self) -> impl Iterator<Item = (PrimitiveHandle, &ScenePrimitive)> {
@@ -238,10 +251,10 @@ impl GameScene {
             _ => None,
         };
 
-        let index = self.primitives.insert(node);
+        let index = self.scene.primitives.insert(node);
 
         if let Some((aabb_min, aabb_max)) = extremes {
-            self.bvh.add(index, aabb_min, aabb_max);
+            self.scene.bvh.add(index, aabb_min, aabb_max);
         }
 
         PrimitiveHandle(index)
@@ -251,10 +264,7 @@ impl GameScene {
 impl GameScene {
     pub fn new() -> Self {
         Self {
-            bvh: Bvh::new(),
-            use_frustum_culling: true,
-            use_bvh: true,
-            primitives: Default::default(),
+            scene: Default::default(),
             current_lights_iteration: 0,
 
             skybox_texture: None,
@@ -269,20 +279,25 @@ impl GameScene {
         label: Option<String>,
     ) -> PrimitiveHandle {
         let (aabb_min, aabb_max) = primitive.bounds.box_extremes();
-        let prim_index = self.primitives.insert(ScenePrimitive {
+        let prim_index = self.scene.primitives.insert(ScenePrimitive {
             ty: ScenePrimitiveType::Mesh(primitive),
             transform,
             label: label.unwrap_or("Mesh".to_owned()),
             tags: Default::default(),
         });
-        self.bvh.add(prim_index, aabb_min, aabb_max);
+        self.scene.bvh.add(prim_index, aabb_min, aabb_max);
 
         PrimitiveHandle(prim_index)
     }
 
-    pub fn intersect_frustum(&self, frustum: &Frustum) -> Vec<&ScenePrimitive> {
-        if !self.use_frustum_culling {
+    pub fn intersect_frustum(
+        &self,
+        frustum: &Frustum,
+        intersection_mode: IntersectionMode,
+    ) -> Vec<&ScenePrimitive> {
+        if intersection_mode == IntersectionMode::None {
             return self
+                .scene
                 .primitives
                 .iter()
                 .filter_map(|(_, p)| match &p.ty {
@@ -290,11 +305,11 @@ impl GameScene {
                     _ => None,
                 })
                 .collect();
-        } else if self.use_bvh {
-            let indices = self.bvh.intersect_frustum_copy(frustum);
+        } else if intersection_mode == IntersectionMode::Bvh {
+            let indices = self.scene.bvh.intersect_frustum_copy(frustum);
             indices
                 .iter()
-                .map(|id| &self.primitives[*id])
+                .map(|id| &self.scene.primitives[*id])
                 .map(|p| match &p.ty {
                     ScenePrimitiveType::Mesh(_) => p,
                     ScenePrimitiveType::Light(_) | ScenePrimitiveType::Empty => {
@@ -303,7 +318,8 @@ impl GameScene {
                 })
                 .collect()
         } else {
-            self.primitives
+            self.scene
+                .primitives
                 .iter()
                 .filter_map(|(_, prim)| match &prim.ty {
                     ScenePrimitiveType::Mesh(m) if frustum.contains_shape(&m.bounds) => Some(prim),
@@ -320,7 +336,7 @@ impl GameScene {
         label: Option<String>,
     ) -> PrimitiveHandle {
         self.increment_light_counter();
-        let idx = self.primitives.insert(ScenePrimitive {
+        let idx = self.scene.primitives.insert(ScenePrimitive {
             ty: ScenePrimitiveType::Light(light),
             transform,
             label: label.unwrap_or_else(|| {
@@ -338,13 +354,17 @@ impl GameScene {
     }
 
     pub fn all_primitives(&self) -> impl Iterator<Item = (PrimitiveHandle, &ScenePrimitive)> {
-        self.primitives.iter().map(|(i, p)| (PrimitiveHandle(i), p))
+        self.scene
+            .primitives
+            .iter()
+            .map(|(i, p)| (PrimitiveHandle(i), p))
     }
 
     pub fn all_primitives_mut(
         &mut self,
     ) -> impl Iterator<Item = (PrimitiveHandle, &mut ScenePrimitive)> {
-        self.primitives
+        self.scene
+            .primitives
             .iter_mut()
             .map(|(i, p)| (PrimitiveHandle(i), p))
     }
@@ -372,18 +392,7 @@ impl GameScene {
         self.skybox_material = new_skybox_material;
     }
 
-    pub fn clean_resources(&mut self, _gpu: &dyn Gpu) {
-        let mut unique_material_instances = HashSet::new();
-        std::mem::take(&mut self.primitives)
-            .into_iter()
-            .for_each(|(_, prim)| {
-                if let ScenePrimitiveType::Mesh(prim) = prim.ty {
-                    prim.materials.into_iter().for_each(|inst| {
-                        unique_material_instances.insert(inst);
-                    });
-                }
-            });
-    }
+    pub fn clean_resources(&mut self, _gpu: &dyn Gpu) {}
 }
 
 pub struct Backbuffer {
@@ -416,4 +425,68 @@ pub trait RenderingPipeline {
     fn on_resolution_changed(&mut self, new_resolution: Extent2D);
 
     fn destroy(&mut self, gpu: &dyn Gpu);
+}
+
+impl Serialize for SceneContent {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeSeq;
+        let num_prims = self.primitives.len();
+        let mut state = serializer.serialize_seq(Some(num_prims))?;
+        for (_, prim) in self.primitives.iter() {
+            state.serialize_element(prim)?;
+        }
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for SceneContent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::SeqAccess;
+        use std::fmt;
+
+        #[derive(Default)]
+        struct ArenaVisitor<T> {
+            marker: PhantomData<T>,
+        }
+
+        impl<'de, T> Visitor<'de> for ArenaVisitor<T>
+        where
+            T: Deserialize<'de>,
+        {
+            type Value = Arena<T>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a sequence")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let capacity = seq.size_hint().unwrap_or_default();
+                let mut values = Arena::<T>::with_capacity(capacity);
+
+                while let Some(value) = seq.next_element()? {
+                    values.insert(value);
+                }
+
+                Ok(values)
+            }
+        }
+        let primitives = deserializer.deserialize_seq(ArenaVisitor::<ScenePrimitive>::default())?;
+        let mut bvh = BinaryBvh::new();
+        for (index, prim) in &primitives {
+            if let ScenePrimitiveType::Mesh(mesh) = &prim.ty {
+                let (aabb_min, aabb_max) = mesh.bounds.box_extremes();
+                bvh.add(index, aabb_min, aabb_max);
+            }
+        }
+        Ok(SceneContent { primitives, bvh })
+    }
 }

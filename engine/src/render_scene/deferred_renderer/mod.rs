@@ -962,7 +962,7 @@ impl RenderingPipeline for DeferredRenderingPipeline {
             self.image_allocator
                 .get(gpu, "color_output/post_process_1", &color_desc);
 
-        let primitives = scene.intersect_frustum(&self.frustum);
+        let primitives = scene.intersect_frustum(&self.frustum, crate::IntersectionMode::Bvh);
 
         if primitives.is_empty() {
             return Ok(color_output.view);

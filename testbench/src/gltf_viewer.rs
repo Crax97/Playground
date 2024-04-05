@@ -475,10 +475,6 @@ impl App for GLTFViewer {
                     ui.input_float("Camera rotation speed", &mut self.camera.rotation_speed);
                     ui.input_float("Camera FOV", &mut self.camera.fov_degrees);
 
-                    ui.checkbox(&mut self.scene.use_frustum_culling, "Use frustum culling");
-
-                    ui.checkbox(&mut self.scene.use_bvh, "Use BVH for frustum culling");
-
                     if ui.button("Reset camera").clicked() {
                         self.camera.location = Default::default();
                         self.camera.rotation = Default::default();

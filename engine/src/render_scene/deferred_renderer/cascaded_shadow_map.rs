@@ -197,7 +197,7 @@ impl CascadedShadowMap {
                 } else {
                     Frustum::from_view_proj(&pov.view, &pov.projection)
                 };
-                let primitives = scene.intersect_frustum(&frustum);
+                let primitives = scene.intersect_frustum(&frustum, crate::IntersectionMode::Bvh);
                 let setup = light
                     .shadow_configuration
                     .expect("Bug: a light is set to render a shadow map, but has no shadow setup");

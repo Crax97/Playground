@@ -291,8 +291,8 @@ impl EguiSceneEditor {
 
             ui.label("Materials");
             ui.end_row();
-            vec_ui(ui, &mut m.materials, |ui, _mat_inst| {
-                ui.label("todo...");
+            vec_ui(ui, &mut m.materials, |ui, mat| {
+                asset_picker.show(mat, asset_map, ui);
             });
 
             ui.end_row();
