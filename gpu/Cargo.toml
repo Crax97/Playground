@@ -18,3 +18,8 @@ bytemuck = "1.13.*"
 spirv-reflect = "0.2.*"
 crossbeam = "0.8.*"
 anymap = "0.12.*"
+
+serde = { version = "1.0.197", features = ["derive"], optional = true}
+
+[features]
+serde = ["dep:serde"]

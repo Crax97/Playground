@@ -28,9 +28,9 @@ use crate::asset_map::{AssetHandle, AssetMap};
 use gpu::{
     render_pass_2::RenderPass2, AttachmentStoreOp, BeginRenderPassInfo2, Binding2,
     BufferCreateInfo, BufferUsageFlags, ColorAttachment, ColorLoadOp, CommandBuffer,
-    DepthAttachment, Extent2D, FragmentStageInfo, Gpu, ImageFormat, ImageViewHandle, ImageViewType,
-    IndexType, InputRate, MemoryDomain, Offset2D, Rect2D, SampleCount, SamplerHandle,
-    ShaderModuleCreateInfo, ShaderModuleHandle, ShaderStage, VertexBindingInfo, VertexStageInfo,
+    DepthAttachment, Extent2D, Gpu, ImageFormat, ImageViewHandle, ImageViewType, IndexType,
+    InputRate, MemoryDomain, Offset2D, Rect2D, SampleCount, SamplerHandle, ShaderModuleCreateInfo,
+    ShaderModuleHandle, ShaderStage, VertexBindingInfo,
 };
 use nalgebra::{vector, Matrix4, Point3, Point4, Vector2, Vector3, Vector4};
 

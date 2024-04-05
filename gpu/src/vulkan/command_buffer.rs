@@ -635,7 +635,7 @@ impl compute_pass::Impl for VkComputePassCommand {
         let bindings = resources
             .iter()
             .enumerate()
-            .filter(|(i, r)| !r.write)
+            .filter(|(_i, r)| !r.write)
             .map(|(i, r)| {
                 Ok(match r.ty {
                     DescriptorBindingType2::UniformBuffer { handle, .. }

@@ -13,6 +13,9 @@ use winit::window::Window;
 
 pub use gpu_resource_manager::*;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 pub const WHOLE_SIZE: u64 = u64::MAX;
 pub const QUEUE_FAMILY_IGNORED: u32 = u32::MAX;
 
@@ -1252,6 +1255,7 @@ pub enum LogicOp {
 }
 
 #[derive(Clone, Copy, Debug, Default, Hash, Eq, PartialEq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FrontFace {
     #[default]
     CounterClockWise,
@@ -1259,6 +1263,7 @@ pub enum FrontFace {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum InputRate {
     PerVertex,
     PerInstance,
@@ -1334,6 +1339,7 @@ pub struct FragmentStageInfo<'a> {
 }
 
 #[derive(Clone, Copy, Debug, Default, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum PrimitiveTopology {
     #[default]
     TriangleList,
@@ -1345,6 +1351,7 @@ pub enum PrimitiveTopology {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum PolygonMode {
     #[default]
     Fill,
@@ -1362,6 +1369,7 @@ impl Hash for PolygonMode {
 }
 
 #[derive(Clone, Copy, Debug, Default, Hash, Eq, PartialEq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CullMode {
     #[default]
     None,

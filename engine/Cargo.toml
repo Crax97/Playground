@@ -32,7 +32,7 @@ egui = { version = "0.26.0", features = ["bytemuck"] }
 rapier2d = { version = "0.17", features = ["simd-stable", "serde-serialize"] }
 kecs = { git="https://github.com/Crax97/kecs.git" }
 
-gpu = { path = "../gpu" }
+gpu = { path = "../gpu", features = ["serde"] }
 engine_macros = { path = "../engine_macros" }
 rand = "0.8.5"
 num_enum = "0.7.2"

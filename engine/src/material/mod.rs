@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use gpu::ShaderModuleHandle;
+use gpu::{CullMode, FrontFace, PolygonMode, PrimitiveTopology, ShaderModuleHandle};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -39,6 +39,11 @@ pub struct Material {
     pub vertex_shader: AssetHandle<Shader>,
     pub fragment_shader: AssetHandle<Shader>,
     pub domain: MaterialDomain,
+    pub front_face: FrontFace,
+    pub cull_mode: CullMode,
+    pub primitive_topology: PrimitiveTopology,
+    pub polygon_mode: PolygonMode,
+
     pub(crate) parameters: HashMap<String, MaterialParameter>,
 
     #[serde(skip)]
@@ -51,6 +56,11 @@ pub struct MaterialBuilder {
     fragment_shader: AssetHandle<Shader>,
     domain: MaterialDomain,
     parameters: HashMap<String, MaterialParameter>,
+
+    front_face: FrontFace,
+    cull_mode: CullMode,
+    primitive_topology: PrimitiveTopology,
+    polygon_mode: PolygonMode,
 }
 
 impl MaterialBuilder {
@@ -63,6 +73,11 @@ impl MaterialBuilder {
             vertex_shader,
             fragment_shader,
             domain,
+
+            front_face: Default::default(),
+            cull_mode: Default::default(),
+            primitive_topology: Default::default(),
+            polygon_mode: Default::default(),
 
             parameters: HashMap::new(),
             name: None,
@@ -79,6 +94,26 @@ impl MaterialBuilder {
         self
     }
 
+    pub fn front_face(mut self, front_face: FrontFace) -> Self {
+        self.front_face = front_face;
+        self
+    }
+
+    pub fn cull_mode(mut self, cull_mode: CullMode) -> Self {
+        self.cull_mode = cull_mode;
+        self
+    }
+
+    pub fn polygon_mode(mut self, polygon_mode: PolygonMode) -> Self {
+        self.polygon_mode = polygon_mode;
+        self
+    }
+
+    pub fn primitive_topology(mut self, primitive_topology: PrimitiveTopology) -> Self {
+        self.primitive_topology = primitive_topology;
+        self
+    }
+
     pub fn build(self) -> Material {
         let uuid = Uuid::new_v4();
         let name = self
@@ -92,6 +127,10 @@ impl MaterialBuilder {
             domain: self.domain,
             parameters: self.parameters,
             last_tick_change: Tick::now(),
+            front_face: self.front_face,
+            cull_mode: self.cull_mode,
+            primitive_topology: self.primitive_topology,
+            polygon_mode: self.polygon_mode,
         }
     }
 }

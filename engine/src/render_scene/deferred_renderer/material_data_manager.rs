@@ -292,8 +292,11 @@ impl MaterialData for SparseMaterialData {
         }
 
         render_pass.bind_resources_2(MATERIAL_PARAMETER_SLOT, &bindings)?;
-
         render_pass.set_vertex_shader(asset_map.get(&material.vertex_shader).handle);
+        render_pass.set_polygon_mode(material.polygon_mode);
+        render_pass.set_cull_mode(material.cull_mode);
+        render_pass.set_front_face(material.front_face);
+        render_pass.set_primitive_topology(material.primitive_topology);
 
         if pipeline_target != PipelineTarget::DepthOnly {
             render_pass.set_fragment_shader(asset_map.get(&material.fragment_shader).handle);

@@ -1620,6 +1620,7 @@ dependencies = [
  "crossbeam",
  "log",
  "raw-window-handle 0.6.0",
+ "serde",
  "spirv-reflect",
  "thiserror",
  "winit",
