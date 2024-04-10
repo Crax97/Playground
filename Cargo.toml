@@ -4,7 +4,7 @@ members = [
     "engine",
     "engine_macros",
     "engine_macros_tests",
-    "gpu",
+    "gpu", "mgpu",
     "testbench",
 ]
 
