@@ -1,28 +1,34 @@
 mod device;
+mod hal;
 mod swapchain;
 
 pub use device::*;
 pub use swapchain::*;
 
-
 #[derive(Debug)]
 pub enum MgpuError {
-
+    Dynamic(String),
 }
 
 pub type MgpuResult<T> = Result<T, MgpuError>;
 
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
+impl std::fmt::Display for MgpuError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MgpuError::Dynamic(msg) => f.write_str(msg),
+        }
+    }
 }
+impl std::error::Error for MgpuError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    fn description(&self) -> &str {
+        "description() is deprecated; use Display"
+    }
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        self.source()
     }
 }
