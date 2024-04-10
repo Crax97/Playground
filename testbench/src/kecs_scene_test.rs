@@ -11,7 +11,7 @@ use engine::editor::{EguiSceneEditor, TypeEditor};
 
 use engine::kecs_app::{KecsApp, SharedAssetMap};
 use engine::loaders::FileSystemTextureLoader;
-use engine::{egui, Time};
+use engine::{egui, FileSystemMeshLoader, Time};
 
 use engine::input::InputState;
 
@@ -97,6 +97,9 @@ fn main() -> anyhow::Result<()> {
         asset_map
             .write()
             .install_resource_loader(FileSystemTextureLoader::new(state.gpu.clone()));
+        asset_map
+            .write()
+            .install_resource_loader(FileSystemMeshLoader::new(state.gpu.clone()));
         asset_map.write().install("assets/")?;
     }
 

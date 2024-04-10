@@ -275,6 +275,10 @@ impl<const N: usize, T> Bvh<N, T> {
             }
         }
     }
+
+    pub fn clear(&mut self) {
+        *self = Default::default()
+    }
 }
 
 impl<const N: usize, T: Clone> Bvh<N, T> {

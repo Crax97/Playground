@@ -66,10 +66,10 @@ pub struct AssetId {
     pub(crate) id: Index,
 }
 
-pub trait ResourceLoader: Send + Sync + 'static {
-    type LoadedResource: Asset;
+pub trait AssetLoader: Send + Sync + 'static {
+    type LoadedAsset: Asset;
 
-    fn load(&self, path: &Path) -> anyhow::Result<Self::LoadedResource>;
+    fn load(&self, path: &Path) -> anyhow::Result<Self::LoadedAsset>;
     fn accepts_extension(&self, extension: &str) -> bool;
 }
 
@@ -228,15 +228,15 @@ impl AssetMap {
         handle.inc_ref_count();
         handle
     }
-    pub fn install_resource_loader<L: ResourceLoader>(&mut self, loader: L) {
+    pub fn install_resource_loader<L: AssetLoader>(&mut self, loader: L) {
         let old = self
             .resource_loaders
-            .insert(TypeId::of::<L::LoadedResource>(), Box::new(loader));
+            .insert(TypeId::of::<L::LoadedAsset>(), Box::new(loader));
 
         if let Some(old) = old {
             panic!(
                 "A resource loader for resource type {:?} has already been installed of type {:?}",
-                TypeId::of::<L::LoadedResource>(),
+                TypeId::of::<L::LoadedAsset>(),
                 old.type_id()
             )
         }
@@ -551,7 +551,7 @@ pub(super) trait ErasedResourceLoader: Send + Sync + 'static {
     fn accepts_extension_erased(&self, extension: &str) -> bool;
 }
 
-impl<T: ResourceLoader> ErasedResourceLoader for T
+impl<T: AssetLoader> ErasedResourceLoader for T
 where
     T: Send + Sync + 'static,
 {
@@ -733,7 +733,7 @@ mod test {
     use gpu::{make_gpu, Gpu, GpuConfiguration};
 
     use super::{Asset, AssetMap};
-    use crate::{AssetHandle, AssetStatus, ResourceLoader};
+    use crate::{AssetHandle, AssetLoader, AssetStatus};
 
     struct TestAsset {
         val: u32,
@@ -775,10 +775,10 @@ mod test {
 
         struct TestAssetLoader;
 
-        impl ResourceLoader for TestAssetLoader {
-            type LoadedResource = TestAsset;
+        impl AssetLoader for TestAssetLoader {
+            type LoadedAsset = TestAsset;
 
-            fn load(&self, path: &std::path::Path) -> anyhow::Result<Self::LoadedResource> {
+            fn load(&self, path: &std::path::Path) -> anyhow::Result<Self::LoadedAsset> {
                 if path.to_str().unwrap() == "a" {
                     Ok(TestAsset { val: 10 })
                 } else {

@@ -3,6 +3,7 @@ mod gltf_loader;
 mod utils;
 
 use std::borrow::Cow;
+use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use engine::app::egui_support::EguiSupport;
@@ -10,18 +11,13 @@ use engine::app::{app_state::*, bootstrap, App, Console};
 use engine::components::Transform;
 use engine::editor::ui_extension::UiExtension;
 use engine::material::{MaterialBuilder, Shader};
-use engine::{
-    egui, GameScene, LightType, SceneLightInfo, ScenePrimitiveType, ShadowConfiguration, Time,
-};
+use engine::{egui, GameScene, LightType, FileSystemMeshLoader, SceneLightInfo, ScenePrimitiveType, ShadowConfiguration, Time};
 
 use engine::input::InputState;
 use engine::post_process_pass::TonemapPass;
 use engine_macros::glsl;
 use fps_camera::FpsCamera;
-use gpu::{
-    CommandBuffer, Extent2D, Offset2D, PresentMode, Rect2D, ShaderModuleCreateInfo,
-    ShaderModuleHandle,
-};
+use gpu::{CommandBuffer, Extent2D, Gpu, Offset2D, PresentMode, Rect2D, ShaderModuleCreateInfo, ShaderModuleHandle};
 use winit::dpi::{PhysicalPosition, Position};
 
 use crate::gltf_loader::{GltfLoadOptions, GltfLoader};
@@ -35,6 +31,7 @@ use winit::event::MouseButton;
 use winit::event_loop::EventLoop;
 
 use clap::Parser;
+use engine::loaders::FileSystemTextureLoader;
 
 const DEPTH_DRAW: &[u32] = glsl!(
     path = "src/shaders/depth_draw.frag",
@@ -80,6 +77,8 @@ pub struct GLTFViewer {
     egui_support: EguiSupport,
 
     depth_draw: ShaderModuleHandle,
+
+    wants_to_clear_scene: bool,
 }
 
 impl GLTFViewer {
@@ -267,6 +266,9 @@ impl App for GLTFViewer {
         let time = Time::new();
 
         let mut resource_map = AssetMap::new(app_state.gpu.clone(), true);
+
+        resource_map.install_resource_loader(FileSystemTextureLoader::new(app_state.gpu.clone()));
+        resource_map.install_resource_loader(FileSystemMeshLoader::new(app_state.gpu.clone()));
         let cube_mesh = utils::load_cube_to_resource_map(app_state.gpu(), &mut resource_map)?;
 
         // TODO: avoid duplicating this module creation
@@ -373,10 +375,12 @@ impl App for GLTFViewer {
             label: Some("Depth draw"),
             code: bytemuck::cast_slice(DEPTH_DRAW),
         })?;
-        let mut camera = FpsCamera::default();
-        camera.location = point![-292.7, 136.0, -216.7];
-        camera.roll = 19.0;
-        camera.pitch = 61.0;
+        let camera = FpsCamera {
+            location: point![-292.7, 136.0, -216.7],
+            roll: 19.0,
+            pitch: 61.0,
+            ..Default::default()
+        };
 
         Ok(Self {
             scene_renderer,
@@ -390,6 +394,7 @@ impl App for GLTFViewer {
             time,
             egui_support,
             depth_draw,
+            wants_to_clear_scene: false,
         })
     }
 
@@ -426,6 +431,10 @@ impl App for GLTFViewer {
     fn begin_frame(&mut self, app_state: &mut AppState) -> anyhow::Result<()> {
         self.time.begin_frame();
         self.egui_support.begin_frame(&app_state.window, &self.time);
+        if self.wants_to_clear_scene {
+            self.wants_to_clear_scene = false;
+            self.scene.clear();
+        }
         Ok(())
     }
 
@@ -449,6 +458,14 @@ impl App for GLTFViewer {
                         "Primitives drawn last frame: {}",
                         self.scene_renderer.drawcalls_last_frame,
                     ));
+                    if ui.button("Clear scene").clicked() {
+                        self.wants_to_clear_scene = true;
+                    }
+                    if ui.button("Save scene").clicked() {
+                        let serialized =
+                            serde_json::to_string_pretty(&self.scene).expect("serialize");
+                        std::fs::write("./scene.json", serialized).expect("write fs");
+                    }
                 });
 
                 ui.group(|ui| {
@@ -660,6 +677,7 @@ impl App for GLTFViewer {
         self.egui_support.destroy(app_state.gpu());
     }
 }
+
 
 fn main() -> anyhow::Result<()> {
     bootstrap::<GLTFViewer>()

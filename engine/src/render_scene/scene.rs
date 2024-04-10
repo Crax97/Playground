@@ -16,7 +16,7 @@ use thunderdome::{Arena, Index};
 
 #[derive(Serialize, Deserialize, Resource, Default)]
 pub struct GameScene {
-    pub scene: SceneContent,
+    pub content: SceneContent,
 
     skybox_material: Option<AssetHandle<Material>>,
     skybox_texture: Option<AssetHandle<Texture>>,
@@ -231,11 +231,11 @@ impl GameScene {
     }
 
     pub fn get(&self, handle: PrimitiveHandle) -> &ScenePrimitive {
-        &self.scene.primitives[handle.0]
+        &self.content.primitives[handle.0]
     }
 
     pub fn get_mut(&mut self, handle: PrimitiveHandle) -> &mut ScenePrimitive {
-        &mut self.scene.primitives[handle.0]
+        &mut self.content.primitives[handle.0]
     }
 
     pub fn all_lights(&self) -> impl Iterator<Item = (PrimitiveHandle, &ScenePrimitive)> {
@@ -251,20 +251,24 @@ impl GameScene {
             _ => None,
         };
 
-        let index = self.scene.primitives.insert(node);
+        let index = self.content.primitives.insert(node);
 
         if let Some((aabb_min, aabb_max)) = extremes {
-            self.scene.bvh.add(index, aabb_min, aabb_max);
+            self.content.bvh.add(index, aabb_min, aabb_max);
         }
 
         PrimitiveHandle(index)
+    }
+
+    pub fn clear(&mut self) {
+        self.content = Default::default();
     }
 }
 
 impl GameScene {
     pub fn new() -> Self {
         Self {
-            scene: Default::default(),
+            content: Default::default(),
             current_lights_iteration: 0,
 
             skybox_texture: None,
@@ -279,13 +283,13 @@ impl GameScene {
         label: Option<String>,
     ) -> PrimitiveHandle {
         let (aabb_min, aabb_max) = primitive.bounds.box_extremes();
-        let prim_index = self.scene.primitives.insert(ScenePrimitive {
+        let prim_index = self.content.primitives.insert(ScenePrimitive {
             ty: ScenePrimitiveType::Mesh(primitive),
             transform,
             label: label.unwrap_or("Mesh".to_owned()),
             tags: Default::default(),
         });
-        self.scene.bvh.add(prim_index, aabb_min, aabb_max);
+        self.content.bvh.add(prim_index, aabb_min, aabb_max);
 
         PrimitiveHandle(prim_index)
     }
@@ -297,7 +301,7 @@ impl GameScene {
     ) -> Vec<&ScenePrimitive> {
         if intersection_mode == IntersectionMode::None {
             return self
-                .scene
+                .content
                 .primitives
                 .iter()
                 .filter_map(|(_, p)| match &p.ty {
@@ -306,10 +310,10 @@ impl GameScene {
                 })
                 .collect();
         } else if intersection_mode == IntersectionMode::Bvh {
-            let indices = self.scene.bvh.intersect_frustum_copy(frustum);
+            let indices = self.content.bvh.intersect_frustum_copy(frustum);
             indices
                 .iter()
-                .map(|id| &self.scene.primitives[*id])
+                .map(|id| &self.content.primitives[*id])
                 .map(|p| match &p.ty {
                     ScenePrimitiveType::Mesh(_) => p,
                     ScenePrimitiveType::Light(_) | ScenePrimitiveType::Empty => {
@@ -318,7 +322,7 @@ impl GameScene {
                 })
                 .collect()
         } else {
-            self.scene
+            self.content
                 .primitives
                 .iter()
                 .filter_map(|(_, prim)| match &prim.ty {
@@ -336,7 +340,7 @@ impl GameScene {
         label: Option<String>,
     ) -> PrimitiveHandle {
         self.increment_light_counter();
-        let idx = self.scene.primitives.insert(ScenePrimitive {
+        let idx = self.content.primitives.insert(ScenePrimitive {
             ty: ScenePrimitiveType::Light(light),
             transform,
             label: label.unwrap_or_else(|| {
@@ -354,7 +358,7 @@ impl GameScene {
     }
 
     pub fn all_primitives(&self) -> impl Iterator<Item = (PrimitiveHandle, &ScenePrimitive)> {
-        self.scene
+        self.content
             .primitives
             .iter()
             .map(|(i, p)| (PrimitiveHandle(i), p))
@@ -363,7 +367,7 @@ impl GameScene {
     pub fn all_primitives_mut(
         &mut self,
     ) -> impl Iterator<Item = (PrimitiveHandle, &mut ScenePrimitive)> {
-        self.scene
+        self.content
             .primitives
             .iter_mut()
             .map(|(i, p)| (PrimitiveHandle(i), p))
