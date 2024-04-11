@@ -5,8 +5,9 @@ fn main() {
     let event_loop = EventLoop::new().unwrap();
     let device = Device::new(DeviceConfiguration {
         app_name: Some("Triangle Application"),
-        features: DeviceFeatures::empty(),
+        features: DeviceFeatures::DEBUG_LAYERS,
         device_preference: Some(DevicePreference::HighPerformance),
+        desired_frames_in_flight: 3,
         display_handle: event_loop.display_handle().unwrap().as_raw(),
     })
     .expect("Failed to create gpu device");

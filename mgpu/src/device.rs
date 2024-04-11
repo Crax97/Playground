@@ -27,6 +27,7 @@ pub struct DeviceConfiguration<'a> {
     pub app_name: Option<&'a str>,
     pub features: DeviceFeatures,
     pub device_preference: Option<DevicePreference>,
+    pub desired_frames_in_flight: u32,
 
     #[cfg(feature = "swapchain")]
     pub display_handle: raw_window_handle::RawDisplayHandle,

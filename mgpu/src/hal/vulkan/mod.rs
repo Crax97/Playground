@@ -1,3 +1,8 @@
+mod util;
+
+#[cfg(feature = "swapchain")]
+mod swapchain;
+
 use crate::hal::Hal;
 use crate::{DeviceConfiguration, DeviceFeatures, DevicePreference, MgpuError, MgpuResult};
 use ash::vk::{DebugUtilsMessageSeverityFlagsEXT, QueueFlags};
@@ -7,8 +12,7 @@ use std::collections::HashMap;
 use std::ffi::{self, c_char, CStr, CString};
 use std::sync::Arc;
 
-#[cfg(feature = "swapchain")]
-mod swapchain;
+use self::swapchain::SwapchainError;
 
 pub struct VulkanHal {
     entry: Entry,
@@ -16,6 +20,11 @@ pub struct VulkanHal {
     physical_device: VulkanPhysicalDevice,
     logical_device: VulkanLogicalDevice,
     debug_utilities: Option<VulkanDebugUtilities>,
+    configuration: VulkanHalConfiguration,
+}
+
+pub struct VulkanHalConfiguration {
+    frames_in_flight: u32,
 }
 
 pub struct VulkanPhysicalDevice {
@@ -35,11 +44,17 @@ pub struct VulkanQueueFamilies {
     pub families: Vec<VulkanQueueFamily>,
 }
 
+pub struct VulkanQueue {
+    handle: vk::Queue,
+    family_index: u32,
+    queue_index: u32,
+}
+
 pub struct VulkanLogicalDevice {
     handle: ash::Device,
-    graphics_queue: vk::Queue,
-    compute_queue: vk::Queue,
-    transfer_queue: vk::Queue,
+    graphics_queue: VulkanQueue,
+    compute_queue: VulkanQueue,
+    transfer_queue: VulkanQueue,
 }
 
 pub(crate) struct VulkanDebugUtilities {
@@ -57,6 +72,9 @@ pub enum VulkanHalError {
     LayerNotAvailable(std::borrow::Cow<'static, str>),
     ExtensionNotAvailable(std::borrow::Cow<'static, str>),
     NoSuitableQueueFamily(vk::QueueFlags),
+
+    #[cfg(feature = "swapchain")]
+    SwapchainError(SwapchainError),
 }
 
 pub type VulkanHalResult<T> = Result<T, VulkanHalError>;
@@ -108,6 +126,9 @@ impl VulkanHal {
             physical_device,
             debug_utilities,
             logical_device,
+            configuration: VulkanHalConfiguration {
+                frames_in_flight: configuration.desired_frames_in_flight,
+            },
         };
 
         Ok(Arc::new(hal))
@@ -131,14 +152,15 @@ impl VulkanHal {
             .engine_name(engine_name)
             .api_version(Self::VULKAN_API_VERSION);
         let mut requested_layers = vec![];
+        let mut requested_instance_extensions: Vec<*const c_char> = vec![];
+
         if configuration
             .features
             .contains(DeviceFeatures::DEBUG_LAYERS)
         {
             requested_layers.push(LAYER_KHRONOS_VALIDATION.as_ptr());
+            requested_instance_extensions.push(ash::ext::debug_utils::NAME.as_ptr());
         }
-
-        let mut requested_instance_extensions: Vec<*const c_char> = vec![];
 
         if cfg!(feature = "swapchain") {
             let extensions =
@@ -153,7 +175,8 @@ impl VulkanHal {
         )?;
         let instance_info = vk::InstanceCreateInfo::default()
             .application_info(&application_info)
-            .enabled_layer_names(&requested_layers);
+            .enabled_layer_names(&requested_layers)
+            .enabled_extension_names(&requested_instance_extensions);
         let instance =
             unsafe { entry.create_instance(&instance_info, get_allocation_callbacks()) }?;
         Ok(instance)
@@ -277,11 +300,14 @@ impl VulkanHal {
         physical_device: vk::PhysicalDevice,
         queue_families: &VulkanQueueFamilies,
     ) -> VulkanHalResult<VulkanLogicalDevice> {
+        const KHR_SWAPCHAIN_EXTENSION: &CStr =
+            unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_KHR_swapchain\0") };
+
         #[derive(Default)]
         struct QueueInfo {
             count: u32,
             priorities: Vec<f32>,
-        };
+        }
         let mut num_queues = HashMap::<u32, QueueInfo>::default();
         for family in &queue_families.families {
             num_queues.entry(family.index).or_default().count += 1;
@@ -303,7 +329,10 @@ impl VulkanHal {
             unsafe { instance.get_physical_device_features(physical_device) };
         let device_features = Self::get_physical_device_features(supported_device_features);
 
-        let required_extensions = vec![];
+        let mut required_extensions = vec![];
+        if cfg!(feature = "swapchain") {
+            required_extensions.push(KHR_SWAPCHAIN_EXTENSION.as_ptr());
+        }
         Self::ensure_requested_device_extensions_are_available(
             instance,
             physical_device,
@@ -346,9 +375,21 @@ impl VulkanHal {
 
         Ok(VulkanLogicalDevice {
             handle: logical_device,
-            graphics_queue,
-            compute_queue,
-            transfer_queue,
+            graphics_queue: VulkanQueue {
+                handle: graphics_queue,
+                family_index: g_f,
+                queue_index: g_i,
+            },
+            compute_queue: VulkanQueue {
+                handle: compute_queue,
+                family_index: c_f,
+                queue_index: c_i,
+            },
+            transfer_queue: VulkanQueue {
+                handle: transfer_queue,
+                family_index: t_f,
+                queue_index: t_i,
+            },
         })
     }
 
@@ -443,6 +484,8 @@ impl From<VulkanHalError> for MgpuError {
             VulkanHalError::NoSuitableQueueFamily(flags) => {
                 format!("No queue family found with the following properties: {flags:?}")
             }
+            #[cfg(feature = "swapchain")]
+            VulkanHalError::SwapchainError(err) => format!("Swapchain error: {err:?}"),
         };
         MgpuError::Dynamic(format!("Vulkan Hal error: {}", message))
     }
