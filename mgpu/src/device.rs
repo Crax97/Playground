@@ -1,8 +1,12 @@
 use crate::hal::Hal;
-use crate::{hal, MgpuResult};
+use crate::{hal, Image, ImageDescription, ImageViewDescription, MgpuResult};
+use ash::vk::ImageView;
 use bitflags::bitflags;
 use std::fmt::Formatter;
 use std::sync::Arc;
+
+#[cfg(feature = "swapchain")]
+use crate::swapchain::*;
 
 bitflags! {
     #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -50,6 +54,34 @@ impl Device {
 
     pub fn get_info(&self) -> DeviceInfo {
         self.device_info.clone()
+    }
+
+    #[cfg(feature = "swapchain")]
+    pub fn create_swapchain(
+        &self,
+        swapchain_info: &SwapchainCreationInfo,
+    ) -> MgpuResult<Swapchain> {
+        let pimpl = self.hal.create_swapchain_impl(swapchain_info)?;
+        Ok(Swapchain { pimpl })
+    }
+
+    pub fn create_image(&self, image_description: &ImageDescription) -> MgpuResult<Image> {
+        todo!()
+    }
+
+    pub fn destroy_image(&self, image: Image) {
+        todo!()
+    }
+
+    pub fn create_image_view(
+        &self,
+        image_view_description: &ImageViewDescription,
+    ) -> MgpuResult<ImageView> {
+        todo!()
+    }
+
+    pub fn destroy_image_view(&self, image_view: ImageView) {
+        todo!()
     }
 }
 
