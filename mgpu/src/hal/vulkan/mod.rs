@@ -3,6 +3,7 @@ mod util;
 #[cfg(feature = "swapchain")]
 mod swapchain;
 
+use crate::hal::vulkan::util::VulkanImage;
 use crate::hal::Hal;
 use crate::{DeviceConfiguration, DeviceFeatures, DevicePreference, MgpuError, MgpuResult};
 use ash::vk::{DebugUtilsMessageSeverityFlagsEXT, QueueFlags};
@@ -13,6 +14,7 @@ use std::ffi::{self, c_char, CStr, CString};
 use std::sync::Arc;
 
 use self::swapchain::SwapchainError;
+use self::util::{ResolveVulkan, VulkanImageView, VulkanResolver};
 
 pub struct VulkanHal {
     entry: Entry,
@@ -21,6 +23,7 @@ pub struct VulkanHal {
     logical_device: VulkanLogicalDevice,
     debug_utilities: Option<VulkanDebugUtilities>,
     configuration: VulkanHalConfiguration,
+    resolver: VulkanResolver,
 }
 
 pub struct VulkanHalConfiguration {
@@ -60,6 +63,7 @@ pub struct VulkanLogicalDevice {
 pub(crate) struct VulkanDebugUtilities {
     debug_messenger: vk::DebugUtilsMessengerEXT,
     debug_instance: ash::ext::debug_utils::Instance,
+    debug_device: ash::ext::debug_utils::Device,
 }
 
 pub struct VulkanDeviceFeatures {
@@ -109,17 +113,22 @@ impl VulkanHal {
         let instance = Self::create_instance(&entry, configuration)?;
         let physical_device = Self::pick_physical_device(&instance, configuration)?;
 
+        let queue_families = Self::pick_queue_families(&instance, physical_device.handle)?;
+        let logical_device =
+            Self::create_device(&instance, physical_device.handle, &queue_families)?;
+
         let debug_utilities = if configuration
             .features
             .contains(DeviceFeatures::DEBUG_LAYERS)
         {
-            Some(Self::create_debug_utilities(&entry, &instance)?)
+            Some(Self::create_debug_utilities(
+                &entry,
+                &instance,
+                &logical_device.handle,
+            )?)
         } else {
             None
         };
-        let queue_families = Self::pick_queue_families(&instance, physical_device.handle)?;
-        let logical_device =
-            Self::create_device(&instance, physical_device.handle, &queue_families)?;
         let hal = Self {
             entry,
             instance,
@@ -129,6 +138,7 @@ impl VulkanHal {
             configuration: VulkanHalConfiguration {
                 frames_in_flight: configuration.desired_frames_in_flight,
             },
+            resolver: Default::default(),
         };
 
         Ok(Arc::new(hal))
@@ -270,8 +280,10 @@ impl VulkanHal {
     fn create_debug_utilities(
         entry: &Entry,
         instance: &Instance,
+        device: &ash::Device,
     ) -> VulkanHalResult<VulkanDebugUtilities> {
         let debug_utils_ext = ash::ext::debug_utils::Instance::new(entry, instance);
+        let debug_utils_device = ash::ext::debug_utils::Device::new(instance, device);
 
         let messenger_info = vk::DebugUtilsMessengerCreateInfoEXT::default()
             .message_severity(
@@ -292,6 +304,7 @@ impl VulkanHal {
         Ok(VulkanDebugUtilities {
             debug_messenger: messenger,
             debug_instance: debug_utils_ext,
+            debug_device: debug_utils_device,
         })
     }
 
@@ -460,6 +473,70 @@ impl VulkanHal {
             }
         }
 
+        Ok(())
+    }
+
+    fn wrap_raw_image(
+        &self,
+        image: vk::Image,
+        name: Option<&str>,
+    ) -> VulkanHalResult<crate::Image> {
+        if let Some(name) = name {
+            self.try_assign_debug_name(image, name)?;
+        }
+        let vulkan_image = VulkanImage {
+            label: name.map(ToOwned::to_owned),
+            handle: image,
+        };
+        let handle = self.resolver.add(vulkan_image);
+        Ok(crate::Image {
+            id: handle.to_u64(),
+        })
+    }
+
+    fn wrap_raw_image_view(
+        &self,
+        image: crate::Image,
+        view: vk::ImageView,
+        name: Option<&str>,
+    ) -> VulkanHalResult<crate::ImageView> {
+        if let Some(name) = name {
+            self.try_assign_debug_name(view, name)?;
+        }
+        let vulkan_image = self
+            .resolver
+            .resolve_vulkan(image)
+            .expect("Failed to resolve resource");
+        let vulkan_image = VulkanImageView {
+            label: name.map(ToOwned::to_owned),
+            handle: view,
+            owner: vulkan_image,
+            wrapped: true,
+        };
+        let handle = self.resolver.add(vulkan_image);
+        Ok(crate::ImageView {
+            id: handle.to_u64(),
+            owner: image,
+        })
+    }
+
+    fn try_assign_debug_name<T: ash::vk::Handle>(
+        &self,
+        object: T,
+        name: &str,
+    ) -> VulkanHalResult<()> {
+        if let Some(debug_utils) = &self.debug_utilities {
+            let string = CString::new(name).expect("Failed to create string name");
+            let object_name = string.as_c_str();
+            let debug_object_info = vk::DebugUtilsObjectNameInfoEXT::default()
+                .object_handle(object)
+                .object_name(object_name);
+            unsafe {
+                debug_utils
+                    .debug_device
+                    .set_debug_utils_object_name(&debug_object_info)?
+            };
+        }
         Ok(())
     }
 }

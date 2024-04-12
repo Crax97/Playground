@@ -66,6 +66,8 @@ macro_rules! define_resource_resolver {
         }
 
         impl ResourceResolver {
+
+            /// Gets a read-only reference to the ResourceArena for T
             pub fn get<T>(&self) -> RwLockReadGuard<'_, ResourceArena<T>>
             where
                 ResourceResolver: GetMap<T>,
@@ -73,6 +75,7 @@ macro_rules! define_resource_resolver {
                 <Self as GetMap<T>>::get(&self)
             }
 
+            /// Gets a writeable reference to the ResourceArena for T
             pub fn get_mut<T>(&self) -> RwLockWriteGuard<'_, ResourceArena<T>>
             where
                 ResourceResolver: GetMap<T>,
@@ -80,10 +83,13 @@ macro_rules! define_resource_resolver {
                 <Self as GetMap<T>>::get_mut(&self)
             }
 
+            /// Adds a resource to the ResourceArena for T
             pub fn add<T>(&self, resource: T) -> Handle<T> where ResourceResolver: GetMap<T> {
                 self.get_mut::<T>().add(resource)
             }
 
+            /// Applies a function to the resource associated with the given `handle`, returning the result if it exists
+            /// Otherwise it returns None (useful for extracting an inner field without cloning/copying the resource)
             pub fn apply<T, U>(&self, handle: impl Into<Handle<T>>, f: impl FnOnce(&T) -> U) -> Option<U> where ResourceResolver: GetMap<T> {
                 if let Some(res) = self.get::<T>().resolve(handle.into()) {
                     Some(f(res))
@@ -92,14 +98,17 @@ macro_rules! define_resource_resolver {
                 }
             }
 
+            /// Removes a resource if it exists, returning the removed resource
             pub fn remove<T>(&self, handle: impl Into<Handle<T>>) -> Option<T> where ResourceResolver: GetMap<T> {
                 self.get_mut::<T>().remove(handle.into())
             }
 
+            /// Resolves a copy of the resource if it exists
             pub fn resolve<T: Copy>(&self, handle: impl Into<Handle<T>>) -> Option<T> where ResourceResolver: GetMap<T> {
                 self.get::<T>().resolve_copy(handle.into())
             }
 
+            /// Resolves a clone of the resource if it exists
             pub fn resolve_clone<T: Copy>(&self, handle: impl Into<Handle<T>>) -> Option<T> where ResourceResolver: GetMap<T> {
                 self.get::<T>().resolve_clone(handle.into())
             }

@@ -1,12 +1,14 @@
+use std::sync::atomic::AtomicUsize;
+
 use ash::{
     khr::{surface, swapchain},
-    vk::{self},
+    vk,
 };
 use raw_window_handle::{DisplayHandle, WindowHandle};
 
 use crate::{
     hal::vulkan::{get_allocation_callbacks, util::ToVk},
-    ImageFormat, PresentMode, SwapchainCreationInfo, SwapchainImpl,
+    Image, ImageFormat, PresentMode, SwapchainCreationInfo, SwapchainImage, SwapchainImpl,
 };
 
 use super::{VulkanHal, VulkanHalResult};
@@ -23,6 +25,9 @@ struct SwapchainData {
     present_modes: Vec<vk::PresentModeKHR>,
     surface_formats: Vec<vk::SurfaceFormatKHR>,
     current_format: vk::SurfaceFormatKHR,
+
+    images: Vec<SwapchainImage>,
+    current_swapchain_image: AtomicUsize,
 
     swapchain: vk::SwapchainKHR,
     surface: vk::SurfaceKHR,
@@ -171,6 +176,36 @@ impl VulkanSwapchain {
             swapchain_device.create_swapchain(&swapchain_create_info, get_allocation_callbacks())?
         };
 
+        let images = unsafe { swapchain_device.get_swapchain_images(swapchain)? };
+        let mut swapchain_images = vec![];
+        for image in images {
+            let mut image_view_info = vk::ImageViewCreateInfo::default()
+                .image(image)
+                .components(vk::ComponentMapping {
+                    r: vk::ComponentSwizzle::R,
+                    g: vk::ComponentSwizzle::G,
+                    b: vk::ComponentSwizzle::B,
+                    a: vk::ComponentSwizzle::A,
+                })
+                .format(image_format.format)
+                .subresource_range(
+                    vk::ImageSubresourceRange::default()
+                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                        .base_array_layer(0)
+                        .base_mip_level(0)
+                        .layer_count(1)
+                        .level_count(1),
+                )
+                .view_type(vk::ImageViewType::TYPE_2D);
+            let mut view =
+                unsafe { device.create_image_view(&image_view_info, get_allocation_callbacks())? };
+            let image = unsafe { hal.wrap_raw_image(image, Some("Swapchain image"))? };
+            let view =
+                unsafe { hal.wrap_raw_image_view(image, view, Some("Swapchain image view"))? };
+
+            swapchain_images.push(SwapchainImage { image, view })
+        }
+
         Ok(SwapchainData {
             capabilities: surface_capabilities,
             present_modes,
@@ -178,6 +213,8 @@ impl VulkanSwapchain {
             current_format: image_format,
             surface,
             swapchain,
+            images: swapchain_images,
+            current_swapchain_image: AtomicUsize::new(0),
         })
     }
 }

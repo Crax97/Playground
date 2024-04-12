@@ -1,6 +1,9 @@
 use ash::vk;
 
-use crate::{ImageFormat, PresentMode};
+use crate::{
+    util::{define_resource_resolver, Handle},
+    Image, ImageFormat, ImageView, PresentMode,
+};
 
 pub(crate) trait ToVk {
     type Target;
@@ -45,3 +48,57 @@ impl ToVk for PresentMode {
         }
     }
 }
+
+#[derive(Clone)]
+pub(super) struct VulkanImage {
+    pub(super) label: Option<String>,
+    pub(super) handle: vk::Image,
+}
+
+#[derive(Clone)]
+pub(super) struct VulkanImageView {
+    pub(super) label: Option<String>,
+    pub(super) handle: vk::ImageView,
+    pub(super) owner: vk::Image,
+    /// if true then the image was created outside of the vulkan instance
+    /// e.g it could be a swapchain image
+    pub(super) wrapped: bool,
+}
+
+define_resource_resolver!(
+    VulkanImage => images,
+    VulkanImageView => image_views
+);
+
+pub(super) trait ResolveVulkan<T, H>
+where
+    Self: Sized,
+{
+    fn resolve_vulkan(&self, handle: H) -> Option<T>;
+}
+
+pub(in crate::hal::vulkan) type VulkanResolver = ResourceResolver;
+
+macro_rules! impl_util_methods {
+    ($handle:ty, $object:ty, $vulkan_ty:ty) => {
+        impl From<$handle> for Handle<$object> {
+            fn from(handle: $handle) -> Handle<$object> {
+                unsafe { Handle::from_u64(handle.id) }
+            }
+        }
+
+        impl<H> ResolveVulkan<$vulkan_ty, H> for VulkanResolver
+        where
+            H: Into<Handle<$object>>,
+        {
+            fn resolve_vulkan(&self, handle: H) -> Option<$vulkan_ty> {
+                self.get::<$object>()
+                    .resolve(handle.into())
+                    .map(|v| v.handle)
+            }
+        }
+    };
+}
+
+impl_util_methods!(Image, VulkanImage, vk::Image);
+impl_util_methods!(ImageView, VulkanImageView, vk::ImageView);
