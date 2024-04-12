@@ -2,6 +2,9 @@ mod device;
 mod hal;
 mod swapchain;
 
+#[macro_use]
+pub(crate) mod util;
+
 use bitflags::bitflags;
 
 pub use device::*;
@@ -109,6 +112,7 @@ pub struct Image {
 /// An image view is a view over a portion of an image
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 pub struct ImageView {
+    owner: Image,
     id: u64,
 }
 
