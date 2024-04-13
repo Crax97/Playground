@@ -11,6 +11,7 @@ use ash::{vk, Entry, Instance};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::{self, c_char, CStr, CString};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use self::swapchain::SwapchainError;
@@ -24,6 +25,7 @@ pub struct VulkanHal {
     debug_utilities: Option<VulkanDebugUtilities>,
     configuration: VulkanHalConfiguration,
     resolver: VulkanResolver,
+    frames_in_flight: Arc<FramesInFlight>,
 }
 
 pub struct VulkanHalConfiguration {
@@ -65,6 +67,14 @@ pub(crate) struct VulkanDebugUtilities {
     debug_instance: ash::ext::debug_utils::Instance,
     debug_device: ash::ext::debug_utils::Device,
 }
+pub(crate) struct FrameInFlight {
+    work_ended_fence: vk::Fence,
+}
+
+pub(crate) struct FramesInFlight {
+    frames: Vec<FrameInFlight>,
+    current_frame_in_flight: AtomicUsize,
+}
 
 pub struct VulkanDeviceFeatures {
     swapchain_support: bool,
@@ -99,10 +109,41 @@ impl Hal for VulkanHal {
     fn create_swapchain_impl(
         &self,
         swapchain_info: &crate::SwapchainCreationInfo,
-    ) -> MgpuResult<Box<dyn crate::SwapchainImpl>> {
+    ) -> MgpuResult<u64> {
         use self::swapchain::VulkanSwapchain;
+        let swapchain = VulkanSwapchain::create(self, swapchain_info)?;
 
-        Ok(Box::new(VulkanSwapchain::create(self, swapchain_info)?))
+        let handle = self.resolver.add(swapchain);
+        Ok(handle.to_u64())
+    }
+
+    #[cfg(feature = "swapchain")]
+    fn swapchain_acquire_next_image(&self, id: u64) -> MgpuResult<crate::SwapchainImage> {
+        use crate::{hal::vulkan::swapchain::VulkanSwapchain, util::Handle, SwapchainImage};
+
+        Ok(self
+            .resolver
+            .apply_mut::<VulkanSwapchain, SwapchainImage>(
+                unsafe { Handle::from_u64(id) },
+                |swapchain| {
+                    let (index, _) = unsafe {
+                        swapchain
+                            .swapchain_device
+                            .acquire_next_image(
+                                swapchain.handle,
+                                u64::MAX,
+                                vk::Semaphore::null(),
+                                swapchain.acquire_fence,
+                            )
+                            .expect("Failed to get swapchain")
+                    };
+
+                    swapchain.current_image_index = Some(index);
+
+                    Ok(swapchain.data.images[index as usize])
+                },
+            )
+            .expect("TODO Correct error"))
     }
 }
 
@@ -129,6 +170,8 @@ impl VulkanHal {
         } else {
             None
         };
+
+        let frames_in_flight = Self::create_frames_in_flight(&logical_device, configuration)?;
         let hal = Self {
             entry,
             instance,
@@ -139,6 +182,7 @@ impl VulkanHal {
                 frames_in_flight: configuration.desired_frames_in_flight,
             },
             resolver: Default::default(),
+            frames_in_flight: Arc::new(frames_in_flight),
         };
 
         Ok(Arc::new(hal))
@@ -476,7 +520,7 @@ impl VulkanHal {
         Ok(())
     }
 
-    fn wrap_raw_image(
+    unsafe fn wrap_raw_image(
         &self,
         image: vk::Image,
         name: Option<&str>,
@@ -494,7 +538,7 @@ impl VulkanHal {
         })
     }
 
-    fn wrap_raw_image_view(
+    unsafe fn wrap_raw_image_view(
         &self,
         image: crate::Image,
         view: vk::ImageView,
@@ -538,6 +582,36 @@ impl VulkanHal {
             };
         }
         Ok(())
+    }
+
+    fn create_frames_in_flight(
+        logical_device: &VulkanLogicalDevice,
+        configuration: &DeviceConfiguration,
+    ) -> VulkanHalResult<FramesInFlight> {
+        let mut frames = vec![];
+        let device = &logical_device.handle;
+        for _ in 0..configuration.desired_frames_in_flight {
+            let fence = unsafe {
+                device.create_fence(
+                    &vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED),
+                    get_allocation_callbacks(),
+                )?
+            };
+            frames.push(FrameInFlight {
+                work_ended_fence: fence,
+            });
+        }
+        Ok(FramesInFlight {
+            frames,
+            current_frame_in_flight: AtomicUsize::new(0),
+        })
+    }
+}
+
+impl FramesInFlight {
+    fn current(&self) -> &FrameInFlight {
+        let current = self.current_frame_in_flight.load(Ordering::Relaxed);
+        &self.frames[current]
     }
 }
 

@@ -50,7 +50,7 @@ pub struct Entry<T> {
 macro_rules! define_resource_resolver {
     ($($resource:ty => $map_name:ident),*) => {
         use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-        use crate::util::ResourceArena;
+        use crate::{util::ResourceArena, MgpuResult, MgpuError};
 
 
         #[derive(Default)]
@@ -88,13 +88,21 @@ macro_rules! define_resource_resolver {
                 self.get_mut::<T>().add(resource)
             }
 
-            /// Applies a function to the resource associated with the given `handle`, returning the result if it exists
-            /// Otherwise it returns None (useful for extracting an inner field without cloning/copying the resource)
-            pub fn apply<T, U>(&self, handle: impl Into<Handle<T>>, f: impl FnOnce(&T) -> U) -> Option<U> where ResourceResolver: GetMap<T> {
+            /// Applies a function to the resource associated with the given `handle`, returning the result if f succeeds
+            pub fn apply<T, U>(&self, handle: impl Into<Handle<T>>, f: impl FnOnce(&T) -> MgpuResult<U>) -> MgpuResult<U> where ResourceResolver: GetMap<T> {
                 if let Some(res) = self.get::<T>().resolve(handle.into()) {
-                    Some(f(res))
+                    f(res)
                 } else {
-                    None
+                    Err(MgpuError::InvalidHandle)
+                }
+            }
+
+            /// Applies a function to the resource associated with the given `handle`, returning the result if it exists
+            pub fn apply_mut<T, U>(&self, handle: impl Into<Handle<T>>, f: impl FnOnce(&mut T) -> MgpuResult<U>) -> MgpuResult<U> where ResourceResolver: GetMap<T> {
+                if let Some(res) = self.get_mut::<T>().resolve_mut(handle.into()) {
+                    f(res)
+                } else {
+                    Err(MgpuError::InvalidHandle)
                 }
             }
 

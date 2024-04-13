@@ -1,6 +1,6 @@
 use raw_window_handle::{DisplayHandle, WindowHandle};
 
-use crate::{Extents2D, Image, ImageFormat, ImageView, MgpuResult};
+use crate::{Device, Extents2D, Image, ImageFormat, ImageView, MgpuResult};
 
 pub struct SwapchainCreationInfo<'a> {
     pub display_handle: DisplayHandle<'a>,
@@ -14,10 +14,14 @@ pub enum PresentMode {
     Fifo,
 }
 
+#[derive(Clone)]
 pub struct Swapchain {
-    pub(crate) pimpl: Box<dyn SwapchainImpl>,
+    pub(crate) device: Device,
+    pub(crate) id: u64,
+    pub(crate) current_acquired_image: Option<SwapchainImage>,
 }
 
+#[derive(Clone, Copy)]
 pub struct SwapchainImage {
     pub image: Image,
     pub view: ImageView,
@@ -25,26 +29,30 @@ pub struct SwapchainImage {
 
 impl Swapchain {
     pub fn set_present_mode(&mut self, present_mode: PresentMode) -> MgpuResult<bool> {
-        self.pimpl.set_present_mode(present_mode)
+        todo!()
+        // self.pimpl.set_present_mode(present_mode)
     }
     pub fn resized(&mut self, new_extents: Extents2D) -> MgpuResult<()> {
-        self.pimpl.resized(new_extents)
+        todo!()
+        // self.pimpl.resized(new_extents)
     }
     pub fn acquire_next_image(&mut self) -> MgpuResult<SwapchainImage> {
-        self.pimpl.acquire_next_image()
+        let image = self.device.hal.swapchain_acquire_next_image(self.id)?;
+        let old_image = self.current_acquired_image.replace(image);
+        assert!(old_image.is_none(), "Called acquire without present!");
+
+        Ok(image)
     }
     pub fn current_format(&self) -> ImageFormat {
-        self.pimpl.current_format()
+        todo!()
+        // self.pimpl.current_format()
     }
     pub fn present(&mut self) -> MgpuResult<()> {
-        self.pimpl.present()
+        let image = self
+            .current_acquired_image
+            .take()
+            .expect("Called present without acquire!");
+        self.device.write_rdg().add_present_pass(image, self.id);
+        Ok(())
     }
-}
-
-pub(crate) trait SwapchainImpl: Send + Sync {
-    fn set_present_mode(&mut self, present_mode: PresentMode) -> MgpuResult<bool>;
-    fn resized(&mut self, new_extents: Extents2D) -> MgpuResult<()>;
-    fn acquire_next_image(&mut self) -> MgpuResult<SwapchainImage>;
-    fn current_format(&self) -> ImageFormat;
-    fn present(&mut self) -> MgpuResult<()>;
 }

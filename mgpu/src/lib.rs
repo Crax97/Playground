@@ -1,5 +1,6 @@
 mod device;
 mod hal;
+mod rdg;
 mod swapchain;
 
 #[macro_use]
@@ -15,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub enum MgpuError {
+    InvalidHandle,
     Dynamic(String),
 }
 
@@ -116,10 +118,17 @@ pub struct ImageView {
     id: u64,
 }
 
+#[derive(Clone)]
+pub struct Swapchain {
+    id: u64,
+    device: crate::Device,
+}
+
 impl std::fmt::Display for MgpuError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MgpuError::Dynamic(msg) => f.write_str(msg),
+            MgpuError::InvalidHandle => f.write_str("Tried to resolve an invalid handle"),
         }
     }
 }

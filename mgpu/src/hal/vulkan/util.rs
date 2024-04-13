@@ -2,8 +2,11 @@ use ash::vk;
 
 use crate::{
     util::{define_resource_resolver, Handle},
-    Image, ImageFormat, ImageView, PresentMode,
+    Image, ImageFormat, ImageView, PresentMode, Swapchain,
 };
+
+#[cfg(feature = "swapchain")]
+use super::swapchain::VulkanSwapchain;
 
 pub(crate) trait ToVk {
     type Target;
@@ -67,7 +70,8 @@ pub(super) struct VulkanImageView {
 
 define_resource_resolver!(
     VulkanImage => images,
-    VulkanImageView => image_views
+    VulkanImageView => image_views,
+    VulkanSwapchain => swapchains
 );
 
 pub(super) trait ResolveVulkan<T, H>
@@ -102,3 +106,4 @@ macro_rules! impl_util_methods {
 
 impl_util_methods!(Image, VulkanImage, vk::Image);
 impl_util_methods!(ImageView, VulkanImageView, vk::ImageView);
+impl_util_methods!(Swapchain, VulkanSwapchain, vk::SwapchainKHR);

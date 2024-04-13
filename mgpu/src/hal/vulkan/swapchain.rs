@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicUsize;
+use std::sync::{atomic::AtomicUsize, Arc};
 
 use ash::{
     khr::{surface, swapchain},
@@ -8,29 +8,30 @@ use raw_window_handle::{DisplayHandle, WindowHandle};
 
 use crate::{
     hal::vulkan::{get_allocation_callbacks, util::ToVk},
-    Image, ImageFormat, PresentMode, SwapchainCreationInfo, SwapchainImage, SwapchainImpl,
+    Image, ImageFormat, PresentMode, SwapchainCreationInfo, SwapchainImage,
 };
 
-use super::{VulkanHal, VulkanHalResult};
+use super::{FramesInFlight, VulkanHal, VulkanHalResult};
 
 pub struct VulkanSwapchain {
-    swapchain_instance: swapchain::Instance,
-    swapchain_device: swapchain::Device,
-    surface_instance: surface::Instance,
-    data: SwapchainData,
+    pub(crate) handle: vk::SwapchainKHR,
+    pub(crate) swapchain_instance: swapchain::Instance,
+    pub(crate) swapchain_device: swapchain::Device,
+    pub(crate) surface_instance: surface::Instance,
+    pub(crate) data: SwapchainData,
+    pub(crate) frames_in_flight: Arc<FramesInFlight>,
+    pub(crate) acquire_fence: vk::Fence,
+    pub(crate) current_image_index: Option<u32>,
 }
 
-struct SwapchainData {
-    capabilities: vk::SurfaceCapabilitiesKHR,
-    present_modes: Vec<vk::PresentModeKHR>,
-    surface_formats: Vec<vk::SurfaceFormatKHR>,
-    current_format: vk::SurfaceFormatKHR,
-
-    images: Vec<SwapchainImage>,
-    current_swapchain_image: AtomicUsize,
-
-    swapchain: vk::SwapchainKHR,
-    surface: vk::SurfaceKHR,
+pub(crate) struct SwapchainData {
+    pub(crate) capabilities: vk::SurfaceCapabilitiesKHR,
+    pub(crate) present_modes: Vec<vk::PresentModeKHR>,
+    pub(crate) surface_formats: Vec<vk::SurfaceFormatKHR>,
+    pub(crate) current_format: vk::SurfaceFormatKHR,
+    pub(crate) images: Vec<SwapchainImage>,
+    pub(crate) current_swapchain_image: AtomicUsize,
+    pub(crate) surface: vk::SurfaceKHR,
 }
 
 struct SwapchainRecreateParams<'a> {
@@ -70,19 +71,27 @@ impl VulkanSwapchain {
             old_swapchain: vk::SwapchainKHR::null(),
         };
 
-        let swapchain_data = Self::recreate(swapchain_create_info)?;
+        let (handle, swapchain_data) = Self::recreate(swapchain_create_info)?;
+
+        let acquire_fence = unsafe {
+            device.create_fence(&vk::FenceCreateInfo::default(), get_allocation_callbacks())?
+        };
 
         Ok(Self {
+            handle,
             swapchain_instance,
             swapchain_device,
             surface_instance,
             data: swapchain_data,
+            frames_in_flight: hal.frames_in_flight.clone(),
+            acquire_fence,
+            current_image_index: None,
         })
     }
 
     fn recreate(
         swapchain_data_create_info: SwapchainRecreateParams,
-    ) -> VulkanHalResult<SwapchainData> {
+    ) -> VulkanHalResult<(vk::SwapchainKHR, SwapchainData)> {
         let SwapchainRecreateParams {
             hal,
             surface_instance,
@@ -206,16 +215,16 @@ impl VulkanSwapchain {
             swapchain_images.push(SwapchainImage { image, view })
         }
 
-        Ok(SwapchainData {
+        let swapchain_data = SwapchainData {
             capabilities: surface_capabilities,
             present_modes,
             surface_formats,
             current_format: image_format,
             surface,
-            swapchain,
             images: swapchain_images,
             current_swapchain_image: AtomicUsize::new(0),
-        })
+        };
+        Ok((swapchain, swapchain_data))
     }
 }
 
@@ -223,31 +232,9 @@ impl Drop for VulkanSwapchain {
     fn drop(&mut self) {
         unsafe {
             self.swapchain_device
-                .destroy_swapchain(self.data.swapchain, get_allocation_callbacks());
+                .destroy_swapchain(self.handle, get_allocation_callbacks());
             self.surface_instance
                 .destroy_surface(self.data.surface, get_allocation_callbacks());
         }
-    }
-}
-
-impl SwapchainImpl for VulkanSwapchain {
-    fn set_present_mode(&mut self, present_mode: crate::PresentMode) -> crate::MgpuResult<bool> {
-        todo!()
-    }
-
-    fn resized(&mut self, new_extents: crate::Extents2D) -> crate::MgpuResult<()> {
-        todo!()
-    }
-
-    fn acquire_next_image(&mut self) -> crate::MgpuResult<crate::SwapchainImage> {
-        todo!()
-    }
-
-    fn current_format(&self) -> crate::ImageFormat {
-        todo!()
-    }
-
-    fn present(&mut self) -> crate::MgpuResult<()> {
-        todo!()
     }
 }

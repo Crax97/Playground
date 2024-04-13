@@ -1,9 +1,10 @@
 use crate::hal::Hal;
+use crate::rdg::Rdg;
 use crate::{hal, Image, ImageDescription, ImageViewDescription, MgpuResult};
 use ash::vk::ImageView;
 use bitflags::bitflags;
 use std::fmt::Formatter;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 #[cfg(feature = "swapchain")]
 use crate::swapchain::*;
@@ -42,15 +43,20 @@ pub struct DeviceInfo {
 
 #[derive(Clone)]
 pub struct Device {
-    hal: Arc<dyn Hal>,
-    device_info: DeviceInfo,
+    pub(crate) hal: Arc<dyn Hal>,
+    pub(crate) device_info: DeviceInfo,
+    pub(crate) rdg: Arc<RwLock<Rdg>>,
 }
 
 impl Device {
     pub fn new(configuration: DeviceConfiguration) -> MgpuResult<Self> {
         let hal = hal::create(&configuration)?;
         let device_info = hal.device_info();
-        Ok(Self { hal, device_info })
+        Ok(Self {
+            hal,
+            device_info,
+            rdg: Default::default(),
+        })
     }
 
     pub fn get_info(&self) -> DeviceInfo {
@@ -62,8 +68,12 @@ impl Device {
         &self,
         swapchain_info: &SwapchainCreationInfo,
     ) -> MgpuResult<Swapchain> {
-        let pimpl = self.hal.create_swapchain_impl(swapchain_info)?;
-        Ok(Swapchain { pimpl })
+        let swapchain_id = self.hal.create_swapchain_impl(swapchain_info)?;
+        Ok(Swapchain {
+            device: self.clone(),
+            id: swapchain_id,
+            current_acquired_image: None,
+        })
     }
 
     pub fn create_image(&self, image_description: &ImageDescription) -> MgpuResult<Image> {
@@ -83,6 +93,14 @@ impl Device {
 
     pub fn destroy_image_view(&self, image_view: ImageView) {
         todo!()
+    }
+
+    pub(crate) fn write_rdg(&self) -> RwLockWriteGuard<'_, Rdg> {
+        self.rdg.write().expect("Failed to lock rdg")
+    }
+
+    pub(crate) fn read_rdg(&self) -> RwLockReadGuard<'_, Rdg> {
+        self.rdg.read().expect("Failed to lock rdg")
     }
 }
 
