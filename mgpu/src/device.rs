@@ -59,6 +59,26 @@ impl Device {
         })
     }
 
+    pub fn submit(&self) -> MgpuResult<()> {
+        let rdg = self.write_rdg().take();
+        let compiled = rdg.compile()?;
+
+        self.hal.begin_rendering()?;
+        for step in compiled.sequence {
+            match step {
+                crate::rdg::Step::Barrier { transfers } => {
+                    todo!()
+                }
+                crate::rdg::Step::PassGroup(passes) => {
+                    self.hal.execute_passes(passes, &compiled.nodes)?
+                }
+            }
+        }
+        self.hal.end_rendering()?;
+
+        Ok(())
+    }
+
     pub fn get_info(&self) -> DeviceInfo {
         self.device_info.clone()
     }

@@ -11,6 +11,9 @@ use bitflags::bitflags;
 pub use device::*;
 pub use swapchain::*;
 
+#[cfg(feature = "vulkan")]
+use hal::vulkan::VulkanHalError;
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +21,9 @@ use serde::{Deserialize, Serialize};
 pub enum MgpuError {
     InvalidHandle,
     Dynamic(String),
+
+    #[cfg(feature = "vulkan")]
+    VulkanError(VulkanHalError),
 }
 
 pub type MgpuResult<T> = Result<T, MgpuError>;
@@ -64,7 +70,6 @@ pub struct Extents3D {
 pub struct Extents2D {
     pub width: u32,
     pub height: u32,
-    pub depth: u32,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
@@ -129,6 +134,8 @@ impl std::fmt::Display for MgpuError {
         match self {
             MgpuError::Dynamic(msg) => f.write_str(msg),
             MgpuError::InvalidHandle => f.write_str("Tried to resolve an invalid handle"),
+            #[cfg(feature = "vulkan")]
+            MgpuError::VulkanError(error) => f.write_fmt(format_args!("{:?}", error)),
         }
     }
 }

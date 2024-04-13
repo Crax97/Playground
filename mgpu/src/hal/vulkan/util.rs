@@ -56,6 +56,7 @@ impl ToVk for PresentMode {
 pub(super) struct VulkanImage {
     pub(super) label: Option<String>,
     pub(super) handle: vk::Image,
+    pub(super) external: bool,
 }
 
 #[derive(Clone)]
@@ -65,7 +66,7 @@ pub(super) struct VulkanImageView {
     pub(super) owner: vk::Image,
     /// if true then the image was created outside of the vulkan instance
     /// e.g it could be a swapchain image
-    pub(super) wrapped: bool,
+    pub(super) external: bool,
 }
 
 define_resource_resolver!(

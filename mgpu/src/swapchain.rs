@@ -32,9 +32,15 @@ impl Swapchain {
         todo!()
         // self.pimpl.set_present_mode(present_mode)
     }
-    pub fn resized(&mut self, new_extents: Extents2D) -> MgpuResult<()> {
-        todo!()
-        // self.pimpl.resized(new_extents)
+    pub fn resized(
+        &mut self,
+        new_extents: Extents2D,
+        window_handle: WindowHandle,
+        display_handle: DisplayHandle,
+    ) -> MgpuResult<()> {
+        self.device
+            .hal
+            .swapchain_on_resized(self.id, new_extents, window_handle, display_handle)
     }
     pub fn acquire_next_image(&mut self) -> MgpuResult<SwapchainImage> {
         let image = self.device.hal.swapchain_acquire_next_image(self.id)?;

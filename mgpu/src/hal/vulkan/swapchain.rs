@@ -2,16 +2,19 @@ use std::sync::{atomic::AtomicUsize, Arc};
 
 use ash::{
     khr::{surface, swapchain},
-    vk,
+    vk::{self, AccessFlags2, ImageLayout, PipelineStageFlags2},
 };
 use raw_window_handle::{DisplayHandle, WindowHandle};
 
 use crate::{
-    hal::vulkan::{get_allocation_callbacks, util::ToVk},
-    Image, ImageFormat, PresentMode, SwapchainCreationInfo, SwapchainImage,
+    hal::{
+        vulkan::{get_allocation_callbacks, util::ToVk},
+        Hal,
+    },
+    Image, ImageFormat, MgpuResult, PresentMode, SwapchainCreationInfo, SwapchainImage,
 };
 
-use super::{FramesInFlight, VulkanHal, VulkanHalResult};
+use super::{FramesInFlight, VulkanHal, VulkanHalError, VulkanHalResult};
 
 pub struct VulkanSwapchain {
     pub(crate) handle: vk::SwapchainKHR,
@@ -87,6 +90,36 @@ impl VulkanSwapchain {
             acquire_fence,
             current_image_index: None,
         })
+    }
+
+    pub(crate) fn rebuild(
+        &mut self,
+        hal: &VulkanHal,
+        swapchain_info: &SwapchainCreationInfo,
+    ) -> MgpuResult<()> {
+        unsafe {
+            self.swapchain_device
+                .destroy_swapchain(self.handle, get_allocation_callbacks())
+        };
+        for image in std::mem::take(&mut self.data.images) {
+            hal.destroy_image_view(image.view)?;
+            hal.destroy_image(image.image)?;
+        }
+
+        let swapchain_create_info = SwapchainRecreateParams {
+            hal,
+            swapchain_device: &self.swapchain_device,
+            surface_instance: &self.surface_instance,
+            window_handle: swapchain_info.window_handle,
+            display_handle: swapchain_info.display_handle,
+            preferred_format: swapchain_info.preferred_format,
+            preferred_present_mode: PresentMode::Immediate,
+            old_swapchain: vk::SwapchainKHR::null(),
+        };
+        let (handle, swapchain_data) = Self::recreate(swapchain_create_info)?;
+        self.handle = handle;
+        self.data = swapchain_data;
+        Ok(())
     }
 
     fn recreate(
@@ -186,9 +219,10 @@ impl VulkanSwapchain {
         };
 
         let images = unsafe { swapchain_device.get_swapchain_images(swapchain)? };
+        Self::transition_images_to_present(hal, &images)?;
         let mut swapchain_images = vec![];
         for image in images {
-            let mut image_view_info = vk::ImageViewCreateInfo::default()
+            let image_view_info = vk::ImageViewCreateInfo::default()
                 .image(image)
                 .components(vk::ComponentMapping {
                     r: vk::ComponentSwizzle::R,
@@ -206,7 +240,7 @@ impl VulkanSwapchain {
                         .level_count(1),
                 )
                 .view_type(vk::ImageViewType::TYPE_2D);
-            let mut view =
+            let view =
                 unsafe { device.create_image_view(&image_view_info, get_allocation_callbacks())? };
             let image = unsafe { hal.wrap_raw_image(image, Some("Swapchain image"))? };
             let view =
@@ -226,15 +260,83 @@ impl VulkanSwapchain {
         };
         Ok((swapchain, swapchain_data))
     }
+
+    fn transition_images_to_present(hal: &VulkanHal, images: &[vk::Image]) -> VulkanHalResult<()> {
+        let device = &hal.logical_device.handle;
+
+        let barriers = images
+            .iter()
+            .map(|image| {
+                vk::ImageMemoryBarrier2::default()
+                    .image(*image)
+                    .src_access_mask(AccessFlags2::empty())
+                    .dst_access_mask(AccessFlags2::empty())
+                    .src_stage_mask(PipelineStageFlags2::TOP_OF_PIPE)
+                    .dst_stage_mask(PipelineStageFlags2::BOTTOM_OF_PIPE)
+                    .old_layout(ImageLayout::UNDEFINED)
+                    .new_layout(ImageLayout::PRESENT_SRC_KHR)
+                    .subresource_range(vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    })
+            })
+            .collect::<Vec<_>>();
+
+        unsafe {
+            let command_pool = device.create_command_pool(
+                &vk::CommandPoolCreateInfo::default()
+                    .queue_family_index(hal.logical_device.graphics_queue.family_index),
+                get_allocation_callbacks(),
+            )?;
+            let command_buffer = device.allocate_command_buffers(
+                &vk::CommandBufferAllocateInfo::default()
+                    .command_buffer_count(1)
+                    .command_pool(command_pool)
+                    .level(vk::CommandBufferLevel::PRIMARY),
+            )?[0];
+            let wait_fence =
+                device.create_fence(&vk::FenceCreateInfo::default(), get_allocation_callbacks())?;
+
+            let queue = hal.logical_device.graphics_queue.handle;
+            device.begin_command_buffer(
+                command_buffer,
+                &vk::CommandBufferBeginInfo::default()
+                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+            )?;
+            device.cmd_pipeline_barrier2(
+                command_buffer,
+                &vk::DependencyInfo::default().image_memory_barriers(&barriers),
+            );
+            device.end_command_buffer(command_buffer)?;
+
+            let cb = [command_buffer];
+            let submits = vk::SubmitInfo::default().command_buffers(&cb);
+            let submits = [submits];
+            device.queue_submit(queue, &submits, wait_fence)?;
+            device.wait_for_fences(&[wait_fence], true, u64::MAX)?;
+
+            device.destroy_fence(wait_fence, get_allocation_callbacks());
+            device.free_command_buffers(command_pool, &[command_buffer]);
+            device.destroy_command_pool(command_pool, get_allocation_callbacks());
+        }
+
+        Ok(())
+    }
 }
 
 impl Drop for VulkanSwapchain {
     fn drop(&mut self) {
+        if self.data.surface == vk::SurfaceKHR::null() {
+            return;
+        }
         unsafe {
-            self.swapchain_device
-                .destroy_swapchain(self.handle, get_allocation_callbacks());
-            self.surface_instance
-                .destroy_surface(self.data.surface, get_allocation_callbacks());
+            // self.swapchain_device
+            //     .destroy_swapchain(self.handle, get_allocation_callbacks());
+            // self.surface_instance
+            //     .destroy_surface(self.data.surface, get_allocation_callbacks());
         }
     }
 }

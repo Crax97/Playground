@@ -1,5 +1,5 @@
 use mgpu::{
-    DeviceConfiguration, DeviceFeatures, DevicePreference, Extents3D, ImageAspect,
+    DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D, Extents3D, ImageAspect,
     ImageDescription, ImageFlags, ImageFormat, ImageViewDescription, MemoryDomain, SampleCount,
     SwapchainCreationInfo, TextureDimension,
 };
@@ -61,6 +61,7 @@ fn main() {
     //         num_array_layers: 0,
     //     })
     // .expect("Failed to create image view");
+    event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
     event_loop
         .run(|event, event_loop| match event {
@@ -72,7 +73,20 @@ fn main() {
                 WindowEvent::RedrawRequested => {
                     let _ = swapchain.acquire_next_image().unwrap();
                     swapchain.present().unwrap();
+
+                    device.submit().unwrap();
+                    window.request_redraw();
                 }
+                WindowEvent::Resized(new_size) => swapchain
+                    .resized(
+                        Extents2D {
+                            width: new_size.width,
+                            height: new_size.height,
+                        },
+                        window.window_handle().unwrap(),
+                        window.display_handle().unwrap(),
+                    )
+                    .unwrap(),
                 _ => {}
             },
             Event::DeviceEvent { .. } => {}

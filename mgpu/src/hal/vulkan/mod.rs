@@ -5,16 +5,21 @@ mod swapchain;
 
 use crate::hal::vulkan::util::VulkanImage;
 use crate::hal::Hal;
+use crate::rdg::{PassGroup, RdgNode};
+use crate::util::Handle;
 use crate::{DeviceConfiguration, DeviceFeatures, DevicePreference, MgpuError, MgpuResult};
-use ash::vk::{DebugUtilsMessageSeverityFlagsEXT, QueueFlags};
+use ash::vk::{
+    DebugUtilsMessageSeverityFlagsEXT, DisplayNativeHdrSurfaceCapabilitiesAMD, QueueFlags,
+};
 use ash::{vk, Entry, Instance};
+use raw_window_handle::{DisplayHandle, WindowHandle};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::{self, c_char, CStr, CString};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock, RwLockReadGuard};
 
-use self::swapchain::SwapchainError;
+use self::swapchain::{SwapchainError, VulkanSwapchain};
 use self::util::{ResolveVulkan, VulkanImageView, VulkanResolver};
 
 pub struct VulkanHal {
@@ -68,6 +73,12 @@ pub(crate) struct VulkanDebugUtilities {
     debug_device: ash::ext::debug_utils::Device,
 }
 pub(crate) struct FrameInFlight {
+    graphics_command_pool: vk::CommandPool,
+    compute_command_pool: vk::CommandPool,
+    transfer_command_pool: vk::CommandPool,
+
+    command_buffers: RwLock<Vec<CommandBuffers>>,
+
     work_ended_fence: vk::Fence,
 }
 
@@ -80,6 +91,7 @@ pub struct VulkanDeviceFeatures {
     swapchain_support: bool,
 }
 
+#[derive(Debug)]
 pub enum VulkanHalError {
     NoSuitableDevice(Option<DevicePreference>),
     ApiError(vk::Result),
@@ -92,6 +104,19 @@ pub enum VulkanHalError {
 }
 
 pub type VulkanHalResult<T> = Result<T, VulkanHalError>;
+
+// Any of these might be null
+#[derive(Default, Clone, Copy)]
+struct CommandBuffers {
+    graphics: vk::CommandBuffer,
+    graphics_semaphore: vk::Semaphore,
+
+    compute: vk::CommandBuffer,
+    compute_semaphore: vk::Semaphore,
+
+    transfer: vk::CommandBuffer,
+    transfer_semaphore: vk::Semaphore,
+}
 
 impl Hal for VulkanHal {
     fn device_info(&self) -> crate::DeviceInfo {
@@ -110,7 +135,6 @@ impl Hal for VulkanHal {
         &self,
         swapchain_info: &crate::SwapchainCreationInfo,
     ) -> MgpuResult<u64> {
-        use self::swapchain::VulkanSwapchain;
         let swapchain = VulkanSwapchain::create(self, swapchain_info)?;
 
         let handle = self.resolver.add(swapchain);
@@ -119,7 +143,7 @@ impl Hal for VulkanHal {
 
     #[cfg(feature = "swapchain")]
     fn swapchain_acquire_next_image(&self, id: u64) -> MgpuResult<crate::SwapchainImage> {
-        use crate::{hal::vulkan::swapchain::VulkanSwapchain, util::Handle, SwapchainImage};
+        use crate::SwapchainImage;
 
         Ok(self
             .resolver
@@ -138,12 +162,131 @@ impl Hal for VulkanHal {
                             .expect("Failed to get swapchain")
                     };
 
+                    unsafe {
+                        self.logical_device.handle.wait_for_fences(
+                            &[swapchain.acquire_fence],
+                            true,
+                            u64::MAX,
+                        )?;
+
+                        self.logical_device
+                            .handle
+                            .reset_fences(&[swapchain.acquire_fence])?;
+                    };
                     swapchain.current_image_index = Some(index);
 
                     Ok(swapchain.data.images[index as usize])
                 },
             )
             .expect("TODO Correct error"))
+    }
+
+    fn begin_rendering(&self) -> MgpuResult<()> {
+        let current_frame = self.frames_in_flight.current();
+        let device = &self.logical_device.handle;
+        unsafe { device.wait_for_fences(&[current_frame.work_ended_fence], true, u64::MAX)? };
+
+        unsafe {
+            device.reset_command_pool(
+                current_frame.graphics_command_pool,
+                vk::CommandPoolResetFlags::RELEASE_RESOURCES,
+            )?;
+            device.reset_command_pool(
+                current_frame.compute_command_pool,
+                vk::CommandPoolResetFlags::RELEASE_RESOURCES,
+            )?;
+            device.reset_command_pool(
+                current_frame.transfer_command_pool,
+                vk::CommandPoolResetFlags::RELEASE_RESOURCES,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn execute_passes(&self, group: PassGroup, passes: &[RdgNode]) -> MgpuResult<()> {
+        let current_frame = self.frames_in_flight.current();
+        let device = &self.logical_device.handle;
+        let command_buffers =
+            current_frame.get_last_command_buffers(device, current_frame, &group)?;
+
+        for &graphics in &group.graphics_nodes {
+            let pass_info = &passes[graphics];
+            self.enqueue_graphics_pass(&command_buffers, pass_info)?;
+        }
+        for _ in &group.compute_nodes {
+            todo!()
+        }
+        for _ in &group.transfer_nodes {
+            todo!()
+        }
+        Ok(())
+    }
+
+    fn end_rendering(&self) -> MgpuResult<()> {
+        let current_frame = self.frames_in_flight.current();
+        let device = &self.logical_device.handle;
+
+        Ok(())
+    }
+
+    fn swapchain_on_resized(
+        &self,
+        id: u64,
+        new_size: crate::Extents2D,
+        window_handle: WindowHandle,
+        display_handle: DisplayHandle,
+    ) -> MgpuResult<()> {
+        if new_size.width == 0 || new_size.height == 0 {
+            // Don't recreate the swapchain when reduced to icon
+            return Ok(());
+        }
+        self.resolver.apply_mut(
+            unsafe { Handle::<VulkanSwapchain>::from_u64(id) },
+            |swapchain| {
+                swapchain.rebuild(
+                    self,
+                    &crate::SwapchainCreationInfo {
+                        display_handle,
+                        window_handle,
+                        preferred_format: None,
+                    },
+                )
+            },
+        )
+    }
+
+    fn destroy_image(&self, image: crate::Image) -> MgpuResult<()> {
+        let image = self
+            .resolver
+            .remove::<VulkanImage>(unsafe { Handle::from_u64(image.id) })
+            .ok_or(MgpuError::InvalidHandle)?;
+
+        if image.external {
+            return Ok(());
+        }
+        unsafe {
+            self.logical_device
+                .handle
+                .destroy_image(image.handle, get_allocation_callbacks());
+        }
+        Ok(())
+    }
+
+    fn destroy_image_view(&self, image_view: crate::ImageView) -> MgpuResult<()> {
+        let view = self
+            .resolver
+            .remove::<VulkanImageView>(unsafe { Handle::from_u64(image_view.id) })
+            .ok_or(MgpuError::InvalidHandle)?;
+
+        if view.external {
+            return Ok(());
+        }
+        unsafe {
+            self.logical_device
+                .handle
+                .destroy_image_view(view.handle, get_allocation_callbacks());
+        }
+        Ok(())
     }
 }
 
@@ -384,7 +527,7 @@ impl VulkanHal {
         }
         let supported_device_features =
             unsafe { instance.get_physical_device_features(physical_device) };
-        let device_features = Self::get_physical_device_features(supported_device_features);
+        let device_features = Self::get_physical_device_features(supported_device_features)?;
 
         let mut required_extensions = vec![];
         if cfg!(feature = "swapchain") {
@@ -395,10 +538,12 @@ impl VulkanHal {
             physical_device,
             &required_extensions,
         )?;
+        let mut features_13 = vk::PhysicalDeviceVulkan13Features::default().synchronization2(true);
         let device_create_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_create_infos)
             .enabled_features(&device_features)
-            .enabled_extension_names(&required_extensions);
+            .enabled_extension_names(&required_extensions)
+            .push_next(&mut features_13);
 
         let logical_device = unsafe {
             instance.create_device(
@@ -493,8 +638,8 @@ impl VulkanHal {
 
     fn get_physical_device_features(
         supported_device_features: vk::PhysicalDeviceFeatures,
-    ) -> vk::PhysicalDeviceFeatures {
-        vk::PhysicalDeviceFeatures::default()
+    ) -> VulkanHalResult<vk::PhysicalDeviceFeatures> {
+        Ok(vk::PhysicalDeviceFeatures::default())
     }
 
     fn ensure_requested_device_extensions_are_available(
@@ -531,6 +676,7 @@ impl VulkanHal {
         let vulkan_image = VulkanImage {
             label: name.map(ToOwned::to_owned),
             handle: image,
+            external: true,
         };
         let handle = self.resolver.add(vulkan_image);
         Ok(crate::Image {
@@ -555,7 +701,7 @@ impl VulkanHal {
             label: name.map(ToOwned::to_owned),
             handle: view,
             owner: vulkan_image,
-            wrapped: true,
+            external: true,
         };
         let handle = self.resolver.add(vulkan_image);
         Ok(crate::ImageView {
@@ -597,14 +743,115 @@ impl VulkanHal {
                     get_allocation_callbacks(),
                 )?
             };
+            let make_command_pool = |qfi| {
+                let command_pool_create_info = vk::CommandPoolCreateInfo::default()
+                    .flags(vk::CommandPoolCreateFlags::default())
+                    .queue_family_index(qfi);
+                unsafe {
+                    device
+                        .create_command_pool(&command_pool_create_info, get_allocation_callbacks())
+                }
+            };
             frames.push(FrameInFlight {
                 work_ended_fence: fence,
+                graphics_command_pool: make_command_pool(
+                    logical_device.graphics_queue.family_index,
+                )?,
+                compute_command_pool: make_command_pool(logical_device.compute_queue.family_index)?,
+                transfer_command_pool: make_command_pool(
+                    logical_device.transfer_queue.family_index,
+                )?,
+                command_buffers: Default::default(),
             });
         }
         Ok(FramesInFlight {
             frames,
             current_frame_in_flight: AtomicUsize::new(0),
         })
+    }
+
+    fn enqueue_graphics_pass(
+        &self,
+        command_buffers: &CommandBuffers,
+        pass_info: &RdgNode,
+    ) -> MgpuResult<()> {
+        match &pass_info.ty {
+            crate::rdg::Node::Present { id, image } => {
+                let handle: Handle<VulkanSwapchain> = unsafe { Handle::from_u64(*id) };
+                self.resolver.apply_mut(handle, |swapchain| {
+                    let queue = self.logical_device.graphics_queue.handle;
+                    let current_index = swapchain.current_image_index.take().expect("Either a Present has already been issued, or acquire has never been called");
+                    let indices = [current_index];
+                    let swapchains = [swapchain.handle];
+                    let present_info = vk::PresentInfoKHR::default()
+                        .swapchains(&swapchains)
+                        .image_indices(&indices);
+                    let swapchain_device = &swapchain.swapchain_device;
+
+                    let present = unsafe { swapchain_device.queue_present(queue, &present_info)? };
+                    Ok(())
+                })
+            }
+        }
+    }
+}
+impl FrameInFlight {
+    fn get_last_command_buffers(
+        &self,
+        device: &ash::Device,
+        current_frame: &FrameInFlight,
+        group: &PassGroup,
+    ) -> VulkanHalResult<CommandBuffers> {
+        let mut command_buffer_list = self
+            .command_buffers
+            .write()
+            .expect("Failed to lock command buffers");
+        if command_buffer_list.is_empty() {
+            let mut command_buffers = CommandBuffers::default();
+
+            let allocate_command_buffer = |command_pool| {
+                let info = vk::CommandBufferAllocateInfo::default()
+                    .command_pool(command_pool)
+                    .command_buffer_count(1)
+                    .level(vk::CommandBufferLevel::PRIMARY);
+
+                let command_buffers = unsafe { device.allocate_command_buffers(&info)? };
+                VulkanHalResult::Ok(command_buffers[0])
+            };
+            let make_semaphore = || {
+                let info =
+                    vk::SemaphoreCreateInfo::default().flags(vk::SemaphoreCreateFlags::empty());
+
+                unsafe { device.create_semaphore(&info, get_allocation_callbacks()) }
+            };
+            if !group.graphics_nodes.is_empty() {
+                command_buffers.graphics =
+                    allocate_command_buffer(current_frame.graphics_command_pool)?;
+                command_buffers.graphics_semaphore = make_semaphore()?;
+            }
+            if !group.compute_nodes.is_empty() {
+                command_buffers.compute =
+                    allocate_command_buffer(current_frame.compute_command_pool)?;
+                command_buffers.compute_semaphore = make_semaphore()?;
+            }
+            if !group.transfer_nodes.is_empty() {
+                command_buffers.transfer =
+                    allocate_command_buffer(current_frame.transfer_command_pool)?;
+
+                command_buffers.transfer_semaphore = make_semaphore()?;
+            }
+            command_buffer_list.push(command_buffers);
+            Ok(command_buffers)
+        } else {
+            let last = command_buffer_list.last().unwrap();
+            Ok(*last)
+        }
+    }
+
+    fn read_command_buffers(&self) -> RwLockReadGuard<'_, Vec<CommandBuffers>> {
+        self.command_buffers
+            .read()
+            .expect("Failed to lock command buffers")
     }
 }
 
@@ -645,6 +892,13 @@ impl From<VulkanHalError> for MgpuError {
 impl From<vk::Result> for VulkanHalError {
     fn from(value: vk::Result) -> Self {
         VulkanHalError::ApiError(value)
+    }
+}
+
+impl From<vk::Result> for MgpuError {
+    fn from(value: vk::Result) -> Self {
+        let vk_error = VulkanHalError::ApiError(value);
+        MgpuError::VulkanError(vk_error)
     }
 }
 
