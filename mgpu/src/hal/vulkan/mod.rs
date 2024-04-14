@@ -1,17 +1,24 @@
-mod util;
+pub(self) mod util;
 
 #[cfg(feature = "swapchain")]
 mod swapchain;
 
-use crate::hal::vulkan::util::VulkanImage;
+use crate::hal::vulkan::util::{ToVk, VulkanImage};
 use crate::hal::Hal;
 use crate::rdg::{PassGroup, RdgNode};
 use crate::util::Handle;
-use crate::{DeviceConfiguration, DeviceFeatures, DevicePreference, MgpuError, MgpuResult};
+use crate::{
+    DeviceConfiguration, DeviceFeatures, DevicePreference, Image, MemoryDomain, MgpuError,
+    MgpuResult,
+};
 use ash::vk::{
     DebugUtilsMessageSeverityFlagsEXT, DisplayNativeHdrSurfaceCapabilitiesAMD, QueueFlags,
 };
 use ash::{vk, Entry, Instance};
+use gpu_allocator::vulkan::{
+    AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc,
+};
+use gpu_allocator::{AllocatorDebugSettings, MemoryLocation};
 use raw_window_handle::{DisplayHandle, WindowHandle};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -31,6 +38,8 @@ pub struct VulkanHal {
     configuration: VulkanHalConfiguration,
     resolver: VulkanResolver,
     frames_in_flight: Arc<FramesInFlight>,
+
+    memory_allocator: RwLock<Allocator>,
 }
 
 pub struct VulkanHalConfiguration {
@@ -98,6 +107,8 @@ pub enum VulkanHalError {
     LayerNotAvailable(std::borrow::Cow<'static, str>),
     ExtensionNotAvailable(std::borrow::Cow<'static, str>),
     NoSuitableQueueFamily(vk::QueueFlags),
+
+    GpuAllocatorError(gpu_allocator::AllocationError),
 
     #[cfg(feature = "swapchain")]
     SwapchainError(SwapchainError),
@@ -255,6 +266,75 @@ impl Hal for VulkanHal {
         )
     }
 
+    fn create_image(
+        &self,
+        image_description: &crate::ImageDescription,
+    ) -> MgpuResult<crate::Image> {
+        let mut flags = vk::ImageCreateFlags::default();
+        if image_description.extents.depth > 1 {
+            flags |= vk::ImageCreateFlags::CUBE_COMPATIBLE;
+        }
+        let tiling = if image_description.memory_domain == MemoryDomain::DeviceLocal {
+            vk::ImageTiling::OPTIMAL
+        } else {
+            vk::ImageTiling::LINEAR
+        };
+        let image_create_info = vk::ImageCreateInfo::default()
+            .flags(flags)
+            .image_type(image_description.dimension.to_vk())
+            .format(image_description.format.to_vk())
+            .extent(image_description.extents.to_vk())
+            .mip_levels(image_description.mips.get())
+            .array_layers(image_description.array_layers.get())
+            .samples(image_description.samples.to_vk())
+            .tiling(tiling)
+            .usage(image_description.usage_flags.to_vk())
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .initial_layout(vk::ImageLayout::UNDEFINED);
+        let device = &self.logical_device.handle;
+        let image = unsafe { device.create_image(&image_create_info, get_allocation_callbacks())? };
+
+        self.try_assign_debug_name(
+            image,
+            image_description
+                .label
+                .unwrap_or(&format!("Image {:?}", image)),
+        )?;
+
+        let requirements = unsafe { device.get_image_memory_requirements(image) };
+        let location = match image_description.memory_domain {
+            MemoryDomain::HostVisible | MemoryDomain::HostCoherent => MemoryLocation::CpuToGpu,
+            MemoryDomain::DeviceLocal => MemoryLocation::GpuOnly,
+        };
+        let fallback_name = format!("Memory allocation for image {:?}", image);
+        let allocation_create_desc = AllocationCreateDesc {
+            name: image_description.label.unwrap_or(&fallback_name),
+            requirements,
+            location,
+            linear: image_description.memory_domain == MemoryDomain::DeviceLocal,
+            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+        };
+        let allocation = self
+            .memory_allocator
+            .write()
+            .expect("Failed to lock memory allocator")
+            .allocate(&allocation_create_desc)
+            .map_err(|e| MgpuError::VulkanError(VulkanHalError::GpuAllocatorError(e)))?;
+        unsafe { device.bind_image_memory(image, allocation.memory(), allocation.offset())? };
+
+        let vulkan_image = VulkanImage {
+            label: image_description.label.map(ToOwned::to_owned),
+            handle: image,
+            external: false,
+            allocation: Some(allocation),
+        };
+
+        let handle = self.resolver.add(vulkan_image);
+        let image = Image {
+            id: handle.to_u64(),
+        };
+        Ok(image)
+    }
     fn destroy_image(&self, image: crate::Image) -> MgpuResult<()> {
         let image = self
             .resolver
@@ -263,6 +343,15 @@ impl Hal for VulkanHal {
 
         if image.external {
             return Ok(());
+        }
+        if let Some(allocation) = image.allocation {
+            let mut allocator = self
+                .memory_allocator
+                .write()
+                .expect("Failed to lock memory allocator");
+            allocator
+                .free(allocation)
+                .map_err(|e| MgpuError::VulkanError(VulkanHalError::GpuAllocatorError(e)))?;
         }
         unsafe {
             self.logical_device
@@ -301,10 +390,11 @@ impl VulkanHal {
         let logical_device =
             Self::create_device(&instance, physical_device.handle, &queue_families)?;
 
-        let debug_utilities = if configuration
+        let use_debug_features = configuration
             .features
-            .contains(DeviceFeatures::DEBUG_LAYERS)
-        {
+            .contains(DeviceFeatures::DEBUG_FEATURES);
+
+        let debug_utilities = if use_debug_features {
             Some(Self::create_debug_utilities(
                 &entry,
                 &instance,
@@ -315,6 +405,21 @@ impl VulkanHal {
         };
 
         let frames_in_flight = Self::create_frames_in_flight(&logical_device, configuration)?;
+        let allocator_create_desc = AllocatorCreateDesc {
+            instance: instance.clone(),
+            device: logical_device.handle.clone(),
+            physical_device: physical_device.handle,
+            debug_settings: AllocatorDebugSettings {
+                log_memory_information: use_debug_features,
+                log_leaks_on_shutdown: use_debug_features,
+                store_stack_traces: false,
+                log_allocations: use_debug_features,
+                log_frees: use_debug_features,
+                log_stack_traces: false,
+            },
+            buffer_device_address: true,
+            allocation_sizes: Default::default(),
+        };
         let hal = Self {
             entry,
             instance,
@@ -326,6 +431,10 @@ impl VulkanHal {
             },
             resolver: Default::default(),
             frames_in_flight: Arc::new(frames_in_flight),
+            memory_allocator: RwLock::new(
+                Allocator::new(&allocator_create_desc)
+                    .map_err(VulkanHalError::GpuAllocatorError)?,
+            ),
         };
 
         Ok(Arc::new(hal))
@@ -353,7 +462,7 @@ impl VulkanHal {
 
         if configuration
             .features
-            .contains(DeviceFeatures::DEBUG_LAYERS)
+            .contains(DeviceFeatures::DEBUG_FEATURES)
         {
             requested_layers.push(LAYER_KHRONOS_VALIDATION.as_ptr());
             requested_instance_extensions.push(ash::ext::debug_utils::NAME.as_ptr());
@@ -539,11 +648,14 @@ impl VulkanHal {
             &required_extensions,
         )?;
         let mut features_13 = vk::PhysicalDeviceVulkan13Features::default().synchronization2(true);
+        let mut physical_device_buffer_address =
+            vk::PhysicalDeviceBufferDeviceAddressFeatures::default().buffer_device_address(true);
         let device_create_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_create_infos)
             .enabled_features(&device_features)
             .enabled_extension_names(&required_extensions)
-            .push_next(&mut features_13);
+            .push_next(&mut features_13)
+            .push_next(&mut physical_device_buffer_address);
 
         let logical_device = unsafe {
             instance.create_device(
@@ -639,7 +751,8 @@ impl VulkanHal {
     fn get_physical_device_features(
         supported_device_features: vk::PhysicalDeviceFeatures,
     ) -> VulkanHalResult<vk::PhysicalDeviceFeatures> {
-        Ok(vk::PhysicalDeviceFeatures::default())
+        let physical_device_features = vk::PhysicalDeviceFeatures::default();
+        Ok(physical_device_features)
     }
 
     fn ensure_requested_device_extensions_are_available(
@@ -677,6 +790,7 @@ impl VulkanHal {
             label: name.map(ToOwned::to_owned),
             handle: image,
             external: true,
+            allocation: None,
         };
         let handle = self.resolver.add(vulkan_image);
         Ok(crate::Image {
@@ -882,6 +996,9 @@ impl From<VulkanHalError> for MgpuError {
             VulkanHalError::NoSuitableQueueFamily(flags) => {
                 format!("No queue family found with the following properties: {flags:?}")
             }
+            VulkanHalError::GpuAllocatorError(error) => {
+                format!("Error allocating a resource: {error}")
+            }
             #[cfg(feature = "swapchain")]
             VulkanHalError::SwapchainError(err) => format!("Swapchain error: {err:?}"),
         };
@@ -905,6 +1022,12 @@ impl From<vk::Result> for MgpuError {
 impl From<ash::LoadingError> for MgpuError {
     fn from(value: ash::LoadingError) -> Self {
         MgpuError::Dynamic(value.to_string())
+    }
+}
+
+impl From<gpu_allocator::AllocationError> for VulkanHalError {
+    fn from(value: gpu_allocator::AllocationError) -> Self {
+        Self::GpuAllocatorError(value)
     }
 }
 

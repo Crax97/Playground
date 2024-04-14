@@ -1,6 +1,7 @@
 use crate::{
     rdg::{PassGroup, RdgNode},
-    swapchain, DeviceConfiguration, DeviceInfo, Extents2D, Image, ImageView, MgpuResult,
+    swapchain, DeviceConfiguration, DeviceInfo, Extents2D, Image, ImageDescription, ImageView,
+    MgpuResult,
 };
 use std::sync::Arc;
 
@@ -32,6 +33,7 @@ pub(crate) trait Hal: Send + Sync {
 
     fn device_info(&self) -> DeviceInfo;
 
+    fn create_image(&self, image_description: &ImageDescription) -> MgpuResult<Image>;
     fn destroy_image(&self, image: Image) -> MgpuResult<()>;
     fn destroy_image_view(&self, image_view: ImageView) -> MgpuResult<()>;
 }

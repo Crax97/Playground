@@ -1,7 +1,8 @@
 use crate::hal::Hal;
 use crate::rdg::Rdg;
-use crate::{hal, Image, ImageDescription, ImageViewDescription, MgpuResult};
-use ash::vk::ImageView;
+use crate::MgpuError;
+use crate::{hal, Image, ImageDescription, ImageDimension, ImageViewDescription, MgpuResult};
+use ash::vk::{self, ImageView};
 use bitflags::bitflags;
 use std::fmt::Formatter;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -12,7 +13,7 @@ use crate::swapchain::*;
 bitflags! {
     #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
     pub struct DeviceFeatures : u32 {
-        const DEBUG_LAYERS = 0b01;
+        const DEBUG_FEATURES = 0b01;
     }
 }
 
@@ -97,11 +98,12 @@ impl Device {
     }
 
     pub fn create_image(&self, image_description: &ImageDescription) -> MgpuResult<Image> {
-        todo!()
+        Self::validate_image_description(image_description)?;
+        self.hal.create_image(image_description)
     }
 
-    pub fn destroy_image(&self, image: Image) {
-        todo!()
+    pub fn destroy_image(&self, image: Image) -> MgpuResult<()> {
+        self.hal.destroy_image(image)
     }
 
     pub fn create_image_view(
@@ -121,6 +123,42 @@ impl Device {
 
     pub(crate) fn read_rdg(&self) -> RwLockReadGuard<'_, Rdg> {
         self.rdg.read().expect("Failed to lock rdg")
+    }
+
+    fn validate_image_description(image_description: &ImageDescription) -> MgpuResult<()> {
+        let check_condition = |condition: bool, error_message: &str| {
+            if !condition {
+                Err(MgpuError::InvaldImageDescription {
+                    image_name: image_description.label.map(ToOwned::to_owned),
+                    reason: error_message.to_string(),
+                })
+            } else {
+                Ok(())
+            }
+        };
+
+        check_condition(
+            image_description.dimension != ImageDimension::D3
+                || image_description.extents.depth > 0,
+            "If an image is a 3D image, it cannot have a depth of 0",
+        )?;
+
+        let total_texels = image_description.extents.width
+            * image_description.extents.height
+            * image_description.extents.depth;
+        check_condition(
+            total_texels > 0,
+            "The width, height and depth of an image cannot be 0",
+        )?;
+        let channel_byte_size = image_description.format.byte_size();
+
+        if let Some(initial_data) = image_description.initial_data {
+            check_condition(
+                 initial_data.len() >= total_texels as usize * channel_byte_size,
+            &format!("If an image has some initial data, the initial data byte buffer must have enough bytes for the image. Expected {}, got {}", total_texels as usize * channel_byte_size, initial_data.len()) 
+            )?;
+        }
+        Ok(())
     }
 }
 

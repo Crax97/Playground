@@ -1,7 +1,7 @@
 use mgpu::{
     DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D, Extents3D, ImageAspect,
-    ImageDescription, ImageFlags, ImageFormat, ImageViewDescription, MemoryDomain, SampleCount,
-    SwapchainCreationInfo, TextureDimension,
+    ImageDescription, ImageDimension, ImageFormat, ImageUsageFlags, ImageViewDescription,
+    MemoryDomain, SampleCount, SwapchainCreationInfo,
 };
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -9,6 +9,7 @@ use winit::event::{Event, WindowEvent};
 use winit::event_loop::EventLoop;
 
 fn main() {
+    env_logger::init();
     let event_loop = EventLoop::new().unwrap();
     let window = winit::window::WindowBuilder::new()
         .with_title("Triangle")
@@ -17,7 +18,7 @@ fn main() {
 
     let device = mgpu::Device::new(DeviceConfiguration {
         app_name: Some("Triangle Application"),
-        features: DeviceFeatures::DEBUG_LAYERS,
+        features: DeviceFeatures::DEBUG_FEATURES,
         device_preference: Some(DevicePreference::HighPerformance),
         display_handle: event_loop.display_handle().unwrap().as_raw(),
         desired_frames_in_flight: 3,
@@ -31,24 +32,25 @@ fn main() {
         })
         .expect("Failed to create swapchain");
 
-    // let triangle_texture_data = read_image_data();
-    // let image = device
-    //     .create_image(&ImageDescription {
-    //         label: Some("triangle image"),
-    //         usage_flags: ImageFlags::TRANSFER_DST | ImageFlags::SAMPLED,
-    //         initial_data: Some(&triangle_texture_data),
-    //         extents: Extents3D {
-    //             width: 1,
-    //             height: 1,
-    //             depth: 1,
-    //         },
-    //         dimension: TextureDimension::D2,
-    //         mips: 1,
-    //         samples: SampleCount::One,
-    //         format: ImageFormat::Rgba8,
-    //         memory_domain: MemoryDomain::DeviceLocal,
-    //     })
-    //     .expect("Failed to create image");
+    let triangle_texture_data = read_image_data();
+    let image = device
+        .create_image(&ImageDescription {
+            label: Some("triangle image"),
+            usage_flags: ImageUsageFlags::TRANSFER_DST | ImageUsageFlags::SAMPLED,
+            initial_data: Some(&triangle_texture_data),
+            extents: Extents3D {
+                width: 1,
+                height: 1,
+                depth: 1,
+            },
+            dimension: ImageDimension::D2,
+            mips: 1.try_into().unwrap(),
+            array_layers: 1.try_into().unwrap(),
+            samples: SampleCount::One,
+            format: ImageFormat::Rgba8,
+            memory_domain: MemoryDomain::DeviceLocal,
+        })
+        .expect("Failed to create image");
 
     // let image_view = device
     //     .create_image_view(&ImageViewDescription {
@@ -102,9 +104,13 @@ fn main() {
         .unwrap();
 
     // device.destroy_image_view(image_view);
-    // device.destroy_image(image);
+    device.destroy_image(image).unwrap();
 }
 
 fn read_image_data() -> Vec<u8> {
-    todo!()
+    let image_content = std::fs::read("examples/assets/david.jpg").unwrap();
+    image::load_from_memory(&image_content)
+        .unwrap()
+        .to_rgb8()
+        .to_vec()
 }

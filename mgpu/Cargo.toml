@@ -8,7 +8,7 @@ edition = "2021"
 [features]
 default = ["swapchain", "vulkan"]
 swapchain = ["dep:raw-window-handle"]
-vulkan = ["dep:ash", "dep:ash-window"]
+vulkan = ["dep:ash", "dep:ash-window", "dep:gpu-allocator", "gpu-allocator/ash"]
 serde = ["dep:serde", "bitflags/serde"]
 
 [dependencies]
@@ -17,7 +17,11 @@ serde = { version = "1.0.*", features = ["serde_derive"], optional = true }
 ash = { version = "0.38.*", optional = true }
 ash-window = { version = "0.13.*", optional = true }
 raw-window-handle = { version = "0.6.*", optional = true }
+gpu-allocator = { git = "https://github.com/Traverse-Research/gpu-allocator.git", branch = "ash-0.38", optional = true }
 
 
 [dev-dependencies]
+env_logger = "0.11.3"
+image = "0.25.1"
+log = "0.4.21"
 winit = "0.29.15"

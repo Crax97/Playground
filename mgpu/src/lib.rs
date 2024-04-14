@@ -6,6 +6,8 @@ mod swapchain;
 #[macro_use]
 pub(crate) mod util;
 
+use std::num::NonZeroU32;
+
 use bitflags::bitflags;
 
 pub use device::*;
@@ -19,6 +21,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub enum MgpuError {
+    InvaldImageDescription {
+        image_name: Option<String>,
+        reason: String,
+    },
     InvalidHandle,
     Dynamic(String),
 
@@ -38,10 +44,23 @@ pub enum MemoryDomain {
 bitflags! {
     #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
     #[cfg_attr(feature="serde", derive(Serialize, Deserialize))]
-    pub struct ImageFlags : u32 {
-        const TRANSFER_DST = 0x00000001;
-        const TRANSFER_SRC = 0x00000002;
-        const SAMPLED = 0x00000004;
+    pub struct ImageUsageFlags : u32 {
+        #[doc = "Can be used as a source of transfer operations"]
+        const TRANSFER_SRC = 0b1;
+        #[doc = "Can be used as a destination of transfer operations"]
+        const TRANSFER_DST= 0b10;
+        #[doc = "Can be sampled from (SAMPLED_IMAGE and COMBINED_IMAGE_SAMPLER descriptor types)"]
+        const SAMPLED= 0b100;
+        #[doc = "Can be used as storage image (STORAGE_IMAGE descriptor type)"]
+        const STORAGE= 0b1000;
+        #[doc = "Can be used as framebuffer color attachment"]
+        const COLOR_ATTACHMENT= 0b1_0000;
+        #[doc = "Can be used as framebuffer depth/stencil attachment"]
+        const DEPTH_STENCIL_ATTACHMENT= 0b10_0000;
+        #[doc = "Image data not needed outside of rendering"]
+        const TRANSIENT_ATTACHMENT= 0b100_0000;
+        #[doc = "Can be used as framebuffer input attachment"]
+        const INPUT_ATTACHMENT= 0b1000_0000;
     }
 }
 
@@ -49,6 +68,13 @@ bitflags! {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ImageFormat {
     Rgba8,
+}
+impl ImageFormat {
+    fn byte_size(&self) -> usize {
+        match self {
+            ImageFormat::Rgba8 => 4,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
@@ -74,7 +100,7 @@ pub struct Extents2D {
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum TextureDimension {
+pub enum ImageDimension {
     D1,
     D2,
     D3,
@@ -89,11 +115,12 @@ pub enum SampleCount {
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 pub struct ImageDescription<'a> {
     pub label: Option<&'a str>,
-    pub usage_flags: ImageFlags,
+    pub usage_flags: ImageUsageFlags,
     pub initial_data: Option<&'a [u8]>,
     pub extents: Extents3D,
-    pub dimension: TextureDimension,
-    pub mips: u32,
+    pub dimension: ImageDimension,
+    pub mips: NonZeroU32,
+    pub array_layers: NonZeroU32,
     pub samples: SampleCount,
     pub format: ImageFormat,
     pub memory_domain: MemoryDomain,
@@ -134,6 +161,11 @@ impl std::fmt::Display for MgpuError {
         match self {
             MgpuError::Dynamic(msg) => f.write_str(msg),
             MgpuError::InvalidHandle => f.write_str("Tried to resolve an invalid handle"),
+            MgpuError::InvaldImageDescription { image_name, reason } => f.write_fmt(format_args!(
+                "Invalid ImageDescription for image {}: {reason}",
+                image_name.as_ref().unwrap_or(&"Unnamed".to_string())
+            )),
+
             #[cfg(feature = "vulkan")]
             MgpuError::VulkanError(error) => f.write_fmt(format_args!("{:?}", error)),
         }

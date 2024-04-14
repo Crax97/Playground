@@ -1,8 +1,10 @@
 use ash::vk;
+use gpu_allocator::vulkan::Allocation;
 
 use crate::{
     util::{define_resource_resolver, Handle},
-    Image, ImageFormat, ImageView, PresentMode, Swapchain,
+    Extents2D, Extents3D, Image, ImageDimension, ImageFormat, ImageUsageFlags, ImageView,
+    PresentMode, SampleCount, Swapchain,
 };
 
 #[cfg(feature = "swapchain")]
@@ -32,6 +34,146 @@ impl ToVk for ImageFormat {
     }
 }
 
+impl ToVk for Extents2D {
+    type Target = vk::Extent2D;
+
+    fn to_vk(self) -> Self::Target {
+        Self::Target {
+            width: self.width,
+            height: self.height,
+        }
+    }
+
+    fn from_vk(value: Self::Target) -> Self {
+        Self {
+            width: value.width,
+            height: value.height,
+        }
+    }
+}
+
+impl ToVk for Extents3D {
+    type Target = vk::Extent3D;
+
+    fn to_vk(self) -> Self::Target {
+        Self::Target {
+            width: self.width,
+            height: self.height,
+            depth: self.depth,
+        }
+    }
+
+    fn from_vk(value: Self::Target) -> Self {
+        Self {
+            width: value.width,
+            height: value.height,
+            depth: value.depth,
+        }
+    }
+}
+
+impl ToVk for SampleCount {
+    type Target = vk::SampleCountFlags;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            SampleCount::One => vk::SampleCountFlags::TYPE_1,
+        }
+    }
+
+    fn from_vk(value: Self::Target) -> Self {
+        match value {
+            vk::SampleCountFlags::TYPE_1 => SampleCount::One,
+            _ => todo!(),
+        }
+    }
+}
+
+impl ToVk for ImageDimension {
+    type Target = vk::ImageType;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            ImageDimension::D1 => vk::ImageType::TYPE_1D,
+            ImageDimension::D2 => vk::ImageType::TYPE_2D,
+            ImageDimension::D3 => vk::ImageType::TYPE_3D,
+        }
+    }
+
+    fn from_vk(value: Self::Target) -> Self {
+        match value {
+            vk::ImageType::TYPE_1D => ImageDimension::D1,
+            vk::ImageType::TYPE_2D => ImageDimension::D2,
+            vk::ImageType::TYPE_3D => ImageDimension::D3,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl ToVk for ImageUsageFlags {
+    type Target = vk::ImageUsageFlags;
+
+    fn to_vk(self) -> Self::Target {
+        let mut flags = Self::Target::default();
+
+        if self.contains(Self::TRANSFER_SRC) {
+            flags |= vk::ImageUsageFlags::TRANSFER_SRC;
+        }
+        if self.contains(Self::TRANSFER_DST) {
+            flags |= vk::ImageUsageFlags::TRANSFER_DST;
+        }
+        if self.contains(Self::SAMPLED) {
+            flags |= vk::ImageUsageFlags::SAMPLED;
+        }
+        if self.contains(Self::STORAGE) {
+            flags |= vk::ImageUsageFlags::STORAGE;
+        }
+        if self.contains(Self::COLOR_ATTACHMENT) {
+            flags |= vk::ImageUsageFlags::COLOR_ATTACHMENT;
+        }
+        if self.contains(Self::DEPTH_STENCIL_ATTACHMENT) {
+            flags |= vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;
+        }
+        if self.contains(Self::TRANSIENT_ATTACHMENT) {
+            flags |= vk::ImageUsageFlags::TRANSIENT_ATTACHMENT;
+        }
+        if self.contains(Self::INPUT_ATTACHMENT) {
+            flags |= vk::ImageUsageFlags::INPUT_ATTACHMENT;
+        }
+        flags
+    }
+
+    fn from_vk(value: Self::Target) -> Self {
+        let mut flags = Self::default();
+
+        if value.contains(vk::ImageUsageFlags::TRANSFER_SRC) {
+            flags |= Self::TRANSFER_SRC;
+        }
+        if value.contains(vk::ImageUsageFlags::TRANSFER_DST) {
+            flags |= Self::TRANSFER_DST;
+        }
+        if value.contains(vk::ImageUsageFlags::SAMPLED) {
+            flags |= Self::SAMPLED;
+        }
+        if value.contains(vk::ImageUsageFlags::STORAGE) {
+            flags |= Self::STORAGE;
+        }
+        if value.contains(vk::ImageUsageFlags::COLOR_ATTACHMENT) {
+            flags |= Self::COLOR_ATTACHMENT;
+        }
+        if value.contains(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT) {
+            flags |= Self::DEPTH_STENCIL_ATTACHMENT;
+        }
+        if value.contains(vk::ImageUsageFlags::TRANSIENT_ATTACHMENT) {
+            flags |= Self::TRANSIENT_ATTACHMENT;
+        }
+        if value.contains(vk::ImageUsageFlags::INPUT_ATTACHMENT) {
+            flags |= Self::INPUT_ATTACHMENT;
+        }
+        flags
+    }
+}
+
 #[cfg(feature = "swapchain")]
 impl ToVk for PresentMode {
     type Target = vk::PresentModeKHR;
@@ -52,11 +194,11 @@ impl ToVk for PresentMode {
     }
 }
 
-#[derive(Clone)]
 pub(super) struct VulkanImage {
     pub(super) label: Option<String>,
     pub(super) handle: vk::Image,
     pub(super) external: bool,
+    pub(super) allocation: Option<Allocation>,
 }
 
 #[derive(Clone)]
