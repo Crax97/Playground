@@ -1,12 +1,45 @@
 use mgpu::{
-    DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D, Extents3D, ImageAspect,
-    ImageDescription, ImageDimension, ImageFormat, ImageUsageFlags, ImageViewDescription,
-    MemoryDomain, SampleCount, SwapchainCreationInfo,
+    AttachmentStoreOp, BufferDescription, BufferUsageFlags, BufferWriteParams, ColorWriteMask,
+    DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D, FragmentStageInfo, Graphics,
+    GraphicsPipelineDescription, ImageFormat, MemoryDomain, Rect2D, RenderPassDescription,
+    RenderTarget, RenderTargetInfo, RenderTargetLoadOp, SampleCount, ShaderModuleDescription,
+    SwapchainCreationInfo, VertexInputDescription, VertexInputFrequency, VertexStageInfo,
 };
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+use shaderc::ShaderKind;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::EventLoop;
+
+const VERTEX_SHADER: &str = "
+#version 460
+layout(location = 0) in vec3 pos;
+
+layout(location = 0) out vec4 vs_pos;
+
+void main() {
+    vs_pos = vec4(pos, 1.0);
+}
+";
+const FRAGMENT_SHADER: &str = "
+#version 460
+layout(location = 0) in vec4 vs_pos;
+layout(location = 0) out vec4 color;
+
+void main() {
+    color = vec4(1.0, 0.0, 0.0, 1.0);
+}
+";
+
+#[repr(C)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable, Clone, Copy)]
+struct Vertex {
+    pos: [f32; 3],
+}
+
+fn vertex(x: f32, y: f32, z: f32) -> Vertex {
+    Vertex { pos: [x, y, z] }
+}
 
 fn main() {
     env_logger::init();
@@ -31,38 +64,74 @@ fn main() {
             preferred_format: None,
         })
         .expect("Failed to create swapchain");
+    let triangle_data = vec![
+        vertex(-1.0, -1.0, 0.0),
+        vertex(1.0, -1.0, 0.0),
+        vertex(0.0, 1.0, 0.0),
+    ];
 
-    let triangle_texture_data = read_image_data();
-    let image = device
-        .create_image(&ImageDescription {
-            label: Some("triangle image"),
-            usage_flags: ImageUsageFlags::TRANSFER_DST | ImageUsageFlags::SAMPLED,
-            initial_data: Some(&triangle_texture_data),
-            extents: Extents3D {
-                width: 1,
-                height: 1,
-                depth: 1,
-            },
-            dimension: ImageDimension::D2,
-            mips: 1.try_into().unwrap(),
-            array_layers: 1.try_into().unwrap(),
-            samples: SampleCount::One,
-            format: ImageFormat::Rgba8,
+    let triangle_buffer = device
+        .create_buffer(&BufferDescription {
+            label: Some("Triangle data"),
+            usage_flags: BufferUsageFlags::VERTEX_BUFFER,
+            size: std::mem::size_of_val(&triangle_data),
             memory_domain: MemoryDomain::DeviceLocal,
         })
-        .expect("Failed to create image");
+        .unwrap();
 
-    // let image_view = device
-    //     .create_image_view(&ImageViewDescription {
-    //         label: Some("triangle image view"),
-    //         format: ImageFormat::Rgba8,
-    //         aspect: ImageAspect::Color,
-    //         base_mip: 0,
-    //         num_mips: 1,
-    //         base_array_layer: 0,
-    //         num_array_layers: 0,
-    //     })
-    // .expect("Failed to create image view");
+    // device
+    //     .write_buffer(
+    //         triangle_buffer,
+    //         &triangle_buffer.write_all_params(bytemuck::cast_slice(&triangle_data)),
+    //     )
+    //     .unwrap();
+
+    let vertex_shader_source = compile_glsl(VERTEX_SHADER, ShaderKind::Vertex);
+    let fragment_shader_source = compile_glsl(FRAGMENT_SHADER, ShaderKind::Fragment);
+    let vertex_shader_module = device
+        .create_shader_module(&ShaderModuleDescription {
+            label: Some("Triangle Vertex Shader"),
+            source: &vertex_shader_source,
+        })
+        .unwrap();
+    let fragment_shader_module = device
+        .create_shader_module(&ShaderModuleDescription {
+            label: Some("Triangle Fragment Shader"),
+            source: &fragment_shader_source,
+        })
+        .unwrap();
+    let pipeline = device
+        .create_graphics_pipeline(
+            &GraphicsPipelineDescription::new(
+                Some("Triangle Pipeline"),
+                &VertexStageInfo {
+                    shader: &vertex_shader_module,
+                    entry_point: "main",
+                    vertex_inputs: &[VertexInputDescription {
+                        location: 0,
+                        stride: std::mem::size_of::<Vertex>(),
+                        offset: 0,
+                        frequency: VertexInputFrequency::PerVertex,
+                    }],
+                },
+            )
+            .fragment_stage(&FragmentStageInfo {
+                shader: &fragment_shader_module,
+                entry_point: "main",
+                render_targets: &[RenderTargetInfo {
+                    format: ImageFormat::Rgba8,
+                    blend: None,
+                    write_mask: ColorWriteMask::RGBA,
+                }],
+                depth_stencil_target: None,
+            }),
+        )
+        .unwrap();
+    // device.destroy_shader_module(vertex_shader_module).unwrap();
+    // device
+    //     .destroy_shader_module(fragment_shader_module)
+    //     .unwrap();
+
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
     event_loop
@@ -73,7 +142,32 @@ fn main() {
                     event_loop.exit();
                 }
                 WindowEvent::RedrawRequested => {
-                    let _ = swapchain.acquire_next_image().unwrap();
+                    let swapchain_image = swapchain.acquire_next_image().unwrap();
+
+                    let mut command_recorder = device.create_command_recorder::<Graphics>();
+                    {
+                        let mut render_pass =
+                            command_recorder.begin_render_pass(&RenderPassDescription {
+                                label: Some("Triangle rendering"),
+                                render_targets: &[RenderTarget {
+                                    view: swapchain_image.view,
+                                    sample_count: SampleCount::One,
+                                    load_op: RenderTargetLoadOp::Clear([0.3, 0.0, 0.5, 1.0]),
+                                    store_op: AttachmentStoreOp::Store,
+                                }],
+                                depth_stencil_attachment: None,
+                                framebuffer_size: swapchain_image.extents,
+                                render_area: Rect2D {
+                                    offset: Default::default(),
+                                    extents: swapchain_image.extents,
+                                },
+                            });
+                        // render_pass.set_vertex_buffers([triangle_buffer]);
+                        // render_pass.set_pipeline(pipeline);
+                        // render_pass.draw(3, 1, 0, 0).unwrap();
+                    }
+                    command_recorder.submit().unwrap();
+
                     swapchain.present().unwrap();
 
                     device.submit().unwrap();
@@ -104,7 +198,16 @@ fn main() {
         .unwrap();
 
     // device.destroy_image_view(image_view);
-    device.destroy_image(image).unwrap();
+    device.destroy_buffer(triangle_buffer).unwrap();
+}
+
+fn compile_glsl(shader_source: &str, shader_kind: ShaderKind) -> Vec<u32> {
+    let compiler = shaderc::Compiler::new().unwrap();
+    let compiled = compiler
+        .compile_into_spirv(shader_source, shader_kind, "none", "main", None)
+        .unwrap();
+
+    compiled.as_binary().to_vec()
 }
 
 fn read_image_data() -> Vec<u8> {

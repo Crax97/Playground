@@ -8,7 +8,10 @@ use raw_window_handle::{DisplayHandle, WindowHandle};
 
 use crate::{
     hal::{
-        vulkan::{get_allocation_callbacks, util::ToVk},
+        vulkan::{
+            get_allocation_callbacks,
+            util::{FromVk, ToVk},
+        },
         Hal,
     },
     Image, ImageFormat, MgpuResult, PresentMode, SwapchainCreationInfo, SwapchainImage,
@@ -198,7 +201,8 @@ impl VulkanSwapchain {
         };
         let image_count = surface_capabilities
             .max_image_count
-            .min(hal.configuration.frames_in_flight);
+            .min(hal.configuration.frames_in_flight.try_into().unwrap());
+        let image_usage_flags = vk::ImageUsageFlags::COLOR_ATTACHMENT;
         let swapchain_create_info = vk::SwapchainCreateInfoKHR::default()
             .surface(surface)
             .min_image_count(image_count)
@@ -207,7 +211,7 @@ impl VulkanSwapchain {
             .image_color_space(image_format.color_space)
             .present_mode(present_mode)
             .pre_transform(transform)
-            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+            .image_usage(image_usage_flags)
             .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
             .old_swapchain(old_swapchain)
             .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
@@ -242,11 +246,34 @@ impl VulkanSwapchain {
                 .view_type(vk::ImageViewType::TYPE_2D);
             let view =
                 unsafe { device.create_image_view(&image_view_info, get_allocation_callbacks())? };
-            let image = unsafe { hal.wrap_raw_image(image, Some("Swapchain image"))? };
+            let image = unsafe {
+                hal.wrap_raw_image(
+                    image,
+                    &crate::ImageDescription {
+                        label: Some("Swapchain Image"),
+                        usage_flags: image_usage_flags.from_vk(),
+                        extents: crate::Extents3D {
+                            width: surface_capabilities.current_extent.width,
+                            height: surface_capabilities.current_extent.height,
+                            depth: 1,
+                        },
+                        dimension: crate::ImageDimension::D2,
+                        mips: 1.try_into().unwrap(),
+                        array_layers: 1.try_into().unwrap(),
+                        samples: crate::SampleCount::One,
+                        format: image_format.format.from_vk(),
+                        memory_domain: crate::MemoryDomain::DeviceLocal,
+                    },
+                )?
+            };
             let view =
                 unsafe { hal.wrap_raw_image_view(image, view, Some("Swapchain image view"))? };
 
-            swapchain_images.push(SwapchainImage { image, view })
+            swapchain_images.push(SwapchainImage {
+                image,
+                view,
+                extents: surface_capabilities.current_extent.from_vk(),
+            })
         }
 
         let swapchain_data = SwapchainData {

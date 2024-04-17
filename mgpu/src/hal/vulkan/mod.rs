@@ -1,19 +1,18 @@
-pub(self) mod util;
+mod util;
 
 #[cfg(feature = "swapchain")]
 mod swapchain;
 
-use crate::hal::vulkan::util::{ToVk, VulkanImage};
-use crate::hal::Hal;
-use crate::rdg::{PassGroup, RdgNode};
-use crate::util::Handle;
+use crate::hal::vulkan::util::{ToVk, VulkanBuffer, VulkanImage};
+use crate::hal::{CommandRecorder, CommandRecorderAllocator, Hal};
+use crate::rdg::PassGroup;
+use crate::util::{hash_type, Handle};
 use crate::{
-    DeviceConfiguration, DeviceFeatures, DevicePreference, Image, MemoryDomain, MgpuError,
-    MgpuResult,
+    AttachmentAccessMode, Buffer, BufferDescription, DeviceConfiguration, DeviceFeatures,
+    DevicePreference, Framebuffer, GraphicsPipeline, GraphicsPipelineDescription, Image,
+    ImageDescription, MemoryDomain, MgpuError, MgpuResult, RenderPassInfo, ShaderModule,
 };
-use ash::vk::{
-    DebugUtilsMessageSeverityFlagsEXT, DisplayNativeHdrSurfaceCapabilitiesAMD, QueueFlags,
-};
+use ash::vk::{DebugUtilsMessageSeverityFlagsEXT, Handle as AshHandle, QueueFlags};
 use ash::{vk, Entry, Instance};
 use gpu_allocator::vulkan::{
     AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc,
@@ -23,11 +22,14 @@ use raw_window_handle::{DisplayHandle, WindowHandle};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::{self, c_char, CStr, CString};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 
 use self::swapchain::{SwapchainError, VulkanSwapchain};
-use self::util::{ResolveVulkan, VulkanImageView, VulkanResolver};
+use self::util::{ResolveVulkan, VulkanImageView, VulkanResolver, VulkanShaderModule};
+
+use super::{RenderState, SubmitInfo};
 
 pub struct VulkanHal {
     entry: Entry,
@@ -39,11 +41,14 @@ pub struct VulkanHal {
     resolver: VulkanResolver,
     frames_in_flight: Arc<FramesInFlight>,
 
+    framebuffers: RwLock<HashMap<u64, vk::Framebuffer>>,
+    render_passes: RwLock<HashMap<u64, vk::RenderPass>>,
+
     memory_allocator: RwLock<Allocator>,
 }
 
 pub struct VulkanHalConfiguration {
-    frames_in_flight: u32,
+    frames_in_flight: usize,
 }
 
 pub struct VulkanPhysicalDevice {
@@ -89,6 +94,7 @@ pub(crate) struct FrameInFlight {
     command_buffers: RwLock<Vec<CommandBuffers>>,
 
     work_ended_fence: vk::Fence,
+    work_ended_semaphore: vk::Semaphore,
 }
 
 pub(crate) struct FramesInFlight {
@@ -192,10 +198,12 @@ impl Hal for VulkanHal {
             .expect("TODO Correct error"))
     }
 
-    fn begin_rendering(&self) -> MgpuResult<()> {
+    unsafe fn begin_rendering(&self) -> MgpuResult<RenderState> {
+        use ash::vk::Handle;
         let current_frame = self.frames_in_flight.current();
         let device = &self.logical_device.handle;
         unsafe { device.wait_for_fences(&[current_frame.work_ended_fence], true, u64::MAX)? };
+        unsafe { device.reset_fences(&[current_frame.work_ended_fence])? };
 
         unsafe {
             device.reset_command_pool(
@@ -211,32 +219,59 @@ impl Hal for VulkanHal {
                 vk::CommandPoolResetFlags::RELEASE_RESOURCES,
             )?;
         }
-        Ok(())
+        Ok(RenderState {
+            graphics_compute_allocator: CommandRecorderAllocator {
+                id: current_frame.graphics_command_pool.as_raw(),
+            },
+            async_compute_allocator: CommandRecorderAllocator {
+                id: current_frame.compute_command_pool.as_raw(),
+            },
+        })
     }
 
-    fn execute_passes(&self, group: PassGroup, passes: &[RdgNode]) -> MgpuResult<()> {
-        let current_frame = self.frames_in_flight.current();
-        let device = &self.logical_device.handle;
-        let command_buffers =
-            current_frame.get_last_command_buffers(device, current_frame, &group)?;
-
-        for &graphics in &group.graphics_nodes {
-            let pass_info = &passes[graphics];
-            self.enqueue_graphics_pass(&command_buffers, pass_info)?;
-        }
-        for _ in &group.compute_nodes {
-            todo!()
-        }
-        for _ in &group.transfer_nodes {
-            todo!()
-        }
-        Ok(())
-    }
-
-    fn end_rendering(&self) -> MgpuResult<()> {
+    unsafe fn submit(&self, end_rendering_info: SubmitInfo) -> MgpuResult<()> {
         let current_frame = self.frames_in_flight.current();
         let device = &self.logical_device.handle;
 
+        if !end_rendering_info.graphics_command_recorders.is_empty() {
+            let command_buffers = end_rendering_info
+                .graphics_command_recorders
+                .iter()
+                .map(|cb| vk::CommandBuffer::from_raw(cb.id))
+                .collect::<Vec<_>>();
+            // let pipeline_stage_flags = [vk::PipelineStageFlags::BOTTOM_OF_PIPE];
+            let signal_semaphores = [current_frame.work_ended_semaphore];
+            let submit_info = vk::SubmitInfo::default()
+                .command_buffers(&command_buffers)
+                // .wait_dst_stage_mask(&pipeline_stage_flags)
+                .signal_semaphores(&signal_semaphores);
+            unsafe {
+                device.queue_submit(
+                    self.logical_device.graphics_queue.handle,
+                    &[submit_info],
+                    current_frame.work_ended_fence,
+                )?;
+            }
+        }
+
+        if !end_rendering_info
+            .async_compute_command_recorders
+            .is_empty()
+        {
+            todo!()
+        }
+
+        Ok(())
+    }
+    unsafe fn end_rendering(&self) -> MgpuResult<()> {
+        let current_frame_index = self
+            .frames_in_flight
+            .current_frame_in_flight
+            .load(Ordering::Relaxed);
+        self.frames_in_flight.current_frame_in_flight.store(
+            (current_frame_index + 1) % self.configuration.frames_in_flight,
+            Ordering::Relaxed,
+        );
         Ok(())
     }
 
@@ -332,6 +367,13 @@ impl Hal for VulkanHal {
         let handle = self.resolver.add(vulkan_image);
         let image = Image {
             id: handle.to_u64(),
+            usage_flags: image_description.usage_flags,
+            extents: image_description.extents,
+            dimension: image_description.dimension,
+            mips: image_description.mips,
+            array_layers: image_description.array_layers,
+            samples: image_description.samples,
+            format: image_description.format,
         };
         Ok(image)
     }
@@ -375,6 +417,345 @@ impl Hal for VulkanHal {
                 .handle
                 .destroy_image_view(view.handle, get_allocation_callbacks());
         }
+        Ok(())
+    }
+
+    fn image_name(&self, image: Image) -> MgpuResult<Option<String>> {
+        self.resolver
+            .apply::<VulkanImage, Option<String>>(image, |vk_image| Ok(vk_image.label.clone()))
+    }
+
+    fn create_buffer(&self, buffer_description: &BufferDescription) -> MgpuResult<Buffer> {
+        let buffer_create_info = vk::BufferCreateInfo::default()
+            .usage(buffer_description.usage_flags.to_vk())
+            .size(buffer_description.size as _);
+        let device = &self.logical_device.handle;
+        let buffer =
+            unsafe { device.create_buffer(&buffer_create_info, get_allocation_callbacks())? };
+        let memory_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
+
+        let fallback_name = format!("Memory allocation for buffer {:?}", buffer);
+        let name = buffer_description.label.unwrap_or(&fallback_name);
+        let allocation_description = AllocationCreateDesc {
+            name,
+            requirements: memory_requirements,
+            location: match buffer_description.memory_domain {
+                MemoryDomain::HostVisible | MemoryDomain::HostCoherent => MemoryLocation::CpuToGpu,
+                MemoryDomain::DeviceLocal => MemoryLocation::GpuOnly,
+            },
+            linear: true,
+            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+        };
+
+        let mut allocator = self
+            .memory_allocator
+            .write()
+            .expect("Failed to lock memory allocator");
+        let allocation = allocator
+            .allocate(&allocation_description)
+            .map_err(|e| MgpuError::VulkanError(VulkanHalError::GpuAllocatorError(e)))?;
+
+        let vulkan_buffer = VulkanBuffer {
+            label: buffer_description.label.map(ToOwned::to_owned),
+            handle: buffer,
+            allocation,
+        };
+        let handle = self.resolver.add(vulkan_buffer);
+        Ok(Buffer {
+            id: handle.to_u64(),
+            usage_flags: buffer_description.usage_flags,
+            size: buffer_description.size,
+            memory_domain: buffer_description.memory_domain,
+        })
+    }
+
+    fn buffer_name(&self, buffer: Buffer) -> MgpuResult<Option<String>> {
+        self.resolver
+            .apply::<VulkanBuffer, Option<String>>(buffer, |vk_buffer| Ok(vk_buffer.label.clone()))
+    }
+
+    fn destroy_buffer(&self, buffer: Buffer) -> MgpuResult<()> {
+        let buffer = self
+            .resolver
+            .remove(buffer)
+            .ok_or(MgpuError::InvalidHandle)?;
+
+        let mut allocator = self
+            .memory_allocator
+            .write()
+            .expect("Failed to lock memory allocator");
+        allocator
+            .free(buffer.allocation)
+            .map_err(|e| MgpuError::VulkanError(VulkanHalError::GpuAllocatorError(e)))?;
+
+        unsafe {
+            self.logical_device
+                .handle
+                .destroy_buffer(buffer.handle, get_allocation_callbacks());
+        }
+        Ok(())
+    }
+
+    unsafe fn write_host_visible_buffer(
+        &self,
+        buffer: Buffer,
+        params: &crate::BufferWriteParams,
+    ) -> MgpuResult<()> {
+        debug_assert!(params.data.len() >= params.size);
+        debug_assert!(buffer.size >= params.size);
+        self.resolver.apply(buffer, |buffer| {
+            let allocation = &buffer.allocation;
+            let ptr = allocation
+                .mapped_ptr()
+                .expect("Tried to do a host visible write without a peristent ptr");
+            let ptr = unsafe { ptr.cast::<u8>().as_ptr().add(params.offset) };
+            unsafe { ptr.copy_from(params.data.as_ptr(), params.size) };
+            Ok(())
+        })
+    }
+
+    fn create_shader_module(
+        &self,
+        shader_module_description: &crate::ShaderModuleDescription,
+    ) -> MgpuResult<ShaderModule> {
+        let shader_module_create_info = vk::ShaderModuleCreateInfo::default()
+            .flags(vk::ShaderModuleCreateFlags::default())
+            .code(shader_module_description.source);
+        let shader_module = unsafe {
+            self.logical_device
+                .handle
+                .create_shader_module(&shader_module_create_info, get_allocation_callbacks())?
+        };
+        if let Some(name) = shader_module_description.label {
+            self.try_assign_debug_name(shader_module, name)?;
+        }
+
+        let vulkan_shader_module = VulkanShaderModule {
+            label: shader_module_description.label.map(ToOwned::to_owned),
+            handle: shader_module,
+        };
+
+        let handle = self.resolver.add(vulkan_shader_module);
+        Ok(ShaderModule {
+            id: handle.to_u64(),
+        })
+    }
+
+    fn destroy_shader_module(&self, shader_module: ShaderModule) -> MgpuResult<()> {
+        let shader_module = self
+            .resolver
+            .remove(shader_module)
+            .ok_or(MgpuError::InvalidHandle)?;
+
+        unsafe {
+            self.logical_device
+                .handle
+                .destroy_shader_module(shader_module.handle, get_allocation_callbacks());
+        }
+        Ok(())
+    }
+
+    fn create_graphics_pipeline(
+        &self,
+        graphics_pipeline_description: &GraphicsPipelineDescription,
+    ) -> MgpuResult<GraphicsPipeline> {
+        // The actual creation of the pipeline is deferred until a render pass using the pipeline is executed
+        let owned_info = graphics_pipeline_description.to_vk_owned();
+        let handle = self.resolver.add(owned_info);
+
+        Ok(GraphicsPipeline {
+            id: handle.to_u64(),
+        })
+    }
+
+    fn destroy_graphics_pipeline(&self, graphics_pipeline: GraphicsPipeline) -> MgpuResult<()> {
+        todo!()
+    }
+
+    unsafe fn request_command_recorder(
+        &self,
+        allocator: super::CommandRecorderAllocator,
+    ) -> MgpuResult<super::CommandRecorder> {
+        use ash::vk::Handle;
+        let command_pool = vk::CommandPool::from_raw(allocator.id);
+        let command_buffer_allocate_info = vk::CommandBufferAllocateInfo::default()
+            .command_buffer_count(1)
+            .command_pool(command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY);
+
+        let cb = unsafe {
+            self.logical_device
+                .handle
+                .allocate_command_buffers(&command_buffer_allocate_info)?
+        }[0];
+
+        unsafe {
+            self.logical_device
+                .handle
+                .begin_command_buffer(cb, &vk::CommandBufferBeginInfo::default())?;
+        }
+
+        Ok(CommandRecorder { id: cb.as_raw() })
+    }
+
+    unsafe fn present_image(&self, swapchain_id: u64, _image: Image) -> MgpuResult<()> {
+        let current_frame = self.frames_in_flight.current();
+        let swapchain = unsafe { Handle::from_u64(swapchain_id) };
+        self.resolver
+            .apply_mut::<VulkanSwapchain, ()>(swapchain, |swapchain| {
+                let queue = self.logical_device.graphics_queue.handle;
+                let current_index = swapchain.current_image_index.take().expect(
+                    "Either a Present has already been issued, or acquire has never been called",
+                );
+                let indices = [current_index];
+                let swapchains = [swapchain.handle];
+                let wait_semaphores = [current_frame.work_ended_semaphore];
+                let present_info = vk::PresentInfoKHR::default()
+                    .swapchains(&swapchains)
+                    .wait_semaphores(&wait_semaphores)
+                    .image_indices(&indices);
+                let swapchain_device = &swapchain.swapchain_device;
+
+                let suboptimal = unsafe { swapchain_device.queue_present(queue, &present_info)? };
+                Ok(())
+            })
+    }
+
+    unsafe fn finalize_command_recorder(&self, command_buffer: CommandRecorder) -> MgpuResult<()> {
+        unsafe {
+            self.logical_device
+                .handle
+                .end_command_buffer(vk::CommandBuffer::from_raw(command_buffer.id))?;
+        }
+        Ok(())
+    }
+
+    unsafe fn begin_render_pass(
+        &self,
+        command_recorder: CommandRecorder,
+        render_pass_info: &RenderPassInfo,
+    ) -> MgpuResult<()> {
+        let render_pass = self.resolve_render_pass(render_pass_info)?;
+        let framebuffer =
+            self.resolve_framebuffer_for_render_pass(render_pass, render_pass_info)?;
+
+        let clear_values = render_pass_info
+            .framebuffer
+            .render_targets
+            .iter()
+            .map(|rt| match rt.load_op {
+                crate::RenderTargetLoadOp::Clear(color) => vk::ClearValue {
+                    color: vk::ClearColorValue { float32: color },
+                },
+                _ => Default::default(),
+            })
+            .chain(
+                render_pass_info
+                    .framebuffer
+                    .depth_stencil_target
+                    .iter()
+                    .map(|rt| match rt.load_op {
+                        crate::DepthStencilTargetLoadOp::Clear(depth, stencil) => vk::ClearValue {
+                            depth_stencil: vk::ClearDepthStencilValue { depth, stencil },
+                        },
+                        _ => Default::default(),
+                    }),
+            )
+            .collect::<Vec<_>>();
+        unsafe {
+            self.logical_device.handle.cmd_begin_render_pass(
+                vk::CommandBuffer::from_raw(command_recorder.id),
+                &vk::RenderPassBeginInfo::default()
+                    .framebuffer(framebuffer)
+                    .render_pass(render_pass)
+                    .render_area(render_pass_info.render_area.to_vk())
+                    .clear_values(&clear_values),
+                vk::SubpassContents::INLINE,
+            )
+        };
+
+        Ok(())
+    }
+
+    unsafe fn bind_graphics_pipeline(
+        &self,
+        command_recorder: CommandRecorder,
+        pipeline: GraphicsPipeline,
+    ) -> MgpuResult<()> {
+        todo!()
+    }
+
+    unsafe fn set_vertex_buffers(
+        &self,
+        command_recorder: CommandRecorder,
+        vertex_buffers: &[Buffer],
+    ) -> MgpuResult<()> {
+        let map = self.resolver.get::<VulkanBuffer>();
+        let mut vulkan_buffers = vec![];
+        for &buffer in vertex_buffers {
+            let vk_buffer = map.resolve(buffer).ok_or(MgpuError::InvalidHandle)?.handle;
+            vulkan_buffers.push(vk_buffer);
+        }
+
+        let cb = vk::CommandBuffer::from_raw(command_recorder.id);
+        let offsets = vertex_buffers.iter().map(|_| 0u64).collect::<Vec<_>>();
+        unsafe {
+            self.logical_device
+                .handle
+                .cmd_bind_vertex_buffers(cb, 0, &vulkan_buffers, &offsets);
+        }
+
+        Ok(())
+    }
+
+    unsafe fn set_binding_sets(
+        &self,
+        command_recorder: CommandRecorder,
+        binding_sets: &[crate::BindingSet],
+    ) -> MgpuResult<()> {
+        todo!()
+    }
+
+    unsafe fn draw(
+        &self,
+        command_recorder: CommandRecorder,
+        vertices: usize,
+        indices: usize,
+        first_vertex: usize,
+        first_instance: usize,
+    ) -> MgpuResult<()> {
+        let cb = vk::CommandBuffer::from_raw(command_recorder.id);
+        unsafe {
+            self.logical_device.handle.cmd_draw(
+                cb,
+                vertices as _,
+                indices as _,
+                first_vertex as _,
+                first_instance as _,
+            );
+        }
+
+        Ok(())
+    }
+
+    unsafe fn advance_to_next_step(&self, command_recorder: CommandRecorder) -> MgpuResult<()> {
+        unsafe {
+            self.logical_device.handle.cmd_next_subpass(
+                vk::CommandBuffer::from_raw(command_recorder.id),
+                vk::SubpassContents::INLINE,
+            );
+        }
+
+        Ok(())
+    }
+
+    unsafe fn end_render_pass(&self, command_recorder: CommandRecorder) -> MgpuResult<()> {
+        unsafe {
+            self.logical_device
+                .handle
+                .cmd_end_render_pass(vk::CommandBuffer::from_raw(command_recorder.id))
+        }
+
         Ok(())
     }
 }
@@ -431,6 +812,9 @@ impl VulkanHal {
             },
             resolver: Default::default(),
             frames_in_flight: Arc::new(frames_in_flight),
+            framebuffers: RwLock::default(),
+            render_passes: RwLock::default(),
+
             memory_allocator: RwLock::new(
                 Allocator::new(&allocator_create_desc)
                     .map_err(VulkanHalError::GpuAllocatorError)?,
@@ -781,13 +1165,13 @@ impl VulkanHal {
     unsafe fn wrap_raw_image(
         &self,
         image: vk::Image,
-        name: Option<&str>,
+        description: &ImageDescription,
     ) -> VulkanHalResult<crate::Image> {
-        if let Some(name) = name {
+        if let Some(name) = description.label {
             self.try_assign_debug_name(image, name)?;
         }
         let vulkan_image = VulkanImage {
-            label: name.map(ToOwned::to_owned),
+            label: description.label.map(ToOwned::to_owned),
             handle: image,
             external: true,
             allocation: None,
@@ -795,6 +1179,13 @@ impl VulkanHal {
         let handle = self.resolver.add(vulkan_image);
         Ok(crate::Image {
             id: handle.to_u64(),
+            usage_flags: description.usage_flags,
+            extents: description.extents,
+            dimension: description.dimension,
+            mips: description.mips,
+            array_layers: description.array_layers,
+            samples: description.samples,
+            format: description.format,
         })
     }
 
@@ -857,6 +1248,12 @@ impl VulkanHal {
                     get_allocation_callbacks(),
                 )?
             };
+            let semaphore = unsafe {
+                device.create_semaphore(
+                    &vk::SemaphoreCreateInfo::default(),
+                    get_allocation_callbacks(),
+                )?
+            };
             let make_command_pool = |qfi| {
                 let command_pool_create_info = vk::CommandPoolCreateInfo::default()
                     .flags(vk::CommandPoolCreateFlags::default())
@@ -868,6 +1265,7 @@ impl VulkanHal {
             };
             frames.push(FrameInFlight {
                 work_ended_fence: fence,
+                work_ended_semaphore: semaphore,
                 graphics_command_pool: make_command_pool(
                     logical_device.graphics_queue.family_index,
                 )?,
@@ -884,30 +1282,292 @@ impl VulkanHal {
         })
     }
 
-    fn enqueue_graphics_pass(
+    fn resolve_framebuffer_for_render_pass(
         &self,
-        command_buffers: &CommandBuffers,
-        pass_info: &RdgNode,
-    ) -> MgpuResult<()> {
-        match &pass_info.ty {
-            crate::rdg::Node::Present { id, image } => {
-                let handle: Handle<VulkanSwapchain> = unsafe { Handle::from_u64(*id) };
-                self.resolver.apply_mut(handle, |swapchain| {
-                    let queue = self.logical_device.graphics_queue.handle;
-                    let current_index = swapchain.current_image_index.take().expect("Either a Present has already been issued, or acquire has never been called");
-                    let indices = [current_index];
-                    let swapchains = [swapchain.handle];
-                    let present_info = vk::PresentInfoKHR::default()
-                        .swapchains(&swapchains)
-                        .image_indices(&indices);
-                    let swapchain_device = &swapchain.swapchain_device;
+        render_pass: vk::RenderPass,
+        render_pass_info: &RenderPassInfo,
+    ) -> MgpuResult<vk::Framebuffer> {
+        let framebuffer_hash = hash_type(&render_pass_info.framebuffer);
+        let mut framebuffers = self
+            .framebuffers
+            .write()
+            .expect("Failed to lock framebuffers");
 
-                    let present = unsafe { swapchain_device.queue_present(queue, &present_info)? };
-                    Ok(())
-                })
-            }
+        if let Some(framebuffer) = framebuffers.get(&framebuffer_hash) {
+            Ok(*framebuffer)
+        } else {
+            let framebuffer = self.create_famebuffer(render_pass, &render_pass_info.framebuffer)?;
+            framebuffers.insert(framebuffer_hash, framebuffer);
+            Ok(framebuffer)
         }
     }
+
+    fn resolve_render_pass(
+        &self,
+        render_pass_info: &RenderPassInfo,
+    ) -> VulkanHalResult<vk::RenderPass> {
+        let render_pass_hash = hash_render_pass_info(render_pass_info);
+        let mut render_passes = self
+            .render_passes
+            .write()
+            .expect("Failed to lock render_passes");
+
+        if let Some(render_pass) = render_passes.get(&render_pass_hash) {
+            Ok(*render_pass)
+        } else {
+            let render_pass = self.create_render_pass(render_pass_info)?;
+            render_passes.insert(render_pass_hash, render_pass);
+            Ok(render_pass)
+        }
+    }
+
+    fn create_famebuffer(
+        &self,
+        render_pass: vk::RenderPass,
+        framebuffer: &Framebuffer,
+    ) -> MgpuResult<vk::Framebuffer> {
+        let image_views = framebuffer
+            .render_targets
+            .iter()
+            .map(|rt| self.resolver.resolve_vulkan(rt.view))
+            .chain(
+                framebuffer
+                    .depth_stencil_target
+                    .iter()
+                    .map(|rt| self.resolver.resolve_vulkan(rt.view)),
+            )
+            .map(|s| s.ok_or(MgpuError::InvalidHandle))
+            .collect::<MgpuResult<Vec<_>>>()?;
+
+        // TODO: Framebuffer Multi Layers
+        let framebuffer_create_info = vk::FramebufferCreateInfo::default()
+            .render_pass(render_pass)
+            .attachment_count(image_views.len() as _)
+            .attachments(&image_views)
+            .width(framebuffer.extents.width)
+            .height(framebuffer.extents.height)
+            .layers(1);
+        let framebuffer = unsafe {
+            self.logical_device
+                .handle
+                .create_framebuffer(&framebuffer_create_info, get_allocation_callbacks())?
+        };
+        Ok(framebuffer)
+    }
+
+    fn create_render_pass(
+        &self,
+        render_pass_info: &RenderPassInfo,
+    ) -> VulkanHalResult<vk::RenderPass> {
+        let attachments = render_pass_info
+            .framebuffer
+            .render_targets
+            .iter()
+            .map(|rt| {
+                vk::AttachmentDescription::default()
+                    .format(rt.view.owner.format.to_vk())
+                    .initial_layout(match rt.load_op {
+                        crate::RenderTargetLoadOp::DontCare
+                        | crate::RenderTargetLoadOp::Clear(_) => vk::ImageLayout::UNDEFINED,
+                        crate::RenderTargetLoadOp::Load => {
+                            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                        }
+                    })
+                    .final_layout(match rt.store_op {
+                        crate::AttachmentStoreOp::DontCare => vk::ImageLayout::UNDEFINED,
+                        crate::AttachmentStoreOp::Store => {
+                            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                        }
+                        crate::AttachmentStoreOp::Present => vk::ImageLayout::PRESENT_SRC_KHR,
+                    })
+                    .load_op(match rt.load_op {
+                        crate::RenderTargetLoadOp::DontCare => vk::AttachmentLoadOp::DONT_CARE,
+                        crate::RenderTargetLoadOp::Clear(_) => vk::AttachmentLoadOp::CLEAR,
+                        crate::RenderTargetLoadOp::Load => vk::AttachmentLoadOp::LOAD,
+                    })
+                    .store_op(match rt.store_op {
+                        crate::AttachmentStoreOp::DontCare => vk::AttachmentStoreOp::DONT_CARE,
+                        crate::AttachmentStoreOp::Store | crate::AttachmentStoreOp::Present => {
+                            vk::AttachmentStoreOp::STORE
+                        }
+                    })
+                    .samples(rt.sample_count.to_vk())
+                    .flags(vk::AttachmentDescriptionFlags::empty())
+            })
+            .chain(
+                render_pass_info
+                    .framebuffer
+                    .depth_stencil_target
+                    .iter()
+                    .map(|rt| {
+                        vk::AttachmentDescription::default()
+                            .format(rt.view.owner.format.to_vk())
+                            .initial_layout(match rt.load_op {
+                                crate::DepthStencilTargetLoadOp::DontCare
+                                | crate::DepthStencilTargetLoadOp::Clear(..) => {
+                                    vk::ImageLayout::UNDEFINED
+                                }
+                                crate::DepthStencilTargetLoadOp::Load => {
+                                    vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                                }
+                            })
+                            .final_layout(match rt.store_op {
+                                crate::AttachmentStoreOp::DontCare => vk::ImageLayout::UNDEFINED,
+                                crate::AttachmentStoreOp::Store => {
+                                    vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+                                }
+                                crate::AttachmentStoreOp::Present => unreachable!(),
+                            })
+                            .load_op(match rt.load_op {
+                                crate::DepthStencilTargetLoadOp::DontCare => {
+                                    vk::AttachmentLoadOp::DONT_CARE
+                                }
+                                crate::DepthStencilTargetLoadOp::Clear(..) => {
+                                    vk::AttachmentLoadOp::CLEAR
+                                }
+                                crate::DepthStencilTargetLoadOp::Load => vk::AttachmentLoadOp::LOAD,
+                            })
+                            .store_op(match rt.store_op {
+                                crate::AttachmentStoreOp::DontCare => {
+                                    vk::AttachmentStoreOp::DONT_CARE
+                                }
+                                crate::AttachmentStoreOp::Store => vk::AttachmentStoreOp::STORE,
+                                crate::AttachmentStoreOp::Present => unreachable!(),
+                            })
+                            .samples(rt.sample_count.to_vk())
+                            .flags(vk::AttachmentDescriptionFlags::empty())
+                    }),
+            )
+            .collect::<Vec<_>>();
+        let mut depth_stencil_attachment_references = vec![];
+        let mut color_attachment_references = vec![];
+        let mut subpasses = vec![];
+        for sp in &render_pass_info.steps {
+            let mut this_attachment_references = vec![];
+            this_attachment_references.resize(
+                render_pass_info.framebuffer.render_targets.len(),
+                vk::AttachmentReference {
+                    attachment: vk::ATTACHMENT_UNUSED,
+                    layout: vk::ImageLayout::UNDEFINED,
+                },
+            );
+            for (i, ar) in sp.color_attachments.iter().enumerate() {
+                let reference = &mut this_attachment_references[i];
+                reference.attachment = i as _;
+                reference.layout = match ar.access_mode {
+                    AttachmentAccessMode::Read => vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                    AttachmentAccessMode::Write => vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                };
+            }
+            color_attachment_references.push(this_attachment_references);
+
+            if let Some(ar) = &sp.depth_stencil_attachment {
+                let depth_subpass_desc = vk::AttachmentReference::default()
+                    .attachment(render_pass_info.framebuffer.render_targets.len() as _)
+                    .layout(match ar.access_mode {
+                        AttachmentAccessMode::Read => {
+                            vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                        }
+                        AttachmentAccessMode::Write => {
+                            vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                        }
+                    });
+                depth_stencil_attachment_references.push(depth_subpass_desc);
+            } else {
+                depth_stencil_attachment_references.push(vk::AttachmentReference {
+                    attachment: vk::ATTACHMENT_UNUSED,
+                    layout: Default::default(),
+                })
+            };
+        }
+        for (spi, _) in render_pass_info.steps.iter().enumerate() {
+            let subpass_description = vk::SubpassDescription::default()
+                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+                .color_attachments(&color_attachment_references[spi])
+                .depth_stencil_attachment(&depth_stencil_attachment_references[spi]);
+
+            subpasses.push(subpass_description);
+        }
+        let mut src_stage_mask = vk::PipelineStageFlags::default();
+        let mut src_access_mask = vk::AccessFlags::default();
+        let subpass_dependencies = subpasses
+            .iter()
+            .enumerate()
+            .map(|(d_idx, sd)| {
+                let src_subpass = if d_idx == 0 {
+                    vk::SUBPASS_EXTERNAL
+                } else {
+                    d_idx as u32 - 1
+                };
+                let step = &render_pass_info.steps[d_idx];
+                let mut dst_access_mask = vk::AccessFlags::default();
+                let mut dst_stage_mask = vk::PipelineStageFlags::default();
+                for color_rt in &step.color_attachments {
+                    if color_rt.access_mode == AttachmentAccessMode::Write {
+                        dst_stage_mask |= vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
+                        dst_access_mask |= vk::AccessFlags::COLOR_ATTACHMENT_WRITE;
+                    } else {
+                        dst_access_mask |= vk::AccessFlags::COLOR_ATTACHMENT_READ;
+                    }
+                }
+
+                if let Some(depth_rt) = &step.depth_stencil_attachment {
+                    if depth_rt.access_mode == AttachmentAccessMode::Write {
+                        dst_stage_mask |= vk::PipelineStageFlags::LATE_FRAGMENT_TESTS
+                            | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS;
+                        dst_access_mask |= vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE;
+                    } else {
+                        dst_access_mask |= vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ;
+                    }
+                }
+                let sd = vk::SubpassDependency::default()
+                    .src_subpass(src_subpass)
+                    .dst_subpass(d_idx as _)
+                    .src_stage_mask(src_stage_mask)
+                    .dst_stage_mask(dst_stage_mask)
+                    .src_access_mask(src_access_mask)
+                    .dst_access_mask(dst_access_mask);
+
+                src_access_mask = dst_access_mask;
+                src_stage_mask = dst_stage_mask;
+
+                sd
+            })
+            .collect::<Vec<_>>();
+        let render_pass_create_info = vk::RenderPassCreateInfo::default()
+            .attachments(&attachments)
+            .subpasses(&subpasses)
+            .dependencies(&subpass_dependencies)
+            .flags(vk::RenderPassCreateFlags::default());
+        let rp = unsafe {
+            self.logical_device
+                .handle
+                .create_render_pass(&render_pass_create_info, get_allocation_callbacks())
+        }?;
+        Ok(rp)
+    }
+}
+
+fn hash_render_pass_info(render_pass_info: &RenderPassInfo) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    render_pass_info.label.hash(&mut hasher);
+
+    for rt in &render_pass_info.framebuffer.render_targets {
+        rt.view.owner.format.hash(&mut hasher);
+        rt.sample_count.hash(&mut hasher);
+        rt.load_op.hash(&mut hasher);
+        rt.store_op.hash(&mut hasher);
+    }
+
+    if let Some(rt) = &render_pass_info.framebuffer.depth_stencil_target {
+        rt.view.owner.format.hash(&mut hasher);
+        rt.sample_count.hash(&mut hasher);
+        rt.load_op.hash(&mut hasher);
+        rt.store_op.hash(&mut hasher);
+    }
+
+    let render_pass_hash = hasher.finish();
+    render_pass_hash
 }
 impl FrameInFlight {
     fn get_last_command_buffers(
@@ -948,12 +1608,7 @@ impl FrameInFlight {
                     allocate_command_buffer(current_frame.compute_command_pool)?;
                 command_buffers.compute_semaphore = make_semaphore()?;
             }
-            if !group.transfer_nodes.is_empty() {
-                command_buffers.transfer =
-                    allocate_command_buffer(current_frame.transfer_command_pool)?;
 
-                command_buffers.transfer_semaphore = make_semaphore()?;
-            }
             command_buffer_list.push(command_buffers);
             Ok(command_buffers)
         } else {

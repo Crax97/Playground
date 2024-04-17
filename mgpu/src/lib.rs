@@ -1,3 +1,4 @@
+mod command_recorder;
 mod device;
 mod hal;
 mod rdg;
@@ -5,11 +6,13 @@ mod swapchain;
 
 #[macro_use]
 pub(crate) mod util;
+pub(crate) mod staging_buffer;
 
 use std::num::NonZeroU32;
 
 use bitflags::bitflags;
 
+pub use command_recorder::*;
 pub use device::*;
 pub use swapchain::*;
 
@@ -21,8 +24,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub enum MgpuError {
-    InvaldImageDescription {
-        image_name: Option<String>,
+    InvalidParams {
+        params_name: &'static str,
+        label: Option<String>,
         reason: String,
     },
     InvalidHandle,
@@ -64,6 +68,31 @@ bitflags! {
     }
 }
 
+bitflags! {
+    #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
+    #[cfg_attr(feature="serde", derive(Serialize, Deserialize))]
+    pub struct BufferUsageFlags : u32 {
+        #[doc = "Can be used as a source of transfer operations"]
+        const TRANSFER_SRC= 0b1;
+        #[doc = "Can be used as a destination of transfer operations"]
+        const TRANSFER_DST= 0b10;
+        #[doc = "Can be used as TBO"]
+        const UNIFORM_TEXEL_BUFFER= 0b100;
+        #[doc = "Can be used as IBO"]
+        const STORAGE_TEXEL_BUFFER= 0b1000;
+        #[doc = "Can be used as UBO"]
+        const UNIFORM_BUFFER = 0b1_0000;
+        #[doc = "Can be used as SSBO"]
+        const STORAGE_BUFFER = 0b10_0000;
+        #[doc = "Can be used as source of fixed-function index fetch (index buffer)"]
+        const INDEX_BUFFER = 0b100_0000;
+        #[doc = "Can be used as source of fixed-function vertex fetch (VBO)"]
+        const VERTEX_BUFFER = 0b1000_0000;
+        #[doc = "Can be the source of indirect parameters (e.g. indirect buffer, parameter buffer)"]
+        const INDIRECT_BUFFER = 0b1_0000_0000;
+    }
+}
+
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ImageFormat {
@@ -98,6 +127,20 @@ pub struct Extents2D {
     pub height: u32,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Offset2D {
+    pub x: i32,
+    pub y: i32,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Rect2D {
+    pub offset: Offset2D,
+    pub extents: Extents2D,
+}
+
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ImageDimension {
@@ -112,11 +155,66 @@ pub enum SampleCount {
     One,
 }
 
+pub struct ShaderModuleDescription<'a> {
+    pub label: Option<&'a str>,
+    pub source: &'a [u32],
+}
+
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum RenderTargetLoadOp {
+    #[default]
+    DontCare,
+    Clear([f32; 4]),
+    Load,
+}
+
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DepthStencilTargetLoadOp {
+    #[default]
+    DontCare,
+    Clear(f32, u32),
+    Load,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AttachmentStoreOp {
+    #[default]
+    DontCare,
+    Store,
+    Present,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Debug, Hash)]
+pub struct RenderTarget {
+    pub view: ImageView,
+    pub sample_count: SampleCount,
+    pub load_op: RenderTargetLoadOp,
+    pub store_op: AttachmentStoreOp,
+}
+
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug, Hash)]
+pub struct DepthStencilTarget {
+    pub view: ImageView,
+    pub sample_count: SampleCount,
+    pub load_op: DepthStencilTargetLoadOp,
+    pub store_op: AttachmentStoreOp,
+}
+
+pub struct RenderPassDescription<'a> {
+    pub label: Option<&'a str>,
+    pub render_targets: &'a [RenderTarget],
+    pub depth_stencil_attachment: Option<&'a DepthStencilTarget>,
+    pub framebuffer_size: Extents2D,
+    pub render_area: Rect2D,
+}
+
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 pub struct ImageDescription<'a> {
     pub label: Option<&'a str>,
     pub usage_flags: ImageUsageFlags,
-    pub initial_data: Option<&'a [u8]>,
     pub extents: Extents3D,
     pub dimension: ImageDimension,
     pub mips: NonZeroU32,
@@ -124,6 +222,28 @@ pub struct ImageDescription<'a> {
     pub samples: SampleCount,
     pub format: ImageFormat,
     pub memory_domain: MemoryDomain,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+pub struct BufferDescription<'a> {
+    pub label: Option<&'a str>,
+    pub usage_flags: BufferUsageFlags,
+    pub size: usize,
+    pub memory_domain: MemoryDomain,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+/// This struct describes an image write operation
+pub struct BufferWriteParams<'a> {
+    pub data: &'a [u8],
+    pub offset: usize,
+    pub size: usize,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+/// This struct describes an image write operation
+pub struct ImageWriteParams<'a> {
+    pub data: &'a [u8],
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
@@ -137,10 +257,102 @@ pub struct ImageViewDescription<'a> {
     pub num_array_layers: u32,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum VertexInputFrequency {
+    PerVertex,
+    PerInstance,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct VertexInputDescription {
+    pub location: usize,
+    pub stride: usize,
+    pub offset: usize,
+    pub frequency: VertexInputFrequency,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct BlendSettings {}
+
+bitflags! {
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ColorWriteMask : u8 {
+    const R = 0x01;
+    const B = 0x02;
+    const G = 0x03;
+    const A = 0x04;
+
+    const RGBA = Self::R.bits() | Self::B.bits() | Self::G.bits() | Self::A.bits();
+}
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct RenderTargetInfo {
+    pub format: ImageFormat,
+    pub blend: Option<BlendSettings>,
+    pub write_mask: ColorWriteMask,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DepthStencilTargetInfo {}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+pub struct VertexStageInfo<'a> {
+    pub shader: &'a ShaderModule,
+    pub entry_point: &'a str,
+    pub vertex_inputs: &'a [VertexInputDescription],
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+pub struct FragmentStageInfo<'a> {
+    pub shader: &'a ShaderModule,
+    pub entry_point: &'a str,
+    pub render_targets: &'a [RenderTargetInfo],
+    pub depth_stencil_target: Option<&'a DepthStencilTargetInfo>,
+}
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+pub struct GraphicsPipelineDescription<'a> {
+    pub label: Option<&'a str>,
+    pub vertex_stage: &'a VertexStageInfo<'a>,
+    pub fragment_stage: Option<&'a FragmentStageInfo<'a>>,
+    pub binding_sets: &'a [BindingSet],
+}
+
+/// A Buffer is a linear data buffer that can be read or written by a shader
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+pub struct Buffer {
+    id: u64,
+    usage_flags: BufferUsageFlags,
+    size: usize,
+    memory_domain: MemoryDomain,
+}
+impl Buffer {
+    pub fn write_all_params<'a>(&self, data: &'a [u8]) -> BufferWriteParams<'a> {
+        BufferWriteParams {
+            data,
+            offset: 0,
+            size: self.size,
+        }
+    }
+}
+
 /// An image is a multidimensional buffer of data, with an associated format
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 pub struct Image {
     id: u64,
+    usage_flags: ImageUsageFlags,
+    extents: Extents3D,
+    dimension: ImageDimension,
+    mips: NonZeroU32,
+    array_layers: NonZeroU32,
+    samples: SampleCount,
+    format: ImageFormat,
 }
 
 /// An image view is a view over a portion of an image
@@ -150,10 +362,46 @@ pub struct ImageView {
     id: u64,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+pub struct ShaderModule {
+    id: u64,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+pub struct GraphicsPipeline {
+    id: u64,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+pub struct BindingSet {
+    id: u64,
+}
+
 #[derive(Clone)]
 pub struct Swapchain {
     id: u64,
-    device: crate::Device,
+}
+
+impl<'a> GraphicsPipelineDescription<'a> {
+    pub fn new(label: Option<&'a str>, vertex_stage: &'a VertexStageInfo) -> Self {
+        Self {
+            label,
+            vertex_stage,
+            fragment_stage: None,
+            binding_sets: &[],
+        }
+    }
+
+    pub fn fragment_stage(mut self, fragment_stage: &'a FragmentStageInfo) -> Self {
+        self.fragment_stage = Some(fragment_stage);
+        self
+    }
+}
+
+impl<'a> BufferWriteParams<'a> {
+    pub fn total_bytes(&self) -> usize {
+        self.size
+    }
 }
 
 impl std::fmt::Display for MgpuError {
@@ -161,9 +409,13 @@ impl std::fmt::Display for MgpuError {
         match self {
             MgpuError::Dynamic(msg) => f.write_str(msg),
             MgpuError::InvalidHandle => f.write_str("Tried to resolve an invalid handle"),
-            MgpuError::InvaldImageDescription { image_name, reason } => f.write_fmt(format_args!(
-                "Invalid ImageDescription for image {}: {reason}",
-                image_name.as_ref().unwrap_or(&"Unnamed".to_string())
+            MgpuError::InvalidParams {
+                params_name,
+                label,
+                reason,
+            } => f.write_fmt(format_args!(
+                "Invalid '{params_name}' for resource '{}': {reason}",
+                label.as_ref().unwrap_or(&"Unnamed".to_string())
             )),
 
             #[cfg(feature = "vulkan")]
@@ -184,3 +436,15 @@ impl std::error::Error for MgpuError {
         self.source()
     }
 }
+
+impl std::hash::Hash for RenderTargetLoadOp {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+    }
+}
+impl std::hash::Hash for DepthStencilTargetLoadOp {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+    }
+}
+impl std::cmp::Eq for RenderTargetLoadOp {}

@@ -1,6 +1,6 @@
 use raw_window_handle::{DisplayHandle, WindowHandle};
 
-use crate::{Device, Extents2D, Image, ImageFormat, ImageView, MgpuResult};
+use crate::{Device, Extents2D, Image, ImageFormat, ImageView, MgpuResult, PresentationRequest};
 
 pub struct SwapchainCreationInfo<'a> {
     pub display_handle: DisplayHandle<'a>,
@@ -25,6 +25,7 @@ pub struct Swapchain {
 pub struct SwapchainImage {
     pub image: Image,
     pub view: ImageView,
+    pub extents: Extents2D,
 }
 
 impl Swapchain {
@@ -58,7 +59,14 @@ impl Swapchain {
             .current_acquired_image
             .take()
             .expect("Called present without acquire!");
-        self.device.write_rdg().add_present_pass(image, self.id);
+        self.device.write_rdg().inform_present(image, self.id);
+        let mut requests = self
+            .device
+            .presentation_requests
+            .write()
+            .expect("Failed to lock presentation requests");
+
+        requests.push(PresentationRequest { id: self.id, image });
         Ok(())
     }
 }

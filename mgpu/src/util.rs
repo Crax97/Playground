@@ -1,4 +1,7 @@
-use std::marker::PhantomData;
+use std::{
+    hash::{DefaultHasher, Hash, Hasher},
+    marker::PhantomData,
+};
 
 /// An Handle is a generational index (8 bytes in size) that can be used to index into a
 /// [`ResourceArena<T>`].
@@ -21,6 +24,12 @@ pub struct ResourceArena<T> {
 pub struct Entry<T> {
     generation: u32,
     payload: Option<T>,
+}
+
+pub fn hash_type<T: Hash>(value: &T) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// This macro helps to define a ResourceResolver, which is a type that can be used by
@@ -48,7 +57,7 @@ pub struct Entry<T> {
 /// ```
 /// For a more concrete example, take a look at `[crate::hal::vulkan::util::VulkanResolver]`
 macro_rules! define_resource_resolver {
-    ($($resource:ty => $map_name:ident),*) => {
+    ($($resource:ty => $map_name:ident),* $(,)?) => {
         use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
         use crate::{util::ResourceArena, MgpuResult, MgpuError};
 
@@ -162,8 +171,8 @@ impl<T> ResourceArena<T> {
         handle
     }
 
-    pub(crate) fn resolve(&self, handle: Handle<T>) -> Option<&T> {
-        let (index, generation) = handle.to_index_generation();
+    pub(crate) fn resolve(&self, handle: impl Into<Handle<T>>) -> Option<&T> {
+        let (index, generation) = handle.into().to_index_generation();
 
         if let Some(entry) = self.resources.get(index as usize) {
             if entry.generation == generation {
@@ -177,8 +186,8 @@ impl<T> ResourceArena<T> {
         None
     }
 
-    pub(crate) fn resolve_mut(&mut self, handle: Handle<T>) -> Option<&mut T> {
-        let (index, generation) = handle.to_index_generation();
+    pub(crate) fn resolve_mut(&mut self, handle: impl Into<Handle<T>>) -> Option<&mut T> {
+        let (index, generation) = handle.into().to_index_generation();
 
         if let Some(entry) = self.resources.get_mut(index as usize) {
             if entry.generation == generation {
@@ -192,7 +201,8 @@ impl<T> ResourceArena<T> {
         None
     }
 
-    pub(crate) fn remove(&mut self, handle: Handle<T>) -> Option<T> {
+    pub(crate) fn remove(&mut self, handle: impl Into<Handle<T>>) -> Option<T> {
+        let handle = handle.into();
         let (index, generation) = handle.to_index_generation();
         if let Some(entry) = self.resources.get_mut(index as usize) {
             if entry.generation == generation {

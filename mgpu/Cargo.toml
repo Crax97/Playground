@@ -21,7 +21,9 @@ gpu-allocator = { git = "https://github.com/Traverse-Research/gpu-allocator.git"
 
 
 [dev-dependencies]
+bytemuck = { version = "1.15.0", features = ["bytemuck_derive", "derive"] }
 env_logger = "0.11.3"
 image = "0.25.1"
 log = "0.4.21"
+shaderc = "0.8.3"
 winit = "0.29.15"

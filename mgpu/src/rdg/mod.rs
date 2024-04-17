@@ -1,14 +1,15 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::{ImageView, MgpuResult, SwapchainImage};
+use crate::{AttachmentStoreOp, Image, ImageView, MgpuResult, RenderPassInfo, SwapchainImage};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Resource {
+    Image { image: Image },
     ImageView { view: ImageView },
 }
 
 pub enum Node {
-    Present { id: u64, image: SwapchainImage },
+    RenderPass { info: RenderPassInfo },
 }
 
 pub struct RdgNode {
@@ -35,9 +36,11 @@ pub struct Rdg {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum QueueType {
+    // This queue can execute both graphics commands (such as drawing) and sync compute commands
     Graphics,
-    Compute,
-    Transfer,
+
+    // This queue can execute only compute commands, and it runs asynchronously from the Graphics queue
+    AsyncCompute,
 }
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct OwnershipTransfer {
@@ -50,7 +53,6 @@ pub struct OwnershipTransfer {
 pub struct PassGroup {
     pub graphics_nodes: Vec<usize>,
     pub compute_nodes: Vec<usize>,
-    pub transfer_nodes: Vec<usize>,
 }
 
 pub enum Step {
@@ -68,15 +70,28 @@ impl Rdg {
     pub fn add_graphics_pass(&mut self, node: Node) {
         Self::add_on_queue(QueueType::Graphics, &mut self.nodes, node);
     }
-    pub fn add_compute_pass(&mut self, node: Node) {
-        Self::add_on_queue(QueueType::Compute, &mut self.nodes, node);
-    }
-    pub fn add_transfer_pass(&mut self, node: Node) {
-        Self::add_on_queue(QueueType::Transfer, &mut self.nodes, node);
+    pub fn add_async_compute_pass(&mut self, node: Node) {
+        Self::add_on_queue(QueueType::AsyncCompute, &mut self.nodes, node);
     }
 
-    pub fn add_present_pass(&mut self, image: SwapchainImage, id: u64) {
-        self.add_graphics_pass(Node::Present { image, id })
+    pub fn inform_present(&mut self, swapchain_image: SwapchainImage, swapchain_id: u64) {
+        for node_info in self.nodes.iter_mut().rev() {
+            let mut stop = false;
+            match &mut node_info.ty {
+                Node::RenderPass { info } => info.steps.iter_mut().for_each(|step| {
+                    step.color_attachments.iter_mut().for_each(|rta| {
+                        if info.framebuffer.render_targets[rta.index].view == swapchain_image.view {
+                            stop = true;
+                            info.framebuffer.render_targets[rta.index].store_op =
+                                AttachmentStoreOp::Present;
+                        }
+                    });
+                }),
+            }
+            if stop {
+                return;
+            };
+        }
     }
 
     pub fn take(&mut self) -> Self {
@@ -169,6 +184,8 @@ impl Rdg {
             }
         }
 
+        sorted.reverse();
+
         Ok(sorted)
     }
 
@@ -226,18 +243,14 @@ impl Rdg {
                     QueueType::Graphics => {
                         current_group.graphics_nodes.push(node_info.global_index)
                     }
-                    QueueType::Compute => current_group.compute_nodes.push(node_info.global_index),
-                    QueueType::Transfer => {
-                        current_group.transfer_nodes.push(node_info.global_index)
+                    QueueType::AsyncCompute => {
+                        current_group.compute_nodes.push(node_info.global_index)
                     }
                 }
             }
         }
 
-        if !current_group.compute_nodes.is_empty()
-            || !current_group.graphics_nodes.is_empty()
-            || !current_group.transfer_nodes.is_empty()
-        {
+        if !current_group.compute_nodes.is_empty() || !current_group.graphics_nodes.is_empty() {
             steps.push(Step::PassGroup(std::mem::take(&mut current_group)));
         }
 
@@ -246,18 +259,67 @@ impl Rdg {
             nodes: std::mem::take(&mut self.nodes),
         })
     }
+
+    fn patch_latest_render_pass_writing_to_swapchain(
+        &mut self,
+        image: SwapchainImage,
+        topological_sorting: &[usize],
+    ) {
+        let swapchain_image = image;
+        let last_writing_node = topological_sorting.iter().find(|node_idx| {
+            let node_info = &self.nodes[**node_idx];
+            node_info.writes.iter().any(|res| match res {
+                Resource::ImageView { view } => *view == swapchain_image.view,
+                _ => false,
+            })
+        });
+        if let Some(&last_writing_node) = last_writing_node {
+            let node_info = &mut self.nodes[last_writing_node];
+            match &mut node_info.ty {
+                Node::RenderPass { info } => info.steps.iter_mut().for_each(|step| {
+                    step.color_attachments.iter_mut().for_each(|rta| {
+                        if info.framebuffer.render_targets[rta.index].view == swapchain_image.view {
+                            info.framebuffer.render_targets[rta.index].store_op =
+                                AttachmentStoreOp::Present;
+                        }
+                    })
+                }),
+            }
+        }
+    }
 }
 
 impl Node {
     fn into_rdg(self, toi: usize, queue: QueueType) -> RdgNode {
-        match &self {
-            Node::Present { image, .. } => RdgNode {
-                reads: [Resource::ImageView { view: image.view }].into(),
-                writes: [].into(),
-                ty: self,
-                global_index: toi,
-                queue,
-            },
+        let (read, write) = match &self {
+            Node::RenderPass { info } => (
+                info.framebuffer
+                    .render_targets
+                    .iter()
+                    .filter_map(|rt| match rt.store_op {
+                        AttachmentStoreOp::DontCare => Some(Resource::ImageView { view: rt.view }),
+                        AttachmentStoreOp::Store | AttachmentStoreOp::Present => None,
+                    })
+                    .collect(),
+                info.framebuffer
+                    .render_targets
+                    .iter()
+                    .filter_map(|rt| match rt.store_op {
+                        AttachmentStoreOp::DontCare => None,
+                        AttachmentStoreOp::Store | AttachmentStoreOp::Present => {
+                            Some(Resource::ImageView { view: rt.view })
+                        }
+                    })
+                    .collect(),
+            ),
+        };
+
+        RdgNode {
+            reads: read,
+            writes: write,
+            ty: self,
+            global_index: toi,
+            queue,
         }
     }
 }
@@ -265,7 +327,7 @@ impl Node {
 #[cfg(test)]
 mod tests {
 
-    use crate::{rdg::Resource, Image, ImageView};
+    use crate::{Image, ImageView};
 
     use super::Rdg;
 
@@ -273,34 +335,35 @@ mod tests {
     fn present() {
         let mut rdg = Rdg::default();
 
-        let image_0 = Image { id: 0 };
+        let image_0 = Image {
+            id: 0,
+            usage_flags: Default::default(),
+            extents: Default::default(),
+            dimension: crate::ImageDimension::D1,
+            mips: 1.try_into().unwrap(),
+            array_layers: 1.try_into().unwrap(),
+            samples: crate::SampleCount::One,
+            format: crate::ImageFormat::Rgba8,
+        };
         let view_0 = ImageView {
             owner: image_0,
             id: 0,
         };
-        rdg.add_present_pass(
+        rdg.inform_present(
             crate::SwapchainImage {
                 image: image_0,
                 view: view_0,
+                extents: Default::default(),
             },
             0,
         );
         let compiled = rdg.compile().unwrap();
-        assert_eq!(compiled.sequence.len(), 1);
+        assert_eq!(compiled.sequence.len(), 0);
         let step_0 = &compiled.sequence[0];
         match step_0 {
             crate::rdg::Step::Barrier { .. } => panic!("Barrier with only a present"),
-            crate::rdg::Step::PassGroup(passes) => {
-                assert_eq!(passes.compute_nodes.len(), 0);
-                assert_eq!(passes.transfer_nodes.len(), 0);
-                assert_eq!(passes.graphics_nodes.len(), 1);
-                let pass = passes.graphics_nodes[0];
-
-                let pass = &compiled.nodes[pass];
-                assert_eq!(
-                    *pass.reads.iter().next().unwrap(),
-                    Resource::ImageView { view: view_0 }
-                );
+            crate::rdg::Step::PassGroup(..) => {
+                panic!("PassGroup with only a present!")
             }
         }
     }
