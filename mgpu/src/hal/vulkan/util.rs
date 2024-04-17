@@ -399,7 +399,7 @@ impl<'a> GraphicsPipelineDescription<'a> {
                 vertex_inputs: self.vertex_stage.vertex_inputs.to_vec(),
             },
             fragment_stage: self.fragment_stage.map(|s| OwnedFragmentStageInfo {
-                shader: s.shader.clone(),
+                shader: *s.shader,
                 entry_point: s.entry_point.to_owned(),
                 render_targets: s.render_targets.to_vec(),
                 depth_stencil_target: s.depth_stencil_target.map(ToOwned::to_owned),

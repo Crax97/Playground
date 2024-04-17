@@ -369,18 +369,13 @@ impl<T> Handle<T> {
 macro_rules! check {
     ($cond:expr, $msg:expr) => {
         if !$cond {
-            use crate::MgpuError;
             crate::util::ERROR_HAPPENED.store(true, std::sync::atomic::Ordering::Relaxed);
 
-            println!("A check condition failed: {}", stringify!($cond));
-            println!("If your application hangs, make sure you're correctly handling all the 'MgpuResult<()>'s");
-
-            return Err(MgpuError::CheckFailed {
-                check: stringify!($cond),
-                message: $msg.to_string(),
-            });
-        } else {
-            MgpuResult::Ok(())
+            panic!(
+                "A check condition failed: {}\nAdditional infos: {}",
+                stringify!($cond),
+                $msg
+            );
         }
     };
 }

@@ -1,11 +1,10 @@
-use std::{hash::DefaultHasher, marker::PhantomData};
+use std::marker::PhantomData;
 
 use crate::{
     rdg::{Node, QueueType},
     util::check,
-    AttachmentStoreOp, BindingSet, Buffer, DepthStencilTarget, DepthStencilTargetInfo, Device,
-    Extents2D, GraphicsPipeline, ImageView, MgpuError, MgpuResult, Rect2D, RenderPassDescription,
-    RenderTarget, RenderTargetInfo,
+    AttachmentStoreOp, BindingSet, Buffer, DepthStencilTarget, Device, Extents2D, GraphicsPipeline,
+    MgpuError, MgpuResult, Rect2D, RenderPassDescription, RenderTarget,
 };
 
 pub struct CommandRecorder<T: CommandRecorderType> {
@@ -112,37 +111,45 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
     fn validate_render_pass_description(
         &self,
         render_pass_description: &RenderPassDescription<'_>,
-    ) -> MgpuResult<()> {
+    ) {
         for rt in render_pass_description.render_targets {
-            let image_name = self.device.hal.image_name(rt.view.owner)?;
+            let image_name = self
+                .device
+                .hal
+                .image_name(rt.view.owner)
+                .expect("Invalid image handle");
             let image_name = image_name.as_deref().unwrap_or("Unknown");
             let error_message = format!(
-                    "Render Target image '{}' is smaller than the framebuffer size! Expected {:?}, got {:?}", image_name,
+                    "Render Target image '{}''s size is different than the framebuffer size! Expected {:?}, got {:?}", image_name,
                     render_pass_description.framebuffer_size,
                     rt.view.owner.extents
                 );
             check!(
-                rt.view.owner.extents.width <= render_pass_description.framebuffer_size.width
+                rt.view.owner.extents.width == render_pass_description.framebuffer_size.width
                     && rt.view.owner.extents.height
-                        <= render_pass_description.framebuffer_size.height,
+                        == render_pass_description.framebuffer_size.height,
                 &error_message
-            )?;
+            );
         }
 
         if let Some(rt) = &render_pass_description.depth_stencil_attachment {
-            let image_name = self.device.hal.image_name(rt.view.owner)?;
+            let image_name = self
+                .device
+                .hal
+                .image_name(rt.view.owner)
+                .expect("Invalid image handle");
             let image_name = image_name.as_deref().unwrap_or("Unknown");
             let error_message = format!(
-                    "Depth Stencil Target image '{}' is smaller than the framebuffer size! Expected {:?}, got {:?}", image_name,
+                    "Depth Stencil Target image '{}''s size is different than the framebuffer size! Expected {:?}, got {:?}", image_name,
                     render_pass_description.framebuffer_size,
                     rt.view.owner.extents
                 );
             check!(
-                rt.view.owner.extents.width <= render_pass_description.framebuffer_size.width
+                rt.view.owner.extents.width == render_pass_description.framebuffer_size.width
                     && rt.view.owner.extents.height
-                        <= render_pass_description.framebuffer_size.height,
+                        == render_pass_description.framebuffer_size.height,
                 &error_message
-            )?;
+            );
         }
 
         check!(
@@ -156,8 +163,7 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
                 "The render area is too smaller/outflows the framebuffer! Got {:?}, expected at least {:?}",
                 render_pass_description.render_area, render_pass_description.framebuffer_size
             )
-        )?;
-        Ok(())
+        );
     }
 }
 
@@ -167,7 +173,7 @@ impl CommandRecorder<Graphics> {
         render_pass_description: &RenderPassDescription,
     ) -> MgpuResult<RenderPass> {
         #[cfg(debug_assertions)]
-        self.validate_render_pass_description(render_pass_description)?;
+        self.validate_render_pass_description(render_pass_description);
         let label = render_pass_description.label.map(ToOwned::to_owned);
 
         let first_step = RenderStep {
@@ -236,12 +242,13 @@ impl<'c> RenderPass<'c> {
         first_vertex: usize,
         first_instance: usize,
     ) -> MgpuResult<()> {
-        self.validate_state()?;
+        #[cfg(debug_assertions)]
+        self.validate_state();
         let step = self.info.steps.last_mut().unwrap();
         step.commands.push(DrawCommand {
-            pipeline: self.pipeline.clone().unwrap(),
+            pipeline: self.pipeline.unwrap(),
             vertex_buffers: self.vertex_buffers.clone(),
-            index_buffer: self.index_buffer.clone(),
+            index_buffer: self.index_buffer,
             binding_sets: self.command_recorder.binding_sets.clone(),
             draw_type: DrawType::Draw {
                 vertices,
@@ -253,22 +260,11 @@ impl<'c> RenderPass<'c> {
         Ok(())
     }
 
-    fn validate_state(&self) -> MgpuResult<()> {
-        let check = |cond: bool, err: &str| {
-            if !cond {
-                return Err(MgpuError::InvalidParams {
-                    params_name: "RenderPass",
-                    label: self.info.label.clone(),
-                    reason: err.to_owned(),
-                });
-            }
-            Ok(())
-        };
-        check(
+    fn validate_state(&self) {
+        check!(
             self.pipeline.is_some(),
-            "Issued a draw call without a pipeline set",
-        )?;
-        Ok(())
+            "Issued a draw call without a pipeline set"
+        );
     }
 }
 

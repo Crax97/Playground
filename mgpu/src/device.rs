@@ -1,5 +1,6 @@
 use crate::hal::{Hal, SubmitInfo};
 use crate::rdg::{Node, Rdg};
+use crate::util::check;
 use crate::DrawType::Draw;
 use crate::{
     hal, Buffer, BufferDescription, BufferWriteParams, CommandRecorder, CommandRecorderType,
@@ -211,7 +212,7 @@ impl Device {
 
     pub fn create_buffer(&self, buffer_description: &BufferDescription) -> MgpuResult<Buffer> {
         #[cfg(debug_assertions)]
-        Self::validate_buffer_description(buffer_description)?;
+        Self::validate_buffer_description(buffer_description);
         self.hal.create_buffer(buffer_description)
     }
 
@@ -221,7 +222,7 @@ impl Device {
         params: &BufferWriteParams,
     ) -> MgpuResult<()> {
         #[cfg(debug_assertions)]
-        self.validate_buffer_write_params(buffer, params)?;
+        self.validate_buffer_write_params(buffer, params);
 
         if buffer.memory_domain == MemoryDomain::DeviceLocal {
             todo!()
@@ -233,7 +234,7 @@ impl Device {
 
     pub fn write_buffer(&self, buffer: Buffer, params: &BufferWriteParams) -> MgpuResult<()> {
         #[cfg(debug_assertions)]
-        self.validate_buffer_write_params(buffer, params)?;
+        self.validate_buffer_write_params(buffer, params);
         todo!()
     }
 
@@ -243,13 +244,13 @@ impl Device {
 
     pub fn create_image(&self, image_description: &ImageDescription) -> MgpuResult<Image> {
         #[cfg(debug_assertions)]
-        Self::validate_image_description(image_description)?;
+        Self::validate_image_description(image_description);
         self.hal.create_image(image_description)
     }
 
     pub fn write_image(&self, image: Image, params: &ImageWriteParams) -> MgpuResult<()> {
         #[cfg(debug_assertions)]
-        self.validate_image_write_params(image, params)?;
+        self.validate_image_write_params(image, params);
 
         todo!();
 
@@ -314,130 +315,57 @@ impl Device {
         self.rdg.read().expect("Failed to lock rdg")
     }
 
-    fn validate_image_description(image_description: &ImageDescription) -> MgpuResult<()> {
-        let check_condition = |condition: bool, error_message: &str| {
-            if !condition {
-                Err(MgpuError::InvalidParams {
-                    params_name: "ImageDescription",
-                    label: image_description.label.map(ToOwned::to_owned),
-                    reason: error_message.to_string(),
-                })
-            } else {
-                Ok(())
-            }
-        };
-
-        check_condition(
+    fn validate_image_description(image_description: &ImageDescription) {
+        check!(
             image_description.dimension != ImageDimension::D3
                 || image_description.extents.depth > 0,
-            "The depth of an image cannot be 0",
-        )?;
+            "The depth of an image cannot be 0"
+        );
 
         let total_texels = image_description.extents.width
             * image_description.extents.height
             * image_description.extents.depth;
-        check_condition(
+        check!(
             total_texels > 0,
-            "The width, height and depth of an image cannot be 0",
-        )?;
-        Ok(())
+            "The width, height and depth of an image cannot be 0"
+        );
     }
 
-    fn validate_buffer_description(buffer_description: &BufferDescription) -> MgpuResult<()> {
-        let check_condition = |condition: bool, error_message: &str| {
-            if !condition {
-                Err(MgpuError::InvalidParams {
-                    params_name: "BufferDescription",
-                    label: buffer_description.label.map(ToOwned::to_owned),
-                    reason: error_message.to_string(),
-                })
-            } else {
-                Ok(())
-            }
-        };
-
-        check_condition(
+    fn validate_buffer_description(buffer_description: &BufferDescription) {
+        check!(
             buffer_description.size > 0,
-            "Cannot create a buffer with size 0!",
-        )?;
-        Ok(())
+            "Cannot create a buffer with size 0!"
+        );
     }
 
-    fn validate_image_write_params(
-        &self,
-        image: Image,
-        params: &ImageWriteParams,
-    ) -> MgpuResult<()> {
-        let check_condition = |condition: bool, error_message: &str| {
-            if !condition {
-                Err(MgpuError::InvalidParams {
-                    params_name: "ImageWriteParams",
-                    label: self.hal.image_name(image)?,
-                    reason: error_message.to_string(),
-                })
-            } else {
-                Ok(())
-            }
-        };
-
+    fn validate_image_write_params(&self, image: Image, params: &ImageWriteParams) {
         let total_texels = image.extents.width * image.extents.height * image.extents.depth;
         let texel_byte_size = image.format.byte_size();
         let total_bytes = total_texels as usize * texel_byte_size;
 
-        check_condition(params.data.len() >= total_bytes, &format!("Attempted to execute a write operation without enough source data, expected at least {total_bytes} bytes, got {}", params.data.len()))?;
-
-        Ok(())
+        check!(params.data.len() >= total_bytes, &format!("Attempted to execute a write operation without enough source data, expected at least {total_bytes} bytes, got {}", params.data.len()));
     }
 
-    fn validate_buffer_write_params(
-        &self,
-        buffer: Buffer,
-        params: &BufferWriteParams,
-    ) -> MgpuResult<()> {
-        let check_condition = |condition: bool, error_message: &str| {
-            if !condition {
-                Err(MgpuError::InvalidParams {
-                    params_name: "BufferWriteParams",
-                    label: self.hal.buffer_name(buffer)?,
-                    reason: error_message.to_string(),
-                })
-            } else {
-                Ok(())
-            }
-        };
-
-        check_condition(
+    fn validate_buffer_write_params(&self, buffer: Buffer, params: &BufferWriteParams) {
+        check!(
             params.size > 0,
-            "A buffer write operation cannot have data length of 0!",
-        )?;
+            "A buffer write operation cannot have data length of 0!"
+        );
         let expected_data_len = params.size - params.offset;
-        check_condition(
+        check!(
             params.data.len() >= expected_data_len,
             &format!(
                 "Not enough data in data buffer: expected {expected_data_len}, got {}",
                 params.data.len()
-            ),
-        )?;
-        Ok(())
+            )
+        );
     }
 
     fn validate_shader_module_description(
         &self,
         shader_module_description: &ShaderModuleDescription,
     ) -> MgpuResult<()> {
-        let check_condition = |condition: bool, error_message: &str| {
-            if !condition {
-                Err(MgpuError::InvalidParams {
-                    params_name: "ShaderModuleDescription",
-                    label: shader_module_description.label.map(ToOwned::to_owned),
-                    reason: error_message.to_string(),
-                })
-            } else {
-                Ok(())
-            }
-        };
-
-        check_condition(shader_module_description.source.len() > 0, "Empty source")?;
+        check!(!shader_module_description.source.is_empty(), "Empty source");
 
         Ok(())
     }
@@ -446,18 +374,6 @@ impl Device {
         &self,
         graphics_pipeline_description: &GraphicsPipelineDescription,
     ) -> MgpuResult<()> {
-        let check_condition = |condition: bool, error_message: &str| {
-            if !condition {
-                Err(MgpuError::InvalidParams {
-                    params_name: "GraphicsPipelineDescription",
-                    label: graphics_pipeline_description.label.map(ToOwned::to_owned),
-                    reason: error_message.to_string(),
-                })
-            } else {
-                Ok(())
-            }
-        };
-
         for binding in graphics_pipeline_description.binding_sets {
             todo!()
         }
