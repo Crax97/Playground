@@ -166,6 +166,7 @@ impl CommandRecorder<Graphics> {
         &mut self,
         render_pass_description: &RenderPassDescription,
     ) -> MgpuResult<RenderPass> {
+        #[cfg(debug_assertions)]
         self.validate_render_pass_description(render_pass_description)?;
         let label = render_pass_description.label.map(ToOwned::to_owned);
 

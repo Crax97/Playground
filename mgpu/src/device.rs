@@ -210,6 +210,7 @@ impl Device {
     }
 
     pub fn create_buffer(&self, buffer_description: &BufferDescription) -> MgpuResult<Buffer> {
+        #[cfg(debug_assertions)]
         Self::validate_buffer_description(buffer_description)?;
         self.hal.create_buffer(buffer_description)
     }
@@ -219,6 +220,7 @@ impl Device {
         buffer: Buffer,
         params: &BufferWriteParams,
     ) -> MgpuResult<()> {
+        #[cfg(debug_assertions)]
         self.validate_buffer_write_params(buffer, params)?;
 
         if buffer.memory_domain == MemoryDomain::DeviceLocal {
@@ -230,6 +232,7 @@ impl Device {
     }
 
     pub fn write_buffer(&self, buffer: Buffer, params: &BufferWriteParams) -> MgpuResult<()> {
+        #[cfg(debug_assertions)]
         self.validate_buffer_write_params(buffer, params)?;
         todo!()
     }
@@ -239,11 +242,13 @@ impl Device {
     }
 
     pub fn create_image(&self, image_description: &ImageDescription) -> MgpuResult<Image> {
+        #[cfg(debug_assertions)]
         Self::validate_image_description(image_description)?;
         self.hal.create_image(image_description)
     }
 
     pub fn write_image(&self, image: Image, params: &ImageWriteParams) -> MgpuResult<()> {
+        #[cfg(debug_assertions)]
         self.validate_image_write_params(image, params)?;
 
         todo!();
@@ -266,6 +271,7 @@ impl Device {
         &self,
         shader_module_description: &ShaderModuleDescription,
     ) -> MgpuResult<ShaderModule> {
+        #[cfg(debug_assertions)]
         self.validate_shader_module_description(shader_module_description)?;
         self.hal.create_shader_module(shader_module_description)
     }
