@@ -1566,8 +1566,7 @@ fn hash_render_pass_info(render_pass_info: &RenderPassInfo) -> u64 {
         rt.store_op.hash(&mut hasher);
     }
 
-    let render_pass_hash = hasher.finish();
-    render_pass_hash
+    hasher.finish()
 }
 impl FrameInFlight {
     fn get_last_command_buffers(
@@ -1692,6 +1691,9 @@ unsafe extern "system" fn vulkan_debug_callback(
     p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT<'_>,
     _user_data: *mut std::os::raw::c_void,
 ) -> vk::Bool32 {
+    if crate::util::ERROR_HAPPENED.load(Ordering::Relaxed) {
+        return vk::FALSE;
+    }
     let callback_data = *p_callback_data;
     let message_id_number = callback_data.message_id_number;
 

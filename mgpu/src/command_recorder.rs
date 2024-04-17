@@ -2,6 +2,7 @@ use std::{hash::DefaultHasher, marker::PhantomData};
 
 use crate::{
     rdg::{Node, QueueType},
+    util::check,
     AttachmentStoreOp, BindingSet, Buffer, DepthStencilTarget, DepthStencilTargetInfo, Device,
     Extents2D, GraphicsPipeline, ImageView, MgpuError, MgpuResult, Rect2D, RenderPassDescription,
     RenderTarget, RenderTargetInfo,
@@ -90,7 +91,7 @@ pub struct Compute;
 pub struct AsyncCompute;
 
 impl<T: CommandRecorderType> CommandRecorder<T> {
-    pub fn submit(mut self) -> MgpuResult<()> {
+    pub fn submit(self) -> MgpuResult<()> {
         let mut rdg = self.device.write_rdg();
         match T::PREFERRED_QUEUE_TYPE {
             QueueType::Graphics => {
@@ -107,13 +108,65 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
 
         Ok(())
     }
+
+    fn validate_render_pass_description(
+        &self,
+        render_pass_description: &RenderPassDescription<'_>,
+    ) -> MgpuResult<()> {
+        for rt in render_pass_description.render_targets {
+            let image_name = self.device.hal.image_name(rt.view.owner)?;
+            let image_name = image_name.as_deref().unwrap_or("Unknown");
+            let error_message = format!(
+                    "Render Target image '{}' is smaller than the framebuffer size! Expected {:?}, got {:?}", image_name,
+                    render_pass_description.framebuffer_size,
+                    rt.view.owner.extents
+                );
+            check!(
+                rt.view.owner.extents.width <= render_pass_description.framebuffer_size.width
+                    && rt.view.owner.extents.height
+                        <= render_pass_description.framebuffer_size.height,
+                &error_message
+            )?;
+        }
+
+        if let Some(rt) = &render_pass_description.depth_stencil_attachment {
+            let image_name = self.device.hal.image_name(rt.view.owner)?;
+            let image_name = image_name.as_deref().unwrap_or("Unknown");
+            let error_message = format!(
+                    "Depth Stencil Target image '{}' is smaller than the framebuffer size! Expected {:?}, got {:?}", image_name,
+                    render_pass_description.framebuffer_size,
+                    rt.view.owner.extents
+                );
+            check!(
+                rt.view.owner.extents.width <= render_pass_description.framebuffer_size.width
+                    && rt.view.owner.extents.height
+                        <= render_pass_description.framebuffer_size.height,
+                &error_message
+            )?;
+        }
+
+        check!(
+            render_pass_description.render_area.offset.x as u32
+                + render_pass_description.render_area.extents.width
+                <= render_pass_description.framebuffer_size.width
+                && render_pass_description.render_area.offset.y as u32
+                    + render_pass_description.render_area.extents.height
+                    <= render_pass_description.framebuffer_size.height,
+            &format!(
+                "The render area is too smaller/outflows the framebuffer! Got {:?}, expected at least {:?}",
+                render_pass_description.render_area, render_pass_description.framebuffer_size
+            )
+        )?;
+        Ok(())
+    }
 }
 
 impl CommandRecorder<Graphics> {
     pub fn begin_render_pass(
         &mut self,
         render_pass_description: &RenderPassDescription,
-    ) -> RenderPass {
+    ) -> MgpuResult<RenderPass> {
+        self.validate_render_pass_description(render_pass_description)?;
         let label = render_pass_description.label.map(ToOwned::to_owned);
 
         let first_step = RenderStep {
@@ -145,7 +198,7 @@ impl CommandRecorder<Graphics> {
             ),
             commands: vec![],
         };
-        RenderPass {
+        Ok(RenderPass {
             command_recorder: self,
             info: RenderPassInfo {
                 label,
@@ -162,7 +215,7 @@ impl CommandRecorder<Graphics> {
             pipeline: None,
             vertex_buffers: Default::default(),
             index_buffer: Default::default(),
-        }
+        })
     }
 }
 

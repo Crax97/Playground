@@ -1,7 +1,11 @@
 use std::{
+    fmt::Display,
     hash::{DefaultHasher, Hash, Hasher},
     marker::PhantomData,
+    sync::atomic::AtomicBool,
 };
+
+pub(crate) static ERROR_HAPPENED: AtomicBool = AtomicBool::new(false);
 
 /// An Handle is a generational index (8 bytes in size) that can be used to index into a
 /// [`ResourceArena<T>`].
@@ -147,6 +151,8 @@ macro_rules! define_resource_resolver {
     };
 }
 pub(crate) use define_resource_resolver;
+
+use crate::{MgpuError, MgpuResult};
 
 impl<T> ResourceArena<T> {
     pub(crate) fn new() -> Self {
@@ -358,6 +364,32 @@ impl<T> Handle<T> {
         (self.id >> 32) as u32
     }
 }
+
+#[cfg(debug_assertions)]
+macro_rules! check {
+    ($cond:expr, $msg:expr) => {
+        if !$cond {
+            use crate::MgpuError;
+            crate::util::ERROR_HAPPENED.store(true, std::sync::atomic::Ordering::Relaxed);
+
+            println!("A check condition failed: {}", stringify!($cond));
+            println!("If your application hangs, make sure you're correctly handling all the 'MgpuResult<()>'s");
+
+            return Err(MgpuError::CheckFailed {
+                check: stringify!($cond),
+                message: $msg.to_string(),
+            });
+        } else {
+            MgpuResult::Ok(())
+        }
+    };
+}
+
+#[cfg(not(debug_assertions))]
+macro_rules! check {
+    ($cond:expr, $msg:expr) => {};
+}
+pub(crate) use check;
 
 impl<T> std::fmt::Debug for Handle<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

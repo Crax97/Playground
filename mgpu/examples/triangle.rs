@@ -146,8 +146,8 @@ fn main() {
 
                     let mut command_recorder = device.create_command_recorder::<Graphics>();
                     {
-                        let mut render_pass =
-                            command_recorder.begin_render_pass(&RenderPassDescription {
+                        let mut render_pass = command_recorder
+                            .begin_render_pass(&RenderPassDescription {
                                 label: Some("Triangle rendering"),
                                 render_targets: &[RenderTarget {
                                     view: swapchain_image.view,
@@ -161,7 +161,8 @@ fn main() {
                                     offset: Default::default(),
                                     extents: swapchain_image.extents,
                                 },
-                            });
+                            })
+                            .unwrap();
                         // render_pass.set_vertex_buffers([triangle_buffer]);
                         // render_pass.set_pipeline(pipeline);
                         // render_pass.draw(3, 1, 0, 0).unwrap();

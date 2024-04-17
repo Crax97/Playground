@@ -29,6 +29,10 @@ pub enum MgpuError {
         label: Option<String>,
         reason: String,
     },
+    CheckFailed {
+        check: &'static str,
+        message: String,
+    },
     InvalidHandle,
     Dynamic(String),
 
@@ -416,6 +420,11 @@ impl std::fmt::Display for MgpuError {
             } => f.write_fmt(format_args!(
                 "Invalid '{params_name}' for resource '{}': {reason}",
                 label.as_ref().unwrap_or(&"Unnamed".to_string())
+            )),
+
+            MgpuError::CheckFailed { check, message } => f.write_fmt(format_args!(
+                "A check failed, condition: {}, error: {}",
+                check, message
             )),
 
             #[cfg(feature = "vulkan")]
