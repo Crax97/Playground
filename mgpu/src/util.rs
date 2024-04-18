@@ -1,5 +1,4 @@
 use std::{
-    fmt::Display,
     hash::{DefaultHasher, Hash, Hasher},
     marker::PhantomData,
     sync::atomic::AtomicBool,
@@ -17,10 +16,17 @@ pub struct Handle<T> {
     id: u64,
 }
 
+struct Lifetimed<T> {
+    lifetime: usize,
+    item: T,
+}
 /// A ResourceArena is a generational arena for items of type T
-pub struct ResourceArena<T> {
+pub struct ResourceArena<S, T> {
     resources: Vec<Entry<T>>,
     reclaimed_handles: Vec<Handle<T>>,
+    destruction_queue: Vec<Lifetimed<T>>,
+    lifetime: usize,
+    deallocate_fn: fn(&S, T) -> MgpuResult<()>,
     len: usize,
 }
 
@@ -39,6 +45,8 @@ pub fn hash_type<T: Hash>(value: &T) -> u64 {
 /// This macro helps to define a ResourceResolver, which is a type that can be used by
 /// a `[crate::hal::Hal]` implementation to resolve an Handle type (es. a `[crate::Image]`) to
 /// a concrete structured used to implement the Hal.
+/// Additionally, the ResourceResolver defers the destruction of every item by a certain amount of frames
+/// specified at creation time (to ensure that e.g an image is not destroyed while in use by a command buffer)
 /// E.g the api `Foo` uses a `foo::Buffer` for buffers and a `foo::Image` for images, therefore
 /// a ResourceResolver might be defined as
 /// ```
@@ -61,27 +69,44 @@ pub fn hash_type<T: Hash>(value: &T) -> u64 {
 /// ```
 /// For a more concrete example, take a look at `[crate::hal::vulkan::util::VulkanResolver]`
 macro_rules! define_resource_resolver {
-    ($($resource:ty => $map_name:ident),* $(,)?) => {
+    ($self:ty, $(($resource:ty, $deallocate_fn:expr) => $map_name:ident),* $(,)?) => {
         use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
         use crate::{util::ResourceArena, MgpuResult, MgpuError};
 
 
-        #[derive(Default)]
         pub struct ResourceResolver {
             $(
-                $map_name : RwLock<ResourceArena<$resource>>,
+                $map_name : RwLock<ResourceArena<$self, $resource>>,
             )*
         }
 
         pub trait GetMap<Output> {
-            fn get(&self) -> RwLockReadGuard<'_, ResourceArena<Output>>;
-            fn get_mut(&self) -> RwLockWriteGuard<'_, ResourceArena<Output>>;
+            fn get(&self) -> RwLockReadGuard<'_, ResourceArena<$self, Output>>;
+            fn get_mut(&self) -> RwLockWriteGuard<'_, ResourceArena<$self, Output>>;
         }
 
         impl ResourceResolver {
 
+            // Creates a new ResourceResolver.
+            // The lifetime parameter indicates after how many update cycles the destroy fn of each removed item should be called
+            pub fn new(lifetime: usize) -> Self {
+                Self {
+                    $(
+                        $map_name: RwLock::new(ResourceArena::new($deallocate_fn, lifetime))
+                    ),*
+                }
+            }
+
+            // Updates all the resource allocators, ensuring to destroy any item if their lifetime is 0
+            pub fn update(&self, s: &$self) -> MgpuResult<()> {
+                $(
+                    self.get_mut::<$resource>().update(s)?;
+                )*
+                Ok(())
+            }
+
             /// Gets a read-only reference to the ResourceArena for T
-            pub fn get<T>(&self) -> RwLockReadGuard<'_, ResourceArena<T>>
+            pub fn get<T>(&self) -> RwLockReadGuard<'_, ResourceArena<$self, T>>
             where
                 ResourceResolver: GetMap<T>,
             {
@@ -89,7 +114,7 @@ macro_rules! define_resource_resolver {
             }
 
             /// Gets a writeable reference to the ResourceArena for T
-            pub fn get_mut<T>(&self) -> RwLockWriteGuard<'_, ResourceArena<T>>
+            pub fn get_mut<T>(&self) -> RwLockWriteGuard<'_, ResourceArena<$self, T>>
             where
                 ResourceResolver: GetMap<T>,
             {
@@ -120,7 +145,7 @@ macro_rules! define_resource_resolver {
             }
 
             /// Removes a resource if it exists, returning the removed resource
-            pub fn remove<T>(&self, handle: impl Into<Handle<T>>) -> Option<T> where ResourceResolver: GetMap<T> {
+            pub fn remove<T>(&self, handle: impl Into<Handle<T>>) -> MgpuResult<()> where ResourceResolver: GetMap<T> {
                 self.get_mut::<T>().remove(handle.into())
             }
 
@@ -130,7 +155,7 @@ macro_rules! define_resource_resolver {
             }
 
             /// Resolves a clone of the resource if it exists
-            pub fn resolve_clone<T: Copy>(&self, handle: impl Into<Handle<T>>) -> Option<T> where ResourceResolver: GetMap<T> {
+            pub fn resolve_clone<T: Clone>(&self, handle: impl Into<Handle<T>>) -> Option<T> where ResourceResolver: GetMap<T> {
                 self.get::<T>().resolve_clone(handle.into())
             }
         }
@@ -139,11 +164,11 @@ macro_rules! define_resource_resolver {
 
         $(
             impl GetMap<$resource> for ResourceResolver {
-                fn get(&self) -> RwLockReadGuard<'_, ResourceArena<$resource>> {
+                fn get(&self) -> RwLockReadGuard<'_, ResourceArena<$self, $resource>> {
                     self.$map_name.read().unwrap_or_else(|_|panic!("Failed to get {}", stringify!($resource)))
                 }
 
-                fn get_mut(&self) -> RwLockWriteGuard<'_, ResourceArena<$resource>> {
+                fn get_mut(&self) -> RwLockWriteGuard<'_, ResourceArena<$self, $resource>> {
                     self.$map_name.write().unwrap_or_else(|_| panic!("Failed to get {}", stringify!($resource)))
                 }
             }
@@ -152,12 +177,18 @@ macro_rules! define_resource_resolver {
 }
 pub(crate) use define_resource_resolver;
 
-use crate::{MgpuError, MgpuResult};
-
-impl<T> ResourceArena<T> {
-    pub(crate) fn new() -> Self {
-        Self::default()
+impl<S, T> ResourceArena<S, T> {
+    pub fn new(deallocate_fn: fn(&S, T) -> MgpuResult<()>, lifetime: usize) -> Self {
+        Self {
+            resources: Default::default(),
+            reclaimed_handles: Default::default(),
+            destruction_queue: Default::default(),
+            lifetime,
+            deallocate_fn,
+            len: 0,
+        }
     }
+
     pub(crate) fn add(&mut self, resource: T) -> Handle<T> {
         let handle = if let Some(handle) = self.reclaimed_handles.pop() {
             let index = handle.index();
@@ -175,6 +206,21 @@ impl<T> ResourceArena<T> {
         };
         self.len += 1;
         handle
+    }
+
+    pub(crate) fn update(&mut self, s: &S) -> MgpuResult<()> {
+        let mut i = 0;
+        while i < self.destruction_queue.len() {
+            self.destruction_queue[i].lifetime -= 1;
+            if self.destruction_queue[i].lifetime == 0 {
+                let item = self.destruction_queue.remove(i);
+                (self.deallocate_fn)(s, item.item)?
+            } else {
+                i += 1;
+            }
+        }
+
+        Ok(())
     }
 
     pub(crate) fn resolve(&self, handle: impl Into<Handle<T>>) -> Option<&T> {
@@ -207,7 +253,7 @@ impl<T> ResourceArena<T> {
         None
     }
 
-    pub(crate) fn remove(&mut self, handle: impl Into<Handle<T>>) -> Option<T> {
+    pub(crate) fn remove(&mut self, handle: impl Into<Handle<T>>) -> MgpuResult<()> {
         let handle = handle.into();
         let (index, generation) = handle.to_index_generation();
         if let Some(entry) = self.resources.get_mut(index as usize) {
@@ -220,10 +266,14 @@ impl<T> ResourceArena<T> {
                 entry.generation += 1;
                 self.reclaimed_handles.push(handle.advance_generation());
                 self.len -= 1;
-                return Some(payload);
+                self.destruction_queue.push(Lifetimed {
+                    lifetime: self.lifetime,
+                    item: payload,
+                });
+                return Ok(());
             }
         }
-        None
+        Err(crate::MgpuError::InvalidHandle)
     }
 
     pub(crate) fn clear(&mut self) {
@@ -256,29 +306,19 @@ impl<T> ResourceArena<T> {
     }
 }
 
-impl<T: Copy> ResourceArena<T> {
+impl<S, T: Copy> ResourceArena<S, T> {
     pub(crate) fn resolve_copy(&self, handle: Handle<T>) -> Option<T> {
         self.resolve(handle).copied()
     }
 }
 
-impl<T: Clone> ResourceArena<T> {
+impl<S, T: Clone> ResourceArena<S, T> {
     pub(crate) fn resolve_clone(&self, handle: Handle<T>) -> Option<T> {
         self.resolve(handle).cloned()
     }
 }
 
-impl<T> Default for ResourceArena<T> {
-    fn default() -> Self {
-        Self {
-            resources: Default::default(),
-            reclaimed_handles: Default::default(),
-            len: 0,
-        }
-    }
-}
-
-impl<T> std::ops::Index<Handle<T>> for ResourceArena<T> {
+impl<S, T> std::ops::Index<Handle<T>> for ResourceArena<S, T> {
     type Output = T;
 
     fn index(&self, index: Handle<T>) -> &Self::Output {
@@ -286,7 +326,7 @@ impl<T> std::ops::Index<Handle<T>> for ResourceArena<T> {
     }
 }
 
-impl<T> std::ops::IndexMut<Handle<T>> for ResourceArena<T> {
+impl<S, T> std::ops::IndexMut<Handle<T>> for ResourceArena<S, T> {
     fn index_mut(&mut self, index: Handle<T>) -> &mut Self::Output {
         self.resolve_mut(index).expect("Invalid handle")
     }
@@ -301,7 +341,7 @@ impl<T: std::fmt::Debug> std::fmt::Debug for Entry<T> {
     }
 }
 
-impl<T: std::fmt::Debug> std::fmt::Debug for ResourceArena<T> {
+impl<S, T: std::fmt::Debug> std::fmt::Debug for ResourceArena<S, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ResourceArena")
             .field("resources", &self.resources)
@@ -312,7 +352,7 @@ impl<T: std::fmt::Debug> std::fmt::Debug for ResourceArena<T> {
 }
 
 pub type Filter<T> = fn(Entry<T>) -> Option<T>;
-impl<T> IntoIterator for ResourceArena<T> {
+impl<S, T> IntoIterator for ResourceArena<S, T> {
     type Item = T;
     type IntoIter =
         <std::iter::FilterMap<std::vec::IntoIter<Entry<T>>, Filter<T>> as IntoIterator>::IntoIter;
@@ -386,6 +426,8 @@ macro_rules! check {
 }
 pub(crate) use check;
 
+use crate::{hal::Hal, MgpuResult};
+
 impl<T> std::fmt::Debug for Handle<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let index_gen_str = format!("{}v{}", self.index(), self.generation());
@@ -422,7 +464,7 @@ mod tests {
 
     #[test]
     fn resource_arena_tests() {
-        let mut arena = ResourceArena::<u32>::default();
+        let mut arena = ResourceArena::<(), u32>::new(|(), _| Ok(()), 5);
         let handle_1 = arena.add(0);
         let handle_2 = arena.add(42);
         let handle_3 = arena.add(145);
@@ -431,7 +473,6 @@ mod tests {
         assert_eq!(arena[handle_1], 0);
 
         assert_eq!(arena.len(), 3);
-        assert_eq!(arena.remove(handle_2).unwrap(), 42);
         assert_eq!(arena.len(), 2);
 
         assert!(arena.resolve(handle_2).is_none());

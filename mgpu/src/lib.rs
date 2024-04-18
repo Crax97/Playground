@@ -100,11 +100,13 @@ bitflags! {
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ImageFormat {
+    Unknown,
     Rgba8,
 }
 impl ImageFormat {
     fn byte_size(&self) -> usize {
         match self {
+            Self::Unknown => 0,
             ImageFormat::Rgba8 => 4,
         }
     }
@@ -269,10 +271,28 @@ pub enum VertexInputFrequency {
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum VertexAttributeFormat {
+    Int,
+    Int2,
+    Int3,
+    Int4,
+    Uint,
+    Uint2,
+    Uint3,
+    Uint4,
+    Float,
+    Float2,
+    Float3,
+    Float4,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct VertexInputDescription {
     pub location: usize,
     pub stride: usize,
     pub offset: usize,
+    pub format: VertexAttributeFormat,
     pub frequency: VertexInputFrequency,
 }
 
@@ -312,6 +332,29 @@ pub struct VertexStageInfo<'a> {
     pub vertex_inputs: &'a [VertexInputDescription],
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
+pub enum CompareOp {
+    #[default]
+    Always,
+    Never,
+    Less,
+    LessOrEqual,
+    Equal,
+    Greater,
+    GreaterOrEqual,
+    NotEqual,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
+pub struct DepthStencilState {
+    pub depth_test_enabled: bool,
+    pub depth_write_enabled: bool,
+    pub depth_compare_op: CompareOp,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+pub struct StencilState {}
+
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 pub struct FragmentStageInfo<'a> {
     pub shader: &'a ShaderModule,
@@ -319,12 +362,125 @@ pub struct FragmentStageInfo<'a> {
     pub render_targets: &'a [RenderTargetInfo],
     pub depth_stencil_target: Option<&'a DepthStencilTargetInfo>,
 }
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum PrimitiveTopology {
+    #[default]
+    TriangleList,
+    TriangleFan,
+    Line,
+    LineList,
+    LineStrip,
+    Point,
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum PolygonMode {
+    #[default]
+    Filled,
+    Line(f32),
+    Point,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CullMode {
+    #[default]
+    Back,
+    Front,
+    None,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum FrontFace {
+    #[default]
+    ClockWise,
+    CounterClockWise,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct MultisampleState {}
+
+#[derive(Copy, Clone, Debug, Hash)]
 pub struct GraphicsPipelineDescription<'a> {
     pub label: Option<&'a str>,
     pub vertex_stage: &'a VertexStageInfo<'a>,
     pub fragment_stage: Option<&'a FragmentStageInfo<'a>>,
     pub binding_sets: &'a [BindingSet],
+    pub primitive_restart_enabled: bool,
+    pub primitive_topology: PrimitiveTopology,
+    pub polygon_mode: PolygonMode,
+    pub cull_mode: CullMode,
+    pub front_face: FrontFace,
+    pub multisample_state: Option<MultisampleState>,
+    pub depth_stencil_state: DepthStencilState,
+}
+
+#[derive(Clone, Debug)]
+pub struct ShaderAttribute {
+    pub name: String,
+    pub location: usize,
+    pub format: VertexAttributeFormat,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum BufferType {
+    Uniform,
+    Storage,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AccessMode {
+    Read,
+    Write,
+    ReadWrite,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum BindingSetElementKind {
+    Buffer {
+        ty: BufferType,
+        access_mode: AccessMode,
+    },
+    Sampler {
+        access_mode: AccessMode,
+    },
+    SampledImage {
+        format: ImageFormat,
+        dimension: ImageDimension,
+    },
+    StorageImage {
+        format: ImageFormat,
+        access_mode: AccessMode,
+        dimension: ImageDimension,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct BindingSetElement {
+    pub name: String,
+    pub binding: usize,
+    pub ty: BindingSetElementKind,
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct BindingSetLayout {
+    pub set: usize,
+    pub bindings: Vec<BindingSetElement>,
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct ShaderModuleLayout {
+    pub entry_points: Vec<String>,
+    pub inputs: Vec<ShaderAttribute>,
+    pub outputs: Vec<ShaderAttribute>,
+    pub binding_sets: Vec<BindingSetLayout>,
 }
 
 /// A Buffer is a linear data buffer that can be read or written by a shader
@@ -365,7 +521,7 @@ pub struct ImageView {
     id: u64,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 pub struct ShaderModule {
     id: u64,
 }
@@ -385,6 +541,16 @@ pub struct Swapchain {
     id: u64,
 }
 
+impl PolygonMode {
+    /// Gets the line width if the mode is Line, otherwise 0.0.
+    pub fn line_width(self) -> f32 {
+        match self {
+            PolygonMode::Line(v) => v,
+            _ => 0.0,
+        }
+    }
+}
+
 impl<'a> GraphicsPipelineDescription<'a> {
     pub fn new(label: Option<&'a str>, vertex_stage: &'a VertexStageInfo) -> Self {
         Self {
@@ -392,6 +558,13 @@ impl<'a> GraphicsPipelineDescription<'a> {
             vertex_stage,
             fragment_stage: None,
             binding_sets: &[],
+            primitive_restart_enabled: Default::default(),
+            primitive_topology: Default::default(),
+            polygon_mode: Default::default(),
+            cull_mode: Default::default(),
+            front_face: Default::default(),
+            multisample_state: Default::default(),
+            depth_stencil_state: Default::default(),
         }
     }
 
@@ -451,6 +624,11 @@ impl std::hash::Hash for RenderTargetLoadOp {
     }
 }
 impl std::hash::Hash for DepthStencilTargetLoadOp {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+    }
+}
+impl std::hash::Hash for PolygonMode {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
     }

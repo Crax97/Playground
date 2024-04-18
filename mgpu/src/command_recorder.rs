@@ -4,7 +4,7 @@ use crate::{
     rdg::{Node, QueueType},
     util::check,
     AttachmentStoreOp, BindingSet, Buffer, DepthStencilTarget, Device, Extents2D, GraphicsPipeline,
-    MgpuError, MgpuResult, Rect2D, RenderPassDescription, RenderTarget,
+    MgpuResult, Rect2D, RenderPassDescription, RenderTarget,
 };
 
 pub struct CommandRecorder<T: CommandRecorderType> {

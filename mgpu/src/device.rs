@@ -6,7 +6,7 @@ use crate::{
     hal, Buffer, BufferDescription, BufferWriteParams, CommandRecorder, CommandRecorderType,
     DrawCommand, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription,
     ImageDimension, ImageViewDescription, MemoryDomain, MgpuResult, ShaderModule,
-    ShaderModuleDescription,
+    ShaderModuleDescription, ShaderModuleLayout,
 };
 use crate::{ImageWriteParams, MgpuError};
 use ash::vk::{self, ImageView};
@@ -50,13 +50,6 @@ pub struct DeviceInfo {
     pub api_description: String,
     pub swapchain_support: bool,
 }
-
-#[cfg(feature = "swapchain")]
-pub(crate) struct PresentationRequest {
-    pub(crate) id: u64,
-    pub(crate) image: SwapchainImage,
-}
-
 #[derive(Clone)]
 pub struct Device {
     pub(crate) hal: Arc<dyn Hal>,
@@ -277,6 +270,13 @@ impl Device {
         self.hal.create_shader_module(shader_module_description)
     }
 
+    pub fn get_shader_module_layout(
+        &self,
+        shader_module: ShaderModule,
+    ) -> MgpuResult<ShaderModuleLayout> {
+        self.hal.get_shader_module_layout(shader_module)
+    }
+
     pub fn create_graphics_pipeline(
         &self,
         graphics_pipeline_description: &GraphicsPipelineDescription,
@@ -380,6 +380,18 @@ impl Device {
 
         Ok(())
     }
+}
+
+impl Drop for Device {
+    fn drop(&mut self) {
+        self.hal.device_wait_idle().unwrap();
+    }
+}
+
+#[cfg(feature = "swapchain")]
+pub(crate) struct PresentationRequest {
+    pub(crate) id: u64,
+    pub(crate) image: SwapchainImage,
 }
 
 impl std::fmt::Display for DeviceInfo {

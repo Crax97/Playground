@@ -14,7 +14,6 @@ use winit::event_loop::EventLoop;
 const VERTEX_SHADER: &str = "
 #version 460
 layout(location = 0) in vec3 pos;
-
 layout(location = 0) out vec4 vs_pos;
 
 void main() {
@@ -112,6 +111,7 @@ fn main() {
                         stride: std::mem::size_of::<Vertex>(),
                         offset: 0,
                         frequency: VertexInputFrequency::PerVertex,
+                        format: mgpu::VertexAttributeFormat::Float3,
                     }],
                 },
             )
@@ -162,9 +162,9 @@ fn main() {
                                 },
                             })
                             .unwrap();
-                        // render_pass.set_vertex_buffers([triangle_buffer]);
-                        // render_pass.set_pipeline(pipeline);
-                        // render_pass.draw(3, 1, 0, 0).unwrap();
+                        render_pass.set_pipeline(pipeline);
+                        render_pass.set_vertex_buffers([triangle_buffer]);
+                        render_pass.draw(3, 1, 0, 0).unwrap();
                     }
                     command_recorder.submit().unwrap();
 

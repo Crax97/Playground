@@ -3,14 +3,17 @@ use gpu_allocator::vulkan::Allocation;
 
 use crate::{
     util::{define_resource_resolver, Handle},
-    BindingSet, Buffer, BufferUsageFlags, DepthStencilTarget, DepthStencilTargetInfo, Extents2D,
-    Extents3D, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDimension, ImageFormat,
-    ImageUsageFlags, ImageView, Offset2D, PresentMode, Rect2D, RenderTargetInfo, SampleCount,
-    ShaderModule, Swapchain, VertexInputDescription, VertexStageInfo,
+    Buffer, BufferUsageFlags, CompareOp, CullMode, DepthStencilState, DepthStencilTargetInfo,
+    Extents2D, Extents3D, FrontFace, GraphicsPipeline, GraphicsPipelineDescription, Image,
+    ImageDimension, ImageFormat, ImageUsageFlags, ImageView, MultisampleState, Offset2D,
+    PolygonMode, PresentMode, PrimitiveTopology, Rect2D, RenderTargetInfo, SampleCount,
+    ShaderModule, ShaderModuleLayout, Swapchain, VertexAttributeFormat, VertexInputDescription,
+    VertexInputFrequency,
 };
 
 #[cfg(feature = "swapchain")]
 use super::swapchain::VulkanSwapchain;
+use super::{get_allocation_callbacks, VulkanHal, VulkanHalError};
 
 pub(crate) trait ToVk {
     type Target;
@@ -27,6 +30,7 @@ impl ToVk for ImageFormat {
 
     fn to_vk(self) -> Self::Target {
         match self {
+            ImageFormat::Unknown => vk::Format::UNDEFINED,
             ImageFormat::Rgba8 => vk::Format::R8G8B8A8_UNORM,
         }
     }
@@ -37,6 +41,7 @@ impl FromVk for vk::Format {
     fn from_vk(self) -> Self::Target {
         match self {
             vk::Format::R8G8B8A8_UNORM => ImageFormat::Rgba8,
+            vk::Format::UNDEFINED => ImageFormat::Unknown,
             _ => unreachable!("Format not known"),
         }
     }
@@ -239,6 +244,105 @@ impl FromVk for vk::ImageUsageFlags {
     }
 }
 
+impl ToVk for VertexInputFrequency {
+    type Target = vk::VertexInputRate;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            VertexInputFrequency::PerVertex => Self::Target::VERTEX,
+            VertexInputFrequency::PerInstance => Self::Target::INSTANCE,
+        }
+    }
+}
+
+impl ToVk for VertexAttributeFormat {
+    type Target = vk::Format;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            VertexAttributeFormat::Int => vk::Format::R32_SINT,
+            VertexAttributeFormat::Int2 => vk::Format::R32G32_SINT,
+            VertexAttributeFormat::Int3 => vk::Format::R32G32B32_SINT,
+            VertexAttributeFormat::Int4 => vk::Format::R32G32B32A32_SINT,
+            VertexAttributeFormat::Uint => vk::Format::R32_UINT,
+            VertexAttributeFormat::Uint2 => vk::Format::R32G32_UINT,
+            VertexAttributeFormat::Uint3 => vk::Format::R32G32B32_UINT,
+            VertexAttributeFormat::Uint4 => vk::Format::R32G32B32A32_UINT,
+            VertexAttributeFormat::Float => vk::Format::R32_SFLOAT,
+            VertexAttributeFormat::Float2 => vk::Format::R32G32_SFLOAT,
+            VertexAttributeFormat::Float3 => vk::Format::R32G32B32_SFLOAT,
+            VertexAttributeFormat::Float4 => vk::Format::R32G32B32A32_SFLOAT,
+        }
+    }
+}
+
+impl ToVk for PolygonMode {
+    type Target = vk::PolygonMode;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            PolygonMode::Filled => vk::PolygonMode::FILL,
+            PolygonMode::Line(_) => vk::PolygonMode::LINE,
+            PolygonMode::Point => vk::PolygonMode::POINT,
+        }
+    }
+}
+
+impl ToVk for PrimitiveTopology {
+    type Target = vk::PrimitiveTopology;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            PrimitiveTopology::TriangleList => vk::PrimitiveTopology::TRIANGLE_LIST,
+            PrimitiveTopology::TriangleFan => vk::PrimitiveTopology::TRIANGLE_FAN,
+            PrimitiveTopology::Line => vk::PrimitiveTopology::LINE_LIST,
+            PrimitiveTopology::LineList => vk::PrimitiveTopology::LINE_LIST,
+            PrimitiveTopology::LineStrip => vk::PrimitiveTopology::LINE_STRIP,
+            PrimitiveTopology::Point => vk::PrimitiveTopology::POINT_LIST,
+        }
+    }
+}
+
+impl ToVk for CullMode {
+    type Target = vk::CullModeFlags;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            CullMode::Back => vk::CullModeFlags::BACK,
+            CullMode::Front => vk::CullModeFlags::FRONT,
+            CullMode::None => vk::CullModeFlags::NONE,
+        }
+    }
+}
+
+impl ToVk for FrontFace {
+    type Target = vk::FrontFace;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            FrontFace::ClockWise => vk::FrontFace::CLOCKWISE,
+            FrontFace::CounterClockWise => vk::FrontFace::COUNTER_CLOCKWISE,
+        }
+    }
+}
+
+impl ToVk for CompareOp {
+    type Target = vk::CompareOp;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            CompareOp::Never => vk::CompareOp::NEVER,
+            CompareOp::Always => vk::CompareOp::ALWAYS,
+            CompareOp::Less => vk::CompareOp::LESS,
+            CompareOp::LessOrEqual => vk::CompareOp::LESS_OR_EQUAL,
+            CompareOp::Equal => vk::CompareOp::EQUAL,
+            CompareOp::Greater => vk::CompareOp::GREATER,
+            CompareOp::GreaterOrEqual => vk::CompareOp::GREATER_OR_EQUAL,
+            CompareOp::NotEqual => vk::CompareOp::NOT_EQUAL,
+        }
+    }
+}
+
 impl ToVk for BufferUsageFlags {
     type Target = vk::BufferUsageFlags;
 
@@ -361,19 +465,20 @@ pub(super) struct VulkanImageView {
 }
 
 #[derive(Clone)]
-pub(super) struct VulkanShaderModule {
+pub(super) struct SpirvShaderModule {
     pub(super) label: Option<String>,
+    pub(super) layout: ShaderModuleLayout,
     pub(super) handle: vk::ShaderModule,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Hash)]
 pub(super) struct OwnedVertexStageInfo {
     pub(super) shader: ShaderModule,
     pub(super) entry_point: String,
     pub(super) vertex_inputs: Vec<VertexInputDescription>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Hash)]
 pub(super) struct OwnedFragmentStageInfo {
     pub(super) shader: ShaderModule,
     pub(super) entry_point: String,
@@ -381,12 +486,18 @@ pub(super) struct OwnedFragmentStageInfo {
     pub(super) depth_stencil_target: Option<DepthStencilTargetInfo>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Hash)]
 pub(super) struct VulkanGraphicsPipelineDescription {
     pub(super) label: Option<String>,
     pub(super) vertex_stage: OwnedVertexStageInfo,
     pub(super) fragment_stage: Option<OwnedFragmentStageInfo>,
-    pub(super) binding_sets: Vec<BindingSet>,
+    pub(super) primitive_restart_enabled: bool,
+    pub(super) primitive_topology: PrimitiveTopology,
+    pub(super) polygon_mode: PolygonMode,
+    pub(super) cull_mode: CullMode,
+    pub(super) front_face: FrontFace,
+    pub(super) multisample_state: Option<MultisampleState>,
+    pub(super) depth_stencil_state: DepthStencilState,
 }
 
 impl<'a> GraphicsPipelineDescription<'a> {
@@ -394,7 +505,7 @@ impl<'a> GraphicsPipelineDescription<'a> {
         VulkanGraphicsPipelineDescription {
             label: self.label.map(ToOwned::to_owned),
             vertex_stage: OwnedVertexStageInfo {
-                shader: self.vertex_stage.shader.clone(),
+                shader: *self.vertex_stage.shader,
                 entry_point: self.vertex_stage.entry_point.to_owned(),
                 vertex_inputs: self.vertex_stage.vertex_inputs.to_vec(),
             },
@@ -404,18 +515,64 @@ impl<'a> GraphicsPipelineDescription<'a> {
                 render_targets: s.render_targets.to_vec(),
                 depth_stencil_target: s.depth_stencil_target.map(ToOwned::to_owned),
             }),
-            binding_sets: self.binding_sets.to_vec(),
+            primitive_restart_enabled: self.primitive_restart_enabled,
+            primitive_topology: self.primitive_topology,
+            polygon_mode: self.polygon_mode,
+            cull_mode: self.cull_mode,
+            front_face: self.front_face,
+            multisample_state: self.multisample_state,
+            depth_stencil_state: self.depth_stencil_state,
         }
     }
 }
 
 define_resource_resolver!(
-    VulkanImage => images,
-    VulkanImageView => image_views,
-    VulkanSwapchain => swapchains,
-    VulkanBuffer => buffers,
-    VulkanShaderModule => shader_modules,
-    VulkanGraphicsPipelineDescription => graphics_pipeline_infos,
+    VulkanHal,
+    (VulkanImageView, |hal, view| unsafe {
+        if view.external {
+            return Ok(());
+        }
+        unsafe {
+            hal.logical_device
+                .handle
+                .destroy_image_view(view.handle, get_allocation_callbacks());
+        }
+        Ok(())
+    }) => image_views,
+    (VulkanImage, |hal, image| unsafe {
+        if image.external {
+            return Ok(());
+        }
+        if let Some(allocation) = image.allocation {
+            let mut allocator = hal
+                .memory_allocator
+                .write()
+                .expect("Failed to lock memory allocator");
+            allocator
+                .free(allocation)
+                .map_err(|e| MgpuError::VulkanError(VulkanHalError::GpuAllocatorError(e)))?;
+        }
+        hal.logical_device.handle.destroy_image(image.handle, get_allocation_callbacks()); Ok(()) } ) => images,
+    (VulkanSwapchain, |_, _| Ok(())) => swapchains,
+    (VulkanBuffer, |hal, buffer| unsafe {
+
+        let mut allocator = hal
+            .memory_allocator
+            .write()
+            .expect("Failed to lock memory allocator");
+        allocator
+            .free(buffer.allocation)
+            .map_err(|e| MgpuError::VulkanError(VulkanHalError::GpuAllocatorError(e)))?;
+
+        unsafe {
+            hal.logical_device
+                .handle
+                .destroy_buffer(buffer.handle, get_allocation_callbacks());
+        }
+        Ok(())
+    }) => buffers,
+    (VulkanGraphicsPipelineDescription, |_, _| { todo!() }) => graphics_pipeline_infos,
+    (SpirvShaderModule, |hal, module| unsafe { hal.logical_device.handle.destroy_shader_module(module.handle, get_allocation_callbacks()); Ok(()) }) => shader_modules,
 );
 
 pub(super) trait ResolveVulkan<T, H>
@@ -454,6 +611,6 @@ macro_rules! impl_util_methods {
 impl_util_methods!(Image, VulkanImage, vk::Image);
 impl_util_methods!(ImageView, VulkanImageView, vk::ImageView);
 impl_util_methods!(Buffer, VulkanBuffer, vk::Buffer);
-impl_util_methods!(ShaderModule, VulkanShaderModule, vk::ShaderModule);
+impl_util_methods!(ShaderModule, SpirvShaderModule, vk::ShaderModule);
 impl_util_methods!(GraphicsPipeline, VulkanGraphicsPipelineDescription);
 impl_util_methods!(Swapchain, VulkanSwapchain, vk::SwapchainKHR);

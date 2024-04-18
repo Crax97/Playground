@@ -8,9 +8,11 @@ use crate::hal::{CommandRecorder, CommandRecorderAllocator, Hal};
 use crate::rdg::PassGroup;
 use crate::util::{hash_type, Handle};
 use crate::{
-    AttachmentAccessMode, Buffer, BufferDescription, DeviceConfiguration, DeviceFeatures,
-    DevicePreference, Framebuffer, GraphicsPipeline, GraphicsPipelineDescription, Image,
-    ImageDescription, MemoryDomain, MgpuError, MgpuResult, RenderPassInfo, ShaderModule,
+    AccessMode, AttachmentAccessMode, BindingSetElement, BindingSetElementKind, BindingSetLayout,
+    Buffer, BufferDescription, DeviceConfiguration, DeviceFeatures, DevicePreference, Framebuffer,
+    GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageDimension,
+    ImageFormat, MemoryDomain, MgpuError, MgpuResult, RenderPassInfo, ShaderAttribute,
+    ShaderModule, ShaderModuleLayout, VertexAttributeFormat,
 };
 use ash::vk::{DebugUtilsMessageSeverityFlagsEXT, Handle as AshHandle, QueueFlags};
 use ash::{vk, Entry, Instance};
@@ -19,6 +21,7 @@ use gpu_allocator::vulkan::{
 };
 use gpu_allocator::{AllocatorDebugSettings, MemoryLocation};
 use raw_window_handle::{DisplayHandle, WindowHandle};
+use spirv_reflect::types::ReflectInterfaceVariable;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::{self, c_char, CStr, CString};
@@ -27,7 +30,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 
 use self::swapchain::{SwapchainError, VulkanSwapchain};
-use self::util::{ResolveVulkan, VulkanImageView, VulkanResolver, VulkanShaderModule};
+use self::util::{ResolveVulkan, SpirvShaderModule, VulkanImageView, VulkanResolver};
 
 use super::{RenderState, SubmitInfo};
 
@@ -43,6 +46,10 @@ pub struct VulkanHal {
 
     framebuffers: RwLock<HashMap<u64, vk::Framebuffer>>,
     render_passes: RwLock<HashMap<u64, vk::RenderPass>>,
+    descriptor_set_layouts: RwLock<HashMap<u64, vk::DescriptorSetLayout>>,
+    pipeline_layouts: RwLock<HashMap<u64, vk::PipelineLayout>>,
+    pipelines: RwLock<HashMap<GraphicsPipeline, VulkanPipelineInfo>>,
+    command_buffer_states: RwLock<HashMap<vk::CommandBuffer, VulkanCommandBufferState>>,
 
     memory_allocator: RwLock<Allocator>,
 }
@@ -102,8 +109,19 @@ pub(crate) struct FramesInFlight {
     current_frame_in_flight: AtomicUsize,
 }
 
+#[derive(Clone, Copy, Default)]
+struct VulkanCommandBufferState {
+    current_render_pass: vk::RenderPass,
+    current_subpass: u32,
+}
+
 pub struct VulkanDeviceFeatures {
     swapchain_support: bool,
+}
+
+#[derive(Default)]
+pub struct VulkanPipelineInfo {
+    pipelines: Vec<vk::Pipeline>,
 }
 
 #[derive(Debug)]
@@ -233,6 +251,12 @@ impl Hal for VulkanHal {
         let current_frame = self.frames_in_flight.current();
         let device = &self.logical_device.handle;
 
+        let mut command_buffer_states = self
+            .command_buffer_states
+            .write()
+            .expect("Failed to lock command buffer states");
+        command_buffer_states.clear();
+
         if !end_rendering_info.graphics_command_recorders.is_empty() {
             let command_buffers = end_rendering_info
                 .graphics_command_recorders
@@ -272,6 +296,7 @@ impl Hal for VulkanHal {
             (current_frame_index + 1) % self.configuration.frames_in_flight,
             Ordering::Relaxed,
         );
+        self.resolver.update(self)?;
         Ok(())
     }
 
@@ -378,46 +403,13 @@ impl Hal for VulkanHal {
         Ok(image)
     }
     fn destroy_image(&self, image: crate::Image) -> MgpuResult<()> {
-        let image = self
-            .resolver
+        self.resolver
             .remove::<VulkanImage>(unsafe { Handle::from_u64(image.id) })
-            .ok_or(MgpuError::InvalidHandle)?;
-
-        if image.external {
-            return Ok(());
-        }
-        if let Some(allocation) = image.allocation {
-            let mut allocator = self
-                .memory_allocator
-                .write()
-                .expect("Failed to lock memory allocator");
-            allocator
-                .free(allocation)
-                .map_err(|e| MgpuError::VulkanError(VulkanHalError::GpuAllocatorError(e)))?;
-        }
-        unsafe {
-            self.logical_device
-                .handle
-                .destroy_image(image.handle, get_allocation_callbacks());
-        }
-        Ok(())
     }
 
     fn destroy_image_view(&self, image_view: crate::ImageView) -> MgpuResult<()> {
-        let view = self
-            .resolver
+        self.resolver
             .remove::<VulkanImageView>(unsafe { Handle::from_u64(image_view.id) })
-            .ok_or(MgpuError::InvalidHandle)?;
-
-        if view.external {
-            return Ok(());
-        }
-        unsafe {
-            self.logical_device
-                .handle
-                .destroy_image_view(view.handle, get_allocation_callbacks());
-        }
-        Ok(())
     }
 
     fn image_name(&self, image: Image) -> MgpuResult<Option<String>> {
@@ -455,6 +447,10 @@ impl Hal for VulkanHal {
             .allocate(&allocation_description)
             .map_err(|e| MgpuError::VulkanError(VulkanHalError::GpuAllocatorError(e)))?;
 
+        unsafe {
+            device.bind_buffer_memory(buffer, allocation.memory(), allocation.offset())?;
+        }
+
         let vulkan_buffer = VulkanBuffer {
             label: buffer_description.label.map(ToOwned::to_owned),
             handle: buffer,
@@ -475,25 +471,7 @@ impl Hal for VulkanHal {
     }
 
     fn destroy_buffer(&self, buffer: Buffer) -> MgpuResult<()> {
-        let buffer = self
-            .resolver
-            .remove(buffer)
-            .ok_or(MgpuError::InvalidHandle)?;
-
-        let mut allocator = self
-            .memory_allocator
-            .write()
-            .expect("Failed to lock memory allocator");
-        allocator
-            .free(buffer.allocation)
-            .map_err(|e| MgpuError::VulkanError(VulkanHalError::GpuAllocatorError(e)))?;
-
-        unsafe {
-            self.logical_device
-                .handle
-                .destroy_buffer(buffer.handle, get_allocation_callbacks());
-        }
-        Ok(())
+        self.resolver.remove(buffer)
     }
 
     unsafe fn write_host_visible_buffer(
@@ -518,6 +496,7 @@ impl Hal for VulkanHal {
         &self,
         shader_module_description: &crate::ShaderModuleDescription,
     ) -> MgpuResult<ShaderModule> {
+        let layout = self.reflect_layout(&shader_module_description)?;
         let shader_module_create_info = vk::ShaderModuleCreateInfo::default()
             .flags(vk::ShaderModuleCreateFlags::default())
             .code(shader_module_description.source);
@@ -530,9 +509,10 @@ impl Hal for VulkanHal {
             self.try_assign_debug_name(shader_module, name)?;
         }
 
-        let vulkan_shader_module = VulkanShaderModule {
+        let vulkan_shader_module = SpirvShaderModule {
             label: shader_module_description.label.map(ToOwned::to_owned),
             handle: shader_module,
+            layout,
         };
 
         let handle = self.resolver.add(vulkan_shader_module);
@@ -541,18 +521,16 @@ impl Hal for VulkanHal {
         })
     }
 
-    fn destroy_shader_module(&self, shader_module: ShaderModule) -> MgpuResult<()> {
-        let shader_module = self
-            .resolver
-            .remove(shader_module)
-            .ok_or(MgpuError::InvalidHandle)?;
+    fn get_shader_module_layout(
+        &self,
+        shader_module: ShaderModule,
+    ) -> MgpuResult<ShaderModuleLayout> {
+        self.resolver
+            .apply(shader_module, |module| Ok(module.layout.clone()))
+    }
 
-        unsafe {
-            self.logical_device
-                .handle
-                .destroy_shader_module(shader_module.handle, get_allocation_callbacks());
-        }
-        Ok(())
+    fn destroy_shader_module(&self, shader_module: ShaderModule) -> MgpuResult<()> {
+        self.resolver.remove(shader_module)
     }
 
     fn create_graphics_pipeline(
@@ -569,7 +547,7 @@ impl Hal for VulkanHal {
     }
 
     fn destroy_graphics_pipeline(&self, graphics_pipeline: GraphicsPipeline) -> MgpuResult<()> {
-        todo!()
+        self.resolver.remove(graphics_pipeline)
     }
 
     unsafe fn request_command_recorder(
@@ -588,6 +566,15 @@ impl Hal for VulkanHal {
                 .handle
                 .allocate_command_buffers(&command_buffer_allocate_info)?
         }[0];
+
+        let state = VulkanCommandBufferState::default();
+        let mut states = self
+            .command_buffer_states
+            .write()
+            .expect("Failed to lock command recorder states");
+        let old_state = states.insert(cb, state);
+
+        assert!(old_state.is_none());
 
         unsafe {
             self.logical_device
@@ -622,6 +609,14 @@ impl Hal for VulkanHal {
     }
 
     unsafe fn finalize_command_recorder(&self, command_buffer: CommandRecorder) -> MgpuResult<()> {
+        let mut states = self
+            .command_buffer_states
+            .write()
+            .expect("Failed to lock command recorder states");
+        let cb = vk::CommandBuffer::from_raw(command_buffer.id);
+        states
+            .remove(&cb)
+            .expect("Finalizing a command recorder with no state");
         unsafe {
             self.logical_device
                 .handle
@@ -635,9 +630,16 @@ impl Hal for VulkanHal {
         command_recorder: CommandRecorder,
         render_pass_info: &RenderPassInfo,
     ) -> MgpuResult<()> {
+        let cb = vk::CommandBuffer::from_raw(command_recorder.id);
         let render_pass = self.resolve_render_pass(render_pass_info)?;
         let framebuffer =
             self.resolve_framebuffer_for_render_pass(render_pass, render_pass_info)?;
+
+        let mut states = self
+            .command_buffer_states
+            .write()
+            .expect("Failed to lock command buffer states");
+        let state = states.get_mut(&cb).unwrap();
 
         let clear_values = render_pass_info
             .framebuffer
@@ -662,16 +664,28 @@ impl Hal for VulkanHal {
                     }),
             )
             .collect::<Vec<_>>();
+        let device = &self.logical_device.handle;
         unsafe {
-            self.logical_device.handle.cmd_begin_render_pass(
-                vk::CommandBuffer::from_raw(command_recorder.id),
+            device.cmd_begin_render_pass(
+                cb,
                 &vk::RenderPassBeginInfo::default()
                     .framebuffer(framebuffer)
                     .render_pass(render_pass)
                     .render_area(render_pass_info.render_area.to_vk())
                     .clear_values(&clear_values),
                 vk::SubpassContents::INLINE,
-            )
+            );
+
+            let viewport = vk::Viewport::default()
+                .width(render_pass_info.render_area.extents.width as f32)
+                .height(render_pass_info.render_area.extents.height as f32)
+                .x(render_pass_info.render_area.offset.x as f32)
+                .y(render_pass_info.render_area.offset.y as f32)
+                .min_depth(1.0)
+                .max_depth(0.0);
+            device.cmd_set_viewport(cb, 0, &[viewport]);
+            device.cmd_set_scissor(cb, 0, &[render_pass_info.render_area.to_vk()]);
+            state.current_render_pass = render_pass;
         };
 
         Ok(())
@@ -680,9 +694,49 @@ impl Hal for VulkanHal {
     unsafe fn bind_graphics_pipeline(
         &self,
         command_recorder: CommandRecorder,
-        pipeline: GraphicsPipeline,
+        graphics_pipeline: GraphicsPipeline,
     ) -> MgpuResult<()> {
-        todo!()
+        let vk_command_buffer = vk::CommandBuffer::from_raw(command_recorder.id);
+        let command_buffer_states = self
+            .command_buffer_states
+            .read()
+            .expect("Failed to lock command buffer states");
+        let command_buffer_state = command_buffer_states[&vk_command_buffer];
+        let pipeline = {
+            let pipelines = self.pipelines.read().expect("Failed to lock pipelines");
+            pipelines.get(&graphics_pipeline).and_then(|info| {
+                info.pipelines
+                    .get(command_buffer_state.current_subpass as usize)
+                    .copied()
+            })
+        };
+
+        let pipeline = if let Some(pipeline) = pipeline {
+            pipeline
+        } else {
+            let pipeline_info = self
+                .resolver
+                .resolve_clone(graphics_pipeline)
+                .ok_or(MgpuError::InvalidHandle)?;
+            let mut pipelines = self.pipelines.write().expect("Failed to lock pipelines");
+            let pipeline = self.create_pipeline(&pipeline_info, &command_buffer_state)?;
+            pipelines
+                .entry(graphics_pipeline)
+                .or_default()
+                .pipelines
+                .push(pipeline);
+            pipeline
+        };
+
+        unsafe {
+            self.logical_device.handle.cmd_bind_pipeline(
+                vk_command_buffer,
+                vk::PipelineBindPoint::GRAPHICS,
+                pipeline,
+            );
+        }
+
+        Ok(())
     }
 
     unsafe fn set_vertex_buffers(
@@ -713,7 +767,10 @@ impl Hal for VulkanHal {
         command_recorder: CommandRecorder,
         binding_sets: &[crate::BindingSet],
     ) -> MgpuResult<()> {
-        todo!()
+        for set in binding_sets {
+            todo!()
+        }
+        Ok(())
     }
 
     unsafe fn draw(
@@ -739,6 +796,15 @@ impl Hal for VulkanHal {
     }
 
     unsafe fn advance_to_next_step(&self, command_recorder: CommandRecorder) -> MgpuResult<()> {
+        let mut states = self
+            .command_buffer_states
+            .write()
+            .expect("Failed to lock command recorder states");
+        let cb = vk::CommandBuffer::from_raw(command_recorder.id);
+        states
+            .get_mut(&cb)
+            .expect("Command buffer with no state")
+            .current_subpass += 1;
         unsafe {
             self.logical_device.handle.cmd_next_subpass(
                 vk::CommandBuffer::from_raw(command_recorder.id),
@@ -750,12 +816,24 @@ impl Hal for VulkanHal {
     }
 
     unsafe fn end_render_pass(&self, command_recorder: CommandRecorder) -> MgpuResult<()> {
+        let mut states = self
+            .command_buffer_states
+            .write()
+            .expect("Failed to lock command recorder states");
+        let cb = vk::CommandBuffer::from_raw(command_recorder.id);
+        states.get_mut(&cb).unwrap().current_render_pass = vk::RenderPass::null();
+
         unsafe {
             self.logical_device
                 .handle
                 .cmd_end_render_pass(vk::CommandBuffer::from_raw(command_recorder.id))
         }
 
+        Ok(())
+    }
+
+    fn device_wait_idle(&self) -> MgpuResult<()> {
+        unsafe { self.logical_device.handle.device_wait_idle() }?;
         Ok(())
     }
 }
@@ -810,15 +888,19 @@ impl VulkanHal {
             configuration: VulkanHalConfiguration {
                 frames_in_flight: configuration.desired_frames_in_flight,
             },
-            resolver: Default::default(),
+            resolver: VulkanResolver::new(configuration.desired_frames_in_flight),
             frames_in_flight: Arc::new(frames_in_flight),
             framebuffers: RwLock::default(),
             render_passes: RwLock::default(),
+            pipelines: RwLock::default(),
 
             memory_allocator: RwLock::new(
                 Allocator::new(&allocator_create_desc)
                     .map_err(VulkanHalError::GpuAllocatorError)?,
             ),
+            command_buffer_states: Default::default(),
+            descriptor_set_layouts: Default::default(),
+            pipeline_layouts: Default::default(),
         };
 
         Ok(Arc::new(hal))
@@ -1545,6 +1627,442 @@ impl VulkanHal {
                 .create_render_pass(&render_pass_create_info, get_allocation_callbacks())
         }?;
         Ok(rp)
+    }
+
+    fn create_pipeline(
+        &self,
+        pipeline_info: &util::VulkanGraphicsPipelineDescription,
+        command_buffer_state: &VulkanCommandBufferState,
+    ) -> MgpuResult<vk::Pipeline> {
+        let pipeline_layout = self.get_pipeline_layout(pipeline_info)?;
+
+        let vertex_shader_entrypt = CString::new(pipeline_info.vertex_stage.entry_point.as_str())
+            .expect("Failed to convert String to CString");
+        let fragment_shader_entrypt = CString::new(
+            pipeline_info
+                .fragment_stage
+                .as_ref()
+                .map(|f| f.entry_point.clone())
+                .unwrap_or_default(),
+        )
+        .expect("Failed to convert String to CString");
+        let mut stages = vec![];
+        stages.push(
+            vk::PipelineShaderStageCreateInfo::default()
+                .flags(vk::PipelineShaderStageCreateFlags::default())
+                .module(
+                    self.resolver
+                        .resolve_vulkan(pipeline_info.vertex_stage.shader)
+                        .ok_or(MgpuError::InvalidHandle)?,
+                )
+                .name(vertex_shader_entrypt.as_c_str())
+                .stage(vk::ShaderStageFlags::VERTEX),
+        );
+        if let Some(fragment_stage) = &pipeline_info.fragment_stage {
+            stages.push(
+                vk::PipelineShaderStageCreateInfo::default()
+                    .flags(vk::PipelineShaderStageCreateFlags::default())
+                    .module(
+                        self.resolver
+                            .resolve_vulkan(fragment_stage.shader)
+                            .ok_or(MgpuError::InvalidHandle)?,
+                    )
+                    .name(fragment_shader_entrypt.as_c_str())
+                    .stage(vk::ShaderStageFlags::FRAGMENT),
+            );
+        }
+
+        let vertex_attribute_descriptions = pipeline_info
+            .vertex_stage
+            .vertex_inputs
+            .iter()
+            .enumerate()
+            .map(|(i, attribute)| {
+                vk::VertexInputAttributeDescription::default()
+                    .binding(i as _)
+                    .location(attribute.location as _)
+                    .format(attribute.format.to_vk())
+                    .offset(attribute.offset as _)
+            })
+            .collect::<Vec<_>>();
+        let vertex_binding_descriptions = pipeline_info
+            .vertex_stage
+            .vertex_inputs
+            .iter()
+            .enumerate()
+            .map(|(i, attrib)| {
+                vk::VertexInputBindingDescription::default()
+                    .binding(i as _)
+                    .stride(attrib.stride as _)
+                    .input_rate(attrib.frequency.to_vk())
+            })
+            .collect::<Vec<_>>();
+
+        let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
+            .vertex_attribute_descriptions(&vertex_attribute_descriptions)
+            .vertex_binding_descriptions(&vertex_binding_descriptions);
+        let input_assembly_state_create_info = vk::PipelineInputAssemblyStateCreateInfo::default()
+            .primitive_restart_enable(pipeline_info.primitive_restart_enabled)
+            .topology(pipeline_info.primitive_topology.to_vk());
+        // The viewports will be set when drawing
+        let viewport_state = vk::PipelineViewportStateCreateInfo::default()
+            .scissor_count(1)
+            .viewport_count(1);
+
+        let pipeline_rasterization_state = vk::PipelineRasterizationStateCreateInfo::default()
+            .polygon_mode(pipeline_info.polygon_mode.to_vk())
+            .line_width(pipeline_info.polygon_mode.line_width())
+            .cull_mode(pipeline_info.cull_mode.to_vk())
+            .front_face(pipeline_info.front_face.to_vk());
+
+        let multisample_state = if let Some(state) = &pipeline_info.multisample_state {
+            todo!()
+        } else {
+            vk::PipelineMultisampleStateCreateInfo::default()
+                .rasterization_samples(vk::SampleCountFlags::TYPE_1)
+        };
+
+        let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::default()
+            .depth_compare_op(pipeline_info.depth_stencil_state.depth_compare_op.to_vk())
+            .depth_test_enable(pipeline_info.depth_stencil_state.depth_test_enabled)
+            .depth_write_enable(pipeline_info.depth_stencil_state.depth_write_enabled);
+        let color_attachments = pipeline_info
+            .fragment_stage
+            .as_ref()
+            .map(|fs| {
+                fs.render_targets
+                    .iter()
+                    .map(|attachment| {
+                        if let Some(_) = &attachment.blend {
+                            todo!()
+                        } else {
+                            vk::PipelineColorBlendAttachmentState::default()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
+            .attachments(&color_attachments)
+            .blend_constants([0.0; 4])
+            .logic_op(vk::LogicOp::default())
+            .logic_op_enable(false);
+
+        let dynamic_states = [
+            vk::DynamicState::VIEWPORT,
+            vk::DynamicState::SCISSOR,
+            vk::DynamicState::LINE_WIDTH,
+        ];
+
+        let dynamic_state =
+            vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
+
+        let pipeline_create_info = vk::GraphicsPipelineCreateInfo::default()
+            .stages(&stages)
+            .vertex_input_state(&vertex_input_state)
+            .input_assembly_state(&input_assembly_state_create_info)
+            .viewport_state(&viewport_state)
+            .rasterization_state(&pipeline_rasterization_state)
+            .multisample_state(&multisample_state)
+            .depth_stencil_state(&depth_stencil_state)
+            .color_blend_state(&color_blend_state)
+            .dynamic_state(&dynamic_state)
+            .layout(pipeline_layout)
+            .render_pass(command_buffer_state.current_render_pass)
+            .subpass(command_buffer_state.current_subpass);
+
+        let pipeline = unsafe {
+            self.logical_device
+                .handle
+                .create_graphics_pipelines(
+                    vk::PipelineCache::null(),
+                    &[pipeline_create_info],
+                    get_allocation_callbacks(),
+                )
+                .map_err(|(_, err)| VulkanHalError::ApiError(err))?[0]
+        };
+
+        Ok(pipeline)
+    }
+
+    fn get_pipeline_layout(
+        &self,
+        pipeline_info: &util::VulkanGraphicsPipelineDescription,
+    ) -> MgpuResult<vk::PipelineLayout> {
+        let descriptor_layouts = self.get_descriptor_set_layouts(&pipeline_info)?;
+
+        let hash = hash_type(&descriptor_layouts);
+        let mut pipeline_layouts = self
+            .pipeline_layouts
+            .write()
+            .expect("Failed to lock pipeline layouts");
+        if let Some(layout) = pipeline_layouts.get(&hash) {
+            Ok(*layout)
+        } else {
+            let pipeline_layout_create_info =
+                vk::PipelineLayoutCreateInfo::default().set_layouts(&descriptor_layouts);
+            let layout = unsafe {
+                self.logical_device.handle.create_pipeline_layout(
+                    &pipeline_layout_create_info,
+                    get_allocation_callbacks(),
+                )?
+            };
+
+            pipeline_layouts.insert(hash, layout);
+            Ok(layout)
+        }
+    }
+
+    fn reflect_layout(
+        &self,
+        shader_module_description: &&crate::ShaderModuleDescription<'_>,
+    ) -> MgpuResult<ShaderModuleLayout> {
+        use spirv_reflect::*;
+        let spirv_mgpu_err = |s: &str| MgpuError::Dynamic(format!("SpirV reflection error: {s}"));
+        let module = ShaderModule::load_u32_data(shader_module_description.source)
+            .map_err(spirv_mgpu_err)?;
+        let entry_points = module
+            .enumerate_entry_points()
+            .map_err(spirv_mgpu_err)?
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+
+        let inputs = module
+            .enumerate_input_variables(None)
+            .map_err(spirv_mgpu_err)?;
+
+        let outputs = module
+            .enumerate_output_variables(None)
+            .map_err(spirv_mgpu_err)?;
+
+        let descriptor_layouts = module
+            .enumerate_descriptor_sets(None)
+            .map_err(spirv_mgpu_err)?;
+        let spirv_to_attribute_input = |input: ReflectInterfaceVariable| {
+            let format = match input.format {
+                types::ReflectFormat::Undefined => unreachable!(),
+                types::ReflectFormat::R32_UINT => VertexAttributeFormat::Uint,
+                types::ReflectFormat::R32_SINT => VertexAttributeFormat::Int,
+                types::ReflectFormat::R32_SFLOAT => VertexAttributeFormat::Float,
+                types::ReflectFormat::R32G32_UINT => VertexAttributeFormat::Uint2,
+                types::ReflectFormat::R32G32_SINT => VertexAttributeFormat::Int2,
+                types::ReflectFormat::R32G32_SFLOAT => VertexAttributeFormat::Float2,
+                types::ReflectFormat::R32G32B32_UINT => VertexAttributeFormat::Uint3,
+                types::ReflectFormat::R32G32B32_SINT => VertexAttributeFormat::Int3,
+                types::ReflectFormat::R32G32B32_SFLOAT => VertexAttributeFormat::Float3,
+                types::ReflectFormat::R32G32B32A32_UINT => VertexAttributeFormat::Uint4,
+                types::ReflectFormat::R32G32B32A32_SINT => VertexAttributeFormat::Int4,
+                types::ReflectFormat::R32G32B32A32_SFLOAT => VertexAttributeFormat::Float4,
+            };
+            ShaderAttribute {
+                name: input.name,
+                location: input.location as _,
+                format,
+            }
+        };
+
+        let inputs = inputs
+            .into_iter()
+            .map(spirv_to_attribute_input)
+            .collect::<Vec<_>>();
+        let outputs = outputs
+            .into_iter()
+            .map(spirv_to_attribute_input)
+            .collect::<Vec<_>>();
+        let binding_sets = descriptor_layouts
+            .into_iter()
+            .map(|set| {
+                let elements = set
+                    .bindings
+                    .into_iter()
+                    .map(|element| {
+                        println!("element {element:#?}");
+                        let image_format = match element.image.image_format {
+                            types::ReflectImageFormat::Undefined => ImageFormat::Unknown,
+                            types::ReflectImageFormat::RGBA8 => ImageFormat::Rgba8,
+                            _ => todo!("Unknown image format {:?}", element.image.image_format),
+                        };
+
+                        let dimension = match element.image.dim {
+                            types::ReflectDimension::Undefined => None,
+                            types::ReflectDimension::Type1d => Some(ImageDimension::D1),
+                            types::ReflectDimension::Type2d => Some(ImageDimension::D2),
+                            types::ReflectDimension::Type3d => Some(ImageDimension::D3),
+                            _ => todo!("Unknown dimension {:?}", element.image.dim),
+                        };
+                        let access_mode = match element.resource_type {
+                            types::ReflectResourceType::Undefined => unreachable!(),
+                            types::ReflectResourceType::Sampler => AccessMode::Read,
+                            types::ReflectResourceType::CombinedImageSampler => AccessMode::Read,
+                            types::ReflectResourceType::ConstantBufferView => todo!(),
+                            types::ReflectResourceType::ShaderResourceView => AccessMode::Read,
+                            types::ReflectResourceType::UnorderedAccessView => todo!(),
+                        };
+
+                        let kind = match element.descriptor_type {
+                            types::ReflectDescriptorType::Undefined => unreachable!(),
+                            types::ReflectDescriptorType::Sampler => {
+                                BindingSetElementKind::Sampler {
+                                    access_mode: todo!("{element:?}"),
+                                }
+                            }
+                            types::ReflectDescriptorType::CombinedImageSampler => {
+                                BindingSetElementKind::SampledImage {
+                                    format: image_format,
+                                    dimension: dimension.unwrap(),
+                                }
+                            }
+                            types::ReflectDescriptorType::SampledImage => {
+                                BindingSetElementKind::SampledImage {
+                                    format: image_format,
+                                    dimension: dimension.unwrap(),
+                                }
+                            }
+                            types::ReflectDescriptorType::StorageImage => {
+                                BindingSetElementKind::StorageImage {
+                                    format: image_format,
+                                    access_mode: todo!("{element:?}"),
+                                    dimension: dimension.unwrap(),
+                                }
+                            }
+                            types::ReflectDescriptorType::UniformTexelBuffer => todo!(),
+                            types::ReflectDescriptorType::StorageTexelBuffer => todo!(),
+                            types::ReflectDescriptorType::UniformBuffer => {
+                                BindingSetElementKind::Buffer {
+                                    ty: crate::BufferType::Uniform,
+                                    access_mode: crate::AccessMode::Read,
+                                }
+                            }
+                            types::ReflectDescriptorType::StorageBuffer => {
+                                BindingSetElementKind::Buffer {
+                                    ty: crate::BufferType::Storage,
+                                    access_mode: todo!("{element:?}"),
+                                }
+                            }
+                            types::ReflectDescriptorType::UniformBufferDynamic => todo!(),
+                            types::ReflectDescriptorType::StorageBufferDynamic => todo!(),
+                            types::ReflectDescriptorType::InputAttachment => todo!(),
+                            types::ReflectDescriptorType::AccelerationStructureNV => todo!(),
+                        };
+                        BindingSetElement {
+                            name: element.name,
+                            binding: element.binding as _,
+                            ty: kind,
+                        }
+                    })
+                    .collect();
+                BindingSetLayout {
+                    set: set.set as _,
+                    bindings: elements,
+                }
+            })
+            .collect();
+        Ok(ShaderModuleLayout {
+            entry_points,
+            inputs,
+            outputs,
+            binding_sets,
+        })
+    }
+
+    fn get_descriptor_set_layouts(
+        &self,
+        pipeline_info: &&util::VulkanGraphicsPipelineDescription,
+    ) -> MgpuResult<Vec<vk::DescriptorSetLayout>> {
+        #[derive(Default, Hash, Clone, Copy)]
+        struct DescriptorBindingType {
+            ty: vk::DescriptorType,
+            count: u32,
+            shader_stage_flags: vk::ShaderStageFlags,
+        }
+        #[derive(Default, Hash)]
+        struct DescriptorTypes {
+            bindings: Vec<DescriptorBindingType>,
+        }
+        let mut descriptor_set_layouts: HashMap<usize, DescriptorTypes> = HashMap::default();
+        let mut count_descriptor_types =
+            |layout: &ShaderModuleLayout, flags: vk::ShaderStageFlags| {
+                for set in &layout.binding_sets {
+                    let entry = descriptor_set_layouts.entry(set.set).or_default();
+                    for binding in &set.bindings {
+                        if entry.bindings.len() < binding.binding {
+                            entry
+                                .bindings
+                                .resize(binding.binding + 1, Default::default())
+                        }
+                        let ds_binding = &mut entry.bindings[binding.binding];
+                        ds_binding.shader_stage_flags |= flags;
+                        ds_binding.count = 1;
+                        let ty = match binding.ty {
+                            BindingSetElementKind::Buffer { ty, .. } => match ty {
+                                crate::BufferType::Uniform => vk::DescriptorType::UNIFORM_BUFFER,
+                                crate::BufferType::Storage => vk::DescriptorType::STORAGE_BUFFER,
+                            },
+                            BindingSetElementKind::Sampler { .. } => vk::DescriptorType::SAMPLER,
+                            BindingSetElementKind::SampledImage { .. } => {
+                                vk::DescriptorType::SAMPLED_IMAGE
+                            }
+                            BindingSetElementKind::StorageImage { .. } => {
+                                vk::DescriptorType::STORAGE_IMAGE
+                            }
+                        };
+                        ds_binding.ty = ty;
+                    }
+                }
+            };
+        let vs_layout = self.get_shader_module_layout(pipeline_info.vertex_stage.shader)?;
+        count_descriptor_types(&vs_layout, vk::ShaderStageFlags::VERTEX);
+
+        if let Some(fs) = &pipeline_info.fragment_stage {
+            let fs_layout = self.get_shader_module_layout(fs.shader)?;
+            count_descriptor_types(&fs_layout, vk::ShaderStageFlags::FRAGMENT);
+        }
+
+        let mut cached_layouts = self
+            .descriptor_set_layouts
+            .write()
+            .expect("Failed to lock ds layouts");
+        let mut layouts = vec![];
+        layouts.resize(
+            descriptor_set_layouts.len(),
+            vk::DescriptorSetLayout::default(),
+        );
+        for (idx, types) in descriptor_set_layouts {
+            let hash = hash_type(&types);
+
+            if let Some(layout) = cached_layouts.get(&hash) {
+                layouts[idx] = *layout;
+            } else {
+                let binding_types = types
+                    .bindings
+                    .iter()
+                    .map(|ty| {
+                        vk::DescriptorSetLayoutBinding::default()
+                            .descriptor_count(ty.count)
+                            .descriptor_type(ty.ty)
+                            .stage_flags(ty.shader_stage_flags)
+                    })
+                    .collect::<Vec<_>>();
+
+                let ds_layout_create_info = vk::DescriptorSetLayoutCreateInfo::default()
+                    .bindings(&binding_types)
+                    .flags(vk::DescriptorSetLayoutCreateFlags::default());
+                let ds_layout = unsafe {
+                    self.logical_device.handle.create_descriptor_set_layout(
+                        &ds_layout_create_info,
+                        get_allocation_callbacks(),
+                    )?
+                };
+
+                cached_layouts.insert(hash, ds_layout);
+
+                layouts[idx] = ds_layout;
+            }
+        }
+
+        Ok(layouts)
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::{
     BindingSet, Buffer, BufferDescription, BufferWriteParams, DeviceConfiguration, DeviceInfo,
     GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageView, MgpuResult,
-    RenderPassInfo, ShaderModule, ShaderModuleDescription,
+    RenderPassInfo, ShaderModule, ShaderModuleDescription, ShaderModuleLayout,
 };
 use std::sync::Arc;
 
@@ -33,6 +33,7 @@ pub struct RenderState {
 }
 
 pub(crate) trait Hal: Send + Sync {
+    fn device_wait_idle(&self) -> MgpuResult<()>;
     unsafe fn begin_rendering(&self) -> MgpuResult<RenderState>;
     unsafe fn request_command_recorder(
         &self,
@@ -115,6 +116,10 @@ pub(crate) trait Hal: Send + Sync {
         &self,
         shader_module_description: &ShaderModuleDescription,
     ) -> MgpuResult<ShaderModule>;
+    fn get_shader_module_layout(
+        &self,
+        shader_module: ShaderModule,
+    ) -> MgpuResult<ShaderModuleLayout>;
     fn destroy_shader_module(&self, shader_module: ShaderModule) -> MgpuResult<()>;
 
     fn destroy_image_view(&self, image_view: ImageView) -> MgpuResult<()>;
