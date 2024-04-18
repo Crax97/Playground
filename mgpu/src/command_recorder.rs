@@ -112,6 +112,17 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
         &self,
         render_pass_description: &RenderPassDescription<'_>,
     ) {
+        check!(
+            !render_pass_description.render_targets.is_empty()
+                || render_pass_description.depth_stencil_attachment.is_some(),
+            "Neither a render target and a depth stencil target is attached to the render pass!"
+        );
+        let framebuffer_size = if let Some(rt) = render_pass_description.render_targets.get(0) {
+            rt.view.owner.extents
+        } else {
+            let rt = render_pass_description.depth_stencil_attachment.unwrap();
+            rt.view.owner.extents
+        };
         for rt in render_pass_description.render_targets {
             let image_name = self
                 .device
@@ -120,14 +131,13 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
                 .expect("Invalid image handle");
             let image_name = image_name.as_deref().unwrap_or("Unknown");
             let error_message = format!(
-                    "Render Target image '{}''s size is different than the framebuffer size! Expected {:?}, got {:?}", image_name,
-                    render_pass_description.framebuffer_size,
+                    "Render Target image '{}''s size is different than the expected framebuffer size! Expected {:?}, got {:?}", image_name,
+                    framebuffer_size,
                     rt.view.owner.extents
                 );
             check!(
-                rt.view.owner.extents.width == render_pass_description.framebuffer_size.width
-                    && rt.view.owner.extents.height
-                        == render_pass_description.framebuffer_size.height,
+                rt.view.owner.extents.width == framebuffer_size.width
+                    && rt.view.owner.extents.height == framebuffer_size.height,
                 &error_message
             );
         }
@@ -140,14 +150,13 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
                 .expect("Invalid image handle");
             let image_name = image_name.as_deref().unwrap_or("Unknown");
             let error_message = format!(
-                    "Depth Stencil Target image '{}''s size is different than the framebuffer size! Expected {:?}, got {:?}", image_name,
-                    render_pass_description.framebuffer_size,
+                    "Depth Stencil Target image '{}''s size is different than the expected framebuffer size! Expected {:?}, got {:?}", image_name,
+                    framebuffer_size,
                     rt.view.owner.extents
                 );
             check!(
-                rt.view.owner.extents.width == render_pass_description.framebuffer_size.width
-                    && rt.view.owner.extents.height
-                        == render_pass_description.framebuffer_size.height,
+                rt.view.owner.extents.width == framebuffer_size.width
+                    && rt.view.owner.extents.height == framebuffer_size.height,
                 &error_message
             );
         }
@@ -155,13 +164,13 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
         check!(
             render_pass_description.render_area.offset.x as u32
                 + render_pass_description.render_area.extents.width
-                <= render_pass_description.framebuffer_size.width
+                <= framebuffer_size.width
                 && render_pass_description.render_area.offset.y as u32
                     + render_pass_description.render_area.extents.height
-                    <= render_pass_description.framebuffer_size.height,
+                    <= framebuffer_size.height,
             &format!(
                 "The render area is too smaller/outflows the framebuffer! Got {:?}, expected at least {:?}",
-                render_pass_description.render_area, render_pass_description.framebuffer_size
+                render_pass_description.render_area, framebuffer_size
             )
         );
     }
@@ -205,6 +214,20 @@ impl CommandRecorder<Graphics> {
             ),
             commands: vec![],
         };
+        let framebuffer_size = if let Some(rt) = render_pass_description.render_targets.get(0) {
+            rt.view.owner.extents
+        } else {
+            render_pass_description
+                .depth_stencil_attachment
+                .unwrap()
+                .view
+                .owner
+                .extents
+        };
+        let framebuffer_size = Extents2D {
+            width: framebuffer_size.width,
+            height: framebuffer_size.height,
+        };
         Ok(RenderPass {
             command_recorder: self,
             info: RenderPassInfo {
@@ -214,7 +237,7 @@ impl CommandRecorder<Graphics> {
                     depth_stencil_target: render_pass_description
                         .depth_stencil_attachment
                         .map(ToOwned::to_owned),
-                    extents: render_pass_description.framebuffer_size,
+                    extents: framebuffer_size,
                 },
                 steps: vec![first_step],
                 render_area: render_pass_description.render_area,

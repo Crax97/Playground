@@ -156,7 +156,6 @@ fn main() {
                                     store_op: AttachmentStoreOp::Store,
                                 }],
                                 depth_stencil_attachment: None,
-                                framebuffer_size: swapchain_image.extents,
                                 render_area: Rect2D {
                                     offset: Default::default(),
                                     extents: swapchain_image.extents,

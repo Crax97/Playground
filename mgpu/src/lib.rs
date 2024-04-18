@@ -211,7 +211,6 @@ pub struct RenderPassDescription<'a> {
     pub label: Option<&'a str>,
     pub render_targets: &'a [RenderTarget],
     pub depth_stencil_attachment: Option<&'a DepthStencilTarget>,
-    pub framebuffer_size: Extents2D,
     pub render_area: Rect2D,
 }
 
