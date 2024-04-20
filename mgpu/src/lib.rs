@@ -6,7 +6,7 @@ mod swapchain;
 
 #[macro_use]
 pub(crate) mod util;
-pub(crate) mod staging_buffer;
+pub(crate) mod staging_buffer_allocator;
 
 use std::num::NonZeroU32;
 
@@ -298,7 +298,40 @@ pub struct VertexInputDescription {
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct BlendSettings {}
+pub enum BlendFactor {
+    Zero,
+    One,
+    SourceColor,
+    OneMinusSourceColor,
+    DestColor,
+    OneMinusDestColor,
+    SourceAlpha,
+    OneMinusSourceAlpha,
+    DestAlpha,
+    OneMinusDestAlpha,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum BlendOp {
+    Add,
+    Subtract,
+    ReverseSubtract,
+    Min,
+    Max,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct BlendSettings {
+    pub src_color_blend_factor: BlendFactor,
+    pub dst_color_blend_factor: BlendFactor,
+    pub color_blend_op: BlendOp,
+    pub src_alpha_blend_factor: BlendFactor,
+    pub dst_alpha_blend_factor: BlendFactor,
+    pub alpha_blend_op: BlendOp,
+    pub write_mask: ColorWriteMask,
+}
 
 bitflags! {
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
@@ -318,7 +351,6 @@ pub struct ColorWriteMask : u8 {
 pub struct RenderTargetInfo {
     pub format: ImageFormat,
     pub blend: Option<BlendSettings>,
-    pub write_mask: ColorWriteMask,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
@@ -388,17 +420,17 @@ pub enum PolygonMode {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CullMode {
     #[default]
+    None,
     Back,
     Front,
-    None,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FrontFace {
     #[default]
-    ClockWise,
     CounterClockWise,
+    ClockWise,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]

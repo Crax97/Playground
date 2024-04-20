@@ -3,12 +3,12 @@ use gpu_allocator::vulkan::Allocation;
 
 use crate::{
     util::{define_resource_resolver, Handle},
-    Buffer, BufferUsageFlags, CompareOp, CullMode, DepthStencilState, DepthStencilTargetInfo,
-    Extents2D, Extents3D, FrontFace, GraphicsPipeline, GraphicsPipelineDescription, Image,
-    ImageDimension, ImageFormat, ImageUsageFlags, ImageView, MultisampleState, Offset2D,
-    PolygonMode, PresentMode, PrimitiveTopology, Rect2D, RenderTargetInfo, SampleCount,
-    ShaderModule, ShaderModuleLayout, Swapchain, VertexAttributeFormat, VertexInputDescription,
-    VertexInputFrequency,
+    BlendFactor, BlendOp, Buffer, BufferUsageFlags, ColorWriteMask, CompareOp, CullMode,
+    DepthStencilState, DepthStencilTargetInfo, Extents2D, Extents3D, FrontFace, GraphicsPipeline,
+    GraphicsPipelineDescription, Image, ImageDimension, ImageFormat, ImageUsageFlags, ImageView,
+    MultisampleState, Offset2D, PolygonMode, PresentMode, PrimitiveTopology, Rect2D,
+    RenderTargetInfo, SampleCount, ShaderModule, ShaderModuleLayout, Swapchain,
+    VertexAttributeFormat, VertexInputDescription, VertexInputFrequency,
 };
 
 #[cfg(feature = "swapchain")]
@@ -416,6 +416,60 @@ impl FromVk for vk::BufferUsageFlags {
     }
 }
 
+impl ToVk for BlendFactor {
+    type Target = vk::BlendFactor;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            BlendFactor::Zero => vk::BlendFactor::ZERO,
+            BlendFactor::One => vk::BlendFactor::ONE,
+            BlendFactor::SourceColor => vk::BlendFactor::SRC_ALPHA,
+            BlendFactor::OneMinusSourceColor => vk::BlendFactor::ONE_MINUS_SRC_COLOR,
+            BlendFactor::DestColor => vk::BlendFactor::DST_COLOR,
+            BlendFactor::OneMinusDestColor => vk::BlendFactor::ONE_MINUS_DST_COLOR,
+            BlendFactor::SourceAlpha => vk::BlendFactor::SRC_ALPHA,
+            BlendFactor::OneMinusSourceAlpha => vk::BlendFactor::ONE_MINUS_SRC_ALPHA,
+            BlendFactor::DestAlpha => vk::BlendFactor::DST_ALPHA,
+            BlendFactor::OneMinusDestAlpha => vk::BlendFactor::ONE_MINUS_DST_ALPHA,
+        }
+    }
+}
+
+impl ToVk for BlendOp {
+    type Target = vk::BlendOp;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            BlendOp::Add => vk::BlendOp::ADD,
+            BlendOp::Subtract => vk::BlendOp::SUBTRACT,
+            BlendOp::ReverseSubtract => vk::BlendOp::REVERSE_SUBTRACT,
+            BlendOp::Min => vk::BlendOp::MIN,
+            BlendOp::Max => vk::BlendOp::MAX,
+        }
+    }
+}
+
+impl ToVk for ColorWriteMask {
+    type Target = vk::ColorComponentFlags;
+
+    fn to_vk(self) -> Self::Target {
+        let mut res = Self::Target::default();
+        if self.contains(Self::R) {
+            res |= vk::ColorComponentFlags::R;
+        }
+        if self.contains(Self::G) {
+            res |= vk::ColorComponentFlags::G;
+        }
+        if self.contains(Self::B) {
+            res |= vk::ColorComponentFlags::B
+        }
+        if self.contains(Self::A) {
+            res |= vk::ColorComponentFlags::A
+        }
+        res
+    }
+}
+
 #[cfg(feature = "swapchain")]
 impl ToVk for PresentMode {
     type Target = vk::PresentModeKHR;
@@ -452,6 +506,8 @@ pub(super) struct VulkanBuffer {
     pub(super) label: Option<String>,
     pub(super) handle: vk::Buffer,
     pub(super) allocation: Allocation,
+    pub(super) current_access_mask: vk::AccessFlags2,
+    pub(super) current_stage_mask: vk::PipelineStageFlags2,
 }
 
 #[derive(Clone)]
@@ -603,6 +659,15 @@ macro_rules! impl_util_methods {
                 self.get::<$object>()
                     .resolve(handle.into())
                     .map(|v| v.handle)
+            }
+        }
+
+        impl<H> ResolveVulkan<$vulkan_ty, H> for ResourceArena<VulkanHal, $object>
+        where
+            H: Into<Handle<$object>>,
+        {
+            fn resolve_vulkan(&self, handle: H) -> Option<$vulkan_ty> {
+                self.resolve(handle.into()).map(|v| v.handle)
             }
         }
     };

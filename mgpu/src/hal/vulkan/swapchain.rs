@@ -1,4 +1,4 @@
-use std::sync::{atomic::AtomicUsize, Arc};
+use std::sync::{atomic::AtomicUsize, Arc, Mutex};
 
 use ash::{
     khr::{surface, swapchain},
@@ -25,7 +25,7 @@ pub struct VulkanSwapchain {
     pub(crate) swapchain_device: swapchain::Device,
     pub(crate) surface_instance: surface::Instance,
     pub(crate) data: SwapchainData,
-    pub(crate) frames_in_flight: Arc<FramesInFlight>,
+    pub(crate) frames_in_flight: Arc<Mutex<FramesInFlight>>,
     pub(crate) acquire_fence: vk::Fence,
     pub(crate) current_image_index: Option<u32>,
 }

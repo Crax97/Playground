@@ -1,7 +1,7 @@
 use crate::{
-    BindingSet, Buffer, BufferDescription, BufferWriteParams, DeviceConfiguration, DeviceInfo,
-    GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageView, MgpuResult,
-    RenderPassInfo, ShaderModule, ShaderModuleDescription, ShaderModuleLayout,
+    AccessMode, BindingSet, Buffer, BufferDescription, BufferWriteParams, DeviceConfiguration,
+    DeviceInfo, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageView,
+    MgpuResult, RenderPassInfo, ShaderModule, ShaderModuleDescription, ShaderModuleLayout,
 };
 use std::sync::Arc;
 
@@ -14,22 +14,97 @@ pub(crate) mod vulkan;
 #[derive(Clone, Copy)]
 pub struct CommandRecorderAllocator {
     id: u64,
+    queue_type: QueueType,
 }
 
 #[derive(Clone, Copy)]
 pub struct CommandRecorder {
     id: u64,
+    queue_type: QueueType,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub enum QueueType {
+    // This queue can execute both graphics commands (such as drawing) and sync compute commands
+    Graphics,
+
+    // This queue can execute only compute commands, and it runs asynchronously from the Graphics and Transfer queue
+    AsyncCompute,
+
+    // This queue can execute only transfer commands, and it runs asynchronously from the Graphics and Compute queue
+    AsyncTransfer,
+}
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum AttachmentType {
+    Color,
+    DepthStencil,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum ResourceAccessMode {
+    AttachmentRead(AttachmentType),
+    AttachmentWrite(AttachmentType),
+
+    VertexInput,
+
+    ShaderRead,
+    ShaderWrite,
+
+    TransferSrc,
+    TransferDst,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum Resource {
+    Image {
+        image: Image,
+    },
+    ImageView {
+        view: ImageView,
+    },
+    Buffer {
+        buffer: Buffer,
+        offset: usize,
+        size: usize,
+    },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct ResourceInfo {
+    pub resource: Resource,
+    pub access_mode: ResourceAccessMode,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct SynchronizationResource {
+    pub ty: Resource,
+    pub source_access_mode: ResourceAccessMode,
+    pub destination_access_mode: ResourceAccessMode,
+}
+
+#[derive(Clone)]
+pub struct SynchronizationInfo {
+    pub source_queue: QueueType,
+    pub source_command_recorder: CommandRecorder,
+    pub destination_queue: QueueType,
+    pub destination_command_recorder: CommandRecorder,
+    pub resources: Vec<ResourceInfo>,
+}
+
+#[derive(Clone, Default)]
+pub struct SubmissionGroup {
+    pub command_recorders: Vec<CommandRecorder>,
 }
 
 #[derive(Clone)]
 pub struct SubmitInfo {
-    pub graphics_command_recorders: Vec<CommandRecorder>,
-    pub async_compute_command_recorders: Vec<CommandRecorder>,
+    pub submission_groups: Vec<SubmissionGroup>,
 }
 
 pub struct RenderState {
     pub graphics_compute_allocator: CommandRecorderAllocator,
     pub async_compute_allocator: CommandRecorderAllocator,
+    pub async_transfer_allocator: CommandRecorderAllocator,
 }
 
 pub(crate) trait Hal: Send + Sync {
@@ -79,6 +154,18 @@ pub(crate) trait Hal: Send + Sync {
     unsafe fn present_image(&self, swapchain_id: u64, image: Image) -> MgpuResult<()>;
     unsafe fn submit(&self, end_rendering_info: SubmitInfo) -> MgpuResult<()>;
     unsafe fn end_rendering(&self) -> MgpuResult<()>;
+
+    unsafe fn cmd_copy_buffer_to_buffer(
+        &self,
+        command_buffer: CommandRecorder,
+        source: Buffer,
+        dest: Buffer,
+        source_offset: usize,
+        dest_offset: usize,
+        size: usize,
+    ) -> MgpuResult<()>;
+
+    unsafe fn enqueue_synchronization(&self, infos: &[SynchronizationInfo]) -> MgpuResult<()>;
 
     #[cfg(feature = "swapchain")]
     fn create_swapchain_impl(&self, swapchain_info: &SwapchainCreationInfo) -> MgpuResult<u64>;

@@ -1,28 +1,31 @@
+mod util;
+
 use mgpu::{
-    AttachmentStoreOp, BufferDescription, BufferUsageFlags, BufferWriteParams, ColorWriteMask,
-    DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D, FragmentStageInfo, Graphics,
-    GraphicsPipelineDescription, ImageFormat, MemoryDomain, Rect2D, RenderPassDescription,
-    RenderTarget, RenderTargetInfo, RenderTargetLoadOp, SampleCount, ShaderModuleDescription,
-    SwapchainCreationInfo, VertexInputDescription, VertexInputFrequency, VertexStageInfo,
+    AttachmentStoreOp, BlendFactor, BlendOp, BlendSettings, BufferDescription, BufferUsageFlags,
+    ColorWriteMask, DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D,
+    FragmentStageInfo, Graphics, GraphicsPipelineDescription, ImageFormat, MemoryDomain, Rect2D,
+    RenderPassDescription, RenderTarget, RenderTargetInfo, RenderTargetLoadOp, SampleCount,
+    ShaderModuleDescription, SwapchainCreationInfo, VertexInputDescription, VertexInputFrequency,
+    VertexStageInfo,
 };
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use shaderc::ShaderKind;
+use util::compile_glsl;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::EventLoop;
 
 const VERTEX_SHADER: &str = "
 #version 460
 layout(location = 0) in vec3 pos;
-layout(location = 0) out vec4 vs_pos;
 
 void main() {
-    vs_pos = vec4(pos, 1.0);
+    vec4 vs_pos = vec4(pos, 1.0);
+    gl_Position = vs_pos;
 }
 ";
 const FRAGMENT_SHADER: &str = "
 #version 460
-layout(location = 0) in vec4 vs_pos;
 layout(location = 0) out vec4 color;
 
 void main() {
@@ -72,18 +75,18 @@ fn main() {
     let triangle_buffer = device
         .create_buffer(&BufferDescription {
             label: Some("Triangle data"),
-            usage_flags: BufferUsageFlags::VERTEX_BUFFER,
-            size: std::mem::size_of_val(&triangle_data),
+            usage_flags: BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
+            size: std::mem::size_of_val(triangle_data.as_slice()),
             memory_domain: MemoryDomain::DeviceLocal,
         })
         .unwrap();
 
-    // device
-    //     .write_buffer(
-    //         triangle_buffer,
-    //         &triangle_buffer.write_all_params(bytemuck::cast_slice(&triangle_data)),
-    //     )
-    //     .unwrap();
+    device
+        .write_buffer(
+            triangle_buffer,
+            &triangle_buffer.write_all_params(bytemuck::cast_slice(&triangle_data)),
+        )
+        .unwrap();
 
     let vertex_shader_source = compile_glsl(VERTEX_SHADER, ShaderKind::Vertex);
     let fragment_shader_source = compile_glsl(FRAGMENT_SHADER, ShaderKind::Fragment);
@@ -121,7 +124,6 @@ fn main() {
                 render_targets: &[RenderTargetInfo {
                     format: ImageFormat::Rgba8,
                     blend: None,
-                    write_mask: ColorWriteMask::RGBA,
                 }],
                 depth_stencil_target: None,
             }),
@@ -199,21 +201,4 @@ fn main() {
 
     // device.destroy_image_view(image_view);
     device.destroy_buffer(triangle_buffer).unwrap();
-}
-
-fn compile_glsl(shader_source: &str, shader_kind: ShaderKind) -> Vec<u32> {
-    let compiler = shaderc::Compiler::new().unwrap();
-    let compiled = compiler
-        .compile_into_spirv(shader_source, shader_kind, "none", "main", None)
-        .unwrap();
-
-    compiled.as_binary().to_vec()
-}
-
-fn read_image_data() -> Vec<u8> {
-    let image_content = std::fs::read("examples/assets/david.jpg").unwrap();
-    image::load_from_memory(&image_content)
-        .unwrap()
-        .to_rgb8()
-        .to_vec()
 }

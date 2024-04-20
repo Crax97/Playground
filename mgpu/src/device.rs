@@ -1,5 +1,8 @@
-use crate::hal::{Hal, SubmitInfo};
-use crate::rdg::{Node, Rdg};
+use crate::hal::{
+    Hal, QueueType, Resource, ResourceInfo, SubmissionGroup, SubmitInfo, SynchronizationInfo,
+};
+use crate::rdg::{Node, Rdg, Step};
+use crate::staging_buffer_allocator::StagingBufferAllocator;
 use crate::util::check;
 use crate::DrawType::Draw;
 use crate::{
@@ -8,13 +11,14 @@ use crate::{
     ImageDimension, ImageViewDescription, MemoryDomain, MgpuResult, ShaderModule,
     ShaderModuleDescription, ShaderModuleLayout,
 };
-use crate::{ImageWriteParams, MgpuError};
+use crate::{BufferUsageFlags, ImageWriteParams};
 use ash::vk::{self, ImageView};
 use bitflags::bitflags;
 use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::ops::DerefMut;
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 #[cfg(feature = "swapchain")]
 use crate::swapchain::*;
@@ -56,6 +60,7 @@ pub struct Device {
     pub(crate) device_info: DeviceInfo,
 
     pub(crate) rdg: Arc<RwLock<Rdg>>,
+    pub(crate) staging_buffer_allocator: Arc<Mutex<StagingBufferAllocator>>,
 
     #[cfg(feature = "swapchain")]
     pub(crate) presentation_requests: Arc<RwLock<Vec<PresentationRequest>>>,
@@ -69,6 +74,7 @@ impl Device {
             hal,
             device_info,
             rdg: Default::default(),
+            staging_buffer_allocator: Default::default(),
 
             #[cfg(feature = "swapchain")]
             presentation_requests: Default::default(),
@@ -78,23 +84,61 @@ impl Device {
     pub fn submit(&self) -> MgpuResult<()> {
         let rdg = self.write_rdg().take();
         let compiled = rdg.compile()?;
+        static DUMP: AtomicBool = AtomicBool::new(true);
+        if DUMP.load(std::sync::atomic::Ordering::Relaxed) {
+            println!("{}", compiled.dump_dot());
+            DUMP.store(false, std::sync::atomic::Ordering::Relaxed);
+        }
 
+        let queues = unsafe { self.hal.begin_rendering()? };
         let mut graphics_command_recorders = vec![];
         let mut async_compute_command_recorders = vec![];
-        let queues = unsafe { self.hal.begin_rendering()? };
-        for step in compiled.sequence {
-            match step {
-                crate::rdg::Step::Barrier { transfers } => {
-                    todo!()
+        let mut async_transfer_command_recorders = vec![];
+
+        let mut submission_groups = Vec::<SubmissionGroup>::default();
+
+        for step in &compiled.sequence {
+            if let Step::PassGroup(passes) = step {
+                if !passes.graphics_nodes.is_empty() {
+                    let command_recorder = unsafe {
+                        self.hal
+                            .request_command_recorder(queues.graphics_compute_allocator)?
+                    };
+                    graphics_command_recorders.push(command_recorder);
                 }
-                crate::rdg::Step::PassGroup(passes) => {
+                if !passes.compute_nodes.is_empty() {
+                    let command_recorder = unsafe {
+                        self.hal
+                            .request_command_recorder(queues.async_compute_allocator)?
+                    };
+                    async_compute_command_recorders.push(command_recorder);
+                }
+
+                if !passes.transfer_nodes.is_empty() {
+                    let command_recorder = unsafe {
+                        self.hal
+                            .request_command_recorder(queues.async_transfer_allocator)?
+                    };
+                    async_transfer_command_recorders.push(command_recorder);
+                }
+            }
+        }
+
+        let mut current_graphics = 0;
+        let mut current_compute = 0;
+        let mut current_transfer = 0;
+
+        let mut current_submission_group = SubmissionGroup::default();
+        for step in &compiled.sequence {
+            match step {
+                Step::PassGroup(passes) => {
                     if !passes.graphics_nodes.is_empty() {
-                        let command_recorder = unsafe {
-                            self.hal
-                                .request_command_recorder(queues.graphics_compute_allocator)?
-                        };
-                        for pass in passes.graphics_nodes {
-                            let node = &compiled.nodes[pass];
+                        let command_recorder = graphics_command_recorders[current_graphics];
+                        current_submission_group
+                            .command_recorders
+                            .push(command_recorder);
+                        for pass in &passes.graphics_nodes {
+                            let node = &compiled.nodes[*pass];
                             match &node.ty {
                                 Node::RenderPass { info } => {
                                     unsafe { self.hal.begin_render_pass(command_recorder, info)? };
@@ -148,22 +192,114 @@ impl Device {
                                     }
                                     unsafe { self.hal.end_render_pass(command_recorder)? };
                                 }
+                                Node::CopyBufferToBuffer { .. } => unreachable!(),
                             }
                         }
 
-                        for pass in passes.compute_nodes {
+                        current_graphics += 1;
+                    }
+                    if !passes.compute_nodes.is_empty() {
+                        let command_recorder = async_compute_command_recorders[current_compute];
+                        current_submission_group
+                            .command_recorders
+                            .push(command_recorder);
+                        for pass in &passes.compute_nodes {
                             todo!();
                         }
-                        unsafe { self.hal.finalize_command_recorder(command_recorder)? };
-                        graphics_command_recorders.push(command_recorder);
+                        current_compute += 1;
                     }
+                    if !passes.transfer_nodes.is_empty() {
+                        for pass in &passes.transfer_nodes {
+                            let command_recorder =
+                                async_transfer_command_recorders[current_transfer];
+
+                            current_submission_group
+                                .command_recorders
+                                .push(command_recorder);
+                            match &compiled.nodes[*pass].ty {
+                                Node::RenderPass { info } => unreachable!(),
+                                Node::CopyBufferToBuffer {
+                                    source,
+                                    dest,
+                                    source_offset,
+                                    dest_offset,
+                                    size,
+                                } => unsafe {
+                                    self.hal.cmd_copy_buffer_to_buffer(
+                                        command_recorder,
+                                        *source,
+                                        *dest,
+                                        *source_offset,
+                                        *dest_offset,
+                                        *size,
+                                    )?
+                                },
+                            }
+                        }
+                        current_transfer += 1;
+                    }
+                }
+                Step::Barrier { transfers } => {
+                    let submission_group = std::mem::take(&mut current_submission_group);
+                    submission_groups.push(submission_group);
+
+                    let mut resources =
+                        HashMap::<(QueueType, QueueType), Vec<ResourceInfo>>::default();
+                    for transfer in transfers {
+                        let pair = (transfer.source, transfer.destination);
+                        resources.entry(pair).or_default().push(transfer.resource)
+                    }
+
+                    let synchronization_infos = resources.into_iter().map(|((src, dest), res)| {
+                        let source_command_recorder = match src {
+                            QueueType::Graphics => graphics_command_recorders[current_graphics - 1],
+                            QueueType::AsyncCompute => {
+                                async_compute_command_recorders[current_compute - 1]
+                            }
+                            QueueType::AsyncTransfer => {
+                                async_transfer_command_recorders[current_transfer - 1]
+                            }
+                        };
+
+                        let destination_command_recorder = *match dest {
+                            QueueType::Graphics => graphics_command_recorders.last().unwrap(),
+                            QueueType::AsyncCompute => {
+                                async_compute_command_recorders.last().unwrap()
+                            }
+                            QueueType::AsyncTransfer => {
+                                async_transfer_command_recorders.last().unwrap()
+                            }
+                        };
+
+                        SynchronizationInfo {
+                            source_queue: src,
+                            source_command_recorder,
+                            destination_queue: dest,
+                            destination_command_recorder,
+                            resources: res,
+                        }
+                    });
+                    let infos = synchronization_infos.collect::<Vec<_>>();
+
+                    unsafe { self.hal.enqueue_synchronization(&infos)? };
                 }
             }
         }
-        let submit_info = SubmitInfo {
-            graphics_command_recorders,
-            async_compute_command_recorders,
-        };
+
+        if !current_submission_group.command_recorders.is_empty() {
+            let submission_group = std::mem::take(&mut current_submission_group);
+            submission_groups.push(submission_group);
+        }
+
+        for command_recorder in graphics_command_recorders
+            .iter()
+            .chain(async_compute_command_recorders.iter())
+            .chain(async_transfer_command_recorders.iter())
+        {
+            unsafe { self.hal.finalize_command_recorder(*command_recorder)? };
+        }
+
+        let submit_info = SubmitInfo { submission_groups };
         unsafe { self.hal.submit(submit_info)? };
 
         #[cfg(feature = "swapchain")]
@@ -228,7 +364,31 @@ impl Device {
     pub fn write_buffer(&self, buffer: Buffer, params: &BufferWriteParams) -> MgpuResult<()> {
         #[cfg(debug_assertions)]
         self.validate_buffer_write_params(buffer, params);
-        todo!()
+        let mut allocator = self
+            .staging_buffer_allocator
+            .lock()
+            .expect("Failed to lock staging buffer allocator");
+        let allocation = allocator.get_staging_buffer(self, params.size)?;
+        unsafe {
+            self.hal.write_host_visible_buffer(
+                allocation.buffer,
+                &BufferWriteParams {
+                    data: params.data,
+                    offset: allocation.offset,
+                    size: params.size,
+                },
+            )
+        }?;
+
+        self.write_rdg()
+            .add_async_transfer_node(Node::CopyBufferToBuffer {
+                source: allocation.buffer,
+                dest: buffer,
+                source_offset: allocation.offset,
+                dest_offset: params.offset,
+                size: params.size,
+            });
+        Ok(())
     }
 
     pub fn destroy_buffer(&self, buffer: Buffer) -> MgpuResult<()> {
@@ -359,6 +519,11 @@ impl Device {
                 params.data.len()
             )
         );
+        check!(
+            buffer.memory_domain == MemoryDomain::HostVisible ||
+            buffer.usage_flags.contains(BufferUsageFlags::TRANSFER_DST),
+            "If a buffer write operation is initiated, the buffer must either be host visible, or it must have the TRANSFER_DST flag"
+        )
     }
 
     fn validate_shader_module_description(

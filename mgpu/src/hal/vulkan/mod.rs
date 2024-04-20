@@ -4,7 +4,7 @@ mod util;
 mod swapchain;
 
 use crate::hal::vulkan::util::{ToVk, VulkanBuffer, VulkanImage};
-use crate::hal::{CommandRecorder, CommandRecorderAllocator, Hal};
+use crate::hal::{CommandRecorder, CommandRecorderAllocator, Hal, QueueType};
 use crate::rdg::PassGroup;
 use crate::util::{hash_type, Handle};
 use crate::{
@@ -21,18 +21,18 @@ use gpu_allocator::vulkan::{
 };
 use gpu_allocator::{AllocatorDebugSettings, MemoryLocation};
 use raw_window_handle::{DisplayHandle, WindowHandle};
-use spirv_reflect::types::ReflectInterfaceVariable;
+use spirv_reflect::types::{ReflectDecorationFlags, ReflectInterfaceVariable};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::{self, c_char, CStr, CString};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock, RwLockReadGuard};
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
 
 use self::swapchain::{SwapchainError, VulkanSwapchain};
 use self::util::{ResolveVulkan, SpirvShaderModule, VulkanImageView, VulkanResolver};
 
-use super::{RenderState, SubmitInfo};
+use super::{RenderState, SubmissionGroup, SubmitInfo};
 
 pub struct VulkanHal {
     entry: Entry,
@@ -42,7 +42,7 @@ pub struct VulkanHal {
     debug_utilities: Option<VulkanDebugUtilities>,
     configuration: VulkanHalConfiguration,
     resolver: VulkanResolver,
-    frames_in_flight: Arc<FramesInFlight>,
+    frames_in_flight: Arc<Mutex<FramesInFlight>>,
 
     framebuffers: RwLock<HashMap<u64, vk::Framebuffer>>,
     render_passes: RwLock<HashMap<u64, vk::RenderPass>>,
@@ -100,13 +100,17 @@ pub(crate) struct FrameInFlight {
 
     command_buffers: RwLock<Vec<CommandBuffers>>,
 
-    work_ended_fence: vk::Fence,
-    work_ended_semaphore: vk::Semaphore,
+    graphics_work_ended_fence: vk::Fence,
+    compute_work_ended_fence: vk::Fence,
+    transfer_work_ended_fence: vk::Fence,
+    allocated_semaphores: Vec<vk::Semaphore>,
+    cached_semaphores: Vec<vk::Semaphore>,
+    work_ended_semaphores: Vec<vk::Semaphore>,
 }
 
 pub(crate) struct FramesInFlight {
     frames: Vec<FrameInFlight>,
-    current_frame_in_flight: AtomicUsize,
+    current_frame_in_flight: usize,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -218,10 +222,29 @@ impl Hal for VulkanHal {
 
     unsafe fn begin_rendering(&self) -> MgpuResult<RenderState> {
         use ash::vk::Handle;
-        let current_frame = self.frames_in_flight.current();
+        let mut current_frame = self.frames_in_flight.lock().unwrap();
+        let current_frame = current_frame.current_mut();
+        current_frame.cached_semaphores = std::mem::take(&mut current_frame.allocated_semaphores);
+        current_frame.work_ended_semaphores.clear();
         let device = &self.logical_device.handle;
-        unsafe { device.wait_for_fences(&[current_frame.work_ended_fence], true, u64::MAX)? };
-        unsafe { device.reset_fences(&[current_frame.work_ended_fence])? };
+        unsafe {
+            device.wait_for_fences(
+                &[
+                    current_frame.graphics_work_ended_fence,
+                    current_frame.transfer_work_ended_fence,
+                    current_frame.compute_work_ended_fence,
+                ],
+                true,
+                u64::MAX,
+            )?
+        };
+        unsafe {
+            device.reset_fences(&[
+                current_frame.graphics_work_ended_fence,
+                current_frame.transfer_work_ended_fence,
+                current_frame.compute_work_ended_fence,
+            ])?
+        };
 
         unsafe {
             device.reset_command_pool(
@@ -240,15 +263,22 @@ impl Hal for VulkanHal {
         Ok(RenderState {
             graphics_compute_allocator: CommandRecorderAllocator {
                 id: current_frame.graphics_command_pool.as_raw(),
+                queue_type: QueueType::Graphics,
             },
             async_compute_allocator: CommandRecorderAllocator {
                 id: current_frame.compute_command_pool.as_raw(),
+                queue_type: QueueType::AsyncCompute,
+            },
+            async_transfer_allocator: CommandRecorderAllocator {
+                id: current_frame.transfer_command_pool.as_raw(),
+                queue_type: QueueType::AsyncTransfer,
             },
         })
     }
 
-    unsafe fn submit(&self, end_rendering_info: SubmitInfo) -> MgpuResult<()> {
-        let current_frame = self.frames_in_flight.current();
+    unsafe fn submit(&self, mut end_rendering_info: SubmitInfo) -> MgpuResult<()> {
+        let mut current_frame = self.frames_in_flight.lock().unwrap();
+        let current_frame = current_frame.current_mut();
         let device = &self.logical_device.handle;
 
         let mut command_buffer_states = self
@@ -257,45 +287,108 @@ impl Hal for VulkanHal {
             .expect("Failed to lock command buffer states");
         command_buffer_states.clear();
 
-        if !end_rendering_info.graphics_command_recorders.is_empty() {
-            let command_buffers = end_rendering_info
-                .graphics_command_recorders
-                .iter()
-                .map(|cb| vk::CommandBuffer::from_raw(cb.id))
-                .collect::<Vec<_>>();
-            // let pipeline_stage_flags = [vk::PipelineStageFlags::BOTTOM_OF_PIPE];
-            let signal_semaphores = [current_frame.work_ended_semaphore];
+        let mut all_semaphores_to_signal = vec![];
+        let mut all_command_buffers = vec![];
+        let mut all_semaphores_to_wait = vec![vec![]];
+
+        if end_rendering_info.submission_groups.is_empty() {
+            let semaphore = current_frame.allocate_semaphore(device)?;
+            all_semaphores_to_signal.push(vec![[semaphore]]);
+        }
+
+        let device = &self.logical_device.handle;
+
+        let mut graphics_queue_submit = vec![];
+        let mut async_compute_queue_submit = vec![];
+        let mut transfer_queue_submit = vec![];
+
+        for (i, group) in end_rendering_info.submission_groups.iter().enumerate() {
+            let mut signals = vec![];
+            let mut command_buffers = vec![];
+            for cb in &group.command_recorders {
+                let semaphore_to_signal = current_frame.allocate_semaphore(device)?;
+                signals.push([semaphore_to_signal]);
+                command_buffers.push([vk::CommandBuffer::from_raw(cb.id)]);
+            }
+            all_semaphores_to_signal.push(signals);
+            all_command_buffers.push(command_buffers);
+            if i > 0 {
+                all_semaphores_to_wait.push(
+                    all_semaphores_to_signal[i - 1]
+                        .iter()
+                        .flatten()
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                );
+            }
+        }
+
+        let all_stages = [vk::PipelineStageFlags::ALL_COMMANDS; 256];
+        for (i, group) in end_rendering_info.submission_groups.iter().enumerate() {
+            let semaphores_to_wait = all_semaphores_to_wait[i].as_slice();
+            for (c, cb) in group.command_recorders.iter().enumerate() {
+                let semaphore_to_signal = &all_semaphores_to_signal[i][c];
+                let vk_cb = &all_command_buffers[i][c];
+
+                let submission_queue = match cb.queue_type {
+                    QueueType::Graphics => &mut graphics_queue_submit,
+                    QueueType::AsyncCompute => &mut async_compute_queue_submit,
+                    QueueType::AsyncTransfer => &mut transfer_queue_submit,
+                };
+
+                let submit_info = vk::SubmitInfo::default()
+                    .command_buffers(vk_cb)
+                    .signal_semaphores(semaphore_to_signal.as_slice())
+                    .wait_dst_stage_mask(&all_stages)
+                    .wait_semaphores(semaphores_to_wait);
+                submission_queue.push(submit_info);
+            }
+        }
+
+        // Signal at least one semaphore on the graphics queue for the swapchain
+        if end_rendering_info.submission_groups.is_empty() {
             let submit_info = vk::SubmitInfo::default()
-                .command_buffers(&command_buffers)
-                // .wait_dst_stage_mask(&pipeline_stage_flags)
-                .signal_semaphores(&signal_semaphores);
+                .signal_semaphores(all_semaphores_to_signal[0][0].as_slice());
+
+            graphics_queue_submit.push(submit_info);
+        }
+
+        {
             unsafe {
                 device.queue_submit(
+                    self.logical_device.transfer_queue.handle,
+                    &transfer_queue_submit,
+                    current_frame.transfer_work_ended_fence,
+                )?;
+
+                device.queue_submit(
                     self.logical_device.graphics_queue.handle,
-                    &[submit_info],
-                    current_frame.work_ended_fence,
+                    &graphics_queue_submit,
+                    current_frame.graphics_work_ended_fence,
+                )?;
+
+                device.queue_submit(
+                    self.logical_device.compute_queue.handle,
+                    &async_compute_queue_submit,
+                    current_frame.compute_work_ended_fence,
                 )?;
             }
         }
 
-        if !end_rendering_info
-            .async_compute_command_recorders
-            .is_empty()
-        {
-            todo!()
-        }
-
+        current_frame.work_ended_semaphores = all_semaphores_to_signal
+            .last()
+            .unwrap()
+            .iter()
+            .flatten()
+            .cloned()
+            .collect();
         Ok(())
     }
     unsafe fn end_rendering(&self) -> MgpuResult<()> {
-        let current_frame_index = self
-            .frames_in_flight
-            .current_frame_in_flight
-            .load(Ordering::Relaxed);
-        self.frames_in_flight.current_frame_in_flight.store(
-            (current_frame_index + 1) % self.configuration.frames_in_flight,
-            Ordering::Relaxed,
-        );
+        let mut ff = self.frames_in_flight.lock().unwrap();
+
+        ff.current_frame_in_flight =
+            (ff.current_frame_in_flight + 1) % self.configuration.frames_in_flight;
         self.resolver.update(self)?;
         Ok(())
     }
@@ -455,6 +548,8 @@ impl Hal for VulkanHal {
             label: buffer_description.label.map(ToOwned::to_owned),
             handle: buffer,
             allocation,
+            current_access_mask: vk::AccessFlags2::empty(),
+            current_stage_mask: vk::PipelineStageFlags2::empty(),
         };
         let handle = self.resolver.add(vulkan_buffer);
         Ok(Buffer {
@@ -582,11 +677,15 @@ impl Hal for VulkanHal {
                 .begin_command_buffer(cb, &vk::CommandBufferBeginInfo::default())?;
         }
 
-        Ok(CommandRecorder { id: cb.as_raw() })
+        Ok(CommandRecorder {
+            id: cb.as_raw(),
+            queue_type: allocator.queue_type,
+        })
     }
 
     unsafe fn present_image(&self, swapchain_id: u64, _image: Image) -> MgpuResult<()> {
-        let current_frame = self.frames_in_flight.current();
+        let current_frame = self.frames_in_flight.lock().unwrap();
+        let current_frame = current_frame.current();
         let swapchain = unsafe { Handle::from_u64(swapchain_id) };
         self.resolver
             .apply_mut::<VulkanSwapchain, ()>(swapchain, |swapchain| {
@@ -596,10 +695,9 @@ impl Hal for VulkanHal {
                 );
                 let indices = [current_index];
                 let swapchains = [swapchain.handle];
-                let wait_semaphores = [current_frame.work_ended_semaphore];
                 let present_info = vk::PresentInfoKHR::default()
                     .swapchains(&swapchains)
-                    .wait_semaphores(&wait_semaphores)
+                    .wait_semaphores(&current_frame.work_ended_semaphores)
                     .image_indices(&indices);
                 let swapchain_device = &swapchain.swapchain_device;
 
@@ -681,8 +779,8 @@ impl Hal for VulkanHal {
                 .height(render_pass_info.render_area.extents.height as f32)
                 .x(render_pass_info.render_area.offset.x as f32)
                 .y(render_pass_info.render_area.offset.y as f32)
-                .min_depth(1.0)
-                .max_depth(0.0);
+                .min_depth(0.0)
+                .max_depth(1.0);
             device.cmd_set_viewport(cb, 0, &[viewport]);
             device.cmd_set_scissor(cb, 0, &[render_pass_info.render_area.to_vk()]);
             state.current_render_pass = render_pass;
@@ -719,7 +817,8 @@ impl Hal for VulkanHal {
                 .resolve_clone(graphics_pipeline)
                 .ok_or(MgpuError::InvalidHandle)?;
             let mut pipelines = self.pipelines.write().expect("Failed to lock pipelines");
-            let pipeline = self.create_pipeline(&pipeline_info, &command_buffer_state)?;
+            let pipeline =
+                self.create_vulkan_graphics_pipeline(&pipeline_info, &command_buffer_state)?;
             pipelines
                 .entry(graphics_pipeline)
                 .or_default()
@@ -836,6 +935,174 @@ impl Hal for VulkanHal {
         unsafe { self.logical_device.handle.device_wait_idle() }?;
         Ok(())
     }
+
+    unsafe fn cmd_copy_buffer_to_buffer(
+        &self,
+        command_buffer: CommandRecorder,
+        source: Buffer,
+        dest: Buffer,
+        source_offset: usize,
+        dest_offset: usize,
+        size: usize,
+    ) -> MgpuResult<()> {
+        let vk_command_buffer = vk::CommandBuffer::from_raw(command_buffer.id);
+
+        let region = vk::BufferCopy::default()
+            .src_offset(source_offset as _)
+            .dst_offset(dest_offset as _)
+            .size(size as _);
+
+        unsafe {
+            self.logical_device.handle.cmd_copy_buffer(
+                vk_command_buffer,
+                self.resolver
+                    .resolve_vulkan(source)
+                    .ok_or(MgpuError::InvalidHandle)?,
+                self.resolver
+                    .resolve_vulkan(dest)
+                    .ok_or(MgpuError::InvalidHandle)?,
+                &[region],
+            );
+        }
+        Ok(())
+    }
+
+    unsafe fn enqueue_synchronization(
+        &self,
+        infos: &[super::SynchronizationInfo],
+    ) -> MgpuResult<()> {
+        let mut buffers = self.resolver.get_mut::<VulkanBuffer>();
+
+        let device = &self.logical_device.handle;
+        for info in infos {
+            let vk_buffer_src = vk::CommandBuffer::from_raw(info.source_command_recorder.id);
+            let vk_buffer_dst = vk::CommandBuffer::from_raw(info.destination_command_recorder.id);
+            let source_qfi = match info.source_queue {
+                super::QueueType::Graphics => self.logical_device.graphics_queue.family_index,
+                super::QueueType::AsyncCompute => self.logical_device.compute_queue.family_index,
+                super::QueueType::AsyncTransfer => self.logical_device.transfer_queue.family_index,
+            };
+
+            let dest_qfi = match info.destination_queue {
+                super::QueueType::Graphics => self.logical_device.graphics_queue.family_index,
+                super::QueueType::AsyncCompute => self.logical_device.compute_queue.family_index,
+                super::QueueType::AsyncTransfer => self.logical_device.transfer_queue.family_index,
+            };
+
+            if source_qfi != dest_qfi {
+                // let mut image_memory_barrier_source = vec![];
+                let mut buffer_memory_barrier_source = vec![];
+
+                // let mut image_memory_barrier_dest = vec![];
+                let mut buffer_memory_barrier_dest = vec![];
+
+                for resource in &info.resources {
+                    let dst_stage_mask = match resource.access_mode {
+                        super::ResourceAccessMode::AttachmentRead(ty) => match ty {
+                            super::AttachmentType::Color => {
+                                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT
+                            }
+                            super::AttachmentType::DepthStencil => {
+                                vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
+                                    | vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS
+                            }
+                        },
+                        super::ResourceAccessMode::AttachmentWrite(ty) => match ty {
+                            super::AttachmentType::Color => {
+                                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT
+                            }
+                            super::AttachmentType::DepthStencil => {
+                                vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
+                                    | vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS
+                            }
+                        },
+                        super::ResourceAccessMode::ShaderRead => todo!(),
+                        super::ResourceAccessMode::ShaderWrite => todo!(),
+                        super::ResourceAccessMode::TransferSrc => vk::PipelineStageFlags2::TRANSFER,
+                        super::ResourceAccessMode::TransferDst => vk::PipelineStageFlags2::TRANSFER,
+                        super::ResourceAccessMode::VertexInput => {
+                            vk::PipelineStageFlags2::VERTEX_ATTRIBUTE_INPUT
+                        }
+                    };
+                    let dst_access_mask = match resource.access_mode {
+                        super::ResourceAccessMode::AttachmentRead(ty) => match ty {
+                            super::AttachmentType::Color => vk::AccessFlags2::COLOR_ATTACHMENT_READ,
+                            super::AttachmentType::DepthStencil => {
+                                vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ
+                            }
+                        },
+                        super::ResourceAccessMode::AttachmentWrite(ty) => match ty {
+                            super::AttachmentType::Color => {
+                                vk::AccessFlags2::COLOR_ATTACHMENT_WRITE
+                            }
+                            super::AttachmentType::DepthStencil => {
+                                vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE
+                            }
+                        },
+                        super::ResourceAccessMode::ShaderRead => todo!(),
+                        super::ResourceAccessMode::ShaderWrite => todo!(),
+                        super::ResourceAccessMode::TransferSrc => vk::AccessFlags2::MEMORY_READ,
+                        super::ResourceAccessMode::TransferDst => vk::AccessFlags2::MEMORY_WRITE,
+                        super::ResourceAccessMode::VertexInput => {
+                            vk::AccessFlags2::VERTEX_ATTRIBUTE_READ
+                        }
+                    };
+                    match &resource.resource {
+                        super::Resource::Image { image } => todo!(),
+                        super::Resource::ImageView { view } => todo!(),
+                        super::Resource::Buffer {
+                            buffer,
+                            offset,
+                            size,
+                        } => {
+                            let buffer = buffers.resolve_mut(*buffer).unwrap();
+                            buffer_memory_barrier_source.push(
+                                vk::BufferMemoryBarrier2::default()
+                                    .buffer(buffer.handle)
+                                    .offset(*offset as _)
+                                    .size(*size as _)
+                                    .src_queue_family_index(source_qfi)
+                                    .dst_queue_family_index(dest_qfi)
+                                    .src_access_mask(buffer.current_access_mask)
+                                    // .dst_access_mask(dst_access_mask)
+                                    .src_stage_mask(buffer.current_stage_mask), // .dst_stage_mask(dst_stage_mask),
+                            );
+                            buffer_memory_barrier_dest.push(
+                                vk::BufferMemoryBarrier2::default()
+                                    .buffer(buffer.handle)
+                                    .offset(*offset as _)
+                                    .size(*size as _)
+                                    .src_queue_family_index(source_qfi)
+                                    .dst_queue_family_index(dest_qfi)
+                                    // .src_access_mask(buffer.current_access_mask)
+                                    .dst_access_mask(dst_access_mask)
+                                    // .src_stage_mask(buffer.current_stage_mask)
+                                    .dst_stage_mask(dst_stage_mask),
+                            );
+                            buffer.current_access_mask = dst_access_mask;
+                            buffer.current_stage_mask = dst_stage_mask;
+                        }
+                    }
+                }
+
+                let depedency_info_source = vk::DependencyInfo::default()
+                    .buffer_memory_barriers(&buffer_memory_barrier_source)
+                    .dependency_flags(vk::DependencyFlags::BY_REGION);
+
+                let depedency_info_dest = vk::DependencyInfo::default()
+                    .buffer_memory_barriers(&buffer_memory_barrier_dest)
+                    .dependency_flags(vk::DependencyFlags::BY_REGION);
+
+                unsafe {
+                    device.cmd_pipeline_barrier2(vk_buffer_src, &depedency_info_source);
+                    device.cmd_pipeline_barrier2(vk_buffer_dst, &depedency_info_dest);
+                }
+            } else {
+                panic!("Pipeline barrier");
+            }
+        }
+        Ok(())
+    }
 }
 
 impl VulkanHal {
@@ -889,7 +1156,7 @@ impl VulkanHal {
                 frames_in_flight: configuration.desired_frames_in_flight,
             },
             resolver: VulkanResolver::new(configuration.desired_frames_in_flight),
-            frames_in_flight: Arc::new(frames_in_flight),
+            frames_in_flight: Arc::new(Mutex::new(frames_in_flight)),
             framebuffers: RwLock::default(),
             render_passes: RwLock::default(),
             pipelines: RwLock::default(),
@@ -1324,17 +1591,11 @@ impl VulkanHal {
         let mut frames = vec![];
         let device = &logical_device.handle;
         for _ in 0..configuration.desired_frames_in_flight {
-            let fence = unsafe {
+            let make_fence = || unsafe {
                 device.create_fence(
                     &vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED),
                     get_allocation_callbacks(),
-                )?
-            };
-            let semaphore = unsafe {
-                device.create_semaphore(
-                    &vk::SemaphoreCreateInfo::default(),
-                    get_allocation_callbacks(),
-                )?
+                )
             };
             let make_command_pool = |qfi| {
                 let command_pool_create_info = vk::CommandPoolCreateInfo::default()
@@ -1346,8 +1607,10 @@ impl VulkanHal {
                 }
             };
             frames.push(FrameInFlight {
-                work_ended_fence: fence,
-                work_ended_semaphore: semaphore,
+                graphics_work_ended_fence: make_fence()?,
+                compute_work_ended_fence: make_fence()?,
+                transfer_work_ended_fence: make_fence()?,
+                work_ended_semaphores: vec![],
                 graphics_command_pool: make_command_pool(
                     logical_device.graphics_queue.family_index,
                 )?,
@@ -1356,11 +1619,13 @@ impl VulkanHal {
                     logical_device.transfer_queue.family_index,
                 )?,
                 command_buffers: Default::default(),
+                allocated_semaphores: vec![],
+                cached_semaphores: vec![],
             });
         }
         Ok(FramesInFlight {
             frames,
-            current_frame_in_flight: AtomicUsize::new(0),
+            current_frame_in_flight: 0,
         })
     }
 
@@ -1629,7 +1894,7 @@ impl VulkanHal {
         Ok(rp)
     }
 
-    fn create_pipeline(
+    fn create_vulkan_graphics_pipeline(
         &self,
         pipeline_info: &util::VulkanGraphicsPipelineDescription,
         command_buffer_state: &VulkanCommandBufferState,
@@ -1733,10 +1998,19 @@ impl VulkanHal {
                 fs.render_targets
                     .iter()
                     .map(|attachment| {
-                        if let Some(_) = &attachment.blend {
-                            todo!()
+                        if let Some(settings) = &attachment.blend {
+                            vk::PipelineColorBlendAttachmentState::default()
+                                .blend_enable(true)
+                                .src_color_blend_factor(settings.src_color_blend_factor.to_vk())
+                                .dst_color_blend_factor(settings.dst_color_blend_factor.to_vk())
+                                .color_blend_op(settings.color_blend_op.to_vk())
+                                .src_alpha_blend_factor(settings.src_alpha_blend_factor.to_vk())
+                                .dst_alpha_blend_factor(settings.dst_alpha_blend_factor.to_vk())
+                                .alpha_blend_op(settings.alpha_blend_op.to_vk())
+                                .color_write_mask(settings.write_mask.to_vk())
                         } else {
                             vk::PipelineColorBlendAttachmentState::default()
+                                .color_write_mask(vk::ColorComponentFlags::RGBA)
                         }
                     })
                     .collect::<Vec<_>>()
@@ -1745,7 +2019,7 @@ impl VulkanHal {
 
         let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
             .attachments(&color_attachments)
-            .blend_constants([0.0; 4])
+            .blend_constants([1.0; 4])
             .logic_op(vk::LogicOp::default())
             .logic_op_enable(false);
 
@@ -1840,9 +2114,14 @@ impl VulkanHal {
         let descriptor_layouts = module
             .enumerate_descriptor_sets(None)
             .map_err(spirv_mgpu_err)?;
+        let filter_out_semantics = |input: &ReflectInterfaceVariable| {
+            !input
+                .decoration_flags
+                .contains(ReflectDecorationFlags::BUILT_IN)
+        };
         let spirv_to_attribute_input = |input: ReflectInterfaceVariable| {
             let format = match input.format {
-                types::ReflectFormat::Undefined => unreachable!(),
+                types::ReflectFormat::Undefined => unreachable!("{input:?}"),
                 types::ReflectFormat::R32_UINT => VertexAttributeFormat::Uint,
                 types::ReflectFormat::R32_SINT => VertexAttributeFormat::Int,
                 types::ReflectFormat::R32_SFLOAT => VertexAttributeFormat::Float,
@@ -1865,10 +2144,12 @@ impl VulkanHal {
 
         let inputs = inputs
             .into_iter()
+            .filter(filter_out_semantics)
             .map(spirv_to_attribute_input)
             .collect::<Vec<_>>();
         let outputs = outputs
             .into_iter()
+            .filter(filter_out_semantics)
             .map(spirv_to_attribute_input)
             .collect::<Vec<_>>();
         let binding_sets = descriptor_layouts
@@ -2139,12 +2420,31 @@ impl FrameInFlight {
             .read()
             .expect("Failed to lock command buffers")
     }
+
+    fn allocate_semaphore(&mut self, device: &ash::Device) -> VulkanHalResult<vk::Semaphore> {
+        if let Some(sem) = self.cached_semaphores.pop() {
+            Ok(sem)
+        } else {
+            let semaphore = unsafe {
+                device.create_semaphore(
+                    &vk::SemaphoreCreateInfo::default(),
+                    get_allocation_callbacks(),
+                )?
+            };
+            self.allocated_semaphores.push(semaphore);
+            Ok(semaphore)
+        }
+    }
 }
 
 impl FramesInFlight {
     fn current(&self) -> &FrameInFlight {
-        let current = self.current_frame_in_flight.load(Ordering::Relaxed);
+        let current = self.current_frame_in_flight;
         &self.frames[current]
+    }
+    fn current_mut(&mut self) -> &mut FrameInFlight {
+        let current = self.current_frame_in_flight;
+        &mut self.frames[current]
     }
 }
 

@@ -1,10 +1,9 @@
 use std::marker::PhantomData;
 
 use crate::{
-    rdg::{Node, QueueType},
-    util::check,
-    AttachmentStoreOp, BindingSet, Buffer, DepthStencilTarget, Device, Extents2D, GraphicsPipeline,
-    MgpuResult, Rect2D, RenderPassDescription, RenderTarget,
+    hal::QueueType, rdg::Node, util::check, AttachmentStoreOp, BindingSet, Buffer,
+    DepthStencilTarget, Device, Extents2D, GraphicsPipeline, MgpuResult, Rect2D,
+    RenderPassDescription, RenderTarget,
 };
 
 pub struct CommandRecorder<T: CommandRecorderType> {
@@ -101,6 +100,11 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
             QueueType::AsyncCompute => {
                 for node in self.new_nodes {
                     rdg.add_async_compute_pass(node);
+                }
+            }
+            QueueType::AsyncTransfer => {
+                for node in self.new_nodes {
+                    rdg.add_async_transfer_node(node);
                 }
             }
         }
@@ -267,6 +271,7 @@ impl<'c> RenderPass<'c> {
     ) -> MgpuResult<()> {
         #[cfg(debug_assertions)]
         self.validate_state();
+
         let step = self.info.steps.last_mut().unwrap();
         step.commands.push(DrawCommand {
             pipeline: self.pipeline.unwrap(),
