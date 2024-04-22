@@ -1172,7 +1172,7 @@ fn validate_descriptor_set_binding(
 }
 
 impl VulkanHal {
-    const VULKAN_API_VERSION: u32 = vk::make_api_version(0, 1, 3, 280);
+    const VULKAN_API_VERSION: u32 = vk::make_api_version(0, 1, 3, 272);
     pub(crate) fn create(configuration: &DeviceConfiguration) -> MgpuResult<Arc<dyn Hal>> {
         let entry = unsafe { Entry::load()? };
         let instance = Self::create_instance(&entry, configuration)?;
@@ -1274,7 +1274,6 @@ impl VulkanHal {
         {
             requested_layers.push(LAYER_KHRONOS_VALIDATION.as_ptr());
             requested_instance_extensions.push(ash::ext::debug_utils::NAME.as_ptr());
-            requested_instance_extensions.push(ash::ext::layer_settings::NAME.as_ptr());
         }
 
         if cfg!(feature = "swapchain") {
@@ -1307,6 +1306,7 @@ impl VulkanHal {
             .push_next(&mut layer_settings_create_info);
         let instance =
             unsafe { entry.create_instance(&instance_info, get_allocation_callbacks()) }?;
+
         Ok(instance)
     }
 
