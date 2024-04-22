@@ -1,11 +1,13 @@
 mod util;
 
+use bytemuck::offset_of;
 use mgpu::{
-    AttachmentStoreOp, BufferDescription, BufferUsageFlags, DeviceConfiguration, DeviceFeatures,
-    DevicePreference, Extents2D, FragmentStageInfo, Graphics, GraphicsPipelineDescription,
-    ImageFormat, MemoryDomain, Rect2D, RenderPassDescription, RenderTarget, RenderTargetInfo,
-    RenderTargetLoadOp, SampleCount, ShaderModuleDescription, SwapchainCreationInfo,
-    VertexInputDescription, VertexInputFrequency, VertexStageInfo,
+    AttachmentStoreOp, BlendFactor, BlendOp, BlendSettings, BufferDescription, BufferUsageFlags,
+    ColorWriteMask, DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D,
+    FragmentStageInfo, Graphics, GraphicsPipelineDescription, ImageFormat, MemoryDomain, Rect2D,
+    RenderPassDescription, RenderTarget, RenderTargetInfo, RenderTargetLoadOp, SampleCount,
+    ShaderModuleDescription, SwapchainCreationInfo, VertexInputDescription, VertexInputFrequency,
+    VertexStageInfo,
 };
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -17,6 +19,9 @@ use winit::event_loop::EventLoop;
 const VERTEX_SHADER: &str = "
 #version 460
 layout(location = 0) in vec3 pos;
+layout(location = 1) in vec2 uv;
+
+layout(location = 0) out vec2 fs_uv;
 
 void main() {
     vec4 vs_pos = vec4(pos, 1.0);
@@ -25,10 +30,15 @@ void main() {
 ";
 const FRAGMENT_SHADER: &str = "
 #version 460
+layout(set = 0, binding = 0) uniform sampler tex_sampler;
+layout(set = 0, binding = 1) uniform texture2D tex;
+
+layout(location = 0) in vec2 uv;
+
 layout(location = 0) out vec4 color;
 
 void main() {
-    color = vec4(1.0, 0.0, 0.0, 1.0);
+    color = texture(sampler2D(tex, tex_sampler), uv);
 }
 ";
 
@@ -55,25 +65,25 @@ fn main() {
             preferred_format: None,
         })
         .expect("Failed to create swapchain");
-    let triangle_data = vec![
-        pos(-1.0, -1.0, 0.0),
-        pos(1.0, -1.0, 0.0),
-        pos(0.0, 1.0, 0.0),
+    let cube_data = vec![
+        vertex(-1.0, -1.0, 0.0, 0.0, 0.0),
+        vertex(1.0, -1.0, 0.0, 0.0, 0.0),
+        vertex(0.0, 1.0, 0.0, 0.0, 0.0),
     ];
 
-    let triangle_buffer = device
+    let cube_data_buffer = device
         .create_buffer(&BufferDescription {
             label: Some("Triangle data"),
             usage_flags: BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
-            size: std::mem::size_of_val(triangle_data.as_slice()),
+            size: std::mem::size_of_val(cube_data.as_slice()),
             memory_domain: MemoryDomain::DeviceLocal,
         })
         .unwrap();
 
     device
         .write_buffer(
-            triangle_buffer,
-            &triangle_buffer.write_all_params(bytemuck::cast_slice(&triangle_data)),
+            cube_data_buffer,
+            &cube_data_buffer.write_all_params(bytemuck::cast_slice(&cube_data)),
         )
         .unwrap();
 
@@ -94,17 +104,26 @@ fn main() {
     let pipeline = device
         .create_graphics_pipeline(
             &GraphicsPipelineDescription::new(
-                Some("Triangle Pipeline"),
+                Some("Textured Cube"),
                 &VertexStageInfo {
                     shader: &vertex_shader_module,
                     entry_point: "main",
-                    vertex_inputs: &[VertexInputDescription {
-                        location: 0,
-                        stride: std::mem::size_of::<Position>(),
-                        offset: 0,
-                        frequency: VertexInputFrequency::PerVertex,
-                        format: mgpu::VertexAttributeFormat::Float3,
-                    }],
+                    vertex_inputs: &[
+                        VertexInputDescription {
+                            location: 0,
+                            stride: std::mem::size_of::<Vertex>(),
+                            offset: 0,
+                            frequency: VertexInputFrequency::PerVertex,
+                            format: mgpu::VertexAttributeFormat::Float3,
+                        },
+                        VertexInputDescription {
+                            location: 1,
+                            stride: std::mem::size_of::<Vertex>(),
+                            offset: offset_of!(Vertex, uv),
+                            frequency: VertexInputFrequency::PerVertex,
+                            format: mgpu::VertexAttributeFormat::Float2,
+                        },
+                    ],
                 },
             )
             .fragment_stage(&FragmentStageInfo {
@@ -154,7 +173,7 @@ fn main() {
                             })
                             .unwrap();
                         render_pass.set_pipeline(pipeline);
-                        render_pass.set_vertex_buffers([triangle_buffer]);
+                        render_pass.set_vertex_buffers([cube_data_buffer, cube_data_buffer]);
                         render_pass.draw(3, 1, 0, 0).unwrap();
                     }
                     command_recorder.submit().unwrap();
@@ -189,5 +208,5 @@ fn main() {
         .unwrap();
 
     // device.destroy_image_view(image_view);
-    device.destroy_buffer(triangle_buffer).unwrap();
+    device.destroy_buffer(cube_data_buffer).unwrap();
 }

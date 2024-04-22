@@ -2,13 +2,15 @@ use ash::vk;
 use gpu_allocator::vulkan::Allocation;
 
 use crate::{
+    hal::{GraphicsPipelineLayout, OwnedFragmentStageInfo, OwnedVertexStageInfo},
     util::{define_resource_resolver, Handle},
-    BlendFactor, BlendOp, Buffer, BufferUsageFlags, ColorWriteMask, CompareOp, CullMode,
-    DepthStencilState, DepthStencilTargetInfo, Extents2D, Extents3D, FrontFace, GraphicsPipeline,
-    GraphicsPipelineDescription, Image, ImageDimension, ImageFormat, ImageUsageFlags, ImageView,
-    MultisampleState, Offset2D, PolygonMode, PresentMode, PrimitiveTopology, Rect2D,
-    RenderTargetInfo, SampleCount, ShaderModule, ShaderModuleLayout, Swapchain,
-    VertexAttributeFormat, VertexInputDescription, VertexInputFrequency,
+    BindingSetElementKind, BindingSetLayout, BlendFactor, BlendOp, Buffer, BufferUsageFlags,
+    ColorWriteMask, CompareOp, CullMode, DepthStencilState, DepthStencilTargetInfo, Extents2D,
+    Extents3D, FrontFace, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDimension,
+    ImageFormat, ImageUsageFlags, ImageView, MultisampleState, Offset2D, PolygonMode, PresentMode,
+    PrimitiveTopology, Rect2D, RenderTargetInfo, SampleCount, ShaderModule, ShaderModuleLayout,
+    ShaderStageFlags, Swapchain, VertexAttributeFormat, VertexInputDescription,
+    VertexInputFrequency,
 };
 
 #[cfg(feature = "swapchain")]
@@ -44,6 +46,24 @@ impl FromVk for vk::Format {
             vk::Format::UNDEFINED => ImageFormat::Unknown,
             _ => unreachable!("Format not known"),
         }
+    }
+}
+
+impl ToVk for ShaderStageFlags {
+    type Target = vk::ShaderStageFlags;
+
+    fn to_vk(self) -> Self::Target {
+        let mut res = Self::Target::default();
+
+        if self.contains(Self::VERTEX) {
+            res |= Self::Target::VERTEX;
+        }
+
+        if self.contains(Self::FRAGMENT) {
+            res |= Self::Target::FRAGMENT;
+        }
+
+        res
     }
 }
 
@@ -343,6 +363,26 @@ impl ToVk for CompareOp {
     }
 }
 
+impl ToVk for BindingSetElementKind {
+    type Target = vk::DescriptorType;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            BindingSetElementKind::Buffer { ty, .. } => match ty {
+                crate::BufferType::Uniform => vk::DescriptorType::UNIFORM_BUFFER,
+                crate::BufferType::Storage => vk::DescriptorType::STORAGE_BUFFER,
+            },
+            BindingSetElementKind::Sampler { .. } => vk::DescriptorType::SAMPLER,
+            BindingSetElementKind::SampledImage { .. } => vk::DescriptorType::SAMPLED_IMAGE,
+            BindingSetElementKind::StorageImage { .. } => vk::DescriptorType::STORAGE_IMAGE,
+            BindingSetElementKind::CombinedImageSampler { .. } => {
+                vk::DescriptorType::COMBINED_IMAGE_SAMPLER
+            }
+            BindingSetElementKind::Unknown => unreachable!(),
+        }
+    }
+}
+
 impl ToVk for BufferUsageFlags {
     type Target = vk::BufferUsageFlags;
 
@@ -527,39 +567,14 @@ pub(super) struct SpirvShaderModule {
     pub(super) handle: vk::ShaderModule,
 }
 
-#[derive(Clone, Hash)]
-pub(super) struct OwnedVertexStageInfo {
-    pub(super) shader: ShaderModule,
-    pub(super) entry_point: String,
-    pub(super) vertex_inputs: Vec<VertexInputDescription>,
-}
-
-#[derive(Clone, Hash)]
-pub(super) struct OwnedFragmentStageInfo {
-    pub(super) shader: ShaderModule,
-    pub(super) entry_point: String,
-    pub(super) render_targets: Vec<RenderTargetInfo>,
-    pub(super) depth_stencil_target: Option<DepthStencilTargetInfo>,
-}
-
-#[derive(Clone, Hash)]
-pub(super) struct VulkanGraphicsPipelineDescription {
-    pub(super) label: Option<String>,
-    pub(super) vertex_stage: OwnedVertexStageInfo,
-    pub(super) fragment_stage: Option<OwnedFragmentStageInfo>,
-    pub(super) primitive_restart_enabled: bool,
-    pub(super) primitive_topology: PrimitiveTopology,
-    pub(super) polygon_mode: PolygonMode,
-    pub(super) cull_mode: CullMode,
-    pub(super) front_face: FrontFace,
-    pub(super) multisample_state: Option<MultisampleState>,
-    pub(super) depth_stencil_state: DepthStencilState,
-}
-
 impl<'a> GraphicsPipelineDescription<'a> {
-    pub(super) fn to_vk_owned(&self) -> VulkanGraphicsPipelineDescription {
-        VulkanGraphicsPipelineDescription {
+    pub(super) fn to_vk_owned(
+        &self,
+        binding_sets: Vec<BindingSetLayout>,
+    ) -> GraphicsPipelineLayout {
+        GraphicsPipelineLayout {
             label: self.label.map(ToOwned::to_owned),
+            binding_sets,
             vertex_stage: OwnedVertexStageInfo {
                 shader: *self.vertex_stage.shader,
                 entry_point: self.vertex_stage.entry_point.to_owned(),
@@ -627,7 +642,7 @@ define_resource_resolver!(
         }
         Ok(())
     }) => buffers,
-    (VulkanGraphicsPipelineDescription, |_, _| { todo!() }) => graphics_pipeline_infos,
+    (GraphicsPipelineLayout, |_, _| { todo!() }) => graphics_pipeline_infos,
     (SpirvShaderModule, |hal, module| unsafe { hal.logical_device.handle.destroy_shader_module(module.handle, get_allocation_callbacks()); Ok(()) }) => shader_modules,
 );
 
@@ -677,5 +692,5 @@ impl_util_methods!(Image, VulkanImage, vk::Image);
 impl_util_methods!(ImageView, VulkanImageView, vk::ImageView);
 impl_util_methods!(Buffer, VulkanBuffer, vk::Buffer);
 impl_util_methods!(ShaderModule, SpirvShaderModule, vk::ShaderModule);
-impl_util_methods!(GraphicsPipeline, VulkanGraphicsPipelineDescription);
+impl_util_methods!(GraphicsPipeline, GraphicsPipelineLayout);
 impl_util_methods!(Swapchain, VulkanSwapchain, vk::SwapchainKHR);

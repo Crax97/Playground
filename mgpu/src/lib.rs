@@ -14,6 +14,7 @@ use bitflags::bitflags;
 
 pub use command_recorder::*;
 pub use device::*;
+pub use hal::{GraphicsPipelineLayout, OwnedFragmentStageInfo, OwnedVertexStageInfo};
 pub use swapchain::*;
 
 #[cfg(feature = "vulkan")]
@@ -442,7 +443,6 @@ pub struct GraphicsPipelineDescription<'a> {
     pub label: Option<&'a str>,
     pub vertex_stage: &'a VertexStageInfo<'a>,
     pub fragment_stage: Option<&'a FragmentStageInfo<'a>>,
-    pub binding_sets: &'a [BindingSet],
     pub primitive_restart_enabled: bool,
     pub primitive_topology: PrimitiveTopology,
     pub polygon_mode: PolygonMode,
@@ -459,14 +459,14 @@ pub struct ShaderAttribute {
     pub format: VertexAttributeFormat,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum BufferType {
     Uniform,
     Storage,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AccessMode {
     Read,
@@ -474,14 +474,19 @@ pub enum AccessMode {
     ReadWrite,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Hash, Default, Eq, PartialEq)]
 pub enum BindingSetElementKind {
+    #[default]
+    Unknown,
     Buffer {
         ty: BufferType,
         access_mode: AccessMode,
     },
-    Sampler {
-        access_mode: AccessMode,
+    Sampler,
+    // This type can only be used with the Vulkan HAL
+    CombinedImageSampler {
+        format: ImageFormat,
+        dimension: ImageDimension,
     },
     SampledImage {
         format: ImageFormat,
@@ -494,17 +499,27 @@ pub enum BindingSetElementKind {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Default, Clone, Debug, Hash)]
 pub struct BindingSetElement {
     pub name: String,
     pub binding: usize,
+    pub array_length: usize,
     pub ty: BindingSetElementKind,
+    pub shader_stage_flags: ShaderStageFlags,
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, Hash)]
 pub struct BindingSetLayout {
     pub set: usize,
     pub bindings: Vec<BindingSetElement>,
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Default, Debug, Hash)]
+    pub struct ShaderStageFlags : u32 {
+        const VERTEX = 0x01;
+        const FRAGMENT = 0x02;
+    }
 }
 
 #[derive(Clone, Default, Debug)]
@@ -589,7 +604,6 @@ impl<'a> GraphicsPipelineDescription<'a> {
             label,
             vertex_stage,
             fragment_stage: None,
-            binding_sets: &[],
             primitive_restart_enabled: Default::default(),
             primitive_topology: Default::default(),
             polygon_mode: Default::default(),

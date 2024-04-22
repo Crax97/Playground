@@ -6,13 +6,13 @@ mod swapchain;
 use crate::hal::vulkan::util::{ToVk, VulkanBuffer, VulkanImage};
 use crate::hal::{CommandRecorder, CommandRecorderAllocator, Hal, QueueType};
 use crate::rdg::PassGroup;
-use crate::util::{hash_type, Handle};
+use crate::util::{check, hash_type, Handle};
 use crate::{
     AccessMode, AttachmentAccessMode, BindingSetElement, BindingSetElementKind, BindingSetLayout,
     Buffer, BufferDescription, DeviceConfiguration, DeviceFeatures, DevicePreference, Framebuffer,
-    GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageDimension,
-    ImageFormat, MemoryDomain, MgpuError, MgpuResult, RenderPassInfo, ShaderAttribute,
-    ShaderModule, ShaderModuleLayout, VertexAttributeFormat,
+    GraphicsPipeline, GraphicsPipelineDescription, GraphicsPipelineLayout, Image, ImageDescription,
+    ImageDimension, ImageFormat, MemoryDomain, MgpuError, MgpuResult, RenderPassInfo,
+    ShaderAttribute, ShaderModule, ShaderModuleLayout, ShaderStageFlags, VertexAttributeFormat,
 };
 use ash::vk::{DebugUtilsMessageSeverityFlagsEXT, Handle as AshHandle, QueueFlags};
 use ash::{vk, Entry, Instance};
@@ -21,18 +21,20 @@ use gpu_allocator::vulkan::{
 };
 use gpu_allocator::{AllocatorDebugSettings, MemoryLocation};
 use raw_window_handle::{DisplayHandle, WindowHandle};
-use spirv_reflect::types::{ReflectDecorationFlags, ReflectInterfaceVariable};
+use spirv_reflect::types::{
+    ReflectDecorationFlags, ReflectInterfaceVariable, ReflectShaderStageFlags,
+};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::{self, c_char, CStr, CString};
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
 
 use self::swapchain::{SwapchainError, VulkanSwapchain};
 use self::util::{ResolveVulkan, SpirvShaderModule, VulkanImageView, VulkanResolver};
 
-use super::{RenderState, SubmissionGroup, SubmitInfo};
+use super::{RenderState, SubmitInfo};
 
 pub struct VulkanHal {
     entry: Entry,
@@ -105,7 +107,9 @@ pub(crate) struct FrameInFlight {
     transfer_work_ended_fence: vk::Fence,
     allocated_semaphores: Vec<vk::Semaphore>,
     cached_semaphores: Vec<vk::Semaphore>,
-    work_ended_semaphores: Vec<vk::Semaphore>,
+    work_ended_semaphore: vk::Semaphore,
+
+    atomic_semaphore_counter: AtomicU64,
 }
 
 pub(crate) struct FramesInFlight {
@@ -225,7 +229,6 @@ impl Hal for VulkanHal {
         let mut current_frame = self.frames_in_flight.lock().unwrap();
         let current_frame = current_frame.current_mut();
         current_frame.cached_semaphores = std::mem::take(&mut current_frame.allocated_semaphores);
-        current_frame.work_ended_semaphores.clear();
         let device = &self.logical_device.handle;
         unsafe {
             device.wait_for_fences(
@@ -279,7 +282,11 @@ impl Hal for VulkanHal {
     unsafe fn submit(&self, mut end_rendering_info: SubmitInfo) -> MgpuResult<()> {
         let mut current_frame = self.frames_in_flight.lock().unwrap();
         let current_frame = current_frame.current_mut();
-        let device = &self.logical_device.handle;
+
+        let current_semaphore_value = current_frame
+            .atomic_semaphore_counter
+            .fetch_add(1, Ordering::Relaxed)
+            + 1;
 
         let mut command_buffer_states = self
             .command_buffer_states
@@ -292,7 +299,7 @@ impl Hal for VulkanHal {
         let mut all_semaphores_to_wait = vec![vec![]];
 
         if end_rendering_info.submission_groups.is_empty() {
-            let semaphore = current_frame.allocate_semaphore(device)?;
+            let semaphore = current_frame.work_ended_semaphore;
             all_semaphores_to_signal.push(vec![[semaphore]]);
         }
 
@@ -323,6 +330,11 @@ impl Hal for VulkanHal {
             }
         }
 
+        let semaphore_values = [current_semaphore_value];
+        let mut timeline_info = vk::TimelineSemaphoreSubmitInfo::default()
+            .signal_semaphore_values(&semaphore_values)
+            .wait_semaphore_values(&semaphore_values);
+
         let all_stages = [vk::PipelineStageFlags::ALL_COMMANDS; 256];
         for (i, group) in end_rendering_info.submission_groups.iter().enumerate() {
             let semaphores_to_wait = all_semaphores_to_wait[i].as_slice();
@@ -340,33 +352,31 @@ impl Hal for VulkanHal {
                     .command_buffers(vk_cb)
                     .signal_semaphores(semaphore_to_signal.as_slice())
                     .wait_dst_stage_mask(&all_stages)
-                    .wait_semaphores(semaphores_to_wait);
+                    .wait_semaphores(semaphores_to_wait)
+                    .push_next(unsafe {
+                        (&mut timeline_info as *mut vk::TimelineSemaphoreSubmitInfo)
+                            .as_mut()
+                            .unwrap()
+                    });
+
                 submission_queue.push(submit_info);
             }
         }
 
-        // Signal at least one semaphore on the graphics queue for the swapchain
-        if end_rendering_info.submission_groups.is_empty() {
-            let submit_info = vk::SubmitInfo::default()
-                .signal_semaphores(all_semaphores_to_signal[0][0].as_slice());
-
-            graphics_queue_submit.push(submit_info);
-        }
-
+        let work_done = [current_frame.work_ended_semaphore];
+        graphics_queue_submit.push(vk::SubmitInfo::default().signal_semaphores(&work_done));
         {
             unsafe {
-                device.queue_submit(
-                    self.logical_device.transfer_queue.handle,
-                    &transfer_queue_submit,
-                    current_frame.transfer_work_ended_fence,
-                )?;
-
                 device.queue_submit(
                     self.logical_device.graphics_queue.handle,
                     &graphics_queue_submit,
                     current_frame.graphics_work_ended_fence,
                 )?;
-
+                device.queue_submit(
+                    self.logical_device.transfer_queue.handle,
+                    &transfer_queue_submit,
+                    current_frame.transfer_work_ended_fence,
+                )?;
                 device.queue_submit(
                     self.logical_device.compute_queue.handle,
                     &async_compute_queue_submit,
@@ -374,14 +384,6 @@ impl Hal for VulkanHal {
                 )?;
             }
         }
-
-        current_frame.work_ended_semaphores = all_semaphores_to_signal
-            .last()
-            .unwrap()
-            .iter()
-            .flatten()
-            .cloned()
-            .collect();
         Ok(())
     }
     unsafe fn end_rendering(&self) -> MgpuResult<()> {
@@ -633,7 +635,33 @@ impl Hal for VulkanHal {
         graphics_pipeline_description: &GraphicsPipelineDescription,
     ) -> MgpuResult<GraphicsPipeline> {
         // The actual creation of the pipeline is deferred until a render pass using the pipeline is executed
-        let owned_info = graphics_pipeline_description.to_vk_owned();
+        let mut descriptor_set_layouts: HashMap<usize, BindingSetLayout> = HashMap::default();
+        let mut find_descriptor_types = |layout: &ShaderModuleLayout| {
+            for set in &layout.binding_sets {
+                let entry = descriptor_set_layouts.entry(set.set).or_default();
+                for binding in &set.bindings {
+                    if entry.bindings.len() <= binding.binding {
+                        entry.bindings.resize(binding.binding + 1, binding.clone())
+                    }
+                    let ds_binding = &mut entry.bindings[binding.binding];
+                    ds_binding.shader_stage_flags |= binding.shader_stage_flags;
+                    #[cfg(debug_assertions)]
+                    validate_descriptor_set_binding(ds_binding, binding, set);
+                }
+            }
+        };
+        let vs_layout =
+            self.get_shader_module_layout(*graphics_pipeline_description.vertex_stage.shader)?;
+        find_descriptor_types(&vs_layout);
+
+        if let Some(fs) = graphics_pipeline_description.fragment_stage {
+            let fs_layout = self.get_shader_module_layout(*fs.shader)?;
+            find_descriptor_types(&fs_layout);
+        }
+
+        let bind_set_layouts = descriptor_set_layouts.into_values().collect::<Vec<_>>();
+
+        let owned_info = graphics_pipeline_description.to_vk_owned(bind_set_layouts);
         let handle = self.resolver.add(owned_info);
 
         Ok(GraphicsPipeline {
@@ -695,9 +723,10 @@ impl Hal for VulkanHal {
                 );
                 let indices = [current_index];
                 let swapchains = [swapchain.handle];
+                let wait_semaphores = [current_frame.work_ended_semaphore];
                 let present_info = vk::PresentInfoKHR::default()
                     .swapchains(&swapchains)
-                    .wait_semaphores(&current_frame.work_ended_semaphores)
+                    .wait_semaphores(&wait_semaphores)
                     .image_indices(&indices);
                 let swapchain_device = &swapchain.swapchain_device;
 
@@ -1103,6 +1132,43 @@ impl Hal for VulkanHal {
         }
         Ok(())
     }
+
+    fn get_graphics_pipeline_layout(
+        &self,
+        graphics_pipeline: GraphicsPipeline,
+    ) -> MgpuResult<GraphicsPipelineLayout> {
+        self.resolver
+            .resolve_clone(graphics_pipeline)
+            .ok_or(MgpuError::InvalidHandle)
+    }
+}
+
+fn validate_descriptor_set_binding(
+    ds_binding: &mut BindingSetElement,
+    binding: &BindingSetElement,
+    set: &BindingSetLayout,
+) {
+    check!(
+        ds_binding.name == binding.name,
+        &format!(
+            "For binding (set={}, binding={}) overlapping binding name: expected {}, got {}",
+            set.set, binding.binding, binding.name, ds_binding.name
+        )
+    );
+    check!(
+        ds_binding.array_length == binding.array_length,
+        &format!(
+            "For binding (set={}, binding={}) different array lenght: expected {}, got {}",
+            set.set, binding.binding, binding.array_length, ds_binding.array_length
+        )
+    );
+    check!(
+        ds_binding.ty == binding.ty,
+        &format!(
+            "For binding (set={}, binding={}) different binding type: expected {:?}, got {:?}",
+            set.set, binding.binding, binding.ty, ds_binding.ty
+        )
+    );
 }
 
 impl VulkanHal {
@@ -1114,7 +1180,7 @@ impl VulkanHal {
 
         let queue_families = Self::pick_queue_families(&instance, physical_device.handle)?;
         let logical_device =
-            Self::create_device(&instance, physical_device.handle, &queue_families)?;
+            Self::create_logical_device(&instance, physical_device.handle, &queue_families)?;
 
         let use_debug_features = configuration
             .features
@@ -1180,6 +1246,15 @@ impl VulkanHal {
         const LAYER_KHRONOS_VALIDATION: &CStr =
             unsafe { CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0") };
 
+        static KHRONOS_VALIDATION_IGNORE_FILTER: &CStr =
+            unsafe { CStr::from_bytes_with_nul_unchecked(b"message_id_filter\0") };
+        // Timeline semaphores can cause false positives with vkQueueSubmit: see
+        // https://github.com/KhronosGroup/Vulkan-ValidationLayers/issues/2441
+        // https://github.com/KhronosGroup/Vulkan-ValidationLayers/issues/4427
+        static KHRONOS_VALIDATION_IGNORE_VUIDS: &[&[u8]] = &[
+            b"UNASSIGNED-VkBufferMemoryBarrier-buffer-00004,UNASSIGNED-VkImageMemoryBarrier-image-00004\0",
+        ];
+
         let application_name = configuration.app_name.unwrap_or("mgpu application");
         let application_name =
             CString::new(application_name).expect("Failed to convert application name to CString");
@@ -1212,10 +1287,23 @@ impl VulkanHal {
             entry,
             &requested_instance_extensions,
         )?;
+
+        let mut message_id_filter = vk::LayerSettingEXT::default()
+            .layer_name(LAYER_KHRONOS_VALIDATION)
+            .setting_name(KHRONOS_VALIDATION_IGNORE_FILTER)
+            .ty(vk::LayerSettingTypeEXT::STRING);
+        message_id_filter.p_values = KHRONOS_VALIDATION_IGNORE_VUIDS.as_ptr().cast();
+        message_id_filter.value_count = 1;
+        let layer_settings = [message_id_filter];
+
+        let mut layer_settings_create_info =
+            vk::LayerSettingsCreateInfoEXT::default().settings(&layer_settings);
+
         let instance_info = vk::InstanceCreateInfo::default()
             .application_info(&application_info)
             .enabled_layer_names(&requested_layers)
-            .enabled_extension_names(&requested_instance_extensions);
+            .enabled_extension_names(&requested_instance_extensions)
+            .push_next(&mut layer_settings_create_info);
         let instance =
             unsafe { entry.create_instance(&instance_info, get_allocation_callbacks()) }?;
         Ok(instance)
@@ -1337,7 +1425,7 @@ impl VulkanHal {
         })
     }
 
-    fn create_device(
+    fn create_logical_device(
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
         queue_families: &VulkanQueueFamilies,
@@ -1381,14 +1469,18 @@ impl VulkanHal {
             &required_extensions,
         )?;
         let mut features_13 = vk::PhysicalDeviceVulkan13Features::default().synchronization2(true);
-        let mut physical_device_buffer_address =
-            vk::PhysicalDeviceBufferDeviceAddressFeatures::default().buffer_device_address(true);
+        let mut features_12 = vk::PhysicalDeviceVulkan12Features::default()
+            .timeline_semaphore(true)
+            .buffer_device_address(true);
+
+        let mut physical_device_features_2 = vk::PhysicalDeviceFeatures2::default()
+            .features(device_features)
+            .push_next(&mut features_13)
+            .push_next(&mut features_12);
         let device_create_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_create_infos)
-            .enabled_features(&device_features)
             .enabled_extension_names(&required_extensions)
-            .push_next(&mut features_13)
-            .push_next(&mut physical_device_buffer_address);
+            .push_next(&mut physical_device_features_2);
 
         let logical_device = unsafe {
             instance.create_device(
@@ -1597,6 +1689,12 @@ impl VulkanHal {
                     get_allocation_callbacks(),
                 )
             };
+            let make_semaphore = || unsafe {
+                device.create_semaphore(
+                    &vk::SemaphoreCreateInfo::default(),
+                    get_allocation_callbacks(),
+                )
+            };
             let make_command_pool = |qfi| {
                 let command_pool_create_info = vk::CommandPoolCreateInfo::default()
                     .flags(vk::CommandPoolCreateFlags::default())
@@ -1610,7 +1708,7 @@ impl VulkanHal {
                 graphics_work_ended_fence: make_fence()?,
                 compute_work_ended_fence: make_fence()?,
                 transfer_work_ended_fence: make_fence()?,
-                work_ended_semaphores: vec![],
+                work_ended_semaphore: make_semaphore()?,
                 graphics_command_pool: make_command_pool(
                     logical_device.graphics_queue.family_index,
                 )?,
@@ -1621,6 +1719,7 @@ impl VulkanHal {
                 command_buffers: Default::default(),
                 allocated_semaphores: vec![],
                 cached_semaphores: vec![],
+                atomic_semaphore_counter: AtomicU64::from(0),
             });
         }
         Ok(FramesInFlight {
@@ -1896,7 +1995,7 @@ impl VulkanHal {
 
     fn create_vulkan_graphics_pipeline(
         &self,
-        pipeline_info: &util::VulkanGraphicsPipelineDescription,
+        pipeline_info: &GraphicsPipelineLayout,
         command_buffer_state: &VulkanCommandBufferState,
     ) -> MgpuResult<vk::Pipeline> {
         let pipeline_layout = self.get_pipeline_layout(pipeline_info)?;
@@ -2062,7 +2161,7 @@ impl VulkanHal {
 
     fn get_pipeline_layout(
         &self,
-        pipeline_info: &util::VulkanGraphicsPipelineDescription,
+        pipeline_info: &GraphicsPipelineLayout,
     ) -> MgpuResult<vk::PipelineLayout> {
         let descriptor_layouts = self.get_descriptor_set_layouts(&pipeline_info)?;
 
@@ -2090,7 +2189,7 @@ impl VulkanHal {
 
     fn reflect_layout(
         &self,
-        shader_module_description: &&crate::ShaderModuleDescription<'_>,
+        shader_module_description: &crate::ShaderModuleDescription<'_>,
     ) -> MgpuResult<ShaderModuleLayout> {
         use spirv_reflect::*;
         let spirv_mgpu_err = |s: &str| MgpuError::Dynamic(format!("SpirV reflection error: {s}"));
@@ -2159,7 +2258,6 @@ impl VulkanHal {
                     .bindings
                     .into_iter()
                     .map(|element| {
-                        println!("element {element:#?}");
                         let image_format = match element.image.image_format {
                             types::ReflectImageFormat::Undefined => ImageFormat::Unknown,
                             types::ReflectImageFormat::RGBA8 => ImageFormat::Rgba8,
@@ -2184,13 +2282,9 @@ impl VulkanHal {
 
                         let kind = match element.descriptor_type {
                             types::ReflectDescriptorType::Undefined => unreachable!(),
-                            types::ReflectDescriptorType::Sampler => {
-                                BindingSetElementKind::Sampler {
-                                    access_mode: todo!("{element:?}"),
-                                }
-                            }
+                            types::ReflectDescriptorType::Sampler => BindingSetElementKind::Sampler,
                             types::ReflectDescriptorType::CombinedImageSampler => {
-                                BindingSetElementKind::SampledImage {
+                                BindingSetElementKind::CombinedImageSampler {
                                     format: image_format,
                                     dimension: dimension.unwrap(),
                                 }
@@ -2227,10 +2321,25 @@ impl VulkanHal {
                             types::ReflectDescriptorType::InputAttachment => todo!(),
                             types::ReflectDescriptorType::AccelerationStructureNV => todo!(),
                         };
+                        let reflect_shader_stage = module.get_shader_stage();
+                        let shader_stage_flags = if reflect_shader_stage
+                            .contains(ReflectShaderStageFlags::VERTEX)
+                        {
+                            ShaderStageFlags::VERTEX
+                        } else if reflect_shader_stage.contains(ReflectShaderStageFlags::FRAGMENT) {
+                            ShaderStageFlags::FRAGMENT
+                        } else {
+                            todo!(
+                                "Add support for shader stage flags {:?}",
+                                reflect_shader_stage
+                            )
+                        };
                         BindingSetElement {
                             name: element.name,
                             binding: element.binding as _,
+                            array_length: element.array.dims.get(0).copied().unwrap_or(1) as usize,
                             ty: kind,
+                            shader_stage_flags,
                         }
                     })
                     .collect();
@@ -2250,80 +2359,32 @@ impl VulkanHal {
 
     fn get_descriptor_set_layouts(
         &self,
-        pipeline_info: &&util::VulkanGraphicsPipelineDescription,
+        pipeline_info: &GraphicsPipelineLayout,
     ) -> MgpuResult<Vec<vk::DescriptorSetLayout>> {
-        #[derive(Default, Hash, Clone, Copy)]
-        struct DescriptorBindingType {
-            ty: vk::DescriptorType,
-            count: u32,
-            shader_stage_flags: vk::ShaderStageFlags,
-        }
-        #[derive(Default, Hash)]
-        struct DescriptorTypes {
-            bindings: Vec<DescriptorBindingType>,
-        }
-        let mut descriptor_set_layouts: HashMap<usize, DescriptorTypes> = HashMap::default();
-        let mut count_descriptor_types =
-            |layout: &ShaderModuleLayout, flags: vk::ShaderStageFlags| {
-                for set in &layout.binding_sets {
-                    let entry = descriptor_set_layouts.entry(set.set).or_default();
-                    for binding in &set.bindings {
-                        if entry.bindings.len() < binding.binding {
-                            entry
-                                .bindings
-                                .resize(binding.binding + 1, Default::default())
-                        }
-                        let ds_binding = &mut entry.bindings[binding.binding];
-                        ds_binding.shader_stage_flags |= flags;
-                        ds_binding.count = 1;
-                        let ty = match binding.ty {
-                            BindingSetElementKind::Buffer { ty, .. } => match ty {
-                                crate::BufferType::Uniform => vk::DescriptorType::UNIFORM_BUFFER,
-                                crate::BufferType::Storage => vk::DescriptorType::STORAGE_BUFFER,
-                            },
-                            BindingSetElementKind::Sampler { .. } => vk::DescriptorType::SAMPLER,
-                            BindingSetElementKind::SampledImage { .. } => {
-                                vk::DescriptorType::SAMPLED_IMAGE
-                            }
-                            BindingSetElementKind::StorageImage { .. } => {
-                                vk::DescriptorType::STORAGE_IMAGE
-                            }
-                        };
-                        ds_binding.ty = ty;
-                    }
-                }
-            };
-        let vs_layout = self.get_shader_module_layout(pipeline_info.vertex_stage.shader)?;
-        count_descriptor_types(&vs_layout, vk::ShaderStageFlags::VERTEX);
-
-        if let Some(fs) = &pipeline_info.fragment_stage {
-            let fs_layout = self.get_shader_module_layout(fs.shader)?;
-            count_descriptor_types(&fs_layout, vk::ShaderStageFlags::FRAGMENT);
-        }
-
         let mut cached_layouts = self
             .descriptor_set_layouts
             .write()
             .expect("Failed to lock ds layouts");
         let mut layouts = vec![];
         layouts.resize(
-            descriptor_set_layouts.len(),
+            pipeline_info.binding_sets.len(),
             vk::DescriptorSetLayout::default(),
         );
-        for (idx, types) in descriptor_set_layouts {
-            let hash = hash_type(&types);
+        for (idx, set) in pipeline_info.binding_sets.iter().enumerate() {
+            let hash = hash_type(set);
 
             if let Some(layout) = cached_layouts.get(&hash) {
                 layouts[idx] = *layout;
             } else {
-                let binding_types = types
+                let binding_types = set
                     .bindings
                     .iter()
                     .map(|ty| {
                         vk::DescriptorSetLayoutBinding::default()
-                            .descriptor_count(ty.count)
-                            .descriptor_type(ty.ty)
-                            .stage_flags(ty.shader_stage_flags)
+                            .binding(ty.binding as _)
+                            .descriptor_count(ty.array_length as _)
+                            .descriptor_type(ty.ty.to_vk())
+                            .stage_flags(ty.shader_stage_flags.to_vk())
                     })
                     .collect::<Vec<_>>();
 
@@ -2425,9 +2486,11 @@ impl FrameInFlight {
         if let Some(sem) = self.cached_semaphores.pop() {
             Ok(sem)
         } else {
+            let mut timeline_semaphore_info =
+                vk::SemaphoreTypeCreateInfo::default().semaphore_type(vk::SemaphoreType::TIMELINE);
             let semaphore = unsafe {
                 device.create_semaphore(
-                    &vk::SemaphoreCreateInfo::default(),
+                    &vk::SemaphoreCreateInfo::default().push_next(&mut timeline_semaphore_info),
                     get_allocation_callbacks(),
                 )?
             };

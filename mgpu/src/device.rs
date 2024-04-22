@@ -98,7 +98,7 @@ impl Device {
         let mut submission_groups = Vec::<SubmissionGroup>::default();
 
         for step in &compiled.sequence {
-            if let Step::PassGroup(passes) = step {
+            if let Step::ExecutePasses(passes) = step {
                 if !passes.graphics_nodes.is_empty() {
                     let command_recorder = unsafe {
                         self.hal
@@ -131,7 +131,7 @@ impl Device {
         let mut current_submission_group = SubmissionGroup::default();
         for step in &compiled.sequence {
             match step {
-                Step::PassGroup(passes) => {
+                Step::ExecutePasses(passes) => {
                     if !passes.graphics_nodes.is_empty() {
                         let command_recorder = graphics_command_recorders[current_graphics];
                         current_submission_group
@@ -239,7 +239,7 @@ impl Device {
                         current_transfer += 1;
                     }
                 }
-                Step::Barrier { transfers } => {
+                Step::OwnershipTransfer { transfers } => {
                     let submission_group = std::mem::take(&mut current_submission_group);
                     submission_groups.push(submission_group);
 
@@ -503,7 +503,8 @@ impl Device {
         let texel_byte_size = image.format.byte_size();
         let total_bytes = total_texels as usize * texel_byte_size;
 
-        check!(params.data.len() >= total_bytes, &format!("Attempted to execute a write operation without enough source data, expected at least {total_bytes} bytes, got {}", params.data.len()));
+        check!(params.data.len() >= total_bytes, 
+            &format!("Attempted to execute a write operation without enough source data, expected at least {total_bytes} bytes, got {}", params.data.len()));
     }
 
     fn validate_buffer_write_params(&self, buffer: Buffer, params: &BufferWriteParams) {
@@ -523,7 +524,7 @@ impl Device {
             buffer.memory_domain == MemoryDomain::HostVisible ||
             buffer.usage_flags.contains(BufferUsageFlags::TRANSFER_DST),
             "If a buffer write operation is initiated, the buffer must either be host visible, or it must have the TRANSFER_DST flag"
-        )
+        );
     }
 
     fn validate_shader_module_description(
@@ -539,8 +540,21 @@ impl Device {
         &self,
         graphics_pipeline_description: &GraphicsPipelineDescription,
     ) -> MgpuResult<()> {
-        for binding in graphics_pipeline_description.binding_sets {
-            todo!()
+        // Validate vertex inputs
+        let vertex_shader_layout =
+            self.get_shader_module_layout(*graphics_pipeline_description.vertex_stage.shader)?;
+        for input in &vertex_shader_layout.inputs {
+            let pipeline_input = graphics_pipeline_description
+                .vertex_stage
+                .vertex_inputs
+                .get(input.location);
+            check!(pipeline_input.is_some(),
+                &format!("Vertex shader expects input '{}' at location {} with format {:?}, but the pipeline description does not provide it",
+                input.name, input.location, input.format));
+            let pipeline_input = pipeline_input.unwrap();
+            check!(pipeline_input.format == input.format,
+                &format!("The format of vertex attribute '{}' differs from the one in the pipeline description! Expected {:?}, got {:?}", input.name, input.format, pipeline_input.format)
+            )
         }
 
         Ok(())

@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use crate::{
     hal::QueueType, rdg::Node, util::check, AttachmentStoreOp, BindingSet, Buffer,
-    DepthStencilTarget, Device, Extents2D, GraphicsPipeline, MgpuResult, Rect2D,
+    BufferUsageFlags, DepthStencilTarget, Device, Extents2D, GraphicsPipeline, MgpuResult, Rect2D,
     RenderPassDescription, RenderTarget,
 };
 
@@ -121,7 +121,7 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
                 || render_pass_description.depth_stencil_attachment.is_some(),
             "Neither a render target and a depth stencil target is attached to the render pass!"
         );
-        let framebuffer_size = if let Some(rt) = render_pass_description.render_targets.get(0) {
+        let framebuffer_size = if let Some(rt) = render_pass_description.render_targets.first() {
             rt.view.owner.extents
         } else {
             let rt = render_pass_description.depth_stencil_attachment.unwrap();
@@ -218,7 +218,7 @@ impl CommandRecorder<Graphics> {
             ),
             commands: vec![],
         };
-        let framebuffer_size = if let Some(rt) = render_pass_description.render_targets.get(0) {
+        let framebuffer_size = if let Some(rt) = render_pass_description.render_targets.first() {
             rt.view.owner.extents
         } else {
             render_pass_description
@@ -270,7 +270,7 @@ impl<'c> RenderPass<'c> {
         first_instance: usize,
     ) -> MgpuResult<()> {
         #[cfg(debug_assertions)]
-        self.validate_state();
+        self.validate_state()?;
 
         let step = self.info.steps.last_mut().unwrap();
         step.commands.push(DrawCommand {
@@ -288,11 +288,45 @@ impl<'c> RenderPass<'c> {
         Ok(())
     }
 
-    fn validate_state(&self) {
+    fn validate_state(&self) -> MgpuResult<()> {
         check!(
             self.pipeline.is_some(),
             "Issued a draw call without a pipeline set"
         );
+        let pipeline = self.pipeline.unwrap();
+        let pipeline_layout = self
+            .command_recorder
+            .device
+            .hal
+            .get_graphics_pipeline_layout(pipeline)?;
+
+        for input in &pipeline_layout.vertex_stage.vertex_inputs {
+            let vertex_buffer = self.vertex_buffers.get(input.location);
+            check!(
+                vertex_buffer.is_some(),
+                &format!(
+                    "Pipeline '{}' expects a vertex buffer at location {}, but none was bound",
+                    pipeline_layout.label.as_deref().unwrap_or("Unknown"),
+                    input.location
+                )
+            );
+            let vertex_buffer = vertex_buffer.unwrap();
+            check!(vertex_buffer.usage_flags.contains(BufferUsageFlags::VERTEX_BUFFER),
+            &format!("Bound a vertex buffer at location {} that doesn't have the VERTEX_BUFFER usage flag", input.location));
+        }
+
+        for set in &pipeline_layout.binding_sets {
+            let bound_set = self.command_recorder.binding_sets.get(set.set);
+            check!(
+                bound_set.is_some(),
+                &format!(
+                    "Pipeline '{}' expects a binding set at location {}, but none was bound",
+                    pipeline_layout.label.as_deref().unwrap_or("Unknown"),
+                    set.set
+                )
+            );
+        }
+        Ok(())
     }
 }
 

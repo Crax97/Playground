@@ -1,7 +1,10 @@
 use crate::{
-    AccessMode, BindingSet, Buffer, BufferDescription, BufferWriteParams, DeviceConfiguration,
-    DeviceInfo, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageView,
-    MgpuResult, RenderPassInfo, ShaderModule, ShaderModuleDescription, ShaderModuleLayout,
+    AccessMode, BindingSet, BindingSetElementKind, BindingSetLayout, Buffer, BufferDescription,
+    BufferWriteParams, CullMode, DepthStencilState, DepthStencilTargetInfo, DeviceConfiguration,
+    DeviceInfo, FrontFace, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription,
+    ImageView, MgpuResult, MultisampleState, PolygonMode, PrimitiveTopology, RenderPassInfo,
+    RenderTargetInfo, ShaderAttribute, ShaderModule, ShaderModuleDescription, ShaderModuleLayout,
+    ShaderStageFlags, VertexInputDescription,
 };
 use std::sync::Arc;
 
@@ -10,6 +13,36 @@ use crate::swapchain::*;
 
 #[cfg(feature = "vulkan")]
 pub(crate) mod vulkan;
+
+#[derive(Clone, Hash)]
+pub struct OwnedVertexStageInfo {
+    pub shader: ShaderModule,
+    pub entry_point: String,
+    pub vertex_inputs: Vec<VertexInputDescription>,
+}
+
+#[derive(Clone, Hash)]
+pub struct OwnedFragmentStageInfo {
+    pub shader: ShaderModule,
+    pub entry_point: String,
+    pub render_targets: Vec<RenderTargetInfo>,
+    pub depth_stencil_target: Option<DepthStencilTargetInfo>,
+}
+
+#[derive(Clone, Hash)]
+pub struct GraphicsPipelineLayout {
+    pub label: Option<String>,
+    pub binding_sets: Vec<BindingSetLayout>,
+    pub vertex_stage: OwnedVertexStageInfo,
+    pub fragment_stage: Option<OwnedFragmentStageInfo>,
+    pub primitive_restart_enabled: bool,
+    pub primitive_topology: PrimitiveTopology,
+    pub polygon_mode: PolygonMode,
+    pub cull_mode: CullMode,
+    pub front_face: FrontFace,
+    pub multisample_state: Option<MultisampleState>,
+    pub depth_stencil_state: DepthStencilState,
+}
 
 #[derive(Clone, Copy)]
 pub struct CommandRecorderAllocator {
@@ -196,7 +229,10 @@ pub(crate) trait Hal: Send + Sync {
         &self,
         graphics_pipeline_description: &GraphicsPipelineDescription,
     ) -> MgpuResult<GraphicsPipeline>;
-
+    fn get_graphics_pipeline_layout(
+        &self,
+        graphics_pipeline: GraphicsPipeline,
+    ) -> MgpuResult<GraphicsPipelineLayout>;
     fn destroy_graphics_pipeline(&self, graphics_pipeline: GraphicsPipeline) -> MgpuResult<()>;
 
     fn create_shader_module(

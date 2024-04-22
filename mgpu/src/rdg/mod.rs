@@ -59,8 +59,8 @@ pub struct PassGroup {
 
 #[derive(Debug)]
 pub enum Step {
-    Barrier { transfers: Vec<OwnershipTransfer> },
-    PassGroup(PassGroup),
+    OwnershipTransfer { transfers: Vec<OwnershipTransfer> },
+    ExecutePasses(PassGroup),
 }
 
 #[derive(Default, Debug)]
@@ -266,8 +266,8 @@ impl Rdg {
             }
 
             if !barrier_info.is_empty() {
-                steps.push(Step::PassGroup(std::mem::take(&mut current_group)));
-                steps.push(Step::Barrier {
+                steps.push(Step::ExecutePasses(std::mem::take(&mut current_group)));
+                steps.push(Step::OwnershipTransfer {
                     transfers: std::mem::take(&mut barrier_info),
                 });
             }
@@ -284,7 +284,7 @@ impl Rdg {
             || !current_group.graphics_nodes.is_empty()
             || !current_group.transfer_nodes.is_empty()
         {
-            steps.push(Step::PassGroup(std::mem::take(&mut current_group)));
+            steps.push(Step::ExecutePasses(std::mem::take(&mut current_group)));
         }
 
         Ok(RdgCompiledGraph {
@@ -513,8 +513,8 @@ mod tests {
         assert_eq!(compiled.sequence.len(), 0);
         let step_0 = &compiled.sequence[0];
         match step_0 {
-            crate::rdg::Step::Barrier { .. } => panic!("Barrier with only a present"),
-            crate::rdg::Step::PassGroup(..) => {
+            crate::rdg::Step::OwnershipTransfer { .. } => panic!("Barrier with only a present"),
+            crate::rdg::Step::ExecutePasses(..) => {
                 panic!("PassGroup with only a present!")
             }
         }
