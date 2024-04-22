@@ -1,10 +1,9 @@
 use crate::{
-    AccessMode, BindingSet, BindingSetElementKind, BindingSetLayout, Buffer, BufferDescription,
-    BufferWriteParams, CullMode, DepthStencilState, DepthStencilTargetInfo, DeviceConfiguration,
-    DeviceInfo, FrontFace, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription,
-    ImageView, MgpuResult, MultisampleState, PolygonMode, PrimitiveTopology, RenderPassInfo,
-    RenderTargetInfo, ShaderAttribute, ShaderModule, ShaderModuleDescription, ShaderModuleLayout,
-    ShaderStageFlags, VertexInputDescription,
+    BindingSet, BindingSetLayout, Buffer, BufferDescription, BufferWriteParams, CullMode,
+    DepthStencilState, DepthStencilTargetInfo, DeviceConfiguration, DeviceInfo, FrontFace,
+    GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageView, MgpuResult,
+    MultisampleState, PolygonMode, PrimitiveTopology, RenderPassInfo, RenderTargetInfo,
+    ShaderModule, ShaderModuleDescription, ShaderModuleLayout, VertexInputDescription,
 };
 use std::sync::Arc;
 

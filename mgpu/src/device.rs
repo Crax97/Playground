@@ -1,24 +1,20 @@
 use crate::hal::{
-    Hal, QueueType, Resource, ResourceInfo, SubmissionGroup, SubmitInfo, SynchronizationInfo,
+    Hal, QueueType, ResourceInfo, SubmissionGroup, SubmitInfo, SynchronizationInfo,
 };
 use crate::rdg::{Node, Rdg, Step};
 use crate::staging_buffer_allocator::StagingBufferAllocator;
 use crate::util::check;
 use crate::DrawType::Draw;
 use crate::{
-    hal, Buffer, BufferDescription, BufferWriteParams, CommandRecorder, CommandRecorderType,
-    DrawCommand, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription,
-    ImageDimension, ImageViewDescription, MemoryDomain, MgpuResult, ShaderModule,
-    ShaderModuleDescription, ShaderModuleLayout,
+    hal, Buffer, BufferDescription, BufferWriteParams, CommandRecorder, CommandRecorderType, DrawCommand, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageDimension, ImageView, ImageViewDescription, MemoryDomain, MgpuResult, ShaderModule, ShaderModuleDescription, ShaderModuleLayout
 };
 use crate::{BufferUsageFlags, ImageWriteParams};
-use ash::vk::{self, ImageView};
 use bitflags::bitflags;
 use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::ops::DerefMut;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 #[cfg(feature = "swapchain")]
 use crate::swapchain::*;
@@ -59,7 +55,7 @@ pub struct Device {
     pub(crate) hal: Arc<dyn Hal>,
     pub(crate) device_info: DeviceInfo,
 
-    pub(crate) rdg: Arc<RwLock<Rdg>>,
+    pub(crate) rdg: Arc<Mutex<Rdg>>,
     pub(crate) staging_buffer_allocator: Arc<Mutex<StagingBufferAllocator>>,
 
     #[cfg(feature = "swapchain")]
@@ -161,6 +157,7 @@ impl Device {
                                                     command_recorder,
                                                     vertex_buffers,
                                                 )?;
+
                                                 self.hal.set_binding_sets(
                                                     command_recorder,
                                                     binding_sets,
@@ -401,7 +398,7 @@ impl Device {
         self.hal.create_image(image_description)
     }
 
-    pub fn write_image(&self, image: Image, params: &ImageWriteParams) -> MgpuResult<()> {
+    pub fn write_image_data(&self, image: Image, params: &ImageWriteParams) -> MgpuResult<()> {
         #[cfg(debug_assertions)]
         self.validate_image_write_params(image, params);
 
@@ -467,12 +464,8 @@ impl Device {
         }
     }
 
-    pub(crate) fn write_rdg(&self) -> RwLockWriteGuard<'_, Rdg> {
-        self.rdg.write().expect("Failed to lock rdg")
-    }
-
-    pub(crate) fn read_rdg(&self) -> RwLockReadGuard<'_, Rdg> {
-        self.rdg.read().expect("Failed to lock rdg")
+    pub(crate) fn write_rdg(&self) -> MutexGuard<'_, Rdg> {
+        self.rdg.lock().expect("Failed to lock rdg")
     }
 
     fn validate_image_description(image_description: &ImageDescription) {

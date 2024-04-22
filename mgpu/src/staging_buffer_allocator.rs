@@ -1,4 +1,4 @@
-use crate::{Buffer, BufferUsageFlags, BufferWriteParams, Device, MemoryDomain, MgpuResult};
+use crate::{Buffer, BufferUsageFlags, Device, MemoryDomain, MgpuResult};
 
 #[derive(Default)]
 pub(crate) struct StagingBufferAllocator {
@@ -10,14 +10,10 @@ pub(crate) struct StagingBufferAllocator {
 pub(crate) struct StagingBufferAllocation {
     pub buffer: Buffer,
     pub offset: usize,
-    pub size: usize,
 }
 
 impl StagingBufferAllocator {
     const MB_128: usize = 1024 * 1024 * 128;
-    pub(crate) fn new() -> MgpuResult<Self> {
-        Ok(Self::default())
-    }
 
     // Returns a suitable, host-visible, buffer big enough to write 'size' bytes to it
     pub(crate) fn get_staging_buffer(
@@ -31,7 +27,6 @@ impl StagingBufferAllocator {
                 let allocation = StagingBufferAllocation {
                     buffer,
                     offset: self.current_offset,
-                    size,
                 };
                 self.current_offset += size;
                 return Ok(allocation);
@@ -50,11 +45,7 @@ impl StagingBufferAllocator {
             self.staging_buffers[self.current_buffer_idx]
         };
 
-        Ok(StagingBufferAllocation {
-            buffer,
-            offset: 0,
-            size,
-        })
+        Ok(StagingBufferAllocation { buffer, offset: 0 })
     }
 
     fn allocate_staging_buffer(device: &Device) -> MgpuResult<Buffer> {

@@ -94,7 +94,7 @@ impl Rdg {
         Self::add_on_queue(QueueType::AsyncTransfer, &mut self.nodes, node);
     }
 
-    pub fn inform_present(&mut self, swapchain_image: SwapchainImage, swapchain_id: u64) {
+    pub fn inform_present(&mut self, swapchain_image: SwapchainImage, _swapchain_id: u64) {
         for node_info in self.nodes.iter_mut().rev() {
             let mut stop = false;
             match &mut node_info.ty {
@@ -107,13 +107,7 @@ impl Rdg {
                         }
                     });
                 }),
-                Node::CopyBufferToBuffer {
-                    source,
-                    dest,
-                    source_offset,
-                    dest_offset,
-                    size,
-                } => {}
+                Node::CopyBufferToBuffer { .. } => {}
             }
             if stop {
                 return;
@@ -123,10 +117,6 @@ impl Rdg {
 
     pub fn take(&mut self) -> Self {
         std::mem::take(self)
-    }
-
-    pub fn clear(&mut self) {
-        *self = Default::default()
     }
 
     fn add_on_queue(queue: QueueType, nodes: &mut Vec<RdgNode>, pass: Node) {

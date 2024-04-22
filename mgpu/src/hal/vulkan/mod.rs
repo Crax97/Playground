@@ -28,7 +28,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::{self, c_char, CStr, CString};
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
 
 use self::swapchain::{SwapchainError, VulkanSwapchain};
@@ -279,7 +279,7 @@ impl Hal for VulkanHal {
         })
     }
 
-    unsafe fn submit(&self, mut end_rendering_info: SubmitInfo) -> MgpuResult<()> {
+    unsafe fn submit(&self, end_rendering_info: SubmitInfo) -> MgpuResult<()> {
         let mut current_frame = self.frames_in_flight.lock().unwrap();
         let current_frame = current_frame.current_mut();
 
@@ -593,7 +593,7 @@ impl Hal for VulkanHal {
         &self,
         shader_module_description: &crate::ShaderModuleDescription,
     ) -> MgpuResult<ShaderModule> {
-        let layout = self.reflect_layout(&shader_module_description)?;
+        let layout = self.reflect_layout(shader_module_description)?;
         let shader_module_create_info = vk::ShaderModuleCreateInfo::default()
             .flags(vk::ShaderModuleCreateFlags::default())
             .code(shader_module_description.source);
@@ -1172,7 +1172,7 @@ fn validate_descriptor_set_binding(
 }
 
 impl VulkanHal {
-    const VULKAN_API_VERSION: u32 = vk::make_api_version(0, 1, 3, 0);
+    const VULKAN_API_VERSION: u32 = vk::make_api_version(0, 1, 3, 280);
     pub(crate) fn create(configuration: &DeviceConfiguration) -> MgpuResult<Arc<dyn Hal>> {
         let entry = unsafe { Entry::load()? };
         let instance = Self::create_instance(&entry, configuration)?;
@@ -1274,6 +1274,7 @@ impl VulkanHal {
         {
             requested_layers.push(LAYER_KHRONOS_VALIDATION.as_ptr());
             requested_instance_extensions.push(ash::ext::debug_utils::NAME.as_ptr());
+            requested_instance_extensions.push(ash::ext::layer_settings::NAME.as_ptr());
         }
 
         if cfg!(feature = "swapchain") {
@@ -1574,7 +1575,7 @@ impl VulkanHal {
     }
 
     fn get_physical_device_features(
-        supported_device_features: vk::PhysicalDeviceFeatures,
+        _supported_device_features: vk::PhysicalDeviceFeatures,
     ) -> VulkanHalResult<vk::PhysicalDeviceFeatures> {
         let physical_device_features = vk::PhysicalDeviceFeatures::default();
         Ok(physical_device_features)
@@ -1939,7 +1940,7 @@ impl VulkanHal {
         let subpass_dependencies = subpasses
             .iter()
             .enumerate()
-            .map(|(d_idx, sd)| {
+            .map(|(d_idx, _)| {
                 let src_subpass = if d_idx == 0 {
                     vk::SUBPASS_EXTERNAL
                 } else {
@@ -2275,9 +2276,11 @@ impl VulkanHal {
                             types::ReflectResourceType::Undefined => unreachable!(),
                             types::ReflectResourceType::Sampler => AccessMode::Read,
                             types::ReflectResourceType::CombinedImageSampler => AccessMode::Read,
-                            types::ReflectResourceType::ConstantBufferView => todo!(),
+                            types::ReflectResourceType::ConstantBufferView => AccessMode::Read,
                             types::ReflectResourceType::ShaderResourceView => AccessMode::Read,
-                            types::ReflectResourceType::UnorderedAccessView => todo!(),
+                            types::ReflectResourceType::UnorderedAccessView => {
+                                AccessMode::ReadWrite
+                            }
                         };
 
                         let kind = match element.descriptor_type {
@@ -2298,7 +2301,7 @@ impl VulkanHal {
                             types::ReflectDescriptorType::StorageImage => {
                                 BindingSetElementKind::StorageImage {
                                     format: image_format,
-                                    access_mode: todo!("{element:?}"),
+                                    access_mode,
                                     dimension: dimension.unwrap(),
                                 }
                             }
@@ -2313,7 +2316,7 @@ impl VulkanHal {
                             types::ReflectDescriptorType::StorageBuffer => {
                                 BindingSetElementKind::Buffer {
                                     ty: crate::BufferType::Storage,
-                                    access_mode: todo!("{element:?}"),
+                                    access_mode,
                                 }
                             }
                             types::ReflectDescriptorType::UniformBufferDynamic => todo!(),
@@ -2337,7 +2340,7 @@ impl VulkanHal {
                         BindingSetElement {
                             name: element.name,
                             binding: element.binding as _,
-                            array_length: element.array.dims.get(0).copied().unwrap_or(1) as usize,
+                            array_length: element.array.dims.first().copied().unwrap_or(1) as usize,
                             ty: kind,
                             shader_stage_flags,
                         }

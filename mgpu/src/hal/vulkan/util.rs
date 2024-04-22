@@ -5,12 +5,10 @@ use crate::{
     hal::{GraphicsPipelineLayout, OwnedFragmentStageInfo, OwnedVertexStageInfo},
     util::{define_resource_resolver, Handle},
     BindingSetElementKind, BindingSetLayout, BlendFactor, BlendOp, Buffer, BufferUsageFlags,
-    ColorWriteMask, CompareOp, CullMode, DepthStencilState, DepthStencilTargetInfo, Extents2D,
-    Extents3D, FrontFace, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDimension,
-    ImageFormat, ImageUsageFlags, ImageView, MultisampleState, Offset2D, PolygonMode, PresentMode,
-    PrimitiveTopology, Rect2D, RenderTargetInfo, SampleCount, ShaderModule, ShaderModuleLayout,
-    ShaderStageFlags, Swapchain, VertexAttributeFormat, VertexInputDescription,
-    VertexInputFrequency,
+    ColorWriteMask, CompareOp, CullMode, Extents2D, Extents3D, FrontFace, GraphicsPipeline,
+    GraphicsPipelineDescription, Image, ImageDimension, ImageFormat, ImageUsageFlags, ImageView,
+    Offset2D, PolygonMode, PresentMode, PrimitiveTopology, Rect2D, SampleCount, ShaderModule,
+    ShaderModuleLayout, ShaderStageFlags, Swapchain, VertexAttributeFormat, VertexInputFrequency,
 };
 
 #[cfg(feature = "swapchain")]
@@ -568,10 +566,7 @@ pub(super) struct SpirvShaderModule {
 }
 
 impl<'a> GraphicsPipelineDescription<'a> {
-    pub(super) fn to_vk_owned(
-        &self,
-        binding_sets: Vec<BindingSetLayout>,
-    ) -> GraphicsPipelineLayout {
+    pub(super) fn to_vk_owned(self, binding_sets: Vec<BindingSetLayout>) -> GraphicsPipelineLayout {
         GraphicsPipelineLayout {
             label: self.label.map(ToOwned::to_owned),
             binding_sets,
@@ -599,7 +594,7 @@ impl<'a> GraphicsPipelineDescription<'a> {
 
 define_resource_resolver!(
     VulkanHal,
-    (VulkanImageView, |hal, view| unsafe {
+    (VulkanImageView, |hal, view| {
         if view.external {
             return Ok(());
         }
@@ -625,7 +620,7 @@ define_resource_resolver!(
         }
         hal.logical_device.handle.destroy_image(image.handle, get_allocation_callbacks()); Ok(()) } ) => images,
     (VulkanSwapchain, |_, _| Ok(())) => swapchains,
-    (VulkanBuffer, |hal, buffer| unsafe {
+    (VulkanBuffer, |hal, buffer| {
 
         let mut allocator = hal
             .memory_allocator

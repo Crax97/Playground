@@ -189,7 +189,7 @@ impl<S, T> ResourceArena<S, T> {
         }
     }
 
-    pub(crate) fn add(&mut self, resource: T) -> Handle<T> {
+    pub fn add(&mut self, resource: T) -> Handle<T> {
         let handle = if let Some(handle) = self.reclaimed_handles.pop() {
             let index = handle.index();
             let entry = &mut self.resources[index as usize];
@@ -208,7 +208,7 @@ impl<S, T> ResourceArena<S, T> {
         handle
     }
 
-    pub(crate) fn update(&mut self, s: &S) -> MgpuResult<()> {
+    pub fn update(&mut self, s: &S) -> MgpuResult<()> {
         let mut i = 0;
         while i < self.destruction_queue.len() {
             self.destruction_queue[i].lifetime -= 1;
@@ -223,7 +223,7 @@ impl<S, T> ResourceArena<S, T> {
         Ok(())
     }
 
-    pub(crate) fn resolve(&self, handle: impl Into<Handle<T>>) -> Option<&T> {
+    pub fn resolve(&self, handle: impl Into<Handle<T>>) -> Option<&T> {
         let (index, generation) = handle.into().to_index_generation();
 
         if let Some(entry) = self.resources.get(index as usize) {
@@ -238,7 +238,7 @@ impl<S, T> ResourceArena<S, T> {
         None
     }
 
-    pub(crate) fn resolve_mut(&mut self, handle: impl Into<Handle<T>>) -> Option<&mut T> {
+    pub fn resolve_mut(&mut self, handle: impl Into<Handle<T>>) -> Option<&mut T> {
         let (index, generation) = handle.into().to_index_generation();
 
         if let Some(entry) = self.resources.get_mut(index as usize) {
@@ -253,7 +253,7 @@ impl<S, T> ResourceArena<S, T> {
         None
     }
 
-    pub(crate) fn remove(&mut self, handle: impl Into<Handle<T>>) -> MgpuResult<()> {
+    pub fn remove(&mut self, handle: impl Into<Handle<T>>) -> MgpuResult<()> {
         let handle = handle.into();
         let (index, generation) = handle.to_index_generation();
         if let Some(entry) = self.resources.get_mut(index as usize) {
@@ -276,7 +276,7 @@ impl<S, T> ResourceArena<S, T> {
         Err(crate::MgpuError::InvalidHandle)
     }
 
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         // We can't just clear everythin, otherwise in certain cases old handles would still be valid
         // Instead, we just increase the generation of everything
         self.reclaimed_handles.clear();
@@ -289,19 +289,19 @@ impl<S, T> ResourceArena<S, T> {
         self.len = 0;
     }
 
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.len
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.resources.iter().filter_map(|r| r.payload.as_ref())
     }
 
-    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
         self.resources.iter_mut().filter_map(|r| r.payload.as_mut())
     }
 }
@@ -363,13 +363,6 @@ impl<S, T> IntoIterator for ResourceArena<S, T> {
 }
 
 impl<T> Handle<T> {
-    pub(crate) fn new() -> Self {
-        Self {
-            _ph: PhantomData,
-            id: 0,
-        }
-    }
-
     pub(crate) unsafe fn from_u64(id: u64) -> Self {
         Self {
             _ph: PhantomData,
@@ -422,11 +415,13 @@ macro_rules! check {
 
 #[cfg(not(debug_assertions))]
 macro_rules! check {
-    ($cond:expr, $msg:expr) => {};
+    ($cond:expr, $msg:expr) => {
+        ();
+    };
 }
 pub(crate) use check;
 
-use crate::{hal::Hal, MgpuResult};
+use crate::MgpuResult;
 
 impl<T> std::fmt::Debug for Handle<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -5,7 +5,7 @@ mod rdg;
 mod swapchain;
 
 #[macro_use]
-pub(crate) mod util;
+pub mod util;
 pub(crate) mod staging_buffer_allocator;
 
 use std::num::NonZeroU32;
