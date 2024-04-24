@@ -2,8 +2,8 @@ use std::marker::PhantomData;
 
 use crate::{
     hal::QueueType, rdg::Node, util::check, AttachmentStoreOp, BindingSet, Buffer,
-    BufferUsageFlags, DepthStencilTarget, Device, Extents2D, GraphicsPipeline, MgpuResult, Rect2D,
-    RenderPassDescription, RenderTarget,
+    BufferUsageFlags, DepthStencilTarget, Device, Extents2D, GraphicsPipeline, ImageUsageFlags,
+    MgpuResult, Rect2D, RenderPassDescription, RenderTarget,
 };
 
 pub struct CommandRecorder<T: CommandRecorderType> {
@@ -44,6 +44,14 @@ pub(crate) enum DrawType {
         vertices: usize,
         instances: usize,
         first_vertex: usize,
+        first_instance: usize,
+    },
+
+    DrawIndexed {
+        indices: usize,
+        instances: usize,
+        first_index: usize,
+        vertex_offset: i32,
         first_instance: usize,
     },
 }
@@ -140,6 +148,13 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
                     rt.view.owner.extents
                 );
             check!(
+                rt.view
+                    .owner
+                    .usage_flags
+                    .contains(ImageUsageFlags::COLOR_ATTACHMENT),
+                "Attachment does not contain COLOR_ATTACHMENT flag"
+            );
+            check!(
                 rt.view.owner.extents.width == framebuffer_size.width
                     && rt.view.owner.extents.height == framebuffer_size.height,
                 &error_message
@@ -159,6 +174,13 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
                     rt.view.owner.extents
                 );
             check!(
+                rt.view
+                    .owner
+                    .usage_flags
+                    .contains(ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT),
+                "Depth Attachment does not contain DEPTH_STENCIL_ATTACHMENT flag"
+            );
+            check!(
                 rt.view.owner.extents.width == framebuffer_size.width
                     && rt.view.owner.extents.height == framebuffer_size.height,
                 &error_message
@@ -177,6 +199,10 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
                 render_pass_description.render_area, framebuffer_size
             )
         );
+    }
+
+    fn set_binding_sets(&mut self, binding_sets: &[BindingSet]) {
+        self.binding_sets = binding_sets.to_vec();
     }
 }
 
@@ -258,6 +284,14 @@ impl<'c> RenderPass<'c> {
         self.vertex_buffers = vertex_buffers.into_iter().collect()
     }
 
+    pub fn set_index_buffer(&mut self, index_buffer: Buffer) {
+        self.index_buffer = Some(index_buffer);
+    }
+
+    pub fn set_binding_sets(&mut self, binding_sets: &[BindingSet]) {
+        self.command_recorder.set_binding_sets(binding_sets);
+    }
+
     pub fn set_pipeline(&mut self, pipeline: GraphicsPipeline) {
         self.pipeline = Some(pipeline);
     }
@@ -270,7 +304,7 @@ impl<'c> RenderPass<'c> {
         first_instance: usize,
     ) -> MgpuResult<()> {
         #[cfg(debug_assertions)]
-        self.validate_state()?;
+        self.validate_state(false)?;
 
         let step = self.info.steps.last_mut().unwrap();
         step.commands.push(DrawCommand {
@@ -288,7 +322,35 @@ impl<'c> RenderPass<'c> {
         Ok(())
     }
 
-    fn validate_state(&self) -> MgpuResult<()> {
+    pub fn draw_indexed(
+        &mut self,
+        indices: usize,
+        instances: usize,
+        first_index: usize,
+        vertex_offset: i32,
+        first_instance: usize,
+    ) -> MgpuResult<()> {
+        #[cfg(debug_assertions)]
+        self.validate_state(true)?;
+
+        let step = self.info.steps.last_mut().unwrap();
+        step.commands.push(DrawCommand {
+            pipeline: self.pipeline.unwrap(),
+            vertex_buffers: self.vertex_buffers.clone(),
+            index_buffer: self.index_buffer,
+            binding_sets: self.command_recorder.binding_sets.clone(),
+            draw_type: DrawType::DrawIndexed {
+                indices,
+                instances,
+                first_index,
+                vertex_offset,
+                first_instance,
+            },
+        });
+        Ok(())
+    }
+
+    fn validate_state(&self, check_index_buffer: bool) -> MgpuResult<()> {
         check!(
             self.pipeline.is_some(),
             "Issued a draw call without a pipeline set"
@@ -315,7 +377,14 @@ impl<'c> RenderPass<'c> {
             &format!("Bound a vertex buffer at location {} that doesn't have the VERTEX_BUFFER usage flag", input.location));
         }
 
-        for set in &pipeline_layout.binding_sets {
+        if check_index_buffer {
+            check!(
+                self.index_buffer.is_some(),
+                "Tried executing a draw_indexed without an index buffer"
+            );
+        }
+
+        for set in &pipeline_layout.binding_sets_infos {
             let bound_set = self.command_recorder.binding_sets.get(set.set);
             check!(
                 bound_set.is_some(),
@@ -326,6 +395,7 @@ impl<'c> RenderPass<'c> {
                 )
             );
         }
+
         Ok(())
     }
 }

@@ -6,7 +6,7 @@ use crate::staging_buffer_allocator::StagingBufferAllocator;
 use crate::util::check;
 use crate::DrawType::Draw;
 use crate::{
-    hal, Buffer, BufferDescription, BufferWriteParams, CommandRecorder, CommandRecorderType, DrawCommand, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageDimension, ImageView, ImageViewDescription, MemoryDomain, MgpuResult, ShaderModule, ShaderModuleDescription, ShaderModuleLayout
+    hal, BindingSet, BindingSetDescription, BindingSetLayout, Buffer, BufferDescription, BufferWriteParams, CommandRecorder, CommandRecorderType, DrawCommand, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageAspect, ImageDescription, ImageDimension, ImageView, ImageViewDescription, MemoryDomain, MgpuResult, Sampler, SamplerDescription, ShaderModule, ShaderModuleDescription, ShaderModuleLayout
 };
 use crate::{BufferUsageFlags, ImageWriteParams};
 use bitflags::bitflags;
@@ -22,7 +22,7 @@ use crate::swapchain::*;
 bitflags! {
     #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
     pub struct DeviceFeatures : u32 {
-        const DEBUG_FEATURES = 0b01;
+        const HAL_DEBUG_LAYERS = 0b01;
     }
 }
 
@@ -133,6 +133,8 @@ impl Device {
                         current_submission_group
                             .command_recorders
                             .push(command_recorder);
+
+                        self.hal.transition_resources(command_recorder, &passes.graphics_resource_transitions)?;
                         for pass in &passes.graphics_nodes {
                             let node = &compiled.nodes[*pass];
                             match &node.ty {
@@ -158,10 +160,17 @@ impl Device {
                                                     vertex_buffers,
                                                 )?;
 
-                                                self.hal.set_binding_sets(
-                                                    command_recorder,
-                                                    binding_sets,
-                                                )?;
+                                                if let Some(index_buffer) = index_buffer {
+                                                    self.hal.set_index_buffer(command_recorder, *index_buffer)?;
+                                                }
+
+                                                if !binding_sets.is_empty() {
+                                                    self.hal.set_binding_sets(
+                                                        command_recorder,
+                                                        binding_sets,
+                                                        *pipeline,
+                                                    )?;
+                                                }
                                                 match *draw_type {
                                                     Draw {
                                                         vertices,
@@ -177,6 +186,9 @@ impl Device {
                                                             first_instance,
                                                         )?;
                                                     }
+                                                    crate::DrawType::DrawIndexed { indices, instances, first_index, vertex_offset, first_instance } =>  {
+                                                        self.hal.draw_indexed(command_recorder, indices, instances, first_index, vertex_offset, first_instance)?;
+                                                    }
                                                 }
                                             }
                                         }
@@ -190,6 +202,7 @@ impl Device {
                                     unsafe { self.hal.end_render_pass(command_recorder)? };
                                 }
                                 Node::CopyBufferToBuffer { .. } => unreachable!(),
+                                Node::CopyBufferToImage { .. } => unreachable!(),
                             }
                         }
 
@@ -197,6 +210,7 @@ impl Device {
                     }
                     if !passes.compute_nodes.is_empty() {
                         let command_recorder = async_compute_command_recorders[current_compute];
+                        self.hal.transition_resources(command_recorder, &passes.compute_resource_transitions)?;
                         current_submission_group
                             .command_recorders
                             .push(command_recorder);
@@ -206,15 +220,18 @@ impl Device {
                         current_compute += 1;
                     }
                     if !passes.transfer_nodes.is_empty() {
-                        for pass in &passes.transfer_nodes {
-                            let command_recorder =
-                                async_transfer_command_recorders[current_transfer];
+                        let command_recorder =
+                            async_transfer_command_recorders[current_transfer];
+                        current_submission_group
+                            .command_recorders
+                            .push(command_recorder);
 
-                            current_submission_group
-                                .command_recorders
-                                .push(command_recorder);
+                        self.hal.transition_resources(command_recorder, &passes.transfer_resource_transitions)?;
+                    
+
+                        for pass in &passes.transfer_nodes {
                             match &compiled.nodes[*pass].ty {
-                                Node::RenderPass { info } => unreachable!(),
+                                Node::RenderPass {..} => unreachable!(),
                                 Node::CopyBufferToBuffer {
                                     source,
                                     dest,
@@ -231,6 +248,15 @@ impl Device {
                                         *size,
                                     )?
                                 },
+                                Node::CopyBufferToImage { source, dest, source_offset, dest_region } => unsafe {
+                                    self.hal.cmd_copy_buffer_to_image(
+                                        command_recorder,
+                                        *source,
+                                        *dest,
+                                        *source_offset,
+                                        *dest_region,
+                                    )?
+                                }
                             }
                         }
                         current_transfer += 1;
@@ -365,7 +391,7 @@ impl Device {
             .staging_buffer_allocator
             .lock()
             .expect("Failed to lock staging buffer allocator");
-        let allocation = allocator.get_staging_buffer(self, params.size)?;
+        let allocation = allocator.allocate_staging_buffer_region(self, params.size)?;
         unsafe {
             self.hal.write_host_visible_buffer(
                 allocation.buffer,
@@ -402,7 +428,31 @@ impl Device {
         #[cfg(debug_assertions)]
         self.validate_image_write_params(image, params);
 
-        todo!();
+        let size = params.region.extents.area() as usize * image.format.byte_size();
+        let mut allocator = self
+            .staging_buffer_allocator
+            .lock()
+            .expect("Failed to lock staging buffer allocator");
+        let allocation = allocator.allocate_staging_buffer_region(self, size)?;
+        unsafe {
+            self.hal.write_host_visible_buffer(
+                allocation.buffer,
+                &BufferWriteParams {
+                    data: params.data,
+                    offset: allocation.offset,
+                    size
+                },
+            )
+        }?;
+
+        self.write_rdg()
+            .add_async_transfer_node(Node::CopyBufferToImage { 
+                source: allocation.buffer,
+                dest: image,
+                source_offset: allocation.offset,
+                dest_region: params.region
+                
+            });
 
         Ok(())
     }
@@ -415,7 +465,10 @@ impl Device {
         &self,
         image_view_description: &ImageViewDescription,
     ) -> MgpuResult<ImageView> {
-        todo!()
+        
+        #[cfg(debug_assertions)]
+        Self::validate_image_view_description(image_view_description);
+        self.hal.create_image_view(image_view_description)
     }
 
     pub fn create_shader_module(
@@ -432,6 +485,26 @@ impl Device {
         shader_module: ShaderModule,
     ) -> MgpuResult<ShaderModuleLayout> {
         self.hal.get_shader_module_layout(shader_module)
+    }
+    
+    pub fn create_sampler(&self, sampler_description: &SamplerDescription) -> MgpuResult<Sampler> {
+        #[cfg(debug_assertions)]
+        self.validate_sampler_description(sampler_description)?;
+        self.hal.create_sampler(sampler_description)
+    }
+
+    pub fn destroy_sampler(&self, sampler: Sampler) -> MgpuResult<()> {
+        self.hal.destroy_sampler(sampler)
+    }
+    
+    pub fn create_binding_set(&self, description: &BindingSetDescription, layout: &BindingSetLayout) -> MgpuResult<BindingSet> {
+        #[cfg(debug_assertions)]
+        Self::validate_bdinging_set_description(description, layout);
+        self.hal.create_binding_set(description, layout)
+    }
+
+    pub fn destroy_binding_set(&self, binding_set: BindingSet) -> MgpuResult<()> {
+        self.hal.destroy_binding_set(binding_set)
     }
 
     pub fn create_graphics_pipeline(
@@ -484,6 +557,9 @@ impl Device {
         );
     }
 
+    fn validate_image_view_description(image_description: &ImageViewDescription) {
+    }
+
     fn validate_buffer_description(buffer_description: &BufferDescription) {
         check!(
             buffer_description.size > 0,
@@ -492,12 +568,20 @@ impl Device {
     }
 
     fn validate_image_write_params(&self, image: Image, params: &ImageWriteParams) {
-        let total_texels = image.extents.width * image.extents.height * image.extents.depth;
+        let total_image_texels = image.extents.area();
         let texel_byte_size = image.format.byte_size();
-        let total_bytes = total_texels as usize * texel_byte_size;
+        let total_bytes = total_image_texels as usize * texel_byte_size;
 
         check!(params.data.len() >= total_bytes, 
             &format!("Attempted to execute a write operation without enough source data, expected at least {total_bytes} bytes, got {}", params.data.len()));
+        check!(params.region.extents.area() > 0, "Image write region is empty");
+
+        check!(params.region.offset.z + params.region.extents.depth as i32 <= image.extents.depth as i32, "Image write region goes beyond the image");
+        check!(params.region.offset.x + params.region.extents.width as i32 <= image.extents.width as i32, "Image write region goes beyond the image");
+        check!(params.region.offset.y + params.region.extents.height as i32 <= image.extents.height as i32, "Image write region goes beyond the image");
+        check!(params.region.mip < image.mips.get(), "Trying to write image mip {}, but the image has only {} mips", params.region.mip, image.mips,);
+        check!(params.region.base_array_layer < params.region.num_layers.get(), "base_array_layer must be <= num_layers");
+        check!(params.region.base_array_layer + params.region.num_layers.get() <= image.array_layers.get(), "Trying to write more image layers than supported by the image");
     }
 
     fn validate_buffer_write_params(&self, buffer: Buffer, params: &BufferWriteParams) {
@@ -529,6 +613,14 @@ impl Device {
         Ok(())
     }
 
+    fn validate_sampler_description(
+        &self,
+        _sampler_description: &SamplerDescription,
+    ) -> MgpuResult<()> {
+
+        Ok(())
+    }
+
     fn validate_graphics_pipeline_description(
         &self,
         graphics_pipeline_description: &GraphicsPipelineDescription,
@@ -550,8 +642,26 @@ impl Device {
             )
         }
 
+        if let Some(fs) = &graphics_pipeline_description.fragment_stage {
+            if let Some(ds) = &fs.depth_stencil_target {
+                check!(ds.format.aspect() == ImageAspect::Depth, "Depth stencil target format isn't a valid depth format");
+            }
+        }
+
         Ok(())
     }
+    
+    fn validate_bdinging_set_description(description: &BindingSetDescription, layout: &BindingSetLayout) {
+        for layout_binding in &layout.binding_set_elements {
+            let description_binding = description.bindings.iter().find(|b| b.binding == layout_binding.binding);
+            check!(description_binding.is_some(), "Layout defines a binding at index {} of type {:?}, but none was found in the description", layout_binding.binding, layout_binding.ty);
+
+            let description_binding = description_binding.unwrap();
+
+            check!(layout_binding.ty == description_binding.ty.binding_type(), "eLayout binding and description binding differs in type, got {:?} expected {:?}", description_binding.ty, layout_binding.ty);
+        }
+    }
+
 }
 
 impl Drop for Device {

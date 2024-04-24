@@ -103,12 +103,14 @@ bitflags! {
 pub enum ImageFormat {
     Unknown,
     Rgba8,
+    Depth32,
 }
 impl ImageFormat {
     fn byte_size(&self) -> usize {
         match self {
-            Self::Unknown => 0,
+            ImageFormat::Unknown => 0,
             ImageFormat::Rgba8 => 4,
+            ImageFormat::Depth32 => 4,
         }
     }
 }
@@ -117,6 +119,7 @@ impl ImageFormat {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ImageAspect {
     Color,
+    Depth,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
@@ -143,9 +146,27 @@ pub struct Offset2D {
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct Offset3D {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Rect2D {
     pub offset: Offset2D,
     pub extents: Extents2D,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ImageRegion {
+    pub offset: Offset3D,
+    pub extents: Extents3D,
+    pub mip: u32,
+    pub base_array_layer: u32,
+    pub num_layers: NonZeroU32,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
@@ -160,6 +181,40 @@ pub enum ImageDimension {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SampleCount {
     One,
+}
+
+#[derive(Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum FilterMode {
+    #[default]
+    Nearest,
+    Linear,
+}
+
+#[derive(Default, Copy, Clone, PartialEq, PartialOrd, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum BorderColor {
+    #[default]
+    White,
+    Black,
+}
+
+#[derive(Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum MipmapMode {
+    #[default]
+    Nearest,
+    Linear,
+}
+
+#[derive(Default, Copy, Clone, PartialEq, PartialOrd, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AddressMode {
+    #[default]
+    Repeat,
+    MirroredRepeat,
+    ClampToEdge,
+    ClampToBorder([f32; 4]),
 }
 
 pub struct ShaderModuleDescription<'a> {
@@ -250,17 +305,34 @@ pub struct BufferWriteParams<'a> {
 /// This struct describes an image write operation
 pub struct ImageWriteParams<'a> {
     pub data: &'a [u8],
+    pub region: ImageRegion,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 pub struct ImageViewDescription<'a> {
     pub label: Option<&'a str>,
+    pub image: Image,
     pub format: ImageFormat,
+    pub dimension: ImageDimension,
     pub aspect: ImageAspect,
-    pub base_mip: u32,
-    pub num_mips: u32,
-    pub base_array_layer: u32,
-    pub num_array_layers: u32,
+    pub image_region: ImageRegion,
+}
+
+#[derive(Copy, Clone, PartialEq, PartialOrd, Debug, Default)]
+pub struct SamplerDescription<'a> {
+    pub label: Option<&'a str>,
+    pub mag_filter: FilterMode,
+    pub min_filter: FilterMode,
+    pub mipmap_mode: MipmapMode,
+    pub address_mode_u: AddressMode,
+    pub address_mode_v: AddressMode,
+    pub address_mode_w: AddressMode,
+    pub lod_bias: f32,
+    pub compare_op: Option<CompareOp>,
+    pub min_lod: f32,
+    pub max_lod: f32,
+    pub border_color: BorderColor,
+    pub unnormalized_coordinates: bool,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
@@ -356,7 +428,9 @@ pub struct RenderTargetInfo {
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct DepthStencilTargetInfo {}
+pub struct DepthStencilTargetInfo {
+    pub format: ImageFormat,
+}
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 pub struct VertexStageInfo<'a> {
@@ -450,6 +524,7 @@ pub struct GraphicsPipelineDescription<'a> {
     pub front_face: FrontFace,
     pub multisample_state: Option<MultisampleState>,
     pub depth_stencil_state: DepthStencilState,
+    pub binding_set_layouts: &'a [BindingSetLayoutInfo],
 }
 
 #[derive(Clone, Debug)]
@@ -468,7 +543,7 @@ pub enum BufferType {
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum AccessMode {
+pub enum StorageAccessMode {
     Read,
     Write,
     ReadWrite,
@@ -480,7 +555,7 @@ pub enum BindingSetElementKind {
     Unknown,
     Buffer {
         ty: BufferType,
-        access_mode: AccessMode,
+        access_mode: StorageAccessMode,
     },
     Sampler,
     // This type can only be used with the Vulkan HAL
@@ -488,20 +563,15 @@ pub enum BindingSetElementKind {
         format: ImageFormat,
         dimension: ImageDimension,
     },
-    SampledImage {
-        format: ImageFormat,
-        dimension: ImageDimension,
-    },
+    SampledImage,
     StorageImage {
         format: ImageFormat,
-        access_mode: AccessMode,
-        dimension: ImageDimension,
+        access_mode: StorageAccessMode,
     },
 }
 
 #[derive(Default, Clone, Debug, Hash)]
 pub struct BindingSetElement {
-    pub name: String,
     pub binding: usize,
     pub array_length: usize,
     pub ty: BindingSetElementKind,
@@ -510,8 +580,49 @@ pub struct BindingSetElement {
 
 #[derive(Clone, Default, Debug, Hash)]
 pub struct BindingSetLayout {
+    pub binding_set_elements: Vec<BindingSetElement>,
+}
+
+#[derive(Clone, Default, Debug, Hash)]
+pub struct BindingSetLayoutInfo {
     pub set: usize,
-    pub bindings: Vec<BindingSetElement>,
+    pub layout: BindingSetLayout,
+}
+
+#[derive(Clone, Debug, Hash)]
+pub enum BindingType {
+    Sampler(Sampler),
+    SampledImage {
+        view: ImageView,
+    },
+    UniformBuffer {
+        buffer: Buffer,
+        offset: usize,
+        range: usize,
+    },
+}
+impl BindingType {
+    fn binding_type(&self) -> BindingSetElementKind {
+        match self {
+            BindingType::Sampler(_) => BindingSetElementKind::Sampler,
+            BindingType::SampledImage { view } => BindingSetElementKind::SampledImage,
+            BindingType::UniformBuffer { buffer, .. } => BindingSetElementKind::Buffer {
+                ty: BufferType::Uniform,
+                access_mode: StorageAccessMode::Read,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, Hash)]
+pub struct Binding {
+    pub binding: usize,
+    pub ty: BindingType,
+}
+
+pub struct BindingSetDescription<'a> {
+    pub label: Option<&'a str>,
+    pub bindings: &'a [Binding],
 }
 
 bitflags! {
@@ -519,6 +630,8 @@ bitflags! {
     pub struct ShaderStageFlags : u32 {
         const VERTEX = 0x01;
         const FRAGMENT = 0x02;
+
+        const ALL = Self::VERTEX.bits() | Self::FRAGMENT.bits();
     }
 }
 
@@ -527,7 +640,7 @@ pub struct ShaderModuleLayout {
     pub entry_points: Vec<String>,
     pub inputs: Vec<ShaderAttribute>,
     pub outputs: Vec<ShaderAttribute>,
-    pub binding_sets: Vec<BindingSetLayout>,
+    pub binding_sets: Vec<BindingSetLayoutInfo>,
 }
 
 /// A Buffer is a linear data buffer that can be read or written by a shader
@@ -546,6 +659,14 @@ impl Buffer {
             size: self.size,
         }
     }
+
+    pub fn bind_whole_range_uniform_buffer(&self) -> BindingType {
+        BindingType::UniformBuffer {
+            buffer: self.clone(),
+            offset: 0,
+            range: self.size,
+        }
+    }
 }
 
 /// An image is a multidimensional buffer of data, with an associated format
@@ -560,11 +681,27 @@ pub struct Image {
     samples: SampleCount,
     format: ImageFormat,
 }
+impl Image {
+    pub fn whole_region(&self, mip: u32) -> ImageRegion {
+        ImageRegion {
+            offset: Offset3D::default(),
+            extents: self.extents,
+            mip,
+            base_array_layer: 0,
+            num_layers: self.array_layers,
+        }
+    }
+}
 
 /// An image view is a view over a portion of an image
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 pub struct ImageView {
     owner: Image,
+    id: u64,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+pub struct Sampler {
     id: u64,
 }
 
@@ -578,14 +715,25 @@ pub struct GraphicsPipeline {
     id: u64,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[derive(Clone, Debug, Hash)]
 pub struct BindingSet {
     id: u64,
+    bindings: Vec<Binding>,
 }
 
 #[derive(Clone)]
 pub struct Swapchain {
     id: u64,
+}
+
+impl ImageFormat {
+    pub fn aspect(self) -> ImageAspect {
+        match self {
+            ImageFormat::Unknown => unreachable!(),
+            ImageFormat::Rgba8 => ImageAspect::Color,
+            ImageFormat::Depth32 => ImageAspect::Depth,
+        }
+    }
 }
 
 impl PolygonMode {
@@ -595,6 +743,18 @@ impl PolygonMode {
             PolygonMode::Line(v) => v,
             _ => 0.0,
         }
+    }
+}
+
+impl Extents3D {
+    pub fn area(&self) -> u32 {
+        self.width * self.height * self.depth
+    }
+}
+
+impl Extents2D {
+    pub fn area(&self) -> u32 {
+        self.width * self.height
     }
 }
 
@@ -611,11 +771,22 @@ impl<'a> GraphicsPipelineDescription<'a> {
             front_face: Default::default(),
             multisample_state: Default::default(),
             depth_stencil_state: Default::default(),
+            binding_set_layouts: Default::default(),
         }
     }
 
     pub fn fragment_stage(mut self, fragment_stage: &'a FragmentStageInfo) -> Self {
         self.fragment_stage = Some(fragment_stage);
+        self
+    }
+
+    pub fn binding_set_layouts(mut self, binding_set_layouts: &'a [BindingSetLayoutInfo]) -> Self {
+        self.binding_set_layouts = binding_set_layouts;
+        self
+    }
+
+    pub fn depth_stencil_state(mut self, depth_stencil_state: DepthStencilState) -> Self {
+        self.depth_stencil_state = depth_stencil_state;
         self
     }
 }

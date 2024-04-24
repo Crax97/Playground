@@ -16,7 +16,7 @@ fn main() {
 
     let device = mgpu::Device::new(DeviceConfiguration {
         app_name: Some("Triangle Application"),
-        features: DeviceFeatures::DEBUG_FEATURES,
+        features: DeviceFeatures::HAL_DEBUG_LAYERS,
         device_preference: Some(DevicePreference::HighPerformance),
         display_handle: event_loop.display_handle().unwrap().as_raw(),
         desired_frames_in_flight: 3,

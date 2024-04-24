@@ -411,12 +411,20 @@ macro_rules! check {
             );
         }
     };
+
+    ($cond:expr, $msg:expr, $($args:expr $(,)?)*) => {
+        check!($cond, format!($msg, $($args,)*))
+    };
 }
 
 #[cfg(not(debug_assertions))]
 macro_rules! check {
     ($cond:expr, $msg:expr) => {
-        ();
+        ()
+    };
+
+    ($cond:expr, $msg:expr, $($args:expr $(,)?)*) => {
+        check!($cond, format!($msg, $($args,)*))
     };
 }
 pub(crate) use check;

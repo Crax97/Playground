@@ -1,13 +1,19 @@
 mod util;
 
+use std::num::NonZeroU32;
+
 use bytemuck::offset_of;
+use glam::{vec3, Vec3};
 use mgpu::{
-    AttachmentStoreOp, BlendFactor, BlendOp, BlendSettings, BufferDescription, BufferUsageFlags,
-    ColorWriteMask, DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D,
-    FragmentStageInfo, Graphics, GraphicsPipelineDescription, ImageFormat, MemoryDomain, Rect2D,
+    AttachmentStoreOp, Binding, BindingSetDescription, BindingSetElement, BindingSetLayout,
+    BindingSetLayoutInfo, BindingType, BufferDescription, BufferUsageFlags, CompareOp,
+    DepthStencilState, DepthStencilTarget, DepthStencilTargetInfo, DepthStencilTargetLoadOp,
+    DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D, Extents3D, FragmentStageInfo,
+    Graphics, GraphicsPipelineDescription, ImageDescription, ImageDimension, ImageFormat,
+    ImageUsageFlags, ImageViewDescription, ImageWriteParams, MemoryDomain, Rect2D,
     RenderPassDescription, RenderTarget, RenderTargetInfo, RenderTargetLoadOp, SampleCount,
-    ShaderModuleDescription, SwapchainCreationInfo, VertexInputDescription, VertexInputFrequency,
-    VertexStageInfo,
+    SamplerDescription, ShaderModuleDescription, ShaderStageFlags, SwapchainCreationInfo,
+    VertexInputDescription, VertexInputFrequency, VertexStageInfo,
 };
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -23,9 +29,14 @@ layout(location = 1) in vec2 uv;
 
 layout(location = 0) out vec2 fs_uv;
 
+layout(set = 0, binding = 2, std140) uniform ObjectData {
+    mat4 mvp;
+};
+
 void main() {
-    vec4 vs_pos = vec4(pos, 1.0);
+    vec4 vs_pos = mvp * vec4(pos, 1.0);
     gl_Position = vs_pos;
+    fs_uv = uv;
 }
 ";
 const FRAGMENT_SHADER: &str = "
@@ -46,13 +57,13 @@ fn main() {
     env_logger::init();
     let event_loop = EventLoop::new().unwrap();
     let window = winit::window::WindowBuilder::new()
-        .with_title("Triangle")
+        .with_title("Textured Cube")
         .build(&event_loop)
         .unwrap();
 
     let device = mgpu::Device::new(DeviceConfiguration {
         app_name: Some("Triangle Application"),
-        features: DeviceFeatures::DEBUG_FEATURES,
+        features: DeviceFeatures::HAL_DEBUG_LAYERS,
         device_preference: Some(DevicePreference::HighPerformance),
         display_handle: event_loop.display_handle().unwrap().as_raw(),
         desired_frames_in_flight: 3,
@@ -66,10 +77,112 @@ fn main() {
         })
         .expect("Failed to create swapchain");
     let cube_data = vec![
-        vertex(-1.0, -1.0, 0.0, 0.0, 0.0),
-        vertex(1.0, -1.0, 0.0, 0.0, 0.0),
-        vertex(0.0, 1.0, 0.0, 0.0, 0.0),
+        vertex(-1.0, -1.0, 1.0, 0.0, 0.0),
+        vertex(1.0, 1.0, 1.0, 1.0, 1.0),
+        vertex(-1.0, 1.0, 1.0, 0.0, 1.0),
+        vertex(1.0, -1.0, 1.0, 1.0, 0.0),
+        vertex(-1.0, -1.0, -1.0, 0.0, 0.0),
+        vertex(1.0, 1.0, -1.0, 1.0, 1.0),
+        vertex(-1.0, 1.0, -1.0, 0.0, 1.0),
+        vertex(1.0, -1.0, -1.0, 1.0, 0.0),
+        vertex(1.0, -1.0, -1.0, 0.0, 0.0),
+        vertex(1.0, 1.0, 1.0, 1.0, 1.0),
+        vertex(1.0, 1.0, -1.0, 0.0, 1.0),
+        vertex(1.0, -1.0, 1.0, 1.0, 0.0),
+        vertex(-1.0, -1.0, -1.0, 0.0, 0.0),
+        vertex(-1.0, 1.0, 1.0, 1.0, 1.0),
+        vertex(-1.0, 1.0, -1.0, 0.0, 1.0),
+        vertex(-1.0, -1.0, 1.0, 1.0, 0.0),
+        vertex(-1.0, 1.0, -1.0, 0.0, 0.0),
+        vertex(1.0, 1.0, 1.0, 1.0, 1.0),
+        vertex(1.0, 1.0, -1.0, 0.0, 1.0),
+        vertex(-1.0, 1.0, 1.0, 1.0, 0.0),
+        vertex(-1.0, -1.0, -1.0, 0.0, 0.0),
+        vertex(1.0, -1.0, 1.0, 1.0, 1.0),
+        vertex(1.0, -1.0, -1.0, 0.0, 1.0),
+        vertex(-1.0, -1.0, 1.0, 1.0, 0.0),
     ];
+
+    let cube_indices = [
+        0, 1, 2, 3, 1, 0, //Bottom
+        6, 5, 4, 4, 5, 7, // Front
+        10, 9, 8, 8, 9, 11, // Left
+        12, 13, 14, 15, 13, 12, // Right
+        16, 17, 18, 19, 17, 16, // Up
+        22, 21, 20, 20, 21, 23, // Down
+    ];
+    let view = glam::Mat4::look_at_rh(vec3(-5.0, 10.0, -5.0), Vec3::default(), vec3(0.0, 1.0, 0.0));
+    let projection = glam::Mat4::perspective_rh(75.0f32.to_radians(), 800.0 / 600.0, 0.01, 1000.0);
+    let model = glam::Mat4::from_scale(Vec3::ONE);
+    let mvp = projection * view * model;
+    let mvp = [mvp];
+
+    let texture_data = util::read_image_data("mgpu/examples/assets/david.jpg");
+    let depth_image = device
+        .create_image(&ImageDescription {
+            label: Some("Depth image"),
+            usage_flags: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            extents: Extents3D {
+                width: 800,
+                height: 600,
+                depth: 1,
+            },
+            dimension: ImageDimension::D2,
+            mips: NonZeroU32::new(1).unwrap(),
+            array_layers: NonZeroU32::new(1).unwrap(),
+            samples: SampleCount::One,
+            format: ImageFormat::Depth32,
+            memory_domain: MemoryDomain::DeviceLocal,
+        })
+        .unwrap();
+    let depth_image_view = device
+        .create_image_view(&ImageViewDescription {
+            label: Some("Depth image view"),
+            format: ImageFormat::Depth32,
+            aspect: mgpu::ImageAspect::Depth,
+            image: depth_image,
+            image_region: depth_image.whole_region(0),
+            dimension: ImageDimension::D2,
+        })
+        .unwrap();
+    let image = device
+        .create_image(&ImageDescription {
+            label: Some("Cube Texture"),
+            usage_flags: ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST,
+            extents: Extents3D {
+                width: 512,
+                height: 512,
+                depth: 1,
+            },
+            dimension: ImageDimension::D2,
+            mips: NonZeroU32::new(1).unwrap(),
+            array_layers: NonZeroU32::new(1).unwrap(),
+            samples: SampleCount::One,
+            format: ImageFormat::Rgba8,
+            memory_domain: MemoryDomain::DeviceLocal,
+        })
+        .unwrap();
+
+    device
+        .write_image_data(
+            image,
+            &ImageWriteParams {
+                data: &texture_data,
+                region: image.whole_region(0),
+            },
+        )
+        .unwrap();
+
+    let image_view = device
+        .create_image_view(&ImageViewDescription {
+            label: Some("David image view"),
+            format: ImageFormat::Rgba8,
+            aspect: mgpu::ImageAspect::Color,
+            image,
+            image_region: image.whole_region(0),
+            dimension: ImageDimension::D2,
+        })
+        .unwrap();
 
     let cube_data_buffer = device
         .create_buffer(&BufferDescription {
@@ -80,10 +193,42 @@ fn main() {
         })
         .unwrap();
 
+    let cube_index_buffer = device
+        .create_buffer(&BufferDescription {
+            label: Some("Triangle index buffer"),
+            usage_flags: BufferUsageFlags::INDEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
+            size: std::mem::size_of_val(cube_indices.as_slice()),
+            memory_domain: MemoryDomain::DeviceLocal,
+        })
+        .unwrap();
+
+    let cube_object_data = device
+        .create_buffer(&BufferDescription {
+            label: Some("Cube Object Data"),
+            usage_flags: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
+            size: std::mem::size_of_val(mvp.as_slice()),
+            memory_domain: MemoryDomain::DeviceLocal,
+        })
+        .unwrap();
+
     device
         .write_buffer(
             cube_data_buffer,
             &cube_data_buffer.write_all_params(bytemuck::cast_slice(&cube_data)),
+        )
+        .unwrap();
+
+    device
+        .write_buffer(
+            cube_index_buffer,
+            &cube_index_buffer.write_all_params(bytemuck::cast_slice(&cube_indices)),
+        )
+        .unwrap();
+
+    device
+        .write_buffer(
+            cube_object_data,
+            &cube_object_data.write_all_params(bytemuck::cast_slice(&mvp)),
         )
         .unwrap();
 
@@ -101,6 +246,31 @@ fn main() {
             source: &fragment_shader_source,
         })
         .unwrap();
+    let binding_set_layout = BindingSetLayout {
+        binding_set_elements: vec![
+            BindingSetElement {
+                binding: 0,
+                array_length: 1,
+                ty: mgpu::BindingSetElementKind::Sampler,
+                shader_stage_flags: ShaderStageFlags::ALL,
+            },
+            BindingSetElement {
+                binding: 1,
+                array_length: 1,
+                ty: mgpu::BindingSetElementKind::SampledImage,
+                shader_stage_flags: ShaderStageFlags::ALL,
+            },
+            BindingSetElement {
+                binding: 2,
+                array_length: 1,
+                ty: mgpu::BindingSetElementKind::Buffer {
+                    ty: mgpu::BufferType::Uniform,
+                    access_mode: mgpu::StorageAccessMode::Read,
+                },
+                shader_stage_flags: ShaderStageFlags::ALL,
+            },
+        ],
+    };
     let pipeline = device
         .create_graphics_pipeline(
             &GraphicsPipelineDescription::new(
@@ -133,10 +303,52 @@ fn main() {
                     format: ImageFormat::Rgba8,
                     blend: None,
                 }],
-                depth_stencil_target: None,
+                depth_stencil_target: Some(&DepthStencilTargetInfo {
+                    format: ImageFormat::Depth32,
+                }),
+            })
+            .binding_set_layouts(&[BindingSetLayoutInfo {
+                layout: binding_set_layout.clone(),
+                set: 0,
+            }])
+            .depth_stencil_state(DepthStencilState {
+                depth_test_enabled: true,
+                depth_write_enabled: true,
+                depth_compare_op: CompareOp::Less,
             }),
         )
         .unwrap();
+
+    let sampler = device
+        .create_sampler(&SamplerDescription {
+            label: Some("Cube Texture Sampler"),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let binding_set = device
+        .create_binding_set(
+            &BindingSetDescription {
+                label: Some("Cube Parameters"),
+                bindings: &[
+                    Binding {
+                        binding: 0,
+                        ty: BindingType::Sampler(sampler),
+                    },
+                    Binding {
+                        binding: 1,
+                        ty: BindingType::SampledImage { view: image_view },
+                    },
+                    Binding {
+                        binding: 2,
+                        ty: cube_object_data.bind_whole_range_uniform_buffer(),
+                    },
+                ],
+            },
+            &binding_set_layout,
+        )
+        .unwrap();
+
     // device.destroy_shader_module(vertex_shader_module).unwrap();
     // device
     //     .destroy_shader_module(fragment_shader_module)
@@ -165,7 +377,12 @@ fn main() {
                                     load_op: RenderTargetLoadOp::Clear([0.3, 0.0, 0.5, 1.0]),
                                     store_op: AttachmentStoreOp::Store,
                                 }],
-                                depth_stencil_attachment: None,
+                                depth_stencil_attachment: Some(&DepthStencilTarget {
+                                    view: depth_image_view,
+                                    sample_count: SampleCount::One,
+                                    load_op: DepthStencilTargetLoadOp::Clear(1.0, 0),
+                                    store_op: AttachmentStoreOp::Store,
+                                }),
                                 render_area: Rect2D {
                                     offset: Default::default(),
                                     extents: swapchain_image.extents,
@@ -174,7 +391,9 @@ fn main() {
                             .unwrap();
                         render_pass.set_pipeline(pipeline);
                         render_pass.set_vertex_buffers([cube_data_buffer, cube_data_buffer]);
-                        render_pass.draw(3, 1, 0, 0).unwrap();
+                        render_pass.set_index_buffer(cube_index_buffer);
+                        render_pass.set_binding_sets(&[binding_set.clone()]);
+                        render_pass.draw_indexed(36, 1, 0, 0, 0).unwrap();
                     }
                     command_recorder.submit().unwrap();
 
@@ -207,6 +426,8 @@ fn main() {
         })
         .unwrap();
 
+    device.destroy_binding_set(binding_set).unwrap();
+    device.destroy_sampler(sampler).unwrap();
     // device.destroy_image_view(image_view);
     device.destroy_buffer(cube_data_buffer).unwrap();
 }

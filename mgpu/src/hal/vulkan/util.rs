@@ -2,13 +2,17 @@ use ash::vk;
 use gpu_allocator::vulkan::Allocation;
 
 use crate::{
-    hal::{GraphicsPipelineLayout, OwnedFragmentStageInfo, OwnedVertexStageInfo},
+    hal::{
+        GraphicsPipelineLayout, OwnedFragmentStageInfo, OwnedVertexStageInfo, ResourceAccessMode,
+    },
     util::{define_resource_resolver, Handle},
-    BindingSetElementKind, BindingSetLayout, BlendFactor, BlendOp, Buffer, BufferUsageFlags,
-    ColorWriteMask, CompareOp, CullMode, Extents2D, Extents3D, FrontFace, GraphicsPipeline,
+    AddressMode, BindingSet, BindingSetElementKind, BindingSetLayout, BindingSetLayoutInfo,
+    BlendFactor, BlendOp, BorderColor, Buffer, BufferUsageFlags, ColorWriteMask, CompareOp,
+    CullMode, Extents2D, Extents3D, FilterMode, FrontFace, GraphicsPipeline,
     GraphicsPipelineDescription, Image, ImageDimension, ImageFormat, ImageUsageFlags, ImageView,
-    Offset2D, PolygonMode, PresentMode, PrimitiveTopology, Rect2D, SampleCount, ShaderModule,
-    ShaderModuleLayout, ShaderStageFlags, Swapchain, VertexAttributeFormat, VertexInputFrequency,
+    MipmapMode, Offset2D, Offset3D, PolygonMode, PresentMode, PrimitiveTopology, Rect2D,
+    SampleCount, Sampler, ShaderModule, ShaderModuleLayout, ShaderStageFlags, Swapchain,
+    VertexAttributeFormat, VertexInputFrequency,
 };
 
 #[cfg(feature = "swapchain")]
@@ -20,9 +24,12 @@ pub(crate) trait ToVk {
     fn to_vk(self) -> Self::Target;
 }
 
-pub(crate) trait FromVk {
+pub(crate) trait FromVk
+where
+    Self: Copy,
+{
     type Target;
-    fn from_vk(self) -> Self::Target;
+    fn to_mgpu(self) -> Self::Target;
 }
 
 impl ToVk for ImageFormat {
@@ -32,15 +39,17 @@ impl ToVk for ImageFormat {
         match self {
             ImageFormat::Unknown => vk::Format::UNDEFINED,
             ImageFormat::Rgba8 => vk::Format::R8G8B8A8_UNORM,
+            ImageFormat::Depth32 => vk::Format::D32_SFLOAT,
         }
     }
 }
 
 impl FromVk for vk::Format {
     type Target = ImageFormat;
-    fn from_vk(self) -> Self::Target {
+    fn to_mgpu(self) -> Self::Target {
         match self {
             vk::Format::R8G8B8A8_UNORM => ImageFormat::Rgba8,
+            vk::Format::D32_SFLOAT => ImageFormat::Depth32,
             vk::Format::UNDEFINED => ImageFormat::Unknown,
             _ => unreachable!("Format not known"),
         }
@@ -78,7 +87,7 @@ impl ToVk for Extents2D {
 impl FromVk for vk::Extent2D {
     type Target = Extents2D;
 
-    fn from_vk(self) -> Self::Target {
+    fn to_mgpu(self) -> Self::Target {
         Self::Target {
             width: self.width,
             height: self.height,
@@ -99,10 +108,33 @@ impl ToVk for Offset2D {
 impl FromVk for vk::Offset2D {
     type Target = Offset2D;
 
-    fn from_vk(self) -> Self::Target {
+    fn to_mgpu(self) -> Self::Target {
         Self::Target {
             x: self.x,
             y: self.y,
+        }
+    }
+}
+
+impl ToVk for Offset3D {
+    type Target = vk::Offset3D;
+
+    fn to_vk(self) -> Self::Target {
+        Self::Target {
+            x: self.x,
+            y: self.y,
+            z: self.z,
+        }
+    }
+}
+impl FromVk for vk::Offset3D {
+    type Target = Offset3D;
+
+    fn to_mgpu(self) -> Self::Target {
+        Self::Target {
+            x: self.x,
+            y: self.y,
+            z: self.z,
         }
     }
 }
@@ -120,10 +152,10 @@ impl ToVk for Rect2D {
 impl FromVk for vk::Rect2D {
     type Target = Rect2D;
 
-    fn from_vk(self) -> Self::Target {
+    fn to_mgpu(self) -> Self::Target {
         Self::Target {
-            offset: self.offset.from_vk(),
-            extents: self.extent.from_vk(),
+            offset: self.offset.to_mgpu(),
+            extents: self.extent.to_mgpu(),
         }
     }
 }
@@ -142,7 +174,7 @@ impl ToVk for Extents3D {
 
 impl FromVk for vk::Extent3D {
     type Target = Extents3D;
-    fn from_vk(self) -> Self::Target {
+    fn to_mgpu(self) -> Self::Target {
         Self::Target {
             width: self.width,
             height: self.height,
@@ -162,7 +194,7 @@ impl ToVk for SampleCount {
 }
 impl FromVk for vk::SampleCountFlags {
     type Target = SampleCount;
-    fn from_vk(self) -> Self::Target {
+    fn to_mgpu(self) -> Self::Target {
         match self {
             vk::SampleCountFlags::TYPE_1 => SampleCount::One,
             _ => todo!(),
@@ -184,7 +216,7 @@ impl ToVk for ImageDimension {
 impl FromVk for vk::ImageType {
     type Target = ImageDimension;
 
-    fn from_vk(self) -> Self::Target {
+    fn to_mgpu(self) -> Self::Target {
         match self {
             vk::ImageType::TYPE_1D => ImageDimension::D1,
             vk::ImageType::TYPE_2D => ImageDimension::D2,
@@ -231,7 +263,7 @@ impl ToVk for ImageUsageFlags {
 impl FromVk for vk::ImageUsageFlags {
     type Target = ImageUsageFlags;
 
-    fn from_vk(self) -> Self::Target {
+    fn to_mgpu(self) -> Self::Target {
         let mut flags = Self::Target::default();
 
         if self.contains(vk::ImageUsageFlags::TRANSFER_SRC) {
@@ -361,6 +393,52 @@ impl ToVk for CompareOp {
     }
 }
 
+impl ToVk for FilterMode {
+    type Target = vk::Filter;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            FilterMode::Nearest => vk::Filter::NEAREST,
+            FilterMode::Linear => vk::Filter::LINEAR,
+        }
+    }
+}
+
+impl ToVk for MipmapMode {
+    type Target = vk::SamplerMipmapMode;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            MipmapMode::Linear => vk::SamplerMipmapMode::LINEAR,
+            MipmapMode::Nearest => vk::SamplerMipmapMode::NEAREST,
+        }
+    }
+}
+
+impl ToVk for AddressMode {
+    type Target = vk::SamplerAddressMode;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            AddressMode::Repeat => vk::SamplerAddressMode::REPEAT,
+            AddressMode::MirroredRepeat => vk::SamplerAddressMode::MIRRORED_REPEAT,
+            AddressMode::ClampToEdge => vk::SamplerAddressMode::CLAMP_TO_EDGE,
+            AddressMode::ClampToBorder(_) => vk::SamplerAddressMode::CLAMP_TO_BORDER,
+        }
+    }
+}
+
+impl ToVk for BorderColor {
+    type Target = vk::BorderColor;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            BorderColor::White => vk::BorderColor::INT_OPAQUE_WHITE,
+            BorderColor::Black => vk::BorderColor::INT_OPAQUE_BLACK,
+        }
+    }
+}
+
 impl ToVk for BindingSetElementKind {
     type Target = vk::DescriptorType;
 
@@ -421,7 +499,7 @@ impl ToVk for BufferUsageFlags {
 impl FromVk for vk::BufferUsageFlags {
     type Target = BufferUsageFlags;
 
-    fn from_vk(self) -> Self::Target {
+    fn to_mgpu(self) -> Self::Target {
         let mut flags = Self::Target::default();
         if self.contains(Self::TRANSFER_SRC) {
             flags |= Self::Target::TRANSFER_SRC;
@@ -524,7 +602,7 @@ impl ToVk for PresentMode {
 impl FromVk for vk::PresentModeKHR {
     type Target = PresentMode;
 
-    fn from_vk(self) -> Self::Target {
+    fn to_mgpu(self) -> Self::Target {
         match self {
             vk::PresentModeKHR::IMMEDIATE => PresentMode::Immediate,
             vk::PresentModeKHR::FIFO => PresentMode::Fifo,
@@ -533,11 +611,38 @@ impl FromVk for vk::PresentModeKHR {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct DescriptorPoolInfo {
+    pub pool: vk::DescriptorPool,
+    pub allocated: usize,
+    pub max: usize,
+}
+
+pub struct DescriptorPoolAllocation {
+    pub index: usize,
+    pub layout: vk::DescriptorSetLayout,
+}
+
+#[derive(Clone, Copy)]
+pub struct DescriptorSetAllocation {
+    pub descriptor_set: vk::DescriptorSet,
+    pub pool_index: usize,
+}
+
+#[derive(Default)]
+pub struct DescriptorPoolInfos {
+    pub pools: Vec<DescriptorPoolInfo>,
+    pub freed: Vec<DescriptorSetAllocation>,
+}
+
 pub(super) struct VulkanImage {
     pub(super) label: Option<String>,
     pub(super) handle: vk::Image,
     pub(super) external: bool,
     pub(super) allocation: Option<Allocation>,
+    pub(super) current_image_layout: vk::ImageLayout,
+    pub(super) current_access_mask: vk::AccessFlags2,
+    pub(super) current_stage_mask: vk::PipelineStageFlags2,
 }
 
 pub(super) struct VulkanBuffer {
@@ -559,6 +664,27 @@ pub(super) struct VulkanImageView {
 }
 
 #[derive(Clone)]
+pub(super) struct VulkanSampler {
+    pub(super) label: Option<String>,
+    pub(super) handle: vk::Sampler,
+}
+
+#[derive(Clone)]
+pub(super) struct VulkanBindingSet {
+    pub(super) label: Option<String>,
+    pub(super) handle: vk::DescriptorSet,
+    pub(super) allocation: DescriptorSetAllocation,
+    pub(super) layout: BindingSetLayout,
+}
+
+#[derive(Clone)]
+pub(super) struct VulkanGraphicsPipelineInfo {
+    pub(super) label: Option<String>,
+    pub(super) layout: GraphicsPipelineLayout,
+    pub(super) vk_layout: vk::PipelineLayout,
+}
+
+#[derive(Clone)]
 pub(super) struct SpirvShaderModule {
     pub(super) label: Option<String>,
     pub(super) layout: ShaderModuleLayout,
@@ -566,10 +692,13 @@ pub(super) struct SpirvShaderModule {
 }
 
 impl<'a> GraphicsPipelineDescription<'a> {
-    pub(super) fn to_vk_owned(self, binding_sets: Vec<BindingSetLayout>) -> GraphicsPipelineLayout {
+    pub(super) fn to_vk_owned(
+        self,
+        binding_sets_infos: Vec<BindingSetLayoutInfo>,
+    ) -> GraphicsPipelineLayout {
         GraphicsPipelineLayout {
             label: self.label.map(ToOwned::to_owned),
-            binding_sets,
+            binding_sets_infos,
             vertex_stage: OwnedVertexStageInfo {
                 shader: *self.vertex_stage.shader,
                 entry_point: self.vertex_stage.entry_point.to_owned(),
@@ -588,6 +717,108 @@ impl<'a> GraphicsPipelineDescription<'a> {
             front_face: self.front_face,
             multisample_state: self.multisample_state,
             depth_stencil_state: self.depth_stencil_state,
+        }
+    }
+}
+
+impl ImageFormat {
+    pub(super) fn aspect_mask(&self) -> ash::vk::ImageAspectFlags {
+        match self {
+            ImageFormat::Unknown => vk::ImageAspectFlags::empty(),
+            ImageFormat::Rgba8 => vk::ImageAspectFlags::COLOR,
+            ImageFormat::Depth32 => vk::ImageAspectFlags::DEPTH,
+        }
+    }
+}
+
+impl ResourceAccessMode {
+    pub(super) fn image_layout(self) -> vk::ImageLayout {
+        match self {
+            ResourceAccessMode::Undefined => vk::ImageLayout::UNDEFINED,
+            crate::hal::ResourceAccessMode::AttachmentRead(ty) => match ty {
+                crate::hal::AttachmentType::Color => vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                crate::hal::AttachmentType::DepthStencil => {
+                    vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                }
+            },
+            crate::hal::ResourceAccessMode::AttachmentWrite(ty) => match ty {
+                crate::hal::AttachmentType::Color => vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                crate::hal::AttachmentType::DepthStencil => {
+                    vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                }
+            },
+            crate::hal::ResourceAccessMode::VertexInput => unreachable!(),
+            crate::hal::ResourceAccessMode::ShaderRead => vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            crate::hal::ResourceAccessMode::ShaderWrite => vk::ImageLayout::GENERAL,
+            crate::hal::ResourceAccessMode::TransferSrc => vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            crate::hal::ResourceAccessMode::TransferDst => vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        }
+    }
+
+    pub(super) fn access_mask(self) -> vk::AccessFlags2 {
+        match self {
+            ResourceAccessMode::Undefined => Default::default(),
+            crate::hal::ResourceAccessMode::AttachmentRead(ty) => match ty {
+                crate::hal::AttachmentType::Color => vk::AccessFlags2::COLOR_ATTACHMENT_READ,
+                crate::hal::AttachmentType::DepthStencil => {
+                    vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ_KHR
+                }
+            },
+            crate::hal::ResourceAccessMode::AttachmentWrite(ty) => match ty {
+                crate::hal::AttachmentType::Color => vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+                crate::hal::AttachmentType::DepthStencil => {
+                    vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE
+                }
+            },
+            crate::hal::ResourceAccessMode::VertexInput => vk::AccessFlags2::VERTEX_ATTRIBUTE_READ,
+            crate::hal::ResourceAccessMode::ShaderRead => vk::AccessFlags2::SHADER_READ,
+            crate::hal::ResourceAccessMode::ShaderWrite => vk::AccessFlags2::SHADER_WRITE,
+            crate::hal::ResourceAccessMode::TransferSrc => vk::AccessFlags2::TRANSFER_READ,
+            crate::hal::ResourceAccessMode::TransferDst => vk::AccessFlags2::TRANSFER_WRITE,
+        }
+    }
+
+    pub(super) fn pipeline_flags(self) -> vk::PipelineStageFlags2 {
+        match self {
+            ResourceAccessMode::Undefined => Default::default(),
+            crate::hal::ResourceAccessMode::AttachmentRead(ty) => match ty {
+                crate::hal::AttachmentType::Color => {
+                    vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT
+                }
+                crate::hal::AttachmentType::DepthStencil => {
+                    vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
+                }
+            },
+            crate::hal::ResourceAccessMode::AttachmentWrite(ty) => match ty {
+                crate::hal::AttachmentType::Color => {
+                    vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT
+                }
+                crate::hal::AttachmentType::DepthStencil => {
+                    vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
+                        | vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS
+                }
+            },
+            crate::hal::ResourceAccessMode::VertexInput => {
+                vk::PipelineStageFlags2::VERTEX_ATTRIBUTE_INPUT
+            }
+            crate::hal::ResourceAccessMode::ShaderRead => {
+                vk::PipelineStageFlags2::VERTEX_SHADER | vk::PipelineStageFlags2::FRAGMENT_SHADER
+            }
+            crate::hal::ResourceAccessMode::ShaderWrite => {
+                vk::PipelineStageFlags2::VERTEX_SHADER | vk::PipelineStageFlags2::FRAGMENT_SHADER
+            }
+            crate::hal::ResourceAccessMode::TransferSrc => vk::PipelineStageFlags2::TRANSFER,
+            crate::hal::ResourceAccessMode::TransferDst => vk::PipelineStageFlags2::TRANSFER,
+        }
+    }
+}
+
+impl ImageDimension {
+    pub(super) fn image_view_type(self) -> vk::ImageViewType {
+        match self {
+            ImageDimension::D1 => vk::ImageViewType::TYPE_1D,
+            ImageDimension::D2 => vk::ImageViewType::TYPE_2D,
+            ImageDimension::D3 => vk::ImageViewType::TYPE_3D,
         }
     }
 }
@@ -637,8 +868,13 @@ define_resource_resolver!(
         }
         Ok(())
     }) => buffers,
-    (GraphicsPipelineLayout, |_, _| { todo!() }) => graphics_pipeline_infos,
+    (VulkanGraphicsPipelineInfo, |_, _| { todo!() }) => graphics_pipeline_infos,
     (SpirvShaderModule, |hal, module| unsafe { hal.logical_device.handle.destroy_shader_module(module.handle, get_allocation_callbacks()); Ok(()) }) => shader_modules,
+    (VulkanSampler, |hal, sampler| unsafe { hal.logical_device.handle.destroy_sampler(sampler.handle, get_allocation_callbacks()); Ok(())}) => samplers,
+    (VulkanBindingSet,  |hal, bs| unsafe {
+        todo!();
+        Ok(())
+    }) => binding_sets,
 );
 
 pub(super) trait ResolveVulkan<T, H>
@@ -654,6 +890,11 @@ macro_rules! impl_util_methods {
     ($handle:ty, $object:ty) => {
         impl From<$handle> for Handle<$object> {
             fn from(handle: $handle) -> Handle<$object> {
+                unsafe { Handle::from_u64(handle.id) }
+            }
+        }
+        impl From<&$handle> for Handle<$object> {
+            fn from(handle: &$handle) -> Handle<$object> {
                 unsafe { Handle::from_u64(handle.id) }
             }
         }
@@ -687,5 +928,7 @@ impl_util_methods!(Image, VulkanImage, vk::Image);
 impl_util_methods!(ImageView, VulkanImageView, vk::ImageView);
 impl_util_methods!(Buffer, VulkanBuffer, vk::Buffer);
 impl_util_methods!(ShaderModule, SpirvShaderModule, vk::ShaderModule);
-impl_util_methods!(GraphicsPipeline, GraphicsPipelineLayout);
+impl_util_methods!(Sampler, VulkanSampler, vk::Sampler);
+impl_util_methods!(BindingSet, VulkanBindingSet, vk::DescriptorSet);
+impl_util_methods!(GraphicsPipeline, VulkanGraphicsPipelineInfo);
 impl_util_methods!(Swapchain, VulkanSwapchain, vk::SwapchainKHR);

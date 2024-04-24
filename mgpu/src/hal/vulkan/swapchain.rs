@@ -17,7 +17,7 @@ use crate::{
     Image, ImageFormat, MgpuResult, PresentMode, SwapchainCreationInfo, SwapchainImage,
 };
 
-use super::{FramesInFlight, VulkanHal, VulkanHalError, VulkanHalResult};
+use super::{FramesInFlight, VulkanHal, VulkanHalResult};
 
 pub struct VulkanSwapchain {
     pub(crate) handle: vk::SwapchainKHR,
@@ -251,7 +251,7 @@ impl VulkanSwapchain {
                     image,
                     &crate::ImageDescription {
                         label: Some("Swapchain Image"),
-                        usage_flags: image_usage_flags.from_vk(),
+                        usage_flags: image_usage_flags.to_mgpu(),
                         extents: crate::Extents3D {
                             width: surface_capabilities.current_extent.width,
                             height: surface_capabilities.current_extent.height,
@@ -261,9 +261,12 @@ impl VulkanSwapchain {
                         mips: 1.try_into().unwrap(),
                         array_layers: 1.try_into().unwrap(),
                         samples: crate::SampleCount::One,
-                        format: image_format.format.from_vk(),
+                        format: image_format.format.to_mgpu(),
                         memory_domain: crate::MemoryDomain::DeviceLocal,
                     },
+                    vk::ImageLayout::PRESENT_SRC_KHR,
+                    vk::AccessFlags2::empty(),
+                    vk::PipelineStageFlags2::empty(),
                 )?
             };
             let view =
@@ -272,7 +275,7 @@ impl VulkanSwapchain {
             swapchain_images.push(SwapchainImage {
                 image,
                 view,
-                extents: surface_capabilities.current_extent.from_vk(),
+                extents: surface_capabilities.current_extent.to_mgpu(),
             })
         }
 

@@ -36,6 +36,6 @@ pub fn read_image_data(path: &str) -> Vec<u8> {
     let image_content = std::fs::read(path).unwrap();
     image::load_from_memory(&image_content)
         .unwrap()
-        .to_rgb8()
+        .to_rgba8()
         .to_vec()
 }

@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::{
-    hal::{AttachmentType, QueueType, Resource, ResourceAccessMode, ResourceInfo},
+    hal::{
+        AttachmentType, QueueType, Resource, ResourceAccessMode, ResourceInfo, ResourceTransition,
+    },
     util::check,
-    AttachmentStoreOp, Buffer, MgpuResult, RenderPassInfo, SwapchainImage,
+    AttachmentStoreOp, Buffer, Image, ImageRegion, MgpuResult, RenderPassInfo, SwapchainImage,
 };
 
 #[derive(Debug)]
@@ -17,6 +19,12 @@ pub enum Node {
         source_offset: usize,
         dest_offset: usize,
         size: usize,
+    },
+    CopyBufferToImage {
+        source: Buffer,
+        dest: Image,
+        source_offset: usize,
+        dest_region: ImageRegion,
     },
 }
 
@@ -36,11 +44,17 @@ pub struct RdgNode {
 
     // The queue where this node should be placed on
     pub(crate) queue: QueueType,
+
+    // This node's predecessor on the same queue, if None this is the first node on the queue
+    pub(crate) predecessor: Option<usize>,
 }
 
 #[derive(Default, Debug)]
 pub struct Rdg {
     nodes: Vec<RdgNode>,
+    last_on_graphics: Option<usize>,
+    last_on_compute: Option<usize>,
+    last_on_transfer: Option<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
@@ -53,8 +67,13 @@ pub struct OwnershipTransfer {
 #[derive(Default, Debug)]
 pub struct PassGroup {
     pub graphics_nodes: Vec<usize>,
+    pub graphics_resource_transitions: Vec<ResourceTransition>,
+
     pub compute_nodes: Vec<usize>,
+    pub compute_resource_transitions: Vec<ResourceTransition>,
+
     pub transfer_nodes: Vec<usize>,
+    pub transfer_resource_transitions: Vec<ResourceTransition>,
 }
 
 #[derive(Debug)]
@@ -68,11 +87,17 @@ pub struct RdgCompiledGraph {
     pub sequence: Vec<Step>,
     pub nodes: Vec<RdgNode>,
     pub adjacency_list: Vec<HashSet<usize>>,
+    pub topological_sorting: Vec<usize>,
 }
 
 impl Rdg {
     pub fn add_graphics_pass(&mut self, node: Node) {
-        Self::add_on_queue(QueueType::Graphics, &mut self.nodes, node);
+        Self::add_on_queue(
+            QueueType::Graphics,
+            &mut self.nodes,
+            node,
+            &mut self.last_on_graphics,
+        );
     }
     pub fn add_async_compute_pass(&mut self, node: Node) {
         check!(
@@ -83,7 +108,12 @@ impl Rdg {
             !matches!(node, Node::CopyBufferToBuffer { .. }),
             "Cannot add a copy pass node on a transfer queue!"
         );
-        Self::add_on_queue(QueueType::AsyncCompute, &mut self.nodes, node);
+        Self::add_on_queue(
+            QueueType::AsyncCompute,
+            &mut self.nodes,
+            node,
+            &mut self.last_on_compute,
+        );
     }
 
     pub fn add_async_transfer_node(&mut self, node: Node) {
@@ -91,7 +121,12 @@ impl Rdg {
             !matches!(node, Node::RenderPass { .. }),
             "Cannot add a render pass node on a transfer queue!"
         );
-        Self::add_on_queue(QueueType::AsyncTransfer, &mut self.nodes, node);
+        Self::add_on_queue(
+            QueueType::AsyncTransfer,
+            &mut self.nodes,
+            node,
+            &mut self.last_on_transfer,
+        );
     }
 
     pub fn inform_present(&mut self, swapchain_image: SwapchainImage, _swapchain_id: u64) {
@@ -108,6 +143,7 @@ impl Rdg {
                     });
                 }),
                 Node::CopyBufferToBuffer { .. } => {}
+                Node::CopyBufferToImage { .. } => {}
             }
             if stop {
                 return;
@@ -119,9 +155,16 @@ impl Rdg {
         std::mem::take(self)
     }
 
-    fn add_on_queue(queue: QueueType, nodes: &mut Vec<RdgNode>, pass: Node) {
+    fn add_on_queue(
+        queue: QueueType,
+        nodes: &mut Vec<RdgNode>,
+        pass: Node,
+        last_on_queue: &mut Option<usize>,
+    ) {
         let toi = nodes.len();
-        let node = pass.into_rdg(toi, queue);
+        let node = pass.into_rdg(toi, queue, *last_on_queue);
+
+        *last_on_queue = Some(toi);
 
         nodes.push(node);
     }
@@ -163,6 +206,9 @@ impl Rdg {
                     }
                 }
             }
+            if let Some(predecessor) = node.predecessor {
+                adjacency_list[predecessor].insert(node.global_index);
+            }
         }
 
         adjacency_list
@@ -172,32 +218,33 @@ impl Rdg {
         let mut visited = Vec::with_capacity(adjacency_list.len());
         visited.resize(adjacency_list.len(), false);
 
-        let mut on_stack = Vec::with_capacity(adjacency_list.len());
-        on_stack.resize(adjacency_list.len(), false);
+        let mut node_depths = Vec::with_capacity(adjacency_list.len());
+        node_depths.resize(adjacency_list.len(), usize::MAX);
 
         let mut sorted = Vec::with_capacity(adjacency_list.len());
 
         let mut to_visit = VecDeque::new();
-        to_visit.push_front(0usize);
-
-        while let Some(node) = to_visit.pop_front() {
-            on_stack[node] = true;
+        to_visit.push_front((0usize, 0usize));
+        while let Some((node, depth)) = to_visit.pop_front() {
+            if node_depths[node] != usize::MAX && depth > node_depths[node] {
+                panic!("Loop!");
+            }
+            node_depths[node] = depth;
             if visited[node] {
-                on_stack[node] = false;
-                sorted.push(node);
-            } else {
-                to_visit.push_front(node);
-                let children = &adjacency_list[node];
-                for &child in children {
-                    if on_stack[child] {
-                        panic!("Loop!");
-                    }
-
-                    if !visited[child] {
-                        to_visit.push_front(child);
-                    }
+                continue;
+            }
+            let children_to_visit = adjacency_list[node]
+                .iter()
+                .filter(|&&node| !visited[node])
+                .collect::<Vec<_>>();
+            if !children_to_visit.is_empty() {
+                to_visit.push_front((node, depth));
+                for &child in children_to_visit {
+                    to_visit.push_front((child, depth + 1));
                 }
+            } else {
                 visited[node] = true;
+                sorted.push(node);
             }
         }
 
@@ -211,9 +258,11 @@ impl Rdg {
         adjacency_list: Vec<HashSet<usize>>,
         topological_sorting: &[usize],
     ) -> Result<RdgCompiledGraph, crate::MgpuError> {
+        #[derive(Debug)]
         struct QueueOwnership {
             queue: QueueType,
             node: usize,
+            access_mode: ResourceAccessMode,
         }
         let mut ownerships = HashMap::<Resource, QueueOwnership>::new();
         let mut steps = Vec::<Step>::new();
@@ -229,16 +278,32 @@ impl Rdg {
                         .or_insert(QueueOwnership {
                             queue: node_info.queue,
                             node: node_info.global_index,
+                            access_mode: ResourceAccessMode::Undefined,
                         });
 
+                ownership.node = node_info.global_index;
                 if ownership.queue != node_info.queue {
                     barrier_info.push(OwnershipTransfer {
                         source: ownership.queue,
                         destination: node_info.queue,
                         resource: read_resource,
                     });
-                    ownership.node = node_info.global_index;
                     ownership.queue = node_info.queue;
+                    ownership.access_mode = read_resource.access_mode;
+                } else if ownership.access_mode != read_resource.access_mode {
+                    let transition_vec = match ownership.queue {
+                        QueueType::Graphics => &mut current_group.graphics_resource_transitions,
+                        QueueType::AsyncCompute => &mut current_group.compute_resource_transitions,
+                        QueueType::AsyncTransfer => {
+                            &mut current_group.transfer_resource_transitions
+                        }
+                    };
+                    transition_vec.push(ResourceTransition {
+                        resource: read_resource.resource,
+                        old_usage: ownership.access_mode,
+                        new_usage: read_resource.access_mode,
+                    });
+                    ownership.access_mode = read_resource.access_mode;
                 }
             }
 
@@ -249,10 +314,27 @@ impl Rdg {
                         .or_insert(QueueOwnership {
                             queue: node_info.queue,
                             node: node_info.global_index,
+                            access_mode: ResourceAccessMode::Undefined,
                         });
 
                 ownership.node = node_info.global_index;
                 ownership.queue = node_info.queue;
+
+                if ownership.access_mode != written_resource.access_mode {
+                    let transition_vec = match ownership.queue {
+                        QueueType::Graphics => &mut current_group.graphics_resource_transitions,
+                        QueueType::AsyncCompute => &mut current_group.compute_resource_transitions,
+                        QueueType::AsyncTransfer => {
+                            &mut current_group.transfer_resource_transitions
+                        }
+                    };
+                    transition_vec.push(ResourceTransition {
+                        resource: written_resource.resource,
+                        old_usage: ownership.access_mode,
+                        new_usage: written_resource.access_mode,
+                    });
+                    ownership.access_mode = written_resource.access_mode;
+                }
             }
 
             if !barrier_info.is_empty() {
@@ -281,12 +363,13 @@ impl Rdg {
             sequence: steps,
             nodes: std::mem::take(&mut self.nodes),
             adjacency_list,
+            topological_sorting: topological_sorting.to_vec(),
         })
     }
 }
 
 impl Node {
-    fn into_rdg(self, toi: usize, queue: QueueType) -> RdgNode {
+    fn into_rdg(self, toi: usize, queue: QueueType, predecessor: Option<usize>) -> RdgNode {
         let (read, write) = match &self {
             Node::RenderPass { info } => {
                 let all_buffers_read = info
@@ -320,13 +403,43 @@ impl Node {
                 //             size: buffer.size,
                 //         });
 
+                let all_resource_bindings_read = info.steps.iter().flat_map(|step| {
+                    step.commands.iter().flat_map(|cmd| {
+                        cmd.binding_sets.iter().flat_map(|set| {
+                            set.bindings.iter().filter_map(|b| match b.ty {
+                                crate::BindingType::Sampler(_) => None,
+                                crate::BindingType::UniformBuffer {
+                                    buffer,
+                                    offset,
+                                    range,
+                                } => Some(ResourceInfo {
+                                    access_mode: ResourceAccessMode::ShaderRead,
+                                    resource: Resource::Buffer {
+                                        buffer,
+                                        offset,
+                                        size: range,
+                                    },
+                                }),
+                                crate::BindingType::SampledImage { view, .. } => {
+                                    Some(ResourceInfo {
+                                        access_mode: ResourceAccessMode::ShaderRead,
+                                        resource: Resource::Image { image: view.owner },
+                                    })
+                                }
+                            })
+                        })
+                    })
+                });
+
                 let attachments_read = info
                     .framebuffer
                     .render_targets
                     .iter()
                     .filter_map(|rt| match rt.store_op {
                         AttachmentStoreOp::DontCare => Some(ResourceInfo {
-                            resource: Resource::ImageView { view: rt.view },
+                            resource: Resource::Image {
+                                image: rt.view.owner,
+                            },
                             access_mode: ResourceAccessMode::AttachmentRead(AttachmentType::Color),
                         }),
                         AttachmentStoreOp::Store | AttachmentStoreOp::Present => None,
@@ -337,7 +450,9 @@ impl Node {
                             .iter()
                             .filter_map(|dt| match dt.store_op {
                                 AttachmentStoreOp::DontCare => Some(ResourceInfo {
-                                    resource: Resource::ImageView { view: dt.view },
+                                    resource: Resource::Image {
+                                        image: dt.view.owner,
+                                    },
                                     access_mode: ResourceAccessMode::AttachmentRead(
                                         AttachmentType::DepthStencil,
                                     ),
@@ -353,7 +468,9 @@ impl Node {
                         AttachmentStoreOp::DontCare => None,
                         AttachmentStoreOp::Store | AttachmentStoreOp::Present => {
                             Some(ResourceInfo {
-                                resource: Resource::ImageView { view: rt.view },
+                                resource: Resource::Image {
+                                    image: rt.view.owner,
+                                },
                                 access_mode: ResourceAccessMode::AttachmentWrite(
                                     AttachmentType::Color,
                                 ),
@@ -368,7 +485,9 @@ impl Node {
                                 AttachmentStoreOp::DontCare => None,
                                 AttachmentStoreOp::Store | AttachmentStoreOp::Present => {
                                     Some(ResourceInfo {
-                                        resource: Resource::ImageView { view: dt.view },
+                                        resource: Resource::Image {
+                                            image: dt.view.owner,
+                                        },
                                         access_mode: ResourceAccessMode::AttachmentWrite(
                                             AttachmentType::DepthStencil,
                                         ),
@@ -377,7 +496,10 @@ impl Node {
                             }),
                     );
                 (
-                    attachments_read.chain(all_buffers_read).collect(),
+                    attachments_read
+                        .chain(all_buffers_read)
+                        .chain(all_resource_bindings_read)
+                        .collect(),
                     attachments_written
                         // .chain(all_buffers_written)
                         .collect(),
@@ -409,6 +531,27 @@ impl Node {
                 }]
                 .into(),
             ),
+            Node::CopyBufferToImage {
+                source,
+                dest,
+                source_offset,
+                dest_region,
+            } => (
+                [ResourceInfo {
+                    access_mode: ResourceAccessMode::TransferSrc,
+                    resource: Resource::Buffer {
+                        buffer: *source,
+                        offset: *source_offset,
+                        size: dest_region.extents.area() as usize,
+                    },
+                }]
+                .into(),
+                [ResourceInfo {
+                    access_mode: ResourceAccessMode::TransferDst,
+                    resource: Resource::Image { image: *dest },
+                }]
+                .into(),
+            ),
         };
 
         RdgNode {
@@ -417,6 +560,7 @@ impl Node {
             ty: self,
             global_index: toi,
             queue,
+            predecessor,
         }
     }
 }
@@ -445,16 +589,27 @@ impl RdgCompiledGraph {
                     "Copy from {:?}:{:?} to {:?}:{:?} {} bytes",
                     source.id, source_offset, dest.id, dest_offset, size
                 ),
+                Node::CopyBufferToImage {
+                    source,
+                    dest,
+                    source_offset,
+                    dest_region,
+                } => format!(
+                    "Copy {} texels from {:?}:{:?} to image {:?}",
+                    source.id,
+                    source_offset,
+                    dest.id,
+                    dest_region.extents.area()
+                ),
             };
             let label = format!("\t{} [label = \"{}\"];\n", node, node_label);
             nodes += label.as_str();
 
-            let mut line: String = format!("\t{}", node);
+            let mut node_connections: String = Default::default();
             for child in children {
-                line += &format!("-> {}", child)
+                node_connections += &format!("\t{} -> {};\n", node, child)
             }
-            line += ";\n";
-            edges += line.as_str();
+            edges += node_connections.as_str();
         }
         let mut result = "digraph rdg {\n".into();
 
@@ -469,7 +624,7 @@ impl RdgCompiledGraph {
 #[cfg(test)]
 mod tests {
 
-    use crate::{Image, ImageView};
+    use crate::{rdg::Node, Buffer, DrawCommand, GraphicsPipeline, Image, ImageView, RenderStep};
 
     use super::Rdg;
 
@@ -501,11 +656,83 @@ mod tests {
         );
         let compiled = rdg.compile().unwrap();
         assert_eq!(compiled.sequence.len(), 0);
+    }
+    #[test]
+    fn ttg() {
+        let mut rdg = Rdg::default();
+
+        let buffer_src = Buffer {
+            id: 0,
+            usage_flags: Default::default(),
+            size: 1000,
+            memory_domain: crate::MemoryDomain::DeviceLocal,
+        };
+        let buffer_0 = Buffer {
+            id: 1,
+            usage_flags: Default::default(),
+            size: 10,
+            memory_domain: crate::MemoryDomain::DeviceLocal,
+        };
+
+        let buffer_1 = Buffer {
+            id: 2,
+            usage_flags: Default::default(),
+            size: 10,
+            memory_domain: crate::MemoryDomain::DeviceLocal,
+        };
+
+        let gp = GraphicsPipeline { id: 0 };
+
+        rdg.add_async_transfer_node(Node::CopyBufferToBuffer {
+            source: buffer_src,
+            dest: buffer_0,
+            source_offset: 0,
+            dest_offset: 0,
+            size: 10,
+        });
+        rdg.add_async_transfer_node(Node::CopyBufferToBuffer {
+            source: buffer_src,
+            dest: buffer_1,
+            source_offset: 10,
+            dest_offset: 0,
+            size: 10,
+        });
+        rdg.add_graphics_pass(Node::RenderPass {
+            info: crate::RenderPassInfo {
+                label: None,
+                framebuffer: Default::default(),
+                render_area: Default::default(),
+                steps: vec![RenderStep {
+                    color_attachments: vec![],
+                    depth_stencil_attachment: None,
+                    commands: vec![DrawCommand {
+                        pipeline: gp,
+                        vertex_buffers: vec![buffer_0, buffer_1],
+                        index_buffer: None,
+                        binding_sets: vec![],
+                        draw_type: crate::DrawType::Draw {
+                            vertices: 1,
+                            instances: 1,
+                            first_vertex: 1,
+                            first_instance: 1,
+                        },
+                    }],
+                }],
+            },
+        });
+
+        let compiled = rdg.compile().unwrap();
+        println!("Topo {:?}", compiled.topological_sorting);
+        println!("Adj {:?}", compiled.adjacency_list);
+        println!("Dot\n{}", compiled.dump_dot());
+        assert_eq!(compiled.sequence.len(), 3);
         let step_0 = &compiled.sequence[0];
         match step_0 {
             crate::rdg::Step::OwnershipTransfer { .. } => panic!("Barrier with only a present"),
-            crate::rdg::Step::ExecutePasses(..) => {
-                panic!("PassGroup with only a present!")
+            crate::rdg::Step::ExecutePasses(passes) => {
+                assert_eq!(passes.transfer_nodes.len(), 2);
+                assert_eq!(passes.graphics_nodes.len(), 0);
+                assert_eq!(passes.compute_nodes.len(), 0);
             }
         }
     }

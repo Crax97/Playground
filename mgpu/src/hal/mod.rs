@@ -1,9 +1,11 @@
 use crate::{
-    BindingSet, BindingSetLayout, Buffer, BufferDescription, BufferWriteParams, CullMode,
-    DepthStencilState, DepthStencilTargetInfo, DeviceConfiguration, DeviceInfo, FrontFace,
-    GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageView, MgpuResult,
-    MultisampleState, PolygonMode, PrimitiveTopology, RenderPassInfo, RenderTargetInfo,
-    ShaderModule, ShaderModuleDescription, ShaderModuleLayout, VertexInputDescription,
+    BindingSet, BindingSetDescription, BindingSetLayout, BindingSetLayoutInfo, Buffer,
+    BufferDescription, BufferWriteParams, CullMode, DepthStencilState, DepthStencilTargetInfo,
+    DeviceConfiguration, DeviceInfo, FrontFace, GraphicsPipeline, GraphicsPipelineDescription,
+    Image, ImageDescription, ImageRegion, ImageView, ImageViewDescription, MgpuResult,
+    MultisampleState, PolygonMode, PrimitiveTopology, RenderPassInfo, RenderTargetInfo, Sampler,
+    SamplerDescription, ShaderModule, ShaderModuleDescription, ShaderModuleLayout,
+    VertexInputDescription,
 };
 use std::sync::Arc;
 
@@ -31,7 +33,7 @@ pub struct OwnedFragmentStageInfo {
 #[derive(Clone, Hash)]
 pub struct GraphicsPipelineLayout {
     pub label: Option<String>,
-    pub binding_sets: Vec<BindingSetLayout>,
+    pub binding_sets_infos: Vec<BindingSetLayoutInfo>,
     pub vertex_stage: OwnedVertexStageInfo,
     pub fragment_stage: Option<OwnedFragmentStageInfo>,
     pub primitive_restart_enabled: bool,
@@ -49,13 +51,13 @@ pub struct CommandRecorderAllocator {
     queue_type: QueueType,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub struct CommandRecorder {
     id: u64,
     queue_type: QueueType,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
 pub enum QueueType {
     // This queue can execute both graphics commands (such as drawing) and sync compute commands
     Graphics,
@@ -72,8 +74,10 @@ pub enum AttachmentType {
     DepthStencil,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
 pub enum ResourceAccessMode {
+    #[default]
+    Undefined,
     AttachmentRead(AttachmentType),
     AttachmentWrite(AttachmentType),
 
@@ -91,9 +95,7 @@ pub enum Resource {
     Image {
         image: Image,
     },
-    ImageView {
-        view: ImageView,
-    },
+
     Buffer {
         buffer: Buffer,
         offset: usize,
@@ -106,12 +108,11 @@ pub struct ResourceInfo {
     pub resource: Resource,
     pub access_mode: ResourceAccessMode,
 }
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct SynchronizationResource {
-    pub ty: Resource,
-    pub source_access_mode: ResourceAccessMode,
-    pub destination_access_mode: ResourceAccessMode,
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct ResourceTransition {
+    pub resource: Resource,
+    pub old_usage: ResourceAccessMode,
+    pub new_usage: ResourceAccessMode,
 }
 
 #[derive(Clone)]
@@ -123,12 +124,12 @@ pub struct SynchronizationInfo {
     pub resources: Vec<ResourceInfo>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct SubmissionGroup {
     pub command_recorders: Vec<CommandRecorder>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SubmitInfo {
     pub submission_groups: Vec<SubmissionGroup>,
 }
@@ -166,10 +167,17 @@ pub(crate) trait Hal: Send + Sync {
         vertex_buffers: &[Buffer],
     ) -> MgpuResult<()>;
 
+    unsafe fn set_index_buffer(
+        &self,
+        command_recorder: CommandRecorder,
+        index_buffer: Buffer,
+    ) -> MgpuResult<()>;
+
     unsafe fn set_binding_sets(
         &self,
         command_recorder: CommandRecorder,
         binding_sets: &[BindingSet],
+        graphics_pipeline: GraphicsPipeline,
     ) -> MgpuResult<()>;
 
     unsafe fn draw(
@@ -179,6 +187,15 @@ pub(crate) trait Hal: Send + Sync {
         indices: usize,
         first_vertex: usize,
         first_index: usize,
+    ) -> MgpuResult<()>;
+    unsafe fn draw_indexed(
+        &self,
+        command_recorder: CommandRecorder,
+        indices: usize,
+        instances: usize,
+        first_index: usize,
+        vertex_offset: i32,
+        first_instance: usize,
     ) -> MgpuResult<()>;
 
     unsafe fn advance_to_next_step(&self, command_recorder: CommandRecorder) -> MgpuResult<()>;
@@ -197,7 +214,21 @@ pub(crate) trait Hal: Send + Sync {
         size: usize,
     ) -> MgpuResult<()>;
 
+    unsafe fn cmd_copy_buffer_to_image(
+        &self,
+        command_buffer: CommandRecorder,
+        source: Buffer,
+        dest: Image,
+        source_offset: usize,
+        dest_region: ImageRegion,
+    ) -> MgpuResult<()>;
+
     unsafe fn enqueue_synchronization(&self, infos: &[SynchronizationInfo]) -> MgpuResult<()>;
+    fn transition_resources(
+        &self,
+        command_recorder: CommandRecorder,
+        resources: &[ResourceTransition],
+    ) -> MgpuResult<()>;
 
     #[cfg(feature = "swapchain")]
     fn create_swapchain_impl(&self, swapchain_info: &SwapchainCreationInfo) -> MgpuResult<u64>;
@@ -219,6 +250,11 @@ pub(crate) trait Hal: Send + Sync {
     fn create_image(&self, image_description: &ImageDescription) -> MgpuResult<Image>;
     fn image_name(&self, image: Image) -> MgpuResult<Option<String>>;
     fn destroy_image(&self, image: Image) -> MgpuResult<()>;
+
+    fn create_image_view(
+        &self,
+        image_view_description: &ImageViewDescription,
+    ) -> MgpuResult<ImageView>;
 
     fn create_buffer(&self, buffer_description: &BufferDescription) -> MgpuResult<Buffer>;
     fn buffer_name(&self, buffer: Buffer) -> MgpuResult<Option<String>>;
@@ -243,6 +279,16 @@ pub(crate) trait Hal: Send + Sync {
         shader_module: ShaderModule,
     ) -> MgpuResult<ShaderModuleLayout>;
     fn destroy_shader_module(&self, shader_module: ShaderModule) -> MgpuResult<()>;
+
+    fn create_sampler(&self, sampler_description: &SamplerDescription) -> MgpuResult<Sampler>;
+    fn destroy_sampler(&self, sampler: Sampler) -> MgpuResult<()>;
+
+    fn create_binding_set(
+        &self,
+        description: &BindingSetDescription,
+        layout: &BindingSetLayout,
+    ) -> MgpuResult<BindingSet>;
+    fn destroy_binding_set(&self, binding_set: BindingSet) -> MgpuResult<()>;
 
     fn destroy_image_view(&self, image_view: ImageView) -> MgpuResult<()>;
 

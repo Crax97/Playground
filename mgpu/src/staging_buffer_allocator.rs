@@ -16,7 +16,7 @@ impl StagingBufferAllocator {
     const MB_128: usize = 1024 * 1024 * 128;
 
     // Returns a suitable, host-visible, buffer big enough to write 'size' bytes to it
-    pub(crate) fn get_staging_buffer(
+    pub(crate) fn allocate_staging_buffer_region(
         &mut self,
         device: &Device,
         size: usize,
