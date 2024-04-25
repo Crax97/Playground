@@ -770,6 +770,15 @@ pub struct ImageView {
     subresource: ImageSubresource,
     id: u64,
 }
+impl ImageView {
+    pub fn extents_2d(&self) -> Extents2D {
+        let exents = self.owner.mip_region(self.subresource.mip).extents;
+        Extents2D {
+            width: exents.width,
+            height: exents.height,
+        }
+    }
+}
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 pub struct Sampler {

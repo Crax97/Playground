@@ -118,7 +118,7 @@ fn main() {
     let mvp = [mvp];
 
     let texture_data = util::read_image_data("examples/assets/david.jpg");
-    let depth_image = device
+    let mut depth_image = device
         .create_image(&ImageDescription {
             label: Some("Depth image"),
             usage_flags: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
@@ -135,7 +135,7 @@ fn main() {
             memory_domain: MemoryDomain::DeviceLocal,
         })
         .unwrap();
-    let depth_image_view = device
+    let mut depth_image_view = device
         .create_image_view(&ImageViewDescription {
             label: Some("Depth image view"),
             format: ImageFormat::Depth32,
@@ -411,16 +411,48 @@ fn main() {
                     device.submit().unwrap();
                     window.request_redraw();
                 }
-                WindowEvent::Resized(new_size) => swapchain
-                    .resized(
-                        Extents2D {
-                            width: new_size.width,
-                            height: new_size.height,
-                        },
-                        window.window_handle().unwrap(),
-                        window.display_handle().unwrap(),
-                    )
-                    .unwrap(),
+                WindowEvent::Resized(new_size) => {
+                    swapchain
+                        .resized(
+                            Extents2D {
+                                width: new_size.width,
+                                height: new_size.height,
+                            },
+                            window.window_handle().unwrap(),
+                            window.display_handle().unwrap(),
+                        )
+                        .unwrap();
+
+                    device.destroy_image_view(depth_image_view).unwrap();
+                    device.destroy_image(depth_image).unwrap();
+                    depth_image = device
+                        .create_image(&ImageDescription {
+                            label: Some("Depth image"),
+                            usage_flags: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                            extents: Extents3D {
+                                width: new_size.width,
+                                height: new_size.height,
+                                depth: 1,
+                            },
+                            dimension: ImageDimension::D2,
+                            mips: NonZeroU32::new(1).unwrap(),
+                            array_layers: NonZeroU32::new(1).unwrap(),
+                            samples: SampleCount::One,
+                            format: ImageFormat::Depth32,
+                            memory_domain: MemoryDomain::DeviceLocal,
+                        })
+                        .unwrap();
+                    depth_image_view = device
+                        .create_image_view(&ImageViewDescription {
+                            label: Some("Depth image view"),
+                            format: ImageFormat::Depth32,
+                            aspect: mgpu::ImageAspect::Depth,
+                            image: depth_image,
+                            image_subresource: depth_image.whole_subresource(),
+                            dimension: ImageDimension::D2,
+                        })
+                        .unwrap();
+                }
                 _ => {}
             },
             Event::DeviceEvent { .. } => {}
