@@ -150,7 +150,8 @@ macro_rules! define_resource_resolver {
             }
 
             /// Resolves a copy of the resource if it exists
-            pub fn resolve<T: Copy>(&self, handle: impl Into<Handle<T>>) -> Option<T> where ResourceResolver: GetMap<T> {
+            #[allow(dead_code)]
+            pub fn resolve_copy<T: Copy>(&self, handle: impl Into<Handle<T>>) -> Option<T> where ResourceResolver: GetMap<T> {
                 self.get::<T>().resolve_copy(handle.into())
             }
 
@@ -307,13 +308,13 @@ impl<S, T> ResourceArena<S, T> {
 }
 
 impl<S, T: Copy> ResourceArena<S, T> {
-    pub(crate) fn resolve_copy(&self, handle: Handle<T>) -> Option<T> {
+    pub fn resolve_copy(&self, handle: Handle<T>) -> Option<T> {
         self.resolve(handle).copied()
     }
 }
 
 impl<S, T: Clone> ResourceArena<S, T> {
-    pub(crate) fn resolve_clone(&self, handle: Handle<T>) -> Option<T> {
+    pub fn resolve_clone(&self, handle: Handle<T>) -> Option<T> {
         self.resolve(handle).cloned()
     }
 }
@@ -370,7 +371,7 @@ impl<T> Handle<T> {
         }
     }
 
-    pub(crate) fn to_u64(self) -> u64 {
+    pub(crate) fn to_u64(&self) -> u64 {
         self.id
     }
 

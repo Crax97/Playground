@@ -8,7 +8,6 @@ use crate::hal::vulkan::util::{
     VulkanSampler,
 };
 use crate::hal::{CommandRecorder, CommandRecorderAllocator, Hal, QueueType, ResourceAccessMode};
-use crate::rdg::PassGroup;
 use crate::util::{check, hash_type, Handle};
 use crate::{
     AttachmentAccessMode, AttachmentStoreOp, BindingSet, BindingSetDescription, BindingSetElement,
@@ -19,10 +18,7 @@ use crate::{
     MgpuResult, RenderPassInfo, Sampler, SamplerDescription, ShaderAttribute, ShaderModule,
     ShaderModuleLayout, ShaderStageFlags, StorageAccessMode, VertexAttributeFormat,
 };
-use ash::vk::{
-    ComponentMapping, DebugUtilsMessageSeverityFlagsEXT, Handle as AshHandle, ImageLayout,
-    QueueFlags,
-};
+use ash::vk::{ComponentMapping, Handle as AshHandle, ImageLayout, QueueFlags};
 use ash::{vk, Entry, Instance};
 use gpu_allocator::vulkan::{
     AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc,
@@ -38,7 +34,7 @@ use std::ffi::{self, c_char, CStr, CString};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::iter;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
+use std::sync::{Arc, Mutex, RwLock};
 
 use self::swapchain::{SwapchainError, VulkanSwapchain};
 use self::util::{
@@ -73,6 +69,7 @@ pub struct VulkanHalConfiguration {
     frames_in_flight: usize,
 }
 
+#[allow(dead_code)]
 pub struct VulkanPhysicalDevice {
     handle: vk::PhysicalDevice,
     name: String,
@@ -81,15 +78,18 @@ pub struct VulkanPhysicalDevice {
     features: VulkanDeviceFeatures,
 }
 
+#[allow(dead_code)]
 pub struct VulkanQueueFamily {
     pub index: u32,
     pub requested_flags: QueueFlags,
 }
 
+#[allow(dead_code)]
 pub struct VulkanQueueFamilies {
     pub families: Vec<VulkanQueueFamily>,
 }
 
+#[allow(dead_code)]
 pub struct VulkanQueue {
     handle: vk::Queue,
     family_index: u32,
@@ -103,6 +103,7 @@ pub struct VulkanLogicalDevice {
     transfer_queue: VulkanQueue,
 }
 
+#[allow(dead_code)]
 pub(crate) struct VulkanDebugUtilities {
     debug_messenger: vk::DebugUtilsMessengerEXT,
     debug_instance: ash::ext::debug_utils::Instance,
@@ -112,8 +113,6 @@ pub(crate) struct FrameInFlight {
     graphics_command_pool: vk::CommandPool,
     compute_command_pool: vk::CommandPool,
     transfer_command_pool: vk::CommandPool,
-
-    command_buffers: RwLock<Vec<CommandBuffers>>,
 
     graphics_work_ended_fence: vk::Fence,
     compute_work_ended_fence: vk::Fence,
@@ -160,19 +159,6 @@ pub enum VulkanHalError {
 }
 
 pub type VulkanHalResult<T> = Result<T, VulkanHalError>;
-
-// Any of these might be null
-#[derive(Default, Clone, Copy)]
-struct CommandBuffers {
-    graphics: vk::CommandBuffer,
-    graphics_semaphore: vk::Semaphore,
-
-    compute: vk::CommandBuffer,
-    compute_semaphore: vk::Semaphore,
-
-    transfer: vk::CommandBuffer,
-    transfer_semaphore: vk::Semaphore,
-}
 
 impl Hal for VulkanHal {
     fn device_info(&self) -> crate::DeviceInfo {
@@ -514,7 +500,7 @@ impl Hal for VulkanHal {
             .map_err(|e| MgpuError::VulkanError(VulkanHalError::GpuAllocatorError(e)))?;
         unsafe { device.bind_image_memory(image, allocation.memory(), allocation.offset())? };
 
-        let mut mips = iter::repeat(LayoutInfo::default())
+        let mips = iter::repeat(LayoutInfo::default())
             .take(image_description.mips.get() as usize)
             .collect::<Vec<_>>();
         let mut layouts = vec![];
@@ -1015,7 +1001,6 @@ impl Hal for VulkanHal {
             })
             .collect::<Vec<_>>();
         let cb = vk::CommandBuffer::from_raw(command_recorder.id);
-        let pipeline_layouts = self.pipeline_layouts.write().unwrap();
         let graphics_pipeline = self
             .resolver
             .apply(graphics_pipeline, |g| Ok(g.vk_layout))?;
@@ -1674,27 +1659,6 @@ impl Hal for VulkanHal {
     }
 }
 
-fn validate_descriptor_set_binding(
-    ds_binding: &mut BindingSetElement,
-    binding: &BindingSetElement,
-    set: &BindingSetLayoutInfo,
-) {
-    check!(
-        ds_binding.array_length == binding.array_length,
-        &format!(
-            "For binding (set={}, binding={}) different array lenght: expected {}, got {}",
-            set.set, binding.binding, binding.array_length, ds_binding.array_length
-        )
-    );
-    check!(
-        ds_binding.ty == binding.ty,
-        &format!(
-            "For binding (set={}, binding={}) different binding type: expected {:?}, got {:?}",
-            set.set, binding.binding, binding.ty, ds_binding.ty
-        )
-    );
-}
-
 impl VulkanHal {
     const VULKAN_API_VERSION: u32 = vk::make_api_version(0, 1, 3, 272);
     pub(crate) fn create(configuration: &DeviceConfiguration) -> MgpuResult<Arc<dyn Hal>> {
@@ -2143,9 +2107,13 @@ impl VulkanHal {
         if let Some(name) = image_description.label {
             self.try_assign_debug_name(image, name)?;
         }
-        let mut mips = iter::repeat(LayoutInfo::default())
-            .take(image_description.mips.get() as usize)
-            .collect::<Vec<_>>();
+        let mips = iter::repeat(LayoutInfo {
+            image_layout: layout,
+            access_mask: access_flags,
+            stage_mask,
+        })
+        .take(image_description.mips.get() as usize)
+        .collect::<Vec<_>>();
         let mut layouts = vec![];
         layouts.resize(image_description.array_layers.get() as usize, mips);
         let vulkan_image = VulkanImage {
@@ -2263,7 +2231,6 @@ impl VulkanHal {
                 transfer_command_pool: make_command_pool(
                     logical_device.transfer_queue.family_index,
                 )?,
-                command_buffers: Default::default(),
                 allocated_semaphores: vec![],
                 cached_semaphores: vec![],
                 atomic_semaphore_counter: AtomicU64::from(0),
@@ -2630,7 +2597,7 @@ impl VulkanHal {
             .cull_mode(pipeline_layout.cull_mode.to_vk())
             .front_face(pipeline_layout.front_face.to_vk());
 
-        let multisample_state = if let Some(state) = &pipeline_layout.multisample_state {
+        let multisample_state = if let Some(_state) = &pipeline_layout.multisample_state {
             todo!()
         } else {
             vk::PipelineMultisampleStateCreateInfo::default()
@@ -3040,7 +3007,7 @@ impl VulkanHal {
             if let Some(pool) = infos.pools.last().copied() {
                 if pool.allocated == pool.max {
                     let new_pool = make_ds_pool()?;
-                    infos.pools.push(pool);
+                    infos.pools.push(new_pool);
                 }
             } else {
                 let pool = make_ds_pool()?;
@@ -3171,59 +3138,6 @@ fn hash_render_pass_info(render_pass_info: &RenderPassInfo) -> u64 {
     hasher.finish()
 }
 impl FrameInFlight {
-    fn get_last_command_buffers(
-        &self,
-        device: &ash::Device,
-        current_frame: &FrameInFlight,
-        group: &PassGroup,
-    ) -> VulkanHalResult<CommandBuffers> {
-        let mut command_buffer_list = self
-            .command_buffers
-            .write()
-            .expect("Failed to lock command buffers");
-        if command_buffer_list.is_empty() {
-            let mut command_buffers = CommandBuffers::default();
-
-            let allocate_command_buffer = |command_pool| {
-                let info = vk::CommandBufferAllocateInfo::default()
-                    .command_pool(command_pool)
-                    .command_buffer_count(1)
-                    .level(vk::CommandBufferLevel::PRIMARY);
-
-                let command_buffers = unsafe { device.allocate_command_buffers(&info)? };
-                VulkanHalResult::Ok(command_buffers[0])
-            };
-            let make_semaphore = || {
-                let info =
-                    vk::SemaphoreCreateInfo::default().flags(vk::SemaphoreCreateFlags::empty());
-
-                unsafe { device.create_semaphore(&info, get_allocation_callbacks()) }
-            };
-            if !group.graphics_passes.is_empty() {
-                command_buffers.graphics =
-                    allocate_command_buffer(current_frame.graphics_command_pool)?;
-                command_buffers.graphics_semaphore = make_semaphore()?;
-            }
-            if !group.compute_passes.is_empty() {
-                command_buffers.compute =
-                    allocate_command_buffer(current_frame.compute_command_pool)?;
-                command_buffers.compute_semaphore = make_semaphore()?;
-            }
-
-            command_buffer_list.push(command_buffers);
-            Ok(command_buffers)
-        } else {
-            let last = command_buffer_list.last().unwrap();
-            Ok(*last)
-        }
-    }
-
-    fn read_command_buffers(&self) -> RwLockReadGuard<'_, Vec<CommandBuffers>> {
-        self.command_buffers
-            .read()
-            .expect("Failed to lock command buffers")
-    }
-
     fn allocate_semaphore(&mut self, device: &ash::Device) -> VulkanHalResult<vk::Semaphore> {
         if let Some(sem) = self.cached_semaphores.pop() {
             Ok(sem)

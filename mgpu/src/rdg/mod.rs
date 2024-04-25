@@ -624,7 +624,7 @@ impl RdgCompiledGraph {
                     dest_offset,
                     size,
                 } => format!(
-                    "Copy from {:?}:{:?} to {:?}:{:?} {} bytes",
+                    "Copy {:?}:{:?} -> {:?}:{:?} {} bytes",
                     source.id, source_offset, dest.id, dest_offset, size
                 ),
                 Node::CopyBufferToImage {
@@ -633,11 +633,11 @@ impl RdgCompiledGraph {
                     source_offset,
                     dest_region,
                 } => format!(
-                    "Copy {} texels from {:?}:{:?} to image {:?}",
+                    "Copy {} texels {}:{} -> {}",
+                    dest_region.extents.area(),
                     source.id,
                     source_offset,
                     dest.id,
-                    dest_region.extents.area()
                 ),
                 Node::Blit {
                     source,
@@ -646,7 +646,19 @@ impl RdgCompiledGraph {
                     dest_region,
                     filter,
                 } => {
-                    format!("Blit from {} to {}", source.id, dest.id)
+                    format!(
+                        "{}Blit {} l{}m{} -> {} l{}m{}",
+                        match filter {
+                            FilterMode::Nearest => "Near",
+                            FilterMode::Linear => "Lin",
+                        },
+                        source.id,
+                        source_region.base_array_layer,
+                        source_region.num_layers.get(),
+                        dest.id,
+                        dest_region.base_array_layer,
+                        dest_region.num_layers.get()
+                    )
                 }
             };
             let label = format!("\t{} [label = \"{}\"];\n", node, node_label);

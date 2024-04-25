@@ -626,8 +626,8 @@ impl BindingType {
     fn binding_type(&self) -> BindingSetElementKind {
         match self {
             BindingType::Sampler(_) => BindingSetElementKind::Sampler,
-            BindingType::SampledImage { view } => BindingSetElementKind::SampledImage,
-            BindingType::UniformBuffer { buffer, .. } => BindingSetElementKind::Buffer {
+            BindingType::SampledImage { .. } => BindingSetElementKind::SampledImage,
+            BindingType::UniformBuffer { .. } => BindingSetElementKind::Buffer {
                 ty: BufferType::Uniform,
                 access_mode: StorageAccessMode::Read,
             },
@@ -683,7 +683,7 @@ impl Buffer {
 
     pub fn bind_whole_range_uniform_buffer(&self) -> BindingType {
         BindingType::UniformBuffer {
-            buffer: self.clone(),
+            buffer: *self,
             offset: 0,
             range: self.size,
         }

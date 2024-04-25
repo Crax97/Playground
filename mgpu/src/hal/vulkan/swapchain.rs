@@ -14,11 +14,12 @@ use crate::{
         },
         Hal,
     },
-    Image, ImageFormat, MgpuResult, PresentMode, SwapchainCreationInfo, SwapchainImage,
+    ImageFormat, MgpuResult, PresentMode, SwapchainCreationInfo, SwapchainImage,
 };
 
 use super::{FramesInFlight, VulkanHal, VulkanHalResult};
 
+#[allow(dead_code)]
 pub struct VulkanSwapchain {
     pub(crate) handle: vk::SwapchainKHR,
     pub(crate) swapchain_instance: swapchain::Instance,
@@ -30,6 +31,7 @@ pub struct VulkanSwapchain {
     pub(crate) current_image_index: Option<u32>,
 }
 
+#[allow(dead_code)]
 pub(crate) struct SwapchainData {
     pub(crate) capabilities: vk::SurfaceCapabilitiesKHR,
     pub(crate) present_modes: Vec<vk::PresentModeKHR>,
@@ -360,19 +362,5 @@ impl VulkanSwapchain {
         }
 
         Ok(())
-    }
-}
-
-impl Drop for VulkanSwapchain {
-    fn drop(&mut self) {
-        if self.data.surface == vk::SurfaceKHR::null() {
-            return;
-        }
-        unsafe {
-            // self.swapchain_device
-            //     .destroy_swapchain(self.handle, get_allocation_callbacks());
-            // self.surface_instance
-            //     .destroy_surface(self.data.surface, get_allocation_callbacks());
-        }
     }
 }

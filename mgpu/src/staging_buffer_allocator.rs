@@ -57,9 +57,4 @@ impl StagingBufferAllocator {
         })?;
         Ok(buffer)
     }
-
-    pub fn clear(&mut self) {
-        self.current_buffer_idx = 0;
-        self.current_offset = 0;
-    }
 }

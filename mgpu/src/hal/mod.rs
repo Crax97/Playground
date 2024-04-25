@@ -7,7 +7,7 @@ use crate::{
     RenderPassInfo, RenderTargetInfo, Sampler, SamplerDescription, ShaderModule,
     ShaderModuleDescription, ShaderModuleLayout, VertexInputDescription,
 };
-use std::{iter::FilterMap, sync::Arc};
+use std::sync::Arc;
 
 #[cfg(feature = "swapchain")]
 use crate::swapchain::*;
@@ -84,6 +84,7 @@ pub enum ResourceAccessMode {
     VertexInput,
 
     ShaderRead,
+    #[allow(dead_code)]
     ShaderWrite,
 
     TransferSrc,

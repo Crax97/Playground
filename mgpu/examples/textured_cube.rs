@@ -180,7 +180,7 @@ fn main() {
     // the mip chain will be created from the new image data
     device.generate_mip_chain(texture_image).unwrap();
 
-    let image_view = device
+    let texture_image_view = device
         .create_image_view(&ImageViewDescription {
             label: Some("David image view"),
             format: ImageFormat::Rgba8,
@@ -344,7 +344,9 @@ fn main() {
                     },
                     Binding {
                         binding: 1,
-                        ty: BindingType::SampledImage { view: image_view },
+                        ty: BindingType::SampledImage {
+                            view: texture_image_view,
+                        },
                     },
                     Binding {
                         binding: 2,
@@ -433,6 +435,11 @@ fn main() {
         })
         .unwrap();
 
+    device.destroy_graphics_pipeline(pipeline).unwrap();
+    device.destroy_image_view(depth_image_view).unwrap();
+    device.destroy_image_view(texture_image_view).unwrap();
+    device.destroy_image(depth_image).unwrap();
+    device.destroy_image(texture_image).unwrap();
     device.destroy_binding_set(binding_set).unwrap();
     device.destroy_sampler(sampler).unwrap();
     // device.destroy_image_view(image_view);

@@ -281,7 +281,7 @@ impl Device {
                                         *dest_region,
                                     )?
                                 }
-                                Node::Blit {..} => unsafe {
+                                Node::Blit {..} => {
                                    unreachable!()
                                 },
                             }
@@ -395,7 +395,7 @@ impl Device {
         self.hal.create_buffer(buffer_description)
     }
 
-    pub(crate) fn write_buffer_immediate(
+    pub fn write_buffer_immediate(
         &self,
         buffer: Buffer,
         params: &BufferWriteParams,
@@ -580,8 +580,8 @@ impl Device {
         Ok(())
     }
 
-    pub fn destroy_image_view(&self, image_view: ImageView) {
-        todo!()
+    pub fn destroy_image_view(&self, image_view: ImageView) -> MgpuResult<()> {
+        self.hal.destroy_image_view(image_view)
     }
 
     pub fn create_command_recorder<T: CommandRecorderType>(&self) -> CommandRecorder<T> {
@@ -614,7 +614,7 @@ impl Device {
         );
     }
 
-    fn validate_image_view_description(image_description: &ImageViewDescription) {
+    fn validate_image_view_description(_image_view_description: &ImageViewDescription) {
     }
 
     fn validate_buffer_description(buffer_description: &BufferDescription) {
