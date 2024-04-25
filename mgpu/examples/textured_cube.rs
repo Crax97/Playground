@@ -117,7 +117,7 @@ fn main() {
     let mvp = projection * view * model;
     let mvp = [mvp];
 
-    let texture_data = util::read_image_data("mgpu/examples/assets/david.jpg");
+    let texture_data = util::read_image_data("examples/assets/david.jpg");
     let depth_image = device
         .create_image(&ImageDescription {
             label: Some("Depth image"),
@@ -141,21 +141,23 @@ fn main() {
             format: ImageFormat::Depth32,
             aspect: mgpu::ImageAspect::Depth,
             image: depth_image,
-            image_region: depth_image.whole_region(0),
+            image_subresource: depth_image.whole_subresource(),
             dimension: ImageDimension::D2,
         })
         .unwrap();
-    let image = device
+    let texture_image = device
         .create_image(&ImageDescription {
             label: Some("Cube Texture"),
-            usage_flags: ImageUsageFlags::SAMPLED | ImageUsageFlags::TRANSFER_DST,
+            usage_flags: ImageUsageFlags::SAMPLED
+                | ImageUsageFlags::TRANSFER_DST
+                | ImageUsageFlags::TRANSFER_SRC,
             extents: Extents3D {
                 width: 512,
                 height: 512,
                 depth: 1,
             },
             dimension: ImageDimension::D2,
-            mips: NonZeroU32::new(1).unwrap(),
+            mips: NonZeroU32::new(9).unwrap(),
             array_layers: NonZeroU32::new(1).unwrap(),
             samples: SampleCount::One,
             format: ImageFormat::Rgba8,
@@ -165,21 +167,26 @@ fn main() {
 
     device
         .write_image_data(
-            image,
+            texture_image,
             &ImageWriteParams {
                 data: &texture_data,
-                region: image.whole_region(0),
+                region: texture_image.mip_region(0),
             },
         )
         .unwrap();
+
+    // The order of operations is important!
+    // Requesting a mip chain BEFORE we write to the image doesn't guarantee that
+    // the mip chain will be created from the new image data
+    device.generate_mip_chain(texture_image).unwrap();
 
     let image_view = device
         .create_image_view(&ImageViewDescription {
             label: Some("David image view"),
             format: ImageFormat::Rgba8,
             aspect: mgpu::ImageAspect::Color,
-            image,
-            image_region: image.whole_region(0),
+            image: texture_image,
+            image_subresource: texture_image.whole_subresource(),
             dimension: ImageDimension::D2,
         })
         .unwrap();
@@ -370,7 +377,7 @@ fn main() {
                     {
                         let mut render_pass = command_recorder
                             .begin_render_pass(&RenderPassDescription {
-                                label: Some("Triangle rendering"),
+                                label: Some("Cube Rendering"),
                                 render_targets: &[RenderTarget {
                                     view: swapchain_image.view,
                                     sample_count: SampleCount::One,

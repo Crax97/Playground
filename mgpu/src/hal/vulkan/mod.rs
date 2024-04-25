@@ -4,7 +4,8 @@ mod util;
 mod swapchain;
 
 use crate::hal::vulkan::util::{
-    DescriptorPoolInfo, ToVk, VulkanBindingSet, VulkanBuffer, VulkanImage, VulkanSampler,
+    DescriptorPoolInfo, LayoutInfo, ToVk, VulkanBindingSet, VulkanBuffer, VulkanImage,
+    VulkanSampler,
 };
 use crate::hal::{CommandRecorder, CommandRecorderAllocator, Hal, QueueType, ResourceAccessMode};
 use crate::rdg::PassGroup;
@@ -12,11 +13,11 @@ use crate::util::{check, hash_type, Handle};
 use crate::{
     AttachmentAccessMode, AttachmentStoreOp, BindingSet, BindingSetDescription, BindingSetElement,
     BindingSetElementKind, BindingSetLayout, BindingSetLayoutInfo, Buffer, BufferDescription,
-    DeviceConfiguration, DeviceFeatures, DevicePreference, Framebuffer, GraphicsPipeline,
-    GraphicsPipelineDescription, GraphicsPipelineLayout, Image, ImageDescription, ImageDimension,
-    ImageFormat, ImageRegion, MemoryDomain, MgpuError, MgpuResult, RenderPassInfo, Sampler,
-    SamplerDescription, ShaderAttribute, ShaderModule, ShaderModuleLayout, ShaderStageFlags,
-    StorageAccessMode, VertexAttributeFormat,
+    DeviceConfiguration, DeviceFeatures, DevicePreference, FilterMode, Framebuffer,
+    GraphicsPipeline, GraphicsPipelineDescription, GraphicsPipelineLayout, Image, ImageDescription,
+    ImageDimension, ImageFormat, ImageRegion, ImageSubresource, MemoryDomain, MgpuError,
+    MgpuResult, RenderPassInfo, Sampler, SamplerDescription, ShaderAttribute, ShaderModule,
+    ShaderModuleLayout, ShaderStageFlags, StorageAccessMode, VertexAttributeFormat,
 };
 use ash::vk::{
     ComponentMapping, DebugUtilsMessageSeverityFlagsEXT, Handle as AshHandle, ImageLayout,
@@ -35,6 +36,7 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{self, c_char, CStr, CString};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::iter;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
 
@@ -512,14 +514,17 @@ impl Hal for VulkanHal {
             .map_err(|e| MgpuError::VulkanError(VulkanHalError::GpuAllocatorError(e)))?;
         unsafe { device.bind_image_memory(image, allocation.memory(), allocation.offset())? };
 
+        let mut mips = iter::repeat(LayoutInfo::default())
+            .take(image_description.mips.get() as usize)
+            .collect::<Vec<_>>();
+        let mut layouts = vec![];
+        layouts.resize(image_description.array_layers.get() as usize, mips);
         let vulkan_image = VulkanImage {
             label: image_description.label.map(ToOwned::to_owned),
             handle: image,
             external: false,
             allocation: Some(allocation),
-            current_image_layout: vk::ImageLayout::UNDEFINED,
-            current_access_mask: vk::AccessFlags2::empty(),
-            current_stage_mask: vk::PipelineStageFlags2::empty(),
+            subresource_layouts: layouts,
         };
 
         let handle = self.resolver.add(vulkan_image);
@@ -528,7 +533,7 @@ impl Hal for VulkanHal {
             usage_flags: image_description.usage_flags,
             extents: image_description.extents,
             dimension: image_description.dimension,
-            mips: image_description.mips,
+            num_mips: image_description.mips,
             array_layers: image_description.array_layers,
             samples: image_description.samples,
             format: image_description.format,
@@ -1168,26 +1173,149 @@ impl Hal for VulkanHal {
             .image_extent(dest_region.extents.to_vk())
             .image_subresource(image_subresource);
 
-        let (image, layout) = self
-            .resolver
-            .apply_mut(dest, |image| Ok((image.handle, image.current_image_layout)))?;
+        let (image, layout) = self.resolver.apply_mut(dest, |image| {
+            Ok((
+                image.handle,
+                image.get_subresource_layout(dest_region.to_image_subresource()),
+            ))
+        })?;
         let buffer = self
             .resolver
             .resolve_vulkan(source)
             .ok_or(MgpuError::InvalidHandle)?;
 
-        unsafe {
-            self.logical_device.handle.cmd_copy_buffer_to_image(
+        let device = &self.logical_device.handle;
+
+        let valid_transfer_layouts = [
+            vk::ImageLayout::GENERAL,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        ];
+
+        let mut copy_layout = layout.image_layout;
+
+        if !valid_transfer_layouts.contains(&copy_layout) {
+            // transition the image to transfer_dst
+            let image_barrier = vk::ImageMemoryBarrier2::default()
+                .image(image)
+                .src_access_mask(layout.access_mask)
+                .src_stage_mask(layout.stage_mask)
+                .old_layout(layout.image_layout)
+                .dst_access_mask(ResourceAccessMode::TransferDst.access_mask())
+                .dst_stage_mask(ResourceAccessMode::TransferDst.pipeline_flags())
+                .new_layout(ResourceAccessMode::TransferDst.image_layout())
+                .subresource_range(
+                    vk::ImageSubresourceRange::default()
+                        .aspect_mask(dest.format.aspect_mask())
+                        .base_array_layer(dest_region.base_array_layer)
+                        .base_mip_level(dest_region.mip)
+                        .layer_count(dest_region.num_layers.get())
+                        .level_count(dest_region.num_mips.get()),
+                );
+            device.cmd_pipeline_barrier2(
                 vk_command_buffer,
-                buffer,
-                image,
-                layout,
-                &[copy],
+                &vk::DependencyInfo::default()
+                    .image_memory_barriers(&[image_barrier])
+                    .dependency_flags(vk::DependencyFlags::BY_REGION),
+            );
+            copy_layout = ResourceAccessMode::TransferDst.image_layout();
+        }
+
+        unsafe {
+            device.cmd_copy_buffer_to_image(vk_command_buffer, buffer, image, copy_layout, &[copy]);
+        }
+
+        if !valid_transfer_layouts.contains(&layout.image_layout) {
+            // transition the image to old_layout
+            let image_barrier = vk::ImageMemoryBarrier2::default()
+                .image(image)
+                .dst_access_mask(layout.access_mask)
+                .dst_stage_mask(layout.stage_mask)
+                .new_layout(layout.image_layout)
+                .src_access_mask(ResourceAccessMode::TransferDst.access_mask())
+                .src_stage_mask(ResourceAccessMode::TransferDst.pipeline_flags())
+                .old_layout(ResourceAccessMode::TransferDst.image_layout())
+                .subresource_range(
+                    vk::ImageSubresourceRange::default()
+                        .aspect_mask(dest.format.aspect_mask())
+                        .base_array_layer(dest_region.base_array_layer)
+                        .base_mip_level(dest_region.mip)
+                        .layer_count(dest_region.num_layers.get())
+                        .level_count(dest_region.num_mips.get()),
+                );
+            device.cmd_pipeline_barrier2(
+                vk_command_buffer,
+                &vk::DependencyInfo::default()
+                    .image_memory_barriers(&[image_barrier])
+                    .dependency_flags(vk::DependencyFlags::BY_REGION),
             );
         }
         Ok(())
     }
 
+    unsafe fn cmd_blit_image(
+        &self,
+        command_buffer: CommandRecorder,
+        source: Image,
+        source_region: ImageRegion,
+        dest: Image,
+        dest_region: ImageRegion,
+        filter: FilterMode,
+    ) -> MgpuResult<()> {
+        let vk_command_buffer = vk::CommandBuffer::from_raw(command_buffer.id);
+        let device = &self.logical_device.handle;
+        let filter = filter.to_vk();
+
+        let (source_image, source_layout) = self.resolver.apply(source, |img| {
+            Ok((
+                img.handle,
+                img.get_subresource_layout(source_region.to_image_subresource()),
+            ))
+        })?;
+        let (dest_image, dest_layout) = self.resolver.apply(dest, |img| {
+            Ok((
+                img.handle,
+                img.get_subresource_layout(dest_region.to_image_subresource()),
+            ))
+        })?;
+
+        debug_assert!(source_layout.image_layout != vk::ImageLayout::UNDEFINED);
+        debug_assert!(dest_layout.image_layout != vk::ImageLayout::UNDEFINED);
+
+        let blit = vk::ImageBlit {
+            src_subresource: vk::ImageSubresourceLayers {
+                aspect_mask: source.format.aspect_mask(),
+                mip_level: source_region.mip,
+                base_array_layer: source_region.base_array_layer,
+                layer_count: source_region.num_layers.get(),
+            },
+            dst_subresource: vk::ImageSubresourceLayers {
+                aspect_mask: dest.format.aspect_mask(),
+                mip_level: dest_region.mip,
+                base_array_layer: dest_region.base_array_layer,
+                layer_count: dest_region.num_layers.get(),
+            },
+            src_offsets: [
+                source_region.offset.to_vk(),
+                (source_region.offset + source_region.extents).to_vk(),
+            ],
+            dst_offsets: [
+                dest_region.offset.to_vk(),
+                (dest_region.offset + dest_region.extents).to_vk(),
+            ],
+        };
+
+        device.cmd_blit_image(
+            vk_command_buffer,
+            source_image,
+            source_layout.image_layout,
+            dest_image,
+            dest_layout.image_layout,
+            &[blit],
+            filter,
+        );
+
+        Ok(())
+    }
     unsafe fn enqueue_synchronization(
         &self,
         infos: &[super::SynchronizationInfo],
@@ -1223,24 +1351,28 @@ impl Hal for VulkanHal {
                     let dst_stage_mask = resource.access_mode.pipeline_flags();
                     let dst_access_mask = resource.access_mode.access_mask();
                     match &resource.resource {
-                        super::Resource::Image { image } => {
+                        super::Resource::Image {
+                            image,
+                            subresource: region,
+                        } => {
                             let new_layout = resource.access_mode.image_layout();
                             let vk_image = images.resolve_mut(*image).unwrap();
+                            let current_layout_info = vk_image.get_subresource_layout(*region);
                             image_memory_barrier_source.push(
                                 vk::ImageMemoryBarrier2::default()
                                     .image(vk_image.handle)
                                     .subresource_range(
                                         vk::ImageSubresourceRange::default()
                                             .aspect_mask(image.format.aspect_mask())
-                                            .base_array_layer(0)
-                                            .base_mip_level(0)
-                                            .layer_count(image.array_layers.get())
-                                            .level_count(image.mips.get()),
+                                            .base_array_layer(region.base_array_layer)
+                                            .base_mip_level(region.mip)
+                                            .layer_count(region.num_layers.get())
+                                            .level_count(region.num_mips.get()),
                                     )
-                                    .old_layout(vk_image.current_image_layout)
+                                    .old_layout(current_layout_info.image_layout)
                                     .new_layout(new_layout)
-                                    .src_access_mask(vk_image.current_access_mask)
-                                    .src_stage_mask(vk_image.current_stage_mask)
+                                    .src_access_mask(current_layout_info.access_mask)
+                                    .src_stage_mask(current_layout_info.stage_mask)
                                     .src_queue_family_index(source_qfi)
                                     .dst_queue_family_index(dest_qfi),
                             );
@@ -1251,21 +1383,26 @@ impl Hal for VulkanHal {
                                     .subresource_range(
                                         vk::ImageSubresourceRange::default()
                                             .aspect_mask(image.format.aspect_mask())
-                                            .base_array_layer(0)
-                                            .base_mip_level(0)
-                                            .layer_count(image.array_layers.get())
-                                            .level_count(image.mips.get()),
+                                            .base_array_layer(region.base_array_layer)
+                                            .base_mip_level(region.mip)
+                                            .layer_count(region.num_layers.get())
+                                            .level_count(region.num_mips.get()),
                                     )
-                                    .old_layout(vk_image.current_image_layout)
+                                    .old_layout(current_layout_info.image_layout)
                                     .new_layout(new_layout)
                                     .dst_access_mask(dst_access_mask)
                                     .dst_stage_mask(dst_stage_mask)
                                     .src_queue_family_index(source_qfi)
                                     .dst_queue_family_index(dest_qfi),
                             );
-                            vk_image.current_access_mask = dst_access_mask;
-                            vk_image.current_stage_mask = dst_stage_mask;
-                            vk_image.current_image_layout = new_layout;
+                            vk_image.set_subresource_layout(
+                                *region,
+                                LayoutInfo {
+                                    image_layout: new_layout,
+                                    access_mask: dst_access_mask,
+                                    stage_mask: dst_stage_mask,
+                                },
+                            );
                         }
                         super::Resource::Buffer {
                             buffer,
@@ -1340,32 +1477,42 @@ impl Hal for VulkanHal {
             let dst_access_mask = resource.new_usage.access_mask();
             let dst_pipeline_flags = resource.new_usage.pipeline_flags();
             match resource.resource {
-                crate::hal::Resource::Image { image } => {
+                crate::hal::Resource::Image {
+                    image,
+                    subresource: region,
+                } => {
                     let new_image_layout = resource.new_usage.image_layout();
                     let vk_image = image_resolver
                         .resolve_mut(image)
                         .ok_or(MgpuError::InvalidHandle)?;
+                    let old_layout = vk_image.get_subresource_layout(region);
 
                     let subresource = vk::ImageSubresourceRange::default()
                         .aspect_mask(image.format.aspect_mask())
-                        .base_array_layer(0)
-                        .layer_count(image.array_layers.get())
-                        .level_count(image.mips.get());
+                        .base_array_layer(region.base_array_layer)
+                        .base_mip_level(region.mip)
+                        .layer_count(region.num_layers.get())
+                        .level_count(region.num_mips.get());
                     image_transitions.push(
                         vk::ImageMemoryBarrier2::default()
                             .image(vk_image.handle)
-                            .old_layout(vk_image.current_image_layout)
+                            .old_layout(old_layout.image_layout)
                             .new_layout(new_image_layout)
-                            .src_access_mask(vk_image.current_access_mask)
+                            .src_access_mask(old_layout.access_mask)
                             .dst_access_mask(dst_access_mask)
-                            .src_stage_mask(vk_image.current_stage_mask)
+                            .src_stage_mask(old_layout.stage_mask)
                             .dst_stage_mask(dst_pipeline_flags)
                             .subresource_range(subresource),
                     );
 
-                    vk_image.current_access_mask = dst_access_mask;
-                    vk_image.current_image_layout = new_image_layout;
-                    vk_image.current_stage_mask = dst_pipeline_flags;
+                    vk_image.set_subresource_layout(
+                        region,
+                        LayoutInfo {
+                            image_layout: new_image_layout,
+                            access_mask: dst_access_mask,
+                            stage_mask: dst_pipeline_flags,
+                        },
+                    );
                 }
                 crate::hal::Resource::Buffer {
                     buffer,
@@ -1499,10 +1646,10 @@ impl Hal for VulkanHal {
             .subresource_range(
                 vk::ImageSubresourceRange::default()
                     .aspect_mask(image_view_description.format.aspect_mask())
-                    .base_array_layer(image_view_description.image_region.base_array_layer)
-                    .base_mip_level(image_view_description.image_region.mip)
-                    .level_count(1)
-                    .layer_count(1),
+                    .base_array_layer(image_view_description.image_subresource.base_array_layer)
+                    .base_mip_level(image_view_description.image_subresource.mip)
+                    .level_count(image_view_description.image_subresource.num_mips.get())
+                    .layer_count(image_view_description.image_subresource.num_layers.get()),
             )
             .components(ComponentMapping::default());
 
@@ -1516,7 +1663,14 @@ impl Hal for VulkanHal {
             self.try_assign_debug_name(image_view, name)?;
         }
 
-        Ok(unsafe { self.wrap_raw_image_view(image, image_view, image_view_description.label)? })
+        Ok(unsafe {
+            self.wrap_raw_image_view(
+                image,
+                image_view,
+                image_view_description.image_subresource,
+                image_view_description.label,
+            )?
+        })
     }
 }
 
@@ -1981,33 +2135,36 @@ impl VulkanHal {
     unsafe fn wrap_raw_image(
         &self,
         image: vk::Image,
-        description: &ImageDescription,
+        image_description: &ImageDescription,
         layout: ImageLayout,
         access_flags: vk::AccessFlags2,
         stage_mask: vk::PipelineStageFlags2,
     ) -> VulkanHalResult<crate::Image> {
-        if let Some(name) = description.label {
+        if let Some(name) = image_description.label {
             self.try_assign_debug_name(image, name)?;
         }
+        let mut mips = iter::repeat(LayoutInfo::default())
+            .take(image_description.mips.get() as usize)
+            .collect::<Vec<_>>();
+        let mut layouts = vec![];
+        layouts.resize(image_description.array_layers.get() as usize, mips);
         let vulkan_image = VulkanImage {
-            label: description.label.map(ToOwned::to_owned),
+            label: image_description.label.map(ToOwned::to_owned),
             handle: image,
             external: true,
             allocation: None,
-            current_access_mask: access_flags,
-            current_image_layout: layout,
-            current_stage_mask: stage_mask,
+            subresource_layouts: layouts,
         };
         let handle = self.resolver.add(vulkan_image);
         Ok(crate::Image {
             id: handle.to_u64(),
-            usage_flags: description.usage_flags,
-            extents: description.extents,
-            dimension: description.dimension,
-            mips: description.mips,
-            array_layers: description.array_layers,
-            samples: description.samples,
-            format: description.format,
+            usage_flags: image_description.usage_flags,
+            extents: image_description.extents,
+            dimension: image_description.dimension,
+            num_mips: image_description.mips,
+            array_layers: image_description.array_layers,
+            samples: image_description.samples,
+            format: image_description.format,
         })
     }
 
@@ -2015,6 +2172,7 @@ impl VulkanHal {
         &self,
         image: crate::Image,
         view: vk::ImageView,
+        subresource: ImageSubresource,
         name: Option<&str>,
     ) -> VulkanHalResult<crate::ImageView> {
         if let Some(name) = name {
@@ -2034,6 +2192,7 @@ impl VulkanHal {
         Ok(crate::ImageView {
             id: handle.to_u64(),
             owner: image,
+            subresource,
         })
     }
 
@@ -3040,12 +3199,12 @@ impl FrameInFlight {
 
                 unsafe { device.create_semaphore(&info, get_allocation_callbacks()) }
             };
-            if !group.graphics_nodes.is_empty() {
+            if !group.graphics_passes.is_empty() {
                 command_buffers.graphics =
                     allocate_command_buffer(current_frame.graphics_command_pool)?;
                 command_buffers.graphics_semaphore = make_semaphore()?;
             }
-            if !group.compute_nodes.is_empty() {
+            if !group.compute_passes.is_empty() {
                 command_buffers.compute =
                     allocate_command_buffer(current_frame.compute_command_pool)?;
                 command_buffers.compute_semaphore = make_semaphore()?;

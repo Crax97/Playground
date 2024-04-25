@@ -1,13 +1,13 @@
 use crate::{
     BindingSet, BindingSetDescription, BindingSetLayout, BindingSetLayoutInfo, Buffer,
     BufferDescription, BufferWriteParams, CullMode, DepthStencilState, DepthStencilTargetInfo,
-    DeviceConfiguration, DeviceInfo, FrontFace, GraphicsPipeline, GraphicsPipelineDescription,
-    Image, ImageDescription, ImageRegion, ImageView, ImageViewDescription, MgpuResult,
-    MultisampleState, PolygonMode, PrimitiveTopology, RenderPassInfo, RenderTargetInfo, Sampler,
-    SamplerDescription, ShaderModule, ShaderModuleDescription, ShaderModuleLayout,
-    VertexInputDescription,
+    DeviceConfiguration, DeviceInfo, FilterMode, FrontFace, GraphicsPipeline,
+    GraphicsPipelineDescription, Image, ImageDescription, ImageRegion, ImageSubresource, ImageView,
+    ImageViewDescription, MgpuResult, MultisampleState, PolygonMode, PrimitiveTopology,
+    RenderPassInfo, RenderTargetInfo, Sampler, SamplerDescription, ShaderModule,
+    ShaderModuleDescription, ShaderModuleLayout, VertexInputDescription,
 };
-use std::sync::Arc;
+use std::{iter::FilterMap, sync::Arc};
 
 #[cfg(feature = "swapchain")]
 use crate::swapchain::*;
@@ -94,6 +94,7 @@ pub enum ResourceAccessMode {
 pub enum Resource {
     Image {
         image: Image,
+        subresource: ImageSubresource,
     },
 
     Buffer {
@@ -221,6 +222,16 @@ pub(crate) trait Hal: Send + Sync {
         dest: Image,
         source_offset: usize,
         dest_region: ImageRegion,
+    ) -> MgpuResult<()>;
+
+    unsafe fn cmd_blit_image(
+        &self,
+        command_buffer: CommandRecorder,
+        source: Image,
+        source_region: ImageRegion,
+        dest: Image,
+        dest_region: ImageRegion,
+        filter: FilterMode,
     ) -> MgpuResult<()>;
 
     unsafe fn enqueue_synchronization(&self, infos: &[SynchronizationInfo]) -> MgpuResult<()>;

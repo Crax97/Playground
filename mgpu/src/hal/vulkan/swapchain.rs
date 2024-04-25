@@ -269,8 +269,14 @@ impl VulkanSwapchain {
                     vk::PipelineStageFlags2::empty(),
                 )?
             };
-            let view =
-                unsafe { hal.wrap_raw_image_view(image, view, Some("Swapchain image view"))? };
+            let view = unsafe {
+                hal.wrap_raw_image_view(
+                    image,
+                    view,
+                    image.whole_subresource(),
+                    Some("Swapchain image view"),
+                )?
+            };
 
             swapchain_images.push(SwapchainImage {
                 image,

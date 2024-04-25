@@ -5,7 +5,8 @@ use crate::{
         AttachmentType, QueueType, Resource, ResourceAccessMode, ResourceInfo, ResourceTransition,
     },
     util::check,
-    AttachmentStoreOp, Buffer, Image, ImageRegion, MgpuResult, RenderPassInfo, SwapchainImage,
+    AttachmentStoreOp, Buffer, FilterMode, Image, ImageRegion, MgpuResult, RenderPassInfo,
+    SwapchainImage,
 };
 
 #[derive(Debug)]
@@ -25,6 +26,13 @@ pub enum Node {
         dest: Image,
         source_offset: usize,
         dest_region: ImageRegion,
+    },
+    Blit {
+        source: Image,
+        source_region: ImageRegion,
+        dest: Image,
+        dest_region: ImageRegion,
+        filter: FilterMode,
     },
 }
 
@@ -64,16 +72,17 @@ pub struct OwnershipTransfer {
     pub resource: ResourceInfo,
 }
 
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct Pass {
+    pub prequisites: Vec<ResourceTransition>,
+    pub node_id: usize,
+}
+
 #[derive(Default, Debug)]
 pub struct PassGroup {
-    pub graphics_nodes: Vec<usize>,
-    pub graphics_resource_transitions: Vec<ResourceTransition>,
-
-    pub compute_nodes: Vec<usize>,
-    pub compute_resource_transitions: Vec<ResourceTransition>,
-
-    pub transfer_nodes: Vec<usize>,
-    pub transfer_resource_transitions: Vec<ResourceTransition>,
+    pub graphics_passes: Vec<Pass>,
+    pub compute_passes: Vec<Pass>,
+    pub transfer_passes: Vec<Pass>,
 }
 
 #[derive(Debug)]
@@ -144,6 +153,7 @@ impl Rdg {
                 }),
                 Node::CopyBufferToBuffer { .. } => {}
                 Node::CopyBufferToImage { .. } => {}
+                Node::Blit { .. } => {}
             }
             if stop {
                 return;
@@ -271,6 +281,7 @@ impl Rdg {
         let mut current_group = PassGroup::default();
         for &node in topological_sorting {
             let node_info = &self.nodes[node];
+            let mut prequisites = vec![];
             for &read_resource in &node_info.reads {
                 let ownership =
                     ownerships
@@ -291,14 +302,7 @@ impl Rdg {
                     ownership.queue = node_info.queue;
                     ownership.access_mode = read_resource.access_mode;
                 } else if ownership.access_mode != read_resource.access_mode {
-                    let transition_vec = match ownership.queue {
-                        QueueType::Graphics => &mut current_group.graphics_resource_transitions,
-                        QueueType::AsyncCompute => &mut current_group.compute_resource_transitions,
-                        QueueType::AsyncTransfer => {
-                            &mut current_group.transfer_resource_transitions
-                        }
-                    };
-                    transition_vec.push(ResourceTransition {
+                    prequisites.push(ResourceTransition {
                         resource: read_resource.resource,
                         old_usage: ownership.access_mode,
                         new_usage: read_resource.access_mode,
@@ -321,14 +325,7 @@ impl Rdg {
                 ownership.queue = node_info.queue;
 
                 if ownership.access_mode != written_resource.access_mode {
-                    let transition_vec = match ownership.queue {
-                        QueueType::Graphics => &mut current_group.graphics_resource_transitions,
-                        QueueType::AsyncCompute => &mut current_group.compute_resource_transitions,
-                        QueueType::AsyncTransfer => {
-                            &mut current_group.transfer_resource_transitions
-                        }
-                    };
-                    transition_vec.push(ResourceTransition {
+                    prequisites.push(ResourceTransition {
                         resource: written_resource.resource,
                         old_usage: ownership.access_mode,
                         new_usage: written_resource.access_mode,
@@ -344,17 +341,24 @@ impl Rdg {
                 });
             }
             match node_info.queue {
-                QueueType::Graphics => current_group.graphics_nodes.push(node_info.global_index),
-                QueueType::AsyncCompute => current_group.compute_nodes.push(node_info.global_index),
-                QueueType::AsyncTransfer => {
-                    current_group.transfer_nodes.push(node_info.global_index)
-                }
+                QueueType::Graphics => current_group.graphics_passes.push(Pass {
+                    prequisites,
+                    node_id: node_info.global_index,
+                }),
+                QueueType::AsyncCompute => current_group.compute_passes.push(Pass {
+                    prequisites,
+                    node_id: node_info.global_index,
+                }),
+                QueueType::AsyncTransfer => current_group.transfer_passes.push(Pass {
+                    prequisites,
+                    node_id: node_info.global_index,
+                }),
             }
         }
 
-        if !current_group.compute_nodes.is_empty()
-            || !current_group.graphics_nodes.is_empty()
-            || !current_group.transfer_nodes.is_empty()
+        if !current_group.compute_passes.is_empty()
+            || !current_group.graphics_passes.is_empty()
+            || !current_group.transfer_passes.is_empty()
         {
             steps.push(Step::ExecutePasses(std::mem::take(&mut current_group)));
         }
@@ -423,7 +427,10 @@ impl Node {
                                 crate::BindingType::SampledImage { view, .. } => {
                                     Some(ResourceInfo {
                                         access_mode: ResourceAccessMode::ShaderRead,
-                                        resource: Resource::Image { image: view.owner },
+                                        resource: Resource::Image {
+                                            image: view.owner,
+                                            subresource: view.subresource,
+                                        },
                                     })
                                 }
                             })
@@ -439,6 +446,7 @@ impl Node {
                         AttachmentStoreOp::DontCare => Some(ResourceInfo {
                             resource: Resource::Image {
                                 image: rt.view.owner,
+                                subresource: rt.view.subresource,
                             },
                             access_mode: ResourceAccessMode::AttachmentRead(AttachmentType::Color),
                         }),
@@ -452,6 +460,7 @@ impl Node {
                                 AttachmentStoreOp::DontCare => Some(ResourceInfo {
                                     resource: Resource::Image {
                                         image: dt.view.owner,
+                                        subresource: dt.view.subresource,
                                     },
                                     access_mode: ResourceAccessMode::AttachmentRead(
                                         AttachmentType::DepthStencil,
@@ -470,6 +479,7 @@ impl Node {
                             Some(ResourceInfo {
                                 resource: Resource::Image {
                                     image: rt.view.owner,
+                                    subresource: rt.view.subresource,
                                 },
                                 access_mode: ResourceAccessMode::AttachmentWrite(
                                     AttachmentType::Color,
@@ -487,6 +497,7 @@ impl Node {
                                     Some(ResourceInfo {
                                         resource: Resource::Image {
                                             image: dt.view.owner,
+                                            subresource: dt.view.subresource,
                                         },
                                         access_mode: ResourceAccessMode::AttachmentWrite(
                                             AttachmentType::DepthStencil,
@@ -542,13 +553,40 @@ impl Node {
                     resource: Resource::Buffer {
                         buffer: *source,
                         offset: *source_offset,
-                        size: dest_region.extents.area() as usize,
+                        size: dest_region.extents.area() as usize * dest.format.byte_size(),
                     },
                 }]
                 .into(),
                 [ResourceInfo {
                     access_mode: ResourceAccessMode::TransferDst,
-                    resource: Resource::Image { image: *dest },
+                    resource: Resource::Image {
+                        image: *dest,
+                        subresource: dest_region.to_image_subresource(),
+                    },
+                }]
+                .into(),
+            ),
+            Node::Blit {
+                source,
+                source_region,
+                dest,
+                dest_region,
+                ..
+            } => (
+                [ResourceInfo {
+                    resource: Resource::Image {
+                        image: *source,
+                        subresource: source_region.to_image_subresource(),
+                    },
+                    access_mode: ResourceAccessMode::TransferSrc,
+                }]
+                .into(),
+                [ResourceInfo {
+                    resource: Resource::Image {
+                        image: *dest,
+                        subresource: dest_region.to_image_subresource(),
+                    },
+                    access_mode: ResourceAccessMode::TransferDst,
                 }]
                 .into(),
             ),
@@ -601,6 +639,15 @@ impl RdgCompiledGraph {
                     dest.id,
                     dest_region.extents.area()
                 ),
+                Node::Blit {
+                    source,
+                    source_region,
+                    dest,
+                    dest_region,
+                    filter,
+                } => {
+                    format!("Blit from {} to {}", source.id, dest.id)
+                }
             };
             let label = format!("\t{} [label = \"{}\"];\n", node, node_label);
             nodes += label.as_str();
@@ -637,13 +684,14 @@ mod tests {
             usage_flags: Default::default(),
             extents: Default::default(),
             dimension: crate::ImageDimension::D1,
-            mips: 1.try_into().unwrap(),
+            num_mips: 1.try_into().unwrap(),
             array_layers: 1.try_into().unwrap(),
             samples: crate::SampleCount::One,
             format: crate::ImageFormat::Rgba8,
         };
         let view_0 = ImageView {
             owner: image_0,
+            subresource: image_0.whole_subresource(),
             id: 0,
         };
         rdg.inform_present(
@@ -730,9 +778,9 @@ mod tests {
         match step_0 {
             crate::rdg::Step::OwnershipTransfer { .. } => panic!("Barrier with only a present"),
             crate::rdg::Step::ExecutePasses(passes) => {
-                assert_eq!(passes.transfer_nodes.len(), 2);
-                assert_eq!(passes.graphics_nodes.len(), 0);
-                assert_eq!(passes.compute_nodes.len(), 0);
+                assert_eq!(passes.transfer_passes.len(), 2);
+                assert_eq!(passes.graphics_passes.len(), 0);
+                assert_eq!(passes.compute_passes.len(), 0);
             }
         }
     }

@@ -1,4 +1,4 @@
-use ash::vk;
+use ash::vk::{self};
 use gpu_allocator::vulkan::Allocation;
 
 use crate::{
@@ -9,10 +9,10 @@ use crate::{
     AddressMode, BindingSet, BindingSetElementKind, BindingSetLayout, BindingSetLayoutInfo,
     BlendFactor, BlendOp, BorderColor, Buffer, BufferUsageFlags, ColorWriteMask, CompareOp,
     CullMode, Extents2D, Extents3D, FilterMode, FrontFace, GraphicsPipeline,
-    GraphicsPipelineDescription, Image, ImageDimension, ImageFormat, ImageUsageFlags, ImageView,
-    MipmapMode, Offset2D, Offset3D, PolygonMode, PresentMode, PrimitiveTopology, Rect2D,
-    SampleCount, Sampler, ShaderModule, ShaderModuleLayout, ShaderStageFlags, Swapchain,
-    VertexAttributeFormat, VertexInputFrequency,
+    GraphicsPipelineDescription, Image, ImageDimension, ImageFormat, ImageSubresource,
+    ImageUsageFlags, ImageView, MipmapMode, Offset2D, Offset3D, PolygonMode, PresentMode,
+    PrimitiveTopology, Rect2D, SampleCount, Sampler, ShaderModule, ShaderModuleLayout,
+    ShaderStageFlags, Swapchain, VertexAttributeFormat, VertexInputFrequency,
 };
 
 #[cfg(feature = "swapchain")]
@@ -635,14 +635,20 @@ pub struct DescriptorPoolInfos {
     pub freed: Vec<DescriptorSetAllocation>,
 }
 
+#[derive(Default, Copy, Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub(super) struct LayoutInfo {
+    pub(super) image_layout: vk::ImageLayout,
+    pub(super) access_mask: vk::AccessFlags2,
+    pub(super) stage_mask: vk::PipelineStageFlags2,
+}
+
 pub(super) struct VulkanImage {
     pub(super) label: Option<String>,
     pub(super) handle: vk::Image,
     pub(super) external: bool,
     pub(super) allocation: Option<Allocation>,
-    pub(super) current_image_layout: vk::ImageLayout,
-    pub(super) current_access_mask: vk::AccessFlags2,
-    pub(super) current_stage_mask: vk::PipelineStageFlags2,
+    // layer x mips
+    pub(super) subresource_layouts: Vec<Vec<LayoutInfo>>,
 }
 
 pub(super) struct VulkanBuffer {
@@ -689,6 +695,37 @@ pub(super) struct SpirvShaderModule {
     pub(super) label: Option<String>,
     pub(super) layout: ShaderModuleLayout,
     pub(super) handle: vk::ShaderModule,
+}
+
+impl VulkanImage {
+    // Panics if the layouts in the subresource are different
+    pub(crate) fn get_subresource_layout(&self, subresource: ImageSubresource) -> LayoutInfo {
+        let layout_info = self.subresource_layouts[subresource.base_array_layer as usize]
+            [subresource.mip as usize];
+        for layer in subresource.base_array_layer + 1..subresource.num_layers.get() {
+            for mip in subresource.mip + 1..subresource.num_mips.get() {
+                let subres_layout_info = self.subresource_layouts[layer as usize][mip as usize];
+                assert!(layout_info.access_mask == subres_layout_info.access_mask);
+                assert!(layout_info.stage_mask == subres_layout_info.stage_mask);
+                assert!(layout_info.image_layout == subres_layout_info.image_layout);
+            }
+        }
+
+        layout_info
+    }
+
+    pub(crate) fn set_subresource_layout(
+        &mut self,
+        region: ImageSubresource,
+        layout_info: LayoutInfo,
+    ) {
+        for layer in 0..region.num_layers.get() {
+            for mip in 0..region.num_mips.get() {
+                self.subresource_layouts[(region.base_array_layer + layer) as usize]
+                    [(region.mip + mip) as usize] = layout_info;
+            }
+        }
+    }
 }
 
 impl<'a> GraphicsPipelineDescription<'a> {

@@ -6,7 +6,7 @@ use crate::staging_buffer_allocator::StagingBufferAllocator;
 use crate::util::check;
 use crate::DrawType::Draw;
 use crate::{
-    hal, BindingSet, BindingSetDescription, BindingSetLayout, Buffer, BufferDescription, BufferWriteParams, CommandRecorder, CommandRecorderType, DrawCommand, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageAspect, ImageDescription, ImageDimension, ImageView, ImageViewDescription, MemoryDomain, MgpuResult, Sampler, SamplerDescription, ShaderModule, ShaderModuleDescription, ShaderModuleLayout
+    hal, BindingSet, BindingSetDescription, BindingSetLayout, BlitParams, Buffer, BufferDescription, BufferWriteParams, CommandRecorder, CommandRecorderType, DrawCommand, Extents3D, FilterMode, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageAspect, ImageDescription, ImageDimension, ImageUsageFlags, ImageView, ImageViewDescription, MemoryDomain, MgpuResult, Sampler, SamplerDescription, ShaderModule, ShaderModuleDescription, ShaderModuleLayout
 };
 use crate::{BufferUsageFlags, ImageWriteParams};
 use bitflags::bitflags;
@@ -95,14 +95,14 @@ impl Device {
 
         for step in &compiled.sequence {
             if let Step::ExecutePasses(passes) = step {
-                if !passes.graphics_nodes.is_empty() {
+                if !passes.graphics_passes.is_empty() {
                     let command_recorder = unsafe {
                         self.hal
                             .request_command_recorder(queues.graphics_compute_allocator)?
                     };
                     graphics_command_recorders.push(command_recorder);
                 }
-                if !passes.compute_nodes.is_empty() {
+                if !passes.compute_passes.is_empty() {
                     let command_recorder = unsafe {
                         self.hal
                             .request_command_recorder(queues.async_compute_allocator)?
@@ -110,7 +110,7 @@ impl Device {
                     async_compute_command_recorders.push(command_recorder);
                 }
 
-                if !passes.transfer_nodes.is_empty() {
+                if !passes.transfer_passes.is_empty() {
                     let command_recorder = unsafe {
                         self.hal
                             .request_command_recorder(queues.async_transfer_allocator)?
@@ -128,15 +128,15 @@ impl Device {
         for step in &compiled.sequence {
             match step {
                 Step::ExecutePasses(passes) => {
-                    if !passes.graphics_nodes.is_empty() {
+                    if !passes.graphics_passes.is_empty() {
                         let command_recorder = graphics_command_recorders[current_graphics];
                         current_submission_group
                             .command_recorders
                             .push(command_recorder);
 
-                        self.hal.transition_resources(command_recorder, &passes.graphics_resource_transitions)?;
-                        for pass in &passes.graphics_nodes {
-                            let node = &compiled.nodes[*pass];
+                        for pass in &passes.graphics_passes {
+                            let node = &compiled.nodes[pass.node_id];
+                            self.hal.transition_resources(command_recorder, &pass.prequisites)?;
                             match &node.ty {
                                 Node::RenderPass { info } => {
                                     unsafe { self.hal.begin_render_pass(command_recorder, info)? };
@@ -201,36 +201,60 @@ impl Device {
                                     }
                                     unsafe { self.hal.end_render_pass(command_recorder)? };
                                 }
-                                Node::CopyBufferToBuffer { .. } => unreachable!(),
-                                Node::CopyBufferToImage { .. } => unreachable!(),
+                                Node::CopyBufferToBuffer {
+                                    source,
+                                    dest,
+                                    source_offset,
+                                    dest_offset,
+                                    size,
+                                } => unsafe {
+                                    self.hal.cmd_copy_buffer_to_buffer(
+                                        command_recorder,
+                                        *source,
+                                        *dest,
+                                        *source_offset,
+                                        *dest_offset,
+                                        *size,
+                                    )?
+                                },
+                                Node::CopyBufferToImage { source, dest, source_offset, dest_region } => unsafe {
+                                    self.hal.cmd_copy_buffer_to_image(
+                                        command_recorder,
+                                        *source,
+                                        *dest,
+                                        *source_offset,
+                                        *dest_region,
+                                    )?
+                                }
+                                Node::Blit { source, source_region, dest, dest_region, filter } => unsafe {
+                                    self.hal.cmd_blit_image(command_recorder, *source, *source_region, *dest, *dest_region, *filter)?;
+                                },
                             }
                         }
 
                         current_graphics += 1;
                     }
-                    if !passes.compute_nodes.is_empty() {
+                    if !passes.compute_passes.is_empty() {
                         let command_recorder = async_compute_command_recorders[current_compute];
-                        self.hal.transition_resources(command_recorder, &passes.compute_resource_transitions)?;
                         current_submission_group
                             .command_recorders
                             .push(command_recorder);
-                        for pass in &passes.compute_nodes {
+                        for pass in &passes.compute_passes {
+                        self.hal.transition_resources(command_recorder, &pass.prequisites)?;
                             todo!();
                         }
                         current_compute += 1;
                     }
-                    if !passes.transfer_nodes.is_empty() {
+                    if !passes.transfer_passes.is_empty() {
                         let command_recorder =
                             async_transfer_command_recorders[current_transfer];
                         current_submission_group
                             .command_recorders
                             .push(command_recorder);
 
-                        self.hal.transition_resources(command_recorder, &passes.transfer_resource_transitions)?;
-                    
-
-                        for pass in &passes.transfer_nodes {
-                            match &compiled.nodes[*pass].ty {
+                        for pass in &passes.transfer_passes {
+                        self.hal.transition_resources(command_recorder, &pass.prequisites)?;
+                            match &compiled.nodes[pass.node_id].ty {
                                 Node::RenderPass {..} => unreachable!(),
                                 Node::CopyBufferToBuffer {
                                     source,
@@ -257,6 +281,9 @@ impl Device {
                                         *dest_region,
                                     )?
                                 }
+                                Node::Blit {..} => unsafe {
+                                   unreachable!()
+                                },
                             }
                         }
                         current_transfer += 1;
@@ -457,6 +484,20 @@ impl Device {
         Ok(())
     }
 
+    pub fn blit_image(&self, params: &BlitParams) -> MgpuResult<()> {
+        Self::validate_blit_params(params);
+        let mut rdg = self.write_rdg();
+        let BlitParams { src_image, src_region, dst_image, dst_region, filter } = *params;
+        rdg.add_graphics_pass(Node::Blit {
+            source: src_image,
+            source_region: src_region,
+            dest: dst_image,
+            dest_region: dst_region,
+            filter
+        });
+        Ok(())
+    }
+
     pub fn destroy_image(&self, image: Image) -> MgpuResult<()> {
         self.hal.destroy_image(image)
     }
@@ -523,6 +564,21 @@ impl Device {
     pub fn destroy_shader_module(&self, shader_module: ShaderModule) -> MgpuResult<()> {
         self.hal.destroy_shader_module(shader_module)
     }
+    
+    pub fn generate_mip_chain(&self, image: Image) -> MgpuResult<()> {
+        for mip_level in 1..image.num_mips.get() {
+            let source = mip_level - 1;
+            let operation = BlitParams {
+                src_image: image,
+                src_region: image.mip_region(source),
+                dst_image: image,
+                dst_region: image.mip_region(mip_level),
+                filter: FilterMode::Nearest,
+            };
+            self.blit_image(&operation)?;
+        }
+        Ok(())
+    }
 
     pub fn destroy_image_view(&self, image_view: ImageView) {
         todo!()
@@ -536,6 +592,7 @@ impl Device {
             new_nodes: Default::default(),
         }
     }
+    
 
     pub(crate) fn write_rdg(&self) -> MutexGuard<'_, Rdg> {
         self.rdg.lock().expect("Failed to lock rdg")
@@ -579,7 +636,7 @@ impl Device {
         check!(params.region.offset.z + params.region.extents.depth as i32 <= image.extents.depth as i32, "Image write region goes beyond the image");
         check!(params.region.offset.x + params.region.extents.width as i32 <= image.extents.width as i32, "Image write region goes beyond the image");
         check!(params.region.offset.y + params.region.extents.height as i32 <= image.extents.height as i32, "Image write region goes beyond the image");
-        check!(params.region.mip < image.mips.get(), "Trying to write image mip {}, but the image has only {} mips", params.region.mip, image.mips,);
+        check!(params.region.mip < image.num_mips.get(), "Trying to write image mip {}, but the image has only {} mips", params.region.mip, image.num_mips,);
         check!(params.region.base_array_layer < params.region.num_layers.get(), "base_array_layer must be <= num_layers");
         check!(params.region.base_array_layer + params.region.num_layers.get() <= image.array_layers.get(), "Trying to write more image layers than supported by the image");
     }
@@ -662,7 +719,33 @@ impl Device {
         }
     }
 
+
+fn validate_blit_params(params: &BlitParams) {
+    check!(params.src_image.usage_flags.contains(ImageUsageFlags::TRANSFER_SRC), "Cannot blit from an image that doesn't have the TRANSFER_SRC flag");
+    check!(params.dst_image.usage_flags.contains(ImageUsageFlags::TRANSFER_DST), "Cannot blit to an image that doesn't have the TRANSFER_DST flag");
+
+        let mut dst_image_mip_extents = params.dst_image.extents;
+        for _ in 1..params.dst_region.mip {
+            dst_image_mip_extents = Extents3D {
+                width: (dst_image_mip_extents.width as f32).sqrt() as u32,
+                height: (dst_image_mip_extents.height as f32).sqrt() as u32,
+                depth: (dst_image_mip_extents.depth as f32).sqrt() as u32,
+            }
+        }
+
+        let mut src_image_mip_extents = params.src_image.extents;
+        for _ in 1..params.src_region.mip {
+            src_image_mip_extents = Extents3D {
+                width: (src_image_mip_extents.width as f32).sqrt() as u32,
+                height: (src_image_mip_extents.height as f32).sqrt() as u32,
+                depth: (src_image_mip_extents.depth as f32).sqrt() as u32,
+            }
+        }
+
 }
+
+}
+
 
 impl Drop for Device {
     fn drop(&mut self) {

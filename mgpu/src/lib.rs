@@ -165,6 +165,17 @@ pub struct ImageRegion {
     pub offset: Offset3D,
     pub extents: Extents3D,
     pub mip: u32,
+    pub num_mips: NonZeroU32,
+    pub base_array_layer: u32,
+    pub num_layers: NonZeroU32,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+// Defines a subresource of an image
+pub struct ImageSubresource {
+    pub mip: u32,
+    pub num_mips: NonZeroU32,
     pub base_array_layer: u32,
     pub num_layers: NonZeroU32,
 }
@@ -309,13 +320,23 @@ pub struct ImageWriteParams<'a> {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+/// This struct describes a blit operation
+pub struct BlitParams {
+    pub src_image: Image,
+    pub src_region: ImageRegion,
+    pub dst_image: Image,
+    pub dst_region: ImageRegion,
+    pub filter: FilterMode,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 pub struct ImageViewDescription<'a> {
     pub label: Option<&'a str>,
     pub image: Image,
     pub format: ImageFormat,
     pub dimension: ImageDimension,
     pub aspect: ImageAspect,
-    pub image_region: ImageRegion,
+    pub image_subresource: ImageSubresource,
 }
 
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug, Default)]
@@ -676,18 +697,67 @@ pub struct Image {
     usage_flags: ImageUsageFlags,
     extents: Extents3D,
     dimension: ImageDimension,
-    mips: NonZeroU32,
+    num_mips: NonZeroU32,
     array_layers: NonZeroU32,
     samples: SampleCount,
     format: ImageFormat,
 }
 impl Image {
-    pub fn whole_region(&self, mip: u32) -> ImageRegion {
+    pub fn whole_region(&self) -> ImageRegion {
         ImageRegion {
             offset: Offset3D::default(),
             extents: self.extents,
-            mip,
+            mip: 0,
+            num_mips: self.num_mips,
             base_array_layer: 0,
+            num_layers: self.array_layers,
+        }
+    }
+
+    pub fn mip_region(&self, mip: u32) -> ImageRegion {
+        let mut extents = self.extents;
+        for _ in 0..mip {
+            extents.width /= 2;
+            extents.height /= 2;
+            extents.depth /= 2;
+            extents.depth = extents.depth.max(1);
+        }
+        ImageRegion {
+            offset: Offset3D::default(),
+            extents,
+            mip,
+            num_mips: 1.try_into().unwrap(),
+            base_array_layer: 0,
+            num_layers: self.array_layers,
+        }
+    }
+
+    pub fn whole_subresource(&self) -> ImageSubresource {
+        ImageSubresource {
+            mip: 0,
+            num_mips: self.num_mips,
+            base_array_layer: 0,
+            num_layers: self.array_layers,
+        }
+    }
+
+    pub fn subresource(&self, mip: u32, layer: u32) -> ImageSubresource {
+        check!(
+            mip < self.num_mips.get(),
+            "Requested mip {} but only {} are available",
+            mip,
+            self.num_mips
+        );
+        check!(
+            layer < self.array_layers.get(),
+            "Requested layer {} but only {} are available",
+            layer,
+            self.array_layers
+        );
+        ImageSubresource {
+            mip,
+            num_mips: self.num_mips,
+            base_array_layer: layer,
             num_layers: self.array_layers,
         }
     }
@@ -697,6 +767,7 @@ impl Image {
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 pub struct ImageView {
     owner: Image,
+    subresource: ImageSubresource,
     id: u64,
 }
 
@@ -746,6 +817,29 @@ impl PolygonMode {
     }
 }
 
+impl std::ops::Add<Extents2D> for Offset2D {
+    type Output = Self;
+
+    fn add(self, rhs: Extents2D) -> Self::Output {
+        Self {
+            x: self.x + rhs.width as i32,
+            y: self.y + rhs.height as i32,
+        }
+    }
+}
+
+impl std::ops::Add<Extents3D> for Offset3D {
+    type Output = Self;
+
+    fn add(self, rhs: Extents3D) -> Self::Output {
+        Self {
+            x: self.x + rhs.width as i32,
+            y: self.y + rhs.height as i32,
+            z: self.z + rhs.depth as i32,
+        }
+    }
+}
+
 impl Extents3D {
     pub fn area(&self) -> u32 {
         self.width * self.height * self.depth
@@ -755,6 +849,17 @@ impl Extents3D {
 impl Extents2D {
     pub fn area(&self) -> u32 {
         self.width * self.height
+    }
+}
+
+impl ImageRegion {
+    pub fn to_image_subresource(&self) -> ImageSubresource {
+        ImageSubresource {
+            mip: self.mip,
+            num_mips: self.num_mips,
+            base_array_layer: self.base_array_layer,
+            num_layers: self.num_layers,
+        }
     }
 }
 
