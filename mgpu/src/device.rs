@@ -63,15 +63,18 @@ pub struct Device {
 }
 
 impl Device {
+    const MB_128: usize = 1024 * 1024 * 128;
     pub fn new(configuration: DeviceConfiguration) -> MgpuResult<Self> {
         let hal = hal::create(&configuration)?;
         let device_info = hal.device_info();
+        let staging_buffer_allocator = StagingBufferAllocator::new(hal.as_ref(), Self::MB_128, configuration.desired_frames_in_flight)?;
+        unsafe { hal.prepare_next_frame() }?;
         Ok(Self {
             hal,
             device_info,
             rdg: Default::default(),
-            staging_buffer_allocator: Default::default(),
-
+            staging_buffer_allocator: Arc::new(Mutex::new(staging_buffer_allocator)),
+        
             #[cfg(feature = "swapchain")]
             presentation_requests: Default::default(),
         })
@@ -369,6 +372,10 @@ impl Device {
 
         unsafe { self.hal.end_rendering()? };
 
+        self.staging_buffer_allocator.lock().expect("Failed to lock staging buffer").end_frame();
+
+        unsafe { self.hal.prepare_next_frame()? };
+
         Ok(())
     }
 
@@ -418,7 +425,7 @@ impl Device {
             .staging_buffer_allocator
             .lock()
             .expect("Failed to lock staging buffer allocator");
-        let allocation = allocator.allocate_staging_buffer_region(self, params.size)?;
+        let allocation = allocator.allocate_staging_buffer_region(params.size)?;
         unsafe {
             self.hal.write_host_visible_buffer(
                 allocation.buffer,
@@ -460,7 +467,7 @@ impl Device {
             .staging_buffer_allocator
             .lock()
             .expect("Failed to lock staging buffer allocator");
-        let allocation = allocator.allocate_staging_buffer_region(self, size)?;
+        let allocation = allocator.allocate_staging_buffer_region( size)?;
         unsafe {
             self.hal.write_host_visible_buffer(
                 allocation.buffer,

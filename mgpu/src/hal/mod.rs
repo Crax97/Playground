@@ -144,6 +144,7 @@ pub struct RenderState {
 
 pub(crate) trait Hal: Send + Sync {
     fn device_wait_idle(&self) -> MgpuResult<()>;
+    unsafe fn prepare_next_frame(&self) -> MgpuResult<()>;
     unsafe fn begin_rendering(&self) -> MgpuResult<RenderState>;
     unsafe fn request_command_recorder(
         &self,

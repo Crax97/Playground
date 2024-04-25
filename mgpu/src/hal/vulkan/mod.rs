@@ -227,41 +227,7 @@ impl Hal for VulkanHal {
         use ash::vk::Handle;
         let mut current_frame = self.frames_in_flight.lock().unwrap();
         let current_frame = current_frame.current_mut();
-        current_frame.cached_semaphores = std::mem::take(&mut current_frame.allocated_semaphores);
-        let device = &self.logical_device.handle;
-        unsafe {
-            device.wait_for_fences(
-                &[
-                    current_frame.graphics_work_ended_fence,
-                    current_frame.transfer_work_ended_fence,
-                    current_frame.compute_work_ended_fence,
-                ],
-                true,
-                u64::MAX,
-            )?
-        };
-        unsafe {
-            device.reset_fences(&[
-                current_frame.graphics_work_ended_fence,
-                current_frame.transfer_work_ended_fence,
-                current_frame.compute_work_ended_fence,
-            ])?
-        };
 
-        unsafe {
-            device.reset_command_pool(
-                current_frame.graphics_command_pool,
-                vk::CommandPoolResetFlags::RELEASE_RESOURCES,
-            )?;
-            device.reset_command_pool(
-                current_frame.compute_command_pool,
-                vk::CommandPoolResetFlags::RELEASE_RESOURCES,
-            )?;
-            device.reset_command_pool(
-                current_frame.transfer_command_pool,
-                vk::CommandPoolResetFlags::RELEASE_RESOURCES,
-            )?;
-        }
         Ok(RenderState {
             graphics_compute_allocator: CommandRecorderAllocator {
                 id: current_frame.graphics_command_pool.as_raw(),
@@ -1656,6 +1622,47 @@ impl Hal for VulkanHal {
                 image_view_description.label,
             )?
         })
+    }
+
+    unsafe fn prepare_next_frame(&self) -> MgpuResult<()> {
+        let mut current_frame = self.frames_in_flight.lock().unwrap();
+        let current_frame = current_frame.current_mut();
+        current_frame.cached_semaphores = std::mem::take(&mut current_frame.allocated_semaphores);
+        let device = &self.logical_device.handle;
+        unsafe {
+            device.wait_for_fences(
+                &[
+                    current_frame.graphics_work_ended_fence,
+                    current_frame.transfer_work_ended_fence,
+                    current_frame.compute_work_ended_fence,
+                ],
+                true,
+                u64::MAX,
+            )?
+        };
+        unsafe {
+            device.reset_fences(&[
+                current_frame.graphics_work_ended_fence,
+                current_frame.transfer_work_ended_fence,
+                current_frame.compute_work_ended_fence,
+            ])?
+        };
+
+        unsafe {
+            device.reset_command_pool(
+                current_frame.graphics_command_pool,
+                vk::CommandPoolResetFlags::RELEASE_RESOURCES,
+            )?;
+            device.reset_command_pool(
+                current_frame.compute_command_pool,
+                vk::CommandPoolResetFlags::RELEASE_RESOURCES,
+            )?;
+            device.reset_command_pool(
+                current_frame.transfer_command_pool,
+                vk::CommandPoolResetFlags::RELEASE_RESOURCES,
+            )?;
+        }
+        Ok(())
     }
 }
 
