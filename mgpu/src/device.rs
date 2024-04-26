@@ -388,10 +388,10 @@ impl Device {
         &self,
         swapchain_info: &SwapchainCreationInfo,
     ) -> MgpuResult<Swapchain> {
-        let swapchain_id = self.hal.create_swapchain_impl(swapchain_info)?;
+        let swapchain_info = self.hal.create_swapchain_impl(swapchain_info)?;
         Ok(Swapchain {
+            info: swapchain_info,
             device: self.clone(),
-            id: swapchain_id,
             current_acquired_image: None,
         })
     }
@@ -572,7 +572,7 @@ impl Device {
         self.hal.destroy_shader_module(shader_module)
     }
     
-    pub fn generate_mip_chain(&self, image: Image) -> MgpuResult<()> {
+    pub fn generate_mip_chain(&self, image: Image, filter: FilterMode) -> MgpuResult<()> {
         for mip_level in 1..image.num_mips.get() {
             let source = mip_level - 1;
             let operation = BlitParams {
@@ -580,7 +580,7 @@ impl Device {
                 src_region: image.mip_region(source),
                 dst_image: image,
                 dst_region: image.mip_region(mip_level),
-                filter: FilterMode::Nearest,
+                filter,
             };
             self.blit_image(&operation)?;
         }

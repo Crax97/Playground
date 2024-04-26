@@ -8,10 +8,10 @@ use mgpu::{
     AttachmentStoreOp, Binding, BindingSetDescription, BindingSetElement, BindingSetLayout,
     BindingSetLayoutInfo, BindingType, BufferDescription, BufferUsageFlags, CompareOp,
     DepthStencilState, DepthStencilTarget, DepthStencilTargetInfo, DepthStencilTargetLoadOp,
-    DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D, Extents3D, FragmentStageInfo,
-    Graphics, GraphicsPipelineDescription, ImageDescription, ImageDimension, ImageFormat,
-    ImageUsageFlags, ImageViewDescription, ImageWriteParams, MemoryDomain, Rect2D,
-    RenderPassDescription, RenderTarget, RenderTargetInfo, RenderTargetLoadOp, SampleCount,
+    DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D, Extents3D, FilterMode,
+    FragmentStageInfo, Graphics, GraphicsPipelineDescription, ImageDescription, ImageDimension,
+    ImageFormat, ImageUsageFlags, ImageViewDescription, ImageWriteParams, MemoryDomain, MipmapMode,
+    Rect2D, RenderPassDescription, RenderTarget, RenderTargetInfo, RenderTargetLoadOp, SampleCount,
     SamplerDescription, ShaderModuleDescription, ShaderStageFlags, SwapchainCreationInfo,
     VertexInputDescription, VertexInputFrequency, VertexStageInfo,
 };
@@ -74,6 +74,7 @@ fn main() {
             display_handle: window.display_handle().unwrap(),
             window_handle: window.window_handle().unwrap(),
             preferred_format: None,
+            preferred_present_mode: None,
         })
         .expect("Failed to create swapchain");
     let cube_data = vec![
@@ -178,7 +179,9 @@ fn main() {
     // The order of operations is important!
     // Requesting a mip chain BEFORE we write to the image doesn't guarantee that
     // the mip chain will be created from the new image data
-    device.generate_mip_chain(texture_image).unwrap();
+    device
+        .generate_mip_chain(texture_image, FilterMode::Linear)
+        .unwrap();
 
     let texture_image_view = device
         .create_image_view(&ImageViewDescription {
@@ -329,6 +332,9 @@ fn main() {
     let sampler = device
         .create_sampler(&SamplerDescription {
             label: Some("Cube Texture Sampler"),
+            min_filter: FilterMode::Linear,
+            mag_filter: FilterMode::Linear,
+            mipmap_mode: MipmapMode::Linear,
             ..Default::default()
         })
         .unwrap();

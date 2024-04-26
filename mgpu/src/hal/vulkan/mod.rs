@@ -15,9 +15,13 @@ use crate::{
     DeviceConfiguration, DeviceFeatures, DevicePreference, FilterMode, Framebuffer,
     GraphicsPipeline, GraphicsPipelineDescription, GraphicsPipelineLayout, Image, ImageDescription,
     ImageDimension, ImageFormat, ImageRegion, ImageSubresource, MemoryDomain, MgpuError,
-    MgpuResult, RenderPassInfo, Sampler, SamplerDescription, ShaderAttribute, ShaderModule,
-    ShaderModuleLayout, ShaderStageFlags, StorageAccessMode, VertexAttributeFormat,
+    MgpuResult, PresentMode, RenderPassInfo, Sampler, SamplerDescription, ShaderAttribute,
+    ShaderModule, ShaderModuleLayout, ShaderStageFlags, StorageAccessMode, SwapchainCreationInfo,
+    VertexAttributeFormat,
 };
+
+#[cfg(feature = "swapchain")]
+use crate::SwapchainInfo;
 use ash::vk::{ComponentMapping, Handle as AshHandle, ImageLayout, QueueFlags};
 use ash::{vk, Entry, Instance};
 use gpu_allocator::vulkan::{
@@ -38,7 +42,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use self::swapchain::{SwapchainError, VulkanSwapchain};
 use self::util::{
-    DescriptorPoolInfos, DescriptorSetAllocation, ResolveVulkan, SpirvShaderModule,
+    DescriptorPoolInfos, DescriptorSetAllocation, FromVk, ResolveVulkan, SpirvShaderModule,
     VulkanGraphicsPipelineInfo, VulkanImageView, VulkanResolver,
 };
 
@@ -176,11 +180,19 @@ impl Hal for VulkanHal {
     fn create_swapchain_impl(
         &self,
         swapchain_info: &crate::SwapchainCreationInfo,
-    ) -> MgpuResult<u64> {
+    ) -> MgpuResult<SwapchainInfo> {
         let swapchain = VulkanSwapchain::create(self, swapchain_info)?;
 
+        let format = swapchain.data.current_format.format.to_mgpu();
+        let present_mode = PresentMode::Immediate;
+
         let handle = self.resolver.add(swapchain);
-        Ok(handle.to_u64())
+        let info = SwapchainInfo {
+            id: handle.to_u64(),
+            format,
+            present_mode,
+        };
+        Ok(info)
     }
 
     #[cfg(feature = "swapchain")]
@@ -403,7 +415,8 @@ impl Hal for VulkanHal {
                     &crate::SwapchainCreationInfo {
                         display_handle,
                         window_handle,
-                        preferred_format: None,
+                        preferred_format: Some(swapchain.data.current_format.format.to_mgpu()),
+                        preferred_present_mode: Some(swapchain.data.current_present_mode.to_mgpu()),
                     },
                 )
             },
@@ -769,6 +782,23 @@ impl Hal for VulkanHal {
                 let swapchain_device = &swapchain.swapchain_device;
 
                 let suboptimal = unsafe { swapchain_device.queue_present(queue, &present_info)? };
+                if suboptimal {
+                    swapchain.rebuild(
+                        self,
+                        &SwapchainCreationInfo {
+                            preferred_format: Some(swapchain.data.current_format.format.to_mgpu()),
+                            preferred_present_mode: Some(
+                                swapchain.data.current_present_mode.to_mgpu(),
+                            ),
+                            display_handle: unsafe {
+                                DisplayHandle::borrow_raw(swapchain.raw_display_handle)
+                            },
+                            window_handle: unsafe {
+                                WindowHandle::borrow_raw(swapchain.raw_window_handle)
+                            },
+                        },
+                    )?;
+                }
                 Ok(())
             })
     }
@@ -1663,6 +1693,50 @@ impl Hal for VulkanHal {
             )?;
         }
         Ok(())
+    }
+
+    fn try_swapchain_set_present_mode(
+        &self,
+        id: u64,
+        present_mode: crate::PresentMode,
+    ) -> MgpuResult<crate::PresentMode> {
+        self.resolver.apply_mut::<VulkanSwapchain, PresentMode>(
+            unsafe { Handle::from_u64(id) },
+            |swapchain| {
+                let vk_present_mode = present_mode.to_vk();
+                if swapchain.data.present_modes.contains(&vk_present_mode) {
+                    swapchain.rebuild(
+                        self,
+                        &SwapchainCreationInfo {
+                            preferred_format: Some(swapchain.data.current_format.format.to_mgpu()),
+                            preferred_present_mode: Some(present_mode),
+                            display_handle: unsafe {
+                                DisplayHandle::borrow_raw(swapchain.raw_display_handle)
+                            },
+                            window_handle: unsafe {
+                                WindowHandle::borrow_raw(swapchain.raw_window_handle)
+                            },
+                        },
+                    )?;
+                    Ok(present_mode)
+                } else {
+                    swapchain.rebuild(
+                        self,
+                        &SwapchainCreationInfo {
+                            preferred_format: Some(swapchain.data.current_format.format.to_mgpu()),
+                            preferred_present_mode: Some(PresentMode::Immediate),
+                            display_handle: unsafe {
+                                DisplayHandle::borrow_raw(swapchain.raw_display_handle)
+                            },
+                            window_handle: unsafe {
+                                WindowHandle::borrow_raw(swapchain.raw_window_handle)
+                            },
+                        },
+                    )?;
+                    Ok(PresentMode::Immediate)
+                }
+            },
+        )
     }
 }
 

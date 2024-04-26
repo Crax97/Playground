@@ -27,6 +27,7 @@ fn main() {
             display_handle: window.display_handle().unwrap(),
             window_handle: window.window_handle().unwrap(),
             preferred_format: None,
+            preferred_present_mode: None,
         })
         .expect("Failed to create swapchain");
 

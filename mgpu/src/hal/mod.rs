@@ -244,7 +244,10 @@ pub(crate) trait Hal: Send + Sync {
     ) -> MgpuResult<()>;
 
     #[cfg(feature = "swapchain")]
-    fn create_swapchain_impl(&self, swapchain_info: &SwapchainCreationInfo) -> MgpuResult<u64>;
+    fn create_swapchain_impl(
+        &self,
+        swapchain_info: &SwapchainCreationInfo,
+    ) -> MgpuResult<SwapchainInfo>;
 
     #[cfg(feature = "swapchain")]
     fn swapchain_acquire_next_image(&self, id: u64) -> MgpuResult<SwapchainImage>;
@@ -257,6 +260,13 @@ pub(crate) trait Hal: Send + Sync {
         window_handle: raw_window_handle::WindowHandle,
         display_handle: raw_window_handle::DisplayHandle,
     ) -> MgpuResult<()>;
+
+    #[cfg(feature = "swapchain")]
+    fn try_swapchain_set_present_mode(
+        &self,
+        id: u64,
+        present_mode: PresentMode,
+    ) -> MgpuResult<PresentMode>;
 
     fn device_info(&self) -> DeviceInfo;
 

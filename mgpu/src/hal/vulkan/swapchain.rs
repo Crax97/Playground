@@ -4,7 +4,7 @@ use ash::{
     khr::{surface, swapchain},
     vk::{self, AccessFlags2, ImageLayout, PipelineStageFlags2},
 };
-use raw_window_handle::{DisplayHandle, WindowHandle};
+use raw_window_handle::{DisplayHandle, RawDisplayHandle, RawWindowHandle, WindowHandle};
 
 use crate::{
     hal::{
@@ -22,6 +22,8 @@ use super::{FramesInFlight, VulkanHal, VulkanHalResult};
 #[allow(dead_code)]
 pub struct VulkanSwapchain {
     pub(crate) handle: vk::SwapchainKHR,
+    pub(crate) raw_display_handle: RawDisplayHandle,
+    pub(crate) raw_window_handle: RawWindowHandle,
     pub(crate) swapchain_instance: swapchain::Instance,
     pub(crate) swapchain_device: swapchain::Device,
     pub(crate) surface_instance: surface::Instance,
@@ -31,10 +33,15 @@ pub struct VulkanSwapchain {
     pub(crate) current_image_index: Option<u32>,
 }
 
+// Access is synchronized through RwLock
+unsafe impl Send for VulkanSwapchain {}
+unsafe impl Sync for VulkanSwapchain {}
+
 #[allow(dead_code)]
 pub(crate) struct SwapchainData {
     pub(crate) capabilities: vk::SurfaceCapabilitiesKHR,
     pub(crate) present_modes: Vec<vk::PresentModeKHR>,
+    pub(crate) current_present_mode: vk::PresentModeKHR,
     pub(crate) surface_formats: Vec<vk::SurfaceFormatKHR>,
     pub(crate) current_format: vk::SurfaceFormatKHR,
     pub(crate) images: Vec<SwapchainImage>,
@@ -75,7 +82,9 @@ impl VulkanSwapchain {
             window_handle: swapchain_info.window_handle,
             display_handle: swapchain_info.display_handle,
             preferred_format: swapchain_info.preferred_format,
-            preferred_present_mode: PresentMode::Immediate,
+            preferred_present_mode: swapchain_info
+                .preferred_present_mode
+                .unwrap_or(PresentMode::Immediate),
             old_swapchain: vk::SwapchainKHR::null(),
         };
 
@@ -86,6 +95,8 @@ impl VulkanSwapchain {
         };
 
         Ok(Self {
+            raw_display_handle: swapchain_info.display_handle.as_raw(),
+            raw_window_handle: swapchain_info.window_handle.as_raw(),
             handle,
             swapchain_instance,
             swapchain_device,
@@ -290,6 +301,7 @@ impl VulkanSwapchain {
         let swapchain_data = SwapchainData {
             capabilities: surface_capabilities,
             present_modes,
+            current_present_mode: present_mode,
             surface_formats,
             current_format: image_format,
             surface,

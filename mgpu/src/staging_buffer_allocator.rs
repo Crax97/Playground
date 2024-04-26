@@ -1,6 +1,4 @@
-use crate::{
-    hal::Hal, Buffer, BufferDescription, BufferUsageFlags, Device, MemoryDomain, MgpuResult,
-};
+use crate::{hal::Hal, Buffer, BufferDescription, BufferUsageFlags, MemoryDomain, MgpuResult};
 
 pub(crate) struct StagingBufferAllocator {
     staging_buffer: Buffer,
@@ -98,7 +96,7 @@ impl StagingBufferAllocator {
 
 #[cfg(test)]
 mod tests {
-    use crate::hal::Hal;
+    use crate::{hal::Hal, SwapchainInfo};
 
     use super::StagingBufferAllocator;
 
@@ -277,7 +275,7 @@ mod tests {
         fn create_swapchain_impl(
             &self,
             swapchain_info: &crate::SwapchainCreationInfo,
-        ) -> crate::MgpuResult<u64> {
+        ) -> crate::MgpuResult<SwapchainInfo> {
             todo!()
         }
 
@@ -422,6 +420,14 @@ mod tests {
         }
 
         unsafe fn prepare_next_frame(&self) -> crate::MgpuResult<()> {
+            todo!()
+        }
+
+        fn try_swapchain_set_present_mode(
+            &self,
+            id: u64,
+            present_mode: crate::PresentMode,
+        ) -> crate::MgpuResult<crate::PresentMode> {
             todo!()
         }
     }
