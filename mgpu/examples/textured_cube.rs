@@ -486,6 +486,8 @@ fn main() {
         })
         .unwrap();
 
+    swapchain.destroy().unwrap();
+
     device.destroy_graphics_pipeline(pipeline).unwrap();
     device.destroy_shader_module(vertex_shader_module).unwrap();
     device
@@ -498,4 +500,6 @@ fn main() {
     device.destroy_image(texture_image).unwrap();
     device.destroy_sampler(sampler).unwrap();
     device.destroy_buffer(cube_data_buffer).unwrap();
+    device.destroy_buffer(cube_index_buffer).unwrap();
+    device.destroy_buffer(cube_object_data).unwrap();
 }

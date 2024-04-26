@@ -858,6 +858,14 @@ impl ImageDimension {
 
 define_resource_resolver!(
     VulkanHal,
+    (VulkanSwapchain, |hal, swapchain| {
+        use crate::hal::Hal;
+        for image in swapchain.data.images {
+            hal.destroy_image_view(image.view)?;
+            hal.destroy_image(image.image)?;
+        }
+        Ok(())
+    }) => swapchains,
     (VulkanImageView, |hal, view| {
         if view.external {
             return Ok(());
@@ -883,7 +891,6 @@ define_resource_resolver!(
                 .map_err(|e| MgpuError::VulkanError(VulkanHalError::GpuAllocatorError(e)))?;
         }
         hal.logical_device.handle.destroy_image(image.handle, get_allocation_callbacks()); Ok(()) } ) => images,
-    (VulkanSwapchain, |_, _| Ok(())) => swapchains,
     (VulkanBuffer, |hal, buffer| {
 
         let mut allocator = hal
@@ -941,6 +948,12 @@ macro_rules! impl_util_methods {
                 unsafe { Handle::from_u64(handle.id) }
             }
         }
+
+        impl crate::util::HasLabel for $object {
+            fn label(&self) -> Option<&str> {
+                self.label.as_deref()
+            }
+        }
     };
     ($handle:ty, $object:ty, $vulkan_ty:ty) => {
         impl_util_methods!($handle, $object);
@@ -956,7 +969,8 @@ macro_rules! impl_util_methods {
             }
         }
 
-        impl<H> ResolveVulkan<$vulkan_ty, H> for ResourceArena<VulkanHal, $object>
+        impl<H: crate::util::HasLabel> ResolveVulkan<$vulkan_ty, H>
+            for ResourceArena<VulkanHal, $object>
         where
             H: Into<Handle<$object>>,
         {

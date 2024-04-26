@@ -4,6 +4,7 @@ use ash::{
     khr::{surface, swapchain},
     vk::{self, AccessFlags2, ImageLayout, PipelineStageFlags2},
 };
+use log::info;
 use raw_window_handle::{DisplayHandle, RawDisplayHandle, RawWindowHandle, WindowHandle};
 
 use crate::{
@@ -21,6 +22,7 @@ use super::{FramesInFlight, VulkanHal, VulkanHalResult};
 
 #[allow(dead_code)]
 pub struct VulkanSwapchain {
+    pub(crate) label: Option<&'static str>,
     pub(crate) handle: vk::SwapchainKHR,
     pub(crate) raw_display_handle: RawDisplayHandle,
     pub(crate) raw_window_handle: RawWindowHandle,
@@ -95,6 +97,7 @@ impl VulkanSwapchain {
         };
 
         Ok(Self {
+            label: Some("VkSwapchain"),
             raw_display_handle: swapchain_info.display_handle.as_raw(),
             raw_window_handle: swapchain_info.window_handle.as_raw(),
             handle,
@@ -133,8 +136,10 @@ impl VulkanSwapchain {
             old_swapchain: vk::SwapchainKHR::null(),
         };
         let (handle, swapchain_data) = Self::recreate(swapchain_create_info)?;
+
         self.handle = handle;
         self.data = swapchain_data;
+
         Ok(())
     }
 
@@ -297,7 +302,13 @@ impl VulkanSwapchain {
                 extents: surface_capabilities.current_extent.to_mgpu(),
             })
         }
-
+        info!(
+            "Recreated swapchaion swapchain {}x{} format {:?} presentation mode {:?}",
+            surface_capabilities.current_extent.width,
+            surface_capabilities.current_extent.height,
+            image_format,
+            present_mode
+        );
         let swapchain_data = SwapchainData {
             capabilities: surface_capabilities,
             present_modes,

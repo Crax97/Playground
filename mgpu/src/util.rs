@@ -20,8 +20,13 @@ struct Lifetimed<T> {
     lifetime: usize,
     item: T,
 }
+
+pub trait HasLabel {
+    fn label(&self) -> Option<&str>;
+}
+
 /// A ResourceArena is a generational arena for items of type T
-pub struct ResourceArena<S, T> {
+pub struct ResourceArena<S, T: HasLabel> {
     resources: Vec<Entry<T>>,
     reclaimed_handles: Vec<Handle<T>>,
     destruction_queue: Vec<Lifetimed<T>>,
@@ -80,7 +85,7 @@ macro_rules! define_resource_resolver {
             )*
         }
 
-        pub trait GetMap<Output> {
+        pub trait GetMap<Output: crate::util::HasLabel> {
             fn get(&self) -> RwLockReadGuard<'_, ResourceArena<$self, Output>>;
             fn get_mut(&self) -> RwLockWriteGuard<'_, ResourceArena<$self, Output>>;
         }
@@ -108,14 +113,18 @@ macro_rules! define_resource_resolver {
             // To be called when the owner of this resolver is dropped: destroys all the items queued for destruction
             pub fn on_destroy(&self, s: &$self) {
                 $(
-                    self.get_mut::<$resource>().on_destroy(s);
+                    {
+                        let mut map = self.get_mut::<$resource>();
+
+                        map.drop_check();
+
+                        map.on_destroy(s);
+                    }
                 )*
             }
 
-
-
             /// Gets a read-only reference to the ResourceArena for T
-            pub fn get<T>(&self) -> RwLockReadGuard<'_, ResourceArena<$self, T>>
+            pub fn get<T: crate::util::HasLabel>(&self) -> RwLockReadGuard<'_, ResourceArena<$self, T>>
             where
                 ResourceResolver: GetMap<T>,
             {
@@ -123,7 +132,7 @@ macro_rules! define_resource_resolver {
             }
 
             /// Gets a writeable reference to the ResourceArena for T
-            pub fn get_mut<T>(&self) -> RwLockWriteGuard<'_, ResourceArena<$self, T>>
+            pub fn get_mut<T: crate::util::HasLabel>(&self) -> RwLockWriteGuard<'_, ResourceArena<$self, T>>
             where
                 ResourceResolver: GetMap<T>,
             {
@@ -131,12 +140,12 @@ macro_rules! define_resource_resolver {
             }
 
             /// Adds a resource to the ResourceArena for T
-            pub fn add<T>(&self, resource: T) -> Handle<T> where ResourceResolver: GetMap<T> {
+            pub fn add<T: crate::util::HasLabel>(&self, resource: T) -> Handle<T> where ResourceResolver: GetMap<T> {
                 self.get_mut::<T>().add(resource)
             }
 
             /// Applies a function to the resource associated with the given `handle`, returning the result if f succeeds
-            pub fn apply<T, U>(&self, handle: impl Into<Handle<T>>, f: impl FnOnce(&T) -> MgpuResult<U>) -> MgpuResult<U> where ResourceResolver: GetMap<T> {
+            pub fn apply<T: crate::util::HasLabel, U>(&self, handle: impl Into<Handle<T>>, f: impl FnOnce(&T) -> MgpuResult<U>) -> MgpuResult<U> where ResourceResolver: GetMap<T> {
                 if let Some(res) = self.get::<T>().resolve(handle.into()) {
                     f(res)
                 } else {
@@ -145,7 +154,7 @@ macro_rules! define_resource_resolver {
             }
 
             /// Applies a function to the resource associated with the given `handle`, returning the result if it exists
-            pub fn apply_mut<T, U>(&self, handle: impl Into<Handle<T>>, f: impl FnOnce(&mut T) -> MgpuResult<U>) -> MgpuResult<U> where ResourceResolver: GetMap<T> {
+            pub fn apply_mut<T: crate::util::HasLabel, U>(&self, handle: impl Into<Handle<T>>, f: impl FnOnce(&mut T) -> MgpuResult<U>) -> MgpuResult<U> where ResourceResolver: GetMap<T> {
                 if let Some(res) = self.get_mut::<T>().resolve_mut(handle.into()) {
                     f(res)
                 } else {
@@ -154,18 +163,18 @@ macro_rules! define_resource_resolver {
             }
 
             /// Removes a resource if it exists, returning the removed resource
-            pub fn remove<T>(&self, handle: impl Into<Handle<T>>) -> MgpuResult<()> where ResourceResolver: GetMap<T> {
+            pub fn remove<T: crate::util::HasLabel>(&self, handle: impl Into<Handle<T>>) -> MgpuResult<()> where ResourceResolver: GetMap<T> {
                 self.get_mut::<T>().remove(handle.into())
             }
 
             /// Resolves a copy of the resource if it exists
             #[allow(dead_code)]
-            pub fn resolve_copy<T: Copy>(&self, handle: impl Into<Handle<T>>) -> Option<T> where ResourceResolver: GetMap<T> {
+            pub fn resolve_copy<T: Copy + crate::util::HasLabel>(&self, handle: impl Into<Handle<T>>) -> Option<T> where ResourceResolver: GetMap<T> {
                 self.get::<T>().resolve_copy(handle.into())
             }
 
             /// Resolves a clone of the resource if it exists
-            pub fn resolve_clone<T: Clone>(&self, handle: impl Into<Handle<T>>) -> Option<T> where ResourceResolver: GetMap<T> {
+            pub fn resolve_clone<T: Clone + crate::util::HasLabel>(&self, handle: impl Into<Handle<T>>) -> Option<T> where ResourceResolver: GetMap<T> {
                 self.get::<T>().resolve_clone(handle.into())
             }
         }
@@ -187,7 +196,7 @@ macro_rules! define_resource_resolver {
 }
 pub(crate) use define_resource_resolver;
 
-impl<S, T> ResourceArena<S, T> {
+impl<S, T: HasLabel> ResourceArena<S, T> {
     pub fn new(deallocate_fn: fn(&S, T) -> MgpuResult<()>, lifetime: usize) -> Self {
         Self {
             resources: Default::default(),
@@ -236,6 +245,18 @@ impl<S, T> ResourceArena<S, T> {
     pub fn on_destroy(&mut self, s: &S) {
         for item in std::mem::take(&mut self.destruction_queue) {
             (self.deallocate_fn)(s, item.item).expect("Failed to call deallocate fn");
+        }
+    }
+
+    pub fn drop_check(&self) {
+        for item in &self.resources {
+            if let Some(element) = &item.payload {
+                warn!(
+                    "'{:?}' of type {:?} was not destroyed",
+                    element.label().unwrap_or("Unknown"),
+                    std::any::type_name::<T>()
+                );
+            }
         }
     }
 
@@ -322,19 +343,19 @@ impl<S, T> ResourceArena<S, T> {
     }
 }
 
-impl<S, T: Copy> ResourceArena<S, T> {
+impl<S, T: Copy + HasLabel> ResourceArena<S, T> {
     pub fn resolve_copy(&self, handle: Handle<T>) -> Option<T> {
         self.resolve(handle).copied()
     }
 }
 
-impl<S, T: Clone> ResourceArena<S, T> {
+impl<S, T: Clone + HasLabel> ResourceArena<S, T> {
     pub fn resolve_clone(&self, handle: Handle<T>) -> Option<T> {
         self.resolve(handle).cloned()
     }
 }
 
-impl<S, T> std::ops::Index<Handle<T>> for ResourceArena<S, T> {
+impl<S, T: HasLabel> std::ops::Index<Handle<T>> for ResourceArena<S, T> {
     type Output = T;
 
     fn index(&self, index: Handle<T>) -> &Self::Output {
@@ -342,7 +363,7 @@ impl<S, T> std::ops::Index<Handle<T>> for ResourceArena<S, T> {
     }
 }
 
-impl<S, T> std::ops::IndexMut<Handle<T>> for ResourceArena<S, T> {
+impl<S, T: HasLabel> std::ops::IndexMut<Handle<T>> for ResourceArena<S, T> {
     fn index_mut(&mut self, index: Handle<T>) -> &mut Self::Output {
         self.resolve_mut(index).expect("Invalid handle")
     }
@@ -357,7 +378,7 @@ impl<T: std::fmt::Debug> std::fmt::Debug for Entry<T> {
     }
 }
 
-impl<S, T: std::fmt::Debug> std::fmt::Debug for ResourceArena<S, T> {
+impl<S, T: std::fmt::Debug + HasLabel> std::fmt::Debug for ResourceArena<S, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ResourceArena")
             .field("resources", &self.resources)
@@ -368,7 +389,7 @@ impl<S, T: std::fmt::Debug> std::fmt::Debug for ResourceArena<S, T> {
 }
 
 pub type Filter<T> = fn(Entry<T>) -> Option<T>;
-impl<S, T> IntoIterator for ResourceArena<S, T> {
+impl<S, T: HasLabel> IntoIterator for ResourceArena<S, T> {
     type Item = T;
     type IntoIter =
         <std::iter::FilterMap<std::vec::IntoIter<Entry<T>>, Filter<T>> as IntoIterator>::IntoIter;
@@ -444,6 +465,7 @@ macro_rules! check {
     };
 }
 pub(crate) use check;
+use log::warn;
 
 use crate::MgpuResult;
 
@@ -458,7 +480,7 @@ impl<T> std::fmt::Debug for Handle<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Handle, ResourceArena};
+    use super::{Handle, HasLabel, ResourceArena};
 
     #[test]
     fn generation_handling() {
@@ -479,6 +501,12 @@ mod tests {
         let (index, generation) = handle.to_index_generation();
         let new_handle = Handle::from_index_generation(index, generation);
         assert_eq!(new_handle, handle)
+    }
+
+    impl HasLabel for u32 {
+        fn label(&self) -> Option<&str> {
+            None
+        }
     }
 
     #[test]

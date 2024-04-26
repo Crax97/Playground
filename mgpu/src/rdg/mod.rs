@@ -672,10 +672,10 @@ impl RdgCompiledGraph {
                         },
                         source.id,
                         source_region.base_array_layer,
-                        source_region.num_layers.get(),
+                        source_region.mip,
                         dest.id,
                         dest_region.base_array_layer,
-                        dest_region.num_layers.get()
+                        dest_region.mip
                     )
                 }
             };

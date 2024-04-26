@@ -185,6 +185,7 @@ fn main() {
         })
         .unwrap();
 
+    swapchain.destroy().unwrap();
     device.destroy_graphics_pipeline(pipeline).unwrap();
     device.destroy_shader_module(vertex_shader_module).unwrap();
     device

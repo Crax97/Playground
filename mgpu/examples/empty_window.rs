@@ -71,4 +71,6 @@ fn main() {
             Event::MemoryWarning => {}
         })
         .unwrap();
+
+    swapchain.destroy().unwrap();
 }

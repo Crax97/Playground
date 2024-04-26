@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{hal::Hal, Buffer, BufferDescription, BufferUsageFlags, MemoryDomain, MgpuResult};
 
 pub(crate) struct StagingBufferAllocator {
@@ -6,6 +8,7 @@ pub(crate) struct StagingBufferAllocator {
     current_frame: usize,
     head: usize,
     tail: usize,
+    hal: Arc<dyn Hal>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -21,7 +24,7 @@ struct StagingBufferAllocatedRegion {
 
 impl StagingBufferAllocator {
     pub fn new(
-        hal: &dyn Hal,
+        hal: Arc<dyn Hal>,
         staging_area_size: usize,
         frames_in_flight: usize,
     ) -> MgpuResult<Self> {
@@ -42,6 +45,7 @@ impl StagingBufferAllocator {
             current_frame: 0,
             head: 0,
             tail: 0,
+            hal,
         })
     }
 
@@ -94,8 +98,15 @@ impl StagingBufferAllocator {
     }
 }
 
+impl Drop for StagingBufferAllocator {
+    fn drop(&mut self) {
+        self.hal.destroy_buffer(self.staging_buffer).unwrap();
+    }
+}
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::{hal::Hal, SwapchainInfo};
 
     use super::StagingBufferAllocator;
@@ -431,13 +442,17 @@ mod tests {
         ) -> crate::MgpuResult<crate::PresentMode> {
             todo!()
         }
+
+        fn swapchain_destroy(&self, id: u64) -> crate::MgpuResult<()> {
+            todo!()
+        }
     }
 
     #[test]
     fn test_staging_buffer_looping() {
         let hal = DummyHal;
 
-        let mut staging_buffer = StagingBufferAllocator::new(&hal, 32, 4).unwrap();
+        let mut staging_buffer = StagingBufferAllocator::new(Arc::new(hal), 32, 4).unwrap();
         for _ in 0..10 {
             let alloc = staging_buffer.allocate_staging_buffer_region(5).unwrap();
             println!("{alloc:?}");

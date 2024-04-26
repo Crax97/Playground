@@ -88,4 +88,8 @@ impl Swapchain {
         });
         Ok(())
     }
+
+    pub fn destroy(&self) -> MgpuResult<()> {
+        self.device.hal.swapchain_destroy(self.info.id)
+    }
 }

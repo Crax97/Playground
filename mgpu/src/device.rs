@@ -52,7 +52,6 @@ pub struct DeviceInfo {
 }
 #[derive(Clone)]
 pub struct Device {
-    pub(crate) hal: Arc<dyn Hal>,
     pub(crate) device_info: DeviceInfo,
 
     pub(crate) rdg: Arc<Mutex<Rdg>>,
@@ -60,6 +59,8 @@ pub struct Device {
 
     #[cfg(feature = "swapchain")]
     pub(crate) presentation_requests: Arc<RwLock<Vec<PresentationRequest>>>,
+
+    pub(crate) hal: Arc<dyn Hal>,
 }
 
 impl Device {
@@ -67,7 +68,7 @@ impl Device {
     pub fn new(configuration: DeviceConfiguration) -> MgpuResult<Self> {
         let hal = hal::create(&configuration)?;
         let device_info = hal.device_info();
-        let staging_buffer_allocator = StagingBufferAllocator::new(hal.as_ref(), Self::MB_128, configuration.desired_frames_in_flight)?;
+        let staging_buffer_allocator = StagingBufferAllocator::new(hal.clone(), Self::MB_128, configuration.desired_frames_in_flight)?;
         unsafe { hal.prepare_next_frame() }?;
         Ok(Self {
             hal,
@@ -760,13 +761,6 @@ fn validate_blit_params(params: &BlitParams) {
 
 }
 
-}
-
-
-impl Drop for Device {
-    fn drop(&mut self) {
-        self.hal.device_wait_idle().unwrap();
-    }
 }
 
 #[cfg(feature = "swapchain")]

@@ -250,6 +250,9 @@ pub(crate) trait Hal: Send + Sync {
     ) -> MgpuResult<SwapchainInfo>;
 
     #[cfg(feature = "swapchain")]
+    fn swapchain_destroy(&self, id: u64) -> MgpuResult<()>;
+
+    #[cfg(feature = "swapchain")]
     fn swapchain_acquire_next_image(&self, id: u64) -> MgpuResult<SwapchainImage>;
 
     #[cfg(feature = "swapchain")]

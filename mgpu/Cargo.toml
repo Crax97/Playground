@@ -19,6 +19,7 @@ ash-window = { version = "0.13.*", optional = true }
 raw-window-handle = { version = "0.6.*", optional = true }
 gpu-allocator = { git = "https://github.com/Traverse-Research/gpu-allocator.git", branch = "ash-0.38", optional = true }
 spirv-reflect = "0.2.3"
+log = "0.4.21"
 
 
 [dev-dependencies]
@@ -26,6 +27,5 @@ bytemuck = { version = "1.15.0", features = ["bytemuck_derive", "derive"] }
 env_logger = "0.11.3"
 glam = { version = "0.27.0", features = ["bytemuck"] }
 image = "0.25.1"
-log = "0.4.21"
 shaderc = "0.8.3"
 winit = "0.29.15"

@@ -28,11 +28,11 @@ use gpu_allocator::vulkan::{
     AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc,
 };
 use gpu_allocator::{AllocatorDebugSettings, MemoryLocation};
+use log::info;
 use raw_window_handle::{DisplayHandle, WindowHandle};
 use spirv_reflect::types::{
     ReflectDecorationFlags, ReflectInterfaceVariable, ReflectShaderStageFlags,
 };
-use std::any::Any;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{self, c_char, CStr, CString};
@@ -96,6 +96,7 @@ pub struct VulkanQueueFamilies {
 }
 
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct VulkanQueue {
     handle: vk::Queue,
     family_index: u32,
@@ -201,7 +202,7 @@ impl Hal for VulkanHal {
             .apply_mut::<VulkanSwapchain, SwapchainImage>(
                 unsafe { Handle::from_u64(id) },
                 |swapchain| {
-                    let (index, _) = unsafe {
+                    let (index, suboptimal) = unsafe {
                         swapchain
                             .swapchain_device
                             .acquire_next_image(
@@ -212,6 +213,9 @@ impl Hal for VulkanHal {
                             )
                             .expect("Failed to get swapchain")
                     };
+                    if suboptimal {
+                        info!("Acquired swapchain image {index} is suboptimal, recreate the swapchain");
+                    }
 
                     unsafe {
                         self.logical_device.handle.wait_for_fences(
@@ -387,8 +391,11 @@ impl Hal for VulkanHal {
     unsafe fn end_rendering(&self) -> MgpuResult<()> {
         let mut ff = self.frames_in_flight.lock().unwrap();
 
-        ff.current_frame_in_flight =
-            (ff.current_frame_in_flight + 1) % self.configuration.frames_in_flight;
+        let current_frame_idx = ff.current_frame_in_flight;
+        let current_frame = ff.current_mut();
+        current_frame.cached_semaphores = current_frame.allocated_semaphores.to_vec();
+
+        ff.current_frame_in_flight = (current_frame_idx + 1) % self.configuration.frames_in_flight;
         self.resolver.update(self)?;
         Ok(())
     }
@@ -489,6 +496,16 @@ impl Hal for VulkanHal {
             subresource_layouts: layouts,
         };
 
+        info!(
+            "Created image {:?} {:?} dimension {:?} layers {} mips {} format {:?}",
+            image_description.label,
+            image_description.extents,
+            image_description.dimension,
+            image_description.array_layers.get(),
+            image_description.mips.get(),
+            image_description.format,
+        );
+
         let handle = self.resolver.add(vulkan_image);
         let image = Image {
             id: handle.to_u64(),
@@ -563,6 +580,11 @@ impl Hal for VulkanHal {
             current_stage_mask: vk::PipelineStageFlags2::empty(),
         };
         let handle = self.resolver.add(vulkan_buffer);
+
+        info!(
+            "Created buffer {:?} of size {}",
+            buffer_description.label, buffer_description.size,
+        );
         Ok(Buffer {
             id: handle.to_u64(),
             usage_flags: buffer_description.usage_flags,
@@ -620,6 +642,11 @@ impl Hal for VulkanHal {
             handle: shader_module,
             layout,
         };
+
+        info!(
+            "Created shader module {:?}",
+            shader_module_description.label
+        );
 
         let handle = self.resolver.add(vulkan_shader_module);
         Ok(ShaderModule {
@@ -712,6 +739,11 @@ impl Hal for VulkanHal {
             pipelines: vec![],
         };
         let handle = self.resolver.add(vulkan_graphics_pipeline_info);
+
+        info!(
+            "Created GraphicsPipeline {:?}",
+            graphics_pipeline_description.label
+        );
 
         Ok(GraphicsPipeline {
             id: handle.to_u64(),
@@ -996,7 +1028,8 @@ impl Hal for VulkanHal {
         let vk_sets = binding_sets
             .iter()
             .map(|s| {
-                sets.resolve_vulkan(s)
+                sets.resolve(s)
+                    .map(|b| b.handle)
                     .expect("Binding Set handle not valid")
             })
             .collect::<Vec<_>>();
@@ -1610,12 +1643,19 @@ impl Hal for VulkanHal {
                 .handle
                 .create_sampler(&sampler_create_info, get_allocation_callbacks())?
         };
+
+        if let Some(name) = sampler_description.label {
+            self.try_assign_debug_name(sampler, name)?;
+        }
+
         let sampler = VulkanSampler {
             label: sampler_description.label.map(ToOwned::to_owned),
             handle: sampler,
         };
 
         let handle = self.resolver.add(sampler);
+
+        info!("Created sampler {:?}", sampler_description.label);
 
         Ok(Sampler {
             id: handle.to_u64(),
@@ -1645,6 +1685,12 @@ impl Hal for VulkanHal {
             allocation,
             layout: layout.clone(),
         };
+
+        if let Some(name) = description.label {
+            self.try_assign_debug_name(binding_set.allocation.descriptor_set, name)?;
+        }
+
+        info!("Created BindingSet {:?}", description.label);
 
         let handle = self.resolver.add(binding_set);
         Ok(BindingSet {
@@ -1691,6 +1737,8 @@ impl Hal for VulkanHal {
             self.try_assign_debug_name(image_view, name)?;
         }
 
+        info!("Created ImageView {:?}", image_view_description.label);
+
         Ok(unsafe {
             self.wrap_raw_image_view(
                 image,
@@ -1704,7 +1752,6 @@ impl Hal for VulkanHal {
     unsafe fn prepare_next_frame(&self) -> MgpuResult<()> {
         let mut current_frame = self.frames_in_flight.lock().unwrap();
         let current_frame = current_frame.current_mut();
-        current_frame.cached_semaphores = std::mem::take(&mut current_frame.allocated_semaphores);
         let device = &self.logical_device.handle;
         unsafe {
             device.wait_for_fences(
@@ -1785,6 +1832,11 @@ impl Hal for VulkanHal {
             },
         )
     }
+
+    fn swapchain_destroy(&self, id: u64) -> MgpuResult<()> {
+        self.resolver
+            .remove::<VulkanSwapchain>(unsafe { Handle::from_u64(id) })
+    }
 }
 
 impl VulkanHal {
@@ -1828,6 +1880,12 @@ impl VulkanHal {
             buffer_device_address: true,
             allocation_sizes: Default::default(),
         };
+
+        info!("Vulkan HAL: using device '{}'", physical_device.name);
+        info!("\tGraphics queue info {:?}", logical_device.graphics_queue);
+        info!("\tCompute queue info {:?}", logical_device.compute_queue);
+        info!("\tTransfer queue info {:?}", logical_device.transfer_queue);
+
         let hal = Self {
             entry,
             instance,
@@ -2801,6 +2859,15 @@ impl VulkanHal {
                 .map_err(|(_, err)| VulkanHalError::ApiError(err))?[0]
         };
 
+        if let Some(label) = pipeline_info.label.as_deref() {
+            self.try_assign_debug_name(pipeline, label)?;
+        }
+
+        info!(
+            "Created vulkan graphics pipeline {:?} subpass {}",
+            pipeline_info.label, command_buffer_state.current_subpass
+        );
+
         Ok(pipeline)
     }
 
@@ -2826,6 +2893,15 @@ impl VulkanHal {
                     get_allocation_callbacks(),
                 )?
             };
+
+            if let Some(label) = pipeline_info.label.as_deref() {
+                self.try_assign_debug_name(layout, label)?;
+            }
+
+            info!(
+                "Created pipeline layout for pipeline {:?}",
+                pipeline_info.label
+            );
 
             pipeline_layouts.insert(hash, layout);
             Ok(layout)
@@ -3123,6 +3199,11 @@ impl VulkanHal {
                 max: MAX_SETS_PER_POOL,
             };
 
+            info!(
+                "Created new descriptor pool for layout {:?}, max sets: {MAX_SETS_PER_POOL}",
+                descriptor_set_layout
+            );
+
             MgpuResult::Ok(info)
         };
         let mut infos = self.descriptor_pool_infos.lock().unwrap();
@@ -3247,6 +3328,7 @@ impl VulkanHal {
 
 impl Drop for VulkanHal {
     fn drop(&mut self) {
+        self.device_wait_idle().unwrap();
         self.resolver.on_destroy(self);
 
         let pools = self.descriptor_pool_infos.lock().unwrap();
@@ -3296,6 +3378,7 @@ impl FrameInFlight {
                 )?
             };
             self.allocated_semaphores.push(semaphore);
+            info!("Allocated new semaphore for current frame in flight");
             Ok(semaphore)
         }
     }
