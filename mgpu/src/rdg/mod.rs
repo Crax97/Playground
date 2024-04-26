@@ -76,7 +76,9 @@ struct QueueOwnership {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct OwnershipTransfer {
     pub source: QueueType,
+    pub source_usage: ResourceAccessMode,
     pub destination: QueueType,
+    pub dest_usage: ResourceAccessMode,
     pub resource: ResourceInfo,
 }
 
@@ -301,7 +303,9 @@ impl Rdg {
                 if ownership.queue != node_info.queue {
                     barrier_info.push(OwnershipTransfer {
                         source: ownership.queue,
+                        source_usage: ownership.access_mode,
                         destination: node_info.queue,
+                        dest_usage: read_resource.access_mode,
                         resource: read_resource,
                     });
                     ownership.queue = node_info.queue;
@@ -330,7 +334,9 @@ impl Rdg {
                 if ownership.queue != node_info.queue {
                     barrier_info.push(OwnershipTransfer {
                         source: ownership.queue,
+                        source_usage: ownership.access_mode,
                         destination: node_info.queue,
+                        dest_usage: written_resource.access_mode,
                         resource: written_resource,
                     });
 

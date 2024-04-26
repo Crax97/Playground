@@ -1334,15 +1334,15 @@ impl Hal for VulkanHal {
                 let mut buffer_memory_barrier_dest = vec![];
 
                 for resource in &info.resources {
-                    assert!(resource.access_mode != ResourceAccessMode::Undefined);
-                    let dst_stage_mask = resource.access_mode.pipeline_flags();
-                    let dst_access_mask = resource.access_mode.access_mask();
+                    assert!(resource.new_usage != ResourceAccessMode::Undefined);
+                    let dst_stage_mask = resource.new_usage.pipeline_flags();
+                    let dst_access_mask = resource.new_usage.access_mask();
                     match &resource.resource {
                         super::Resource::Image {
                             image,
                             subresource: region,
                         } => {
-                            let new_layout = resource.access_mode.image_layout();
+                            let new_layout = resource.new_usage.image_layout();
                             let vk_image = images.resolve_mut(*image).unwrap();
                             let current_layout_info = vk_image.get_subresource_layout(*region);
                             if vk_buffer_src.is_some() {
@@ -1482,7 +1482,7 @@ impl Hal for VulkanHal {
                     device.cmd_pipeline_barrier2(vk_buffer_dst, &depedency_info_dest);
                 }
             } else {
-                panic!("Pipeline barrier");
+                self.transition_resources(info.destination_command_recorder, &info.resources)?;
             }
         }
         Ok(())

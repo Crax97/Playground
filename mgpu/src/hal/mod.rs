@@ -123,7 +123,7 @@ pub struct SynchronizationInfo {
     pub source_command_recorder: Option<CommandRecorder>,
     pub destination_queue: QueueType,
     pub destination_command_recorder: CommandRecorder,
-    pub resources: Vec<ResourceInfo>,
+    pub resources: Vec<ResourceTransition>,
 }
 
 #[derive(Clone, Default, Debug)]

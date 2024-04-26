@@ -1,7 +1,7 @@
 use crate::hal::{
-    Hal, QueueType, ResourceInfo, SubmissionGroup, SubmitInfo, SynchronizationInfo,
+    Hal, QueueType, ResourceInfo, ResourceTransition, SubmissionGroup, SubmitInfo, SynchronizationInfo
 };
-use crate::rdg::{Node, Rdg, Step};
+use crate::rdg::{Node, OwnershipTransfer, Rdg, Step};
 use crate::staging_buffer_allocator::StagingBufferAllocator;
 use crate::util::check;
 use crate::DrawType::Draw;
@@ -298,10 +298,10 @@ impl Device {
                     submission_groups.push(submission_group);
 
                     let mut resources =
-                        HashMap::<(QueueType, QueueType), Vec<ResourceInfo>>::default();
+                        HashMap::<(QueueType, QueueType), Vec<&OwnershipTransfer>>::default();
                     for transfer in transfers {
                         let pair = (transfer.source, transfer.destination);
-                        resources.entry(pair).or_default().push(transfer.resource)
+                        resources.entry(pair).or_default().push(transfer)
                     }
 
                     let synchronization_infos = resources.into_iter().map(|((src, dest), res)| {
@@ -324,13 +324,21 @@ impl Device {
                                 async_transfer_command_recorders.last().unwrap()
                             }
                         };
+                        
+                        let resources = res.iter().map(|ot| {
+                            ResourceTransition {
+                                resource: ot.resource.resource,
+                                old_usage: ot.source_usage,
+                                new_usage: ot.dest_usage,
+                            }
+                        }).collect();
 
                         SynchronizationInfo {
                             source_queue: src,
                             source_command_recorder,
                             destination_queue: dest,
                             destination_command_recorder,
-                            resources: res,
+                            resources ,
                         }
                     });
                     let infos = synchronization_infos.collect::<Vec<_>>();
