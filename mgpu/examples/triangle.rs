@@ -119,10 +119,6 @@ fn main() {
             }),
         )
         .unwrap();
-    // device.destroy_shader_module(vertex_shader_module).unwrap();
-    // device
-    //     .destroy_shader_module(fragment_shader_module)
-    //     .unwrap();
 
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
@@ -189,6 +185,10 @@ fn main() {
         })
         .unwrap();
 
-    // device.destroy_image_view(image_view);
+    device.destroy_graphics_pipeline(pipeline).unwrap();
+    device.destroy_shader_module(vertex_shader_module).unwrap();
+    device
+        .destroy_shader_module(fragment_shader_module)
+        .unwrap();
     device.destroy_buffer(triangle_buffer).unwrap();
 }

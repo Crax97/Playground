@@ -474,12 +474,15 @@ fn main() {
         .unwrap();
 
     device.destroy_graphics_pipeline(pipeline).unwrap();
+    device.destroy_shader_module(vertex_shader_module).unwrap();
+    device
+        .destroy_shader_module(fragment_shader_module)
+        .unwrap();
+    device.destroy_binding_set(binding_set).unwrap();
     device.destroy_image_view(depth_image_view).unwrap();
     device.destroy_image_view(texture_image_view).unwrap();
     device.destroy_image(depth_image).unwrap();
     device.destroy_image(texture_image).unwrap();
-    device.destroy_binding_set(binding_set).unwrap();
     device.destroy_sampler(sampler).unwrap();
-    // device.destroy_image_view(image_view);
     device.destroy_buffer(cube_data_buffer).unwrap();
 }

@@ -626,6 +626,7 @@ pub struct DescriptorPoolAllocation {
 #[derive(Clone, Copy)]
 pub struct DescriptorSetAllocation {
     pub descriptor_set: vk::DescriptorSet,
+    pub layout: vk::DescriptorSetLayout,
     pub pool_index: usize,
 }
 
@@ -688,6 +689,7 @@ pub(super) struct VulkanGraphicsPipelineInfo {
     pub(super) label: Option<String>,
     pub(super) layout: GraphicsPipelineLayout,
     pub(super) vk_layout: vk::PipelineLayout,
+    pub(super) pipelines: Vec<vk::Pipeline>,
 }
 
 #[derive(Clone)]
@@ -905,11 +907,21 @@ define_resource_resolver!(
         }
         Ok(())
     }) => buffers,
-    (VulkanGraphicsPipelineInfo, |_, _| { todo!() }) => graphics_pipeline_infos,
+    (VulkanGraphicsPipelineInfo, |hal, pipeline| {
+          for pipeline in pipeline.pipelines {
+            unsafe {
+                hal.logical_device.handle.destroy_pipeline(pipeline, get_allocation_callbacks());
+            }
+          }
+          Ok(())
+        }) => graphics_pipeline_infos,
     (SpirvShaderModule, |hal, module| unsafe { hal.logical_device.handle.destroy_shader_module(module.handle, get_allocation_callbacks()); Ok(()) }) => shader_modules,
     (VulkanSampler, |hal, sampler| unsafe { hal.logical_device.handle.destroy_sampler(sampler.handle, get_allocation_callbacks()); Ok(())}) => samplers,
-    (VulkanBindingSet,  |hal, bs| unsafe {
-        todo!();
+    (VulkanBindingSet,  |hal, bs| {
+        let mut infos = hal.descriptor_pool_infos.lock().unwrap();
+        let ds_pool_info = infos.get_mut(&bs.allocation.layout).unwrap();
+        ds_pool_info.freed.push(bs.allocation);
+        ds_pool_info.pools[bs.allocation.pool_index].allocated -= 1;
         Ok(())
     }) => binding_sets,
 );

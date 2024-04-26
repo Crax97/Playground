@@ -62,7 +62,6 @@ pub struct VulkanHal {
     render_passes: RwLock<HashMap<u64, vk::RenderPass>>,
     descriptor_set_layouts: RwLock<HashMap<u64, vk::DescriptorSetLayout>>,
     pipeline_layouts: RwLock<HashMap<u64, vk::PipelineLayout>>,
-    pipelines: RwLock<HashMap<GraphicsPipeline, VulkanPipelineInfo>>,
     command_buffer_states: RwLock<HashMap<vk::CommandBuffer, VulkanCommandBufferState>>,
     descriptor_pool_infos: Mutex<HashMap<vk::DescriptorSetLayout, DescriptorPoolInfos>>,
 
@@ -712,6 +711,7 @@ impl Hal for VulkanHal {
             label: graphics_pipeline_description.label.map(ToOwned::to_owned),
             layout: owned_info,
             vk_layout: pipeline_layout,
+            pipelines: vec![],
         };
         let handle = self.resolver.add(vulkan_graphics_pipeline_info);
 
@@ -897,32 +897,27 @@ impl Hal for VulkanHal {
             .read()
             .expect("Failed to lock command buffer states");
         let command_buffer_state = command_buffer_states[&vk_command_buffer];
-        let pipeline = {
-            let pipelines = self.pipelines.read().expect("Failed to lock pipelines");
-            pipelines.get(&graphics_pipeline).and_then(|info| {
-                info.pipelines
-                    .get(command_buffer_state.current_subpass as usize)
-                    .copied()
-            })
-        };
-
-        let pipeline = if let Some(pipeline) = pipeline {
-            pipeline
-        } else {
-            let pipeline_info = self
-                .resolver
-                .resolve_clone(graphics_pipeline)
-                .ok_or(MgpuError::InvalidHandle)?;
-            let mut pipelines = self.pipelines.write().expect("Failed to lock pipelines");
-            let pipeline =
-                self.create_vulkan_graphics_pipeline(&pipeline_info, &command_buffer_state)?;
-            pipelines
-                .entry(graphics_pipeline)
-                .or_default()
+        let pipeline = self.resolver.apply_mut(graphics_pipeline, |vk_pipeline| {
+            if let Some(pipeline) = vk_pipeline
                 .pipelines
-                .push(pipeline);
-            pipeline
-        };
+                .get(command_buffer_state.current_subpass as usize)
+                .copied()
+            {
+                debug_assert!(pipeline != vk::Pipeline::null());
+                Ok(pipeline)
+            } else {
+                let pipeline =
+                    self.create_vulkan_graphics_pipeline(vk_pipeline, &command_buffer_state)?;
+                if vk_pipeline.pipelines.len() <= command_buffer_state.current_subpass as usize {
+                    vk_pipeline.pipelines.resize(
+                        command_buffer_state.current_subpass as usize + 1,
+                        vk::Pipeline::default(),
+                    )
+                }
+                vk_pipeline.pipelines[command_buffer_state.current_subpass as usize] = pipeline;
+                Ok(pipeline)
+            }
+        })?;
 
         unsafe {
             self.logical_device.handle.cmd_bind_pipeline(
@@ -1794,7 +1789,6 @@ impl VulkanHal {
             frames_in_flight: Arc::new(Mutex::new(frames_in_flight)),
             framebuffers: RwLock::default(),
             render_passes: RwLock::default(),
-            pipelines: RwLock::default(),
 
             memory_allocator: RwLock::new(
                 Allocator::new(&allocator_create_desc)
@@ -3110,6 +3104,7 @@ impl VulkanHal {
 
             Ok(DescriptorSetAllocation {
                 descriptor_set: set,
+                layout: descriptor_set_layout,
                 pool_index: infos.pools.len() - 1,
             })
         }
@@ -3195,6 +3190,23 @@ impl VulkanHal {
         };
 
         Ok(())
+    }
+}
+
+impl Drop for VulkanHal {
+    fn drop(&mut self) {
+        self.resolver.on_destroy(self);
+
+        let pools = self.descriptor_pool_infos.lock().unwrap();
+        for (_, pool) in pools.iter() {
+            for pool in &pool.pools {
+                unsafe {
+                    self.logical_device
+                        .handle
+                        .destroy_descriptor_pool(pool.pool, get_allocation_callbacks())
+                };
+            }
+        }
     }
 }
 

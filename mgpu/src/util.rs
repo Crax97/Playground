@@ -105,6 +105,15 @@ macro_rules! define_resource_resolver {
                 Ok(())
             }
 
+            // To be called when the owner of this resolver is dropped: destroys all the items queued for destruction
+            pub fn on_destroy(&self, s: &$self) {
+                $(
+                    self.get_mut::<$resource>().on_destroy(s);
+                )*
+            }
+
+
+
             /// Gets a read-only reference to the ResourceArena for T
             pub fn get<T>(&self) -> RwLockReadGuard<'_, ResourceArena<$self, T>>
             where
@@ -222,6 +231,12 @@ impl<S, T> ResourceArena<S, T> {
         }
 
         Ok(())
+    }
+
+    pub fn on_destroy(&mut self, s: &S) {
+        for item in std::mem::take(&mut self.destruction_queue) {
+            (self.deallocate_fn)(s, item.item).expect("Failed to call deallocate fn");
+        }
     }
 
     pub fn resolve(&self, handle: impl Into<Handle<T>>) -> Option<&T> {
