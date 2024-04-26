@@ -81,8 +81,9 @@ impl Device {
     }
 
     pub fn submit(&self) -> MgpuResult<()> {
-        let rdg = self.write_rdg().take();
+        let mut rdg = self.write_rdg();
         let compiled = rdg.compile()?;
+        rdg.clear();
         static DUMP: AtomicBool = AtomicBool::new(true);
         if DUMP.load(std::sync::atomic::Ordering::Relaxed) {
             println!("{}", compiled.dump_dot());
@@ -305,12 +306,12 @@ impl Device {
 
                     let synchronization_infos = resources.into_iter().map(|((src, dest), res)| {
                         let source_command_recorder = match src {
-                            QueueType::Graphics => graphics_command_recorders[current_graphics - 1],
+                            QueueType::Graphics => if current_graphics > 0 { Some(graphics_command_recorders[current_graphics - 1]) } else { None },
                             QueueType::AsyncCompute => {
-                                async_compute_command_recorders[current_compute - 1]
+                                if current_compute > 0 { Some(async_compute_command_recorders[current_compute - 1]) } else { None }
                             }
                             QueueType::AsyncTransfer => {
-                                async_transfer_command_recorders[current_transfer - 1]
+                                if current_transfer > 0 { Some(async_transfer_command_recorders[current_transfer - 1]) } else {None}
                             }
                         };
 

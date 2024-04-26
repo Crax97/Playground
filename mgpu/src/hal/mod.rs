@@ -120,7 +120,7 @@ pub struct ResourceTransition {
 #[derive(Clone)]
 pub struct SynchronizationInfo {
     pub source_queue: QueueType,
-    pub source_command_recorder: CommandRecorder,
+    pub source_command_recorder: Option<CommandRecorder>,
     pub destination_queue: QueueType,
     pub destination_command_recorder: CommandRecorder,
     pub resources: Vec<ResourceInfo>,

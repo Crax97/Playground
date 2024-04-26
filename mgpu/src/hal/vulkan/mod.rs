@@ -32,6 +32,7 @@ use raw_window_handle::{DisplayHandle, WindowHandle};
 use spirv_reflect::types::{
     ReflectDecorationFlags, ReflectInterfaceVariable, ReflectShaderStageFlags,
 };
+use std::any::Any;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{self, c_char, CStr, CString};
@@ -47,6 +48,8 @@ use self::util::{
 };
 
 use super::{RenderState, ResourceTransition, SubmitInfo};
+
+pub(crate) const FLIP_VIEWPORT: bool = true;
 
 pub struct VulkanHal {
     entry: Entry,
@@ -140,11 +143,6 @@ struct VulkanCommandBufferState {
 
 pub struct VulkanDeviceFeatures {
     swapchain_support: bool,
-}
-
-#[derive(Default)]
-pub struct VulkanPipelineInfo {
-    pipelines: Vec<vk::Pipeline>,
 }
 
 #[derive(Debug)]
@@ -871,13 +869,24 @@ impl Hal for VulkanHal {
                 vk::SubpassContents::INLINE,
             );
 
-            let viewport = vk::Viewport::default()
-                .width(render_pass_info.render_area.extents.width as f32)
-                .height(render_pass_info.render_area.extents.height as f32)
-                .x(render_pass_info.render_area.offset.x as f32)
-                .y(render_pass_info.render_area.offset.y as f32)
-                .min_depth(0.0)
-                .max_depth(1.0);
+            let viewport = if FLIP_VIEWPORT {
+                vk::Viewport::default()
+                    .width(render_pass_info.render_area.extents.width as f32)
+                    .height(-(render_pass_info.render_area.extents.height as f32))
+                    .x(render_pass_info.render_area.offset.x as f32)
+                    .y(render_pass_info.render_area.offset.y as f32
+                        + render_pass_info.render_area.extents.height as f32)
+                    .min_depth(0.0)
+                    .max_depth(1.0)
+            } else {
+                vk::Viewport::default()
+                    .width(render_pass_info.render_area.extents.width as f32)
+                    .height(render_pass_info.render_area.extents.height as f32)
+                    .x(render_pass_info.render_area.offset.x as f32)
+                    .y(render_pass_info.render_area.offset.y as f32)
+                    .min_depth(0.0)
+                    .max_depth(1.0)
+            };
             device.cmd_set_viewport(cb, 0, &[viewport]);
             device.cmd_set_scissor(cb, 0, &[render_pass_info.render_area.to_vk()]);
             state.current_render_pass = render_pass;
@@ -1301,7 +1310,9 @@ impl Hal for VulkanHal {
 
         let device = &self.logical_device.handle;
         for info in infos {
-            let vk_buffer_src = vk::CommandBuffer::from_raw(info.source_command_recorder.id);
+            let vk_buffer_src = info
+                .source_command_recorder
+                .map(|cr| vk::CommandBuffer::from_raw(cr.id));
             let vk_buffer_dst = vk::CommandBuffer::from_raw(info.destination_command_recorder.id);
             let source_qfi = match info.source_queue {
                 super::QueueType::Graphics => self.logical_device.graphics_queue.family_index,
@@ -1334,43 +1345,66 @@ impl Hal for VulkanHal {
                             let new_layout = resource.access_mode.image_layout();
                             let vk_image = images.resolve_mut(*image).unwrap();
                             let current_layout_info = vk_image.get_subresource_layout(*region);
-                            image_memory_barrier_source.push(
-                                vk::ImageMemoryBarrier2::default()
-                                    .image(vk_image.handle)
-                                    .subresource_range(
-                                        vk::ImageSubresourceRange::default()
-                                            .aspect_mask(image.format.aspect_mask())
-                                            .base_array_layer(region.base_array_layer)
-                                            .base_mip_level(region.mip)
-                                            .layer_count(region.num_layers.get())
-                                            .level_count(region.num_mips.get()),
-                                    )
-                                    .old_layout(current_layout_info.image_layout)
-                                    .new_layout(new_layout)
-                                    .src_access_mask(current_layout_info.access_mask)
-                                    .src_stage_mask(current_layout_info.stage_mask)
-                                    .src_queue_family_index(source_qfi)
-                                    .dst_queue_family_index(dest_qfi),
-                            );
+                            if vk_buffer_src.is_some() {
+                                image_memory_barrier_source.push(
+                                    vk::ImageMemoryBarrier2::default()
+                                        .image(vk_image.handle)
+                                        .subresource_range(
+                                            vk::ImageSubresourceRange::default()
+                                                .aspect_mask(image.format.aspect_mask())
+                                                .base_array_layer(region.base_array_layer)
+                                                .base_mip_level(region.mip)
+                                                .layer_count(region.num_layers.get())
+                                                .level_count(region.num_mips.get()),
+                                        )
+                                        .old_layout(current_layout_info.image_layout)
+                                        .new_layout(new_layout)
+                                        .src_access_mask(current_layout_info.access_mask)
+                                        .src_stage_mask(current_layout_info.stage_mask)
+                                        .src_queue_family_index(source_qfi)
+                                        .dst_queue_family_index(dest_qfi),
+                                );
 
-                            image_memory_barrier_dest.push(
-                                vk::ImageMemoryBarrier2::default()
-                                    .image(vk_image.handle)
-                                    .subresource_range(
-                                        vk::ImageSubresourceRange::default()
-                                            .aspect_mask(image.format.aspect_mask())
-                                            .base_array_layer(region.base_array_layer)
-                                            .base_mip_level(region.mip)
-                                            .layer_count(region.num_layers.get())
-                                            .level_count(region.num_mips.get()),
-                                    )
-                                    .old_layout(current_layout_info.image_layout)
-                                    .new_layout(new_layout)
-                                    .dst_access_mask(dst_access_mask)
-                                    .dst_stage_mask(dst_stage_mask)
-                                    .src_queue_family_index(source_qfi)
-                                    .dst_queue_family_index(dest_qfi),
-                            );
+                                image_memory_barrier_dest.push(
+                                    vk::ImageMemoryBarrier2::default()
+                                        .image(vk_image.handle)
+                                        .subresource_range(
+                                            vk::ImageSubresourceRange::default()
+                                                .aspect_mask(image.format.aspect_mask())
+                                                .base_array_layer(region.base_array_layer)
+                                                .base_mip_level(region.mip)
+                                                .layer_count(region.num_layers.get())
+                                                .level_count(region.num_mips.get()),
+                                        )
+                                        .old_layout(current_layout_info.image_layout)
+                                        .new_layout(new_layout)
+                                        .dst_access_mask(dst_access_mask)
+                                        .dst_stage_mask(dst_stage_mask)
+                                        .src_queue_family_index(source_qfi)
+                                        .dst_queue_family_index(dest_qfi),
+                                );
+                            } else {
+                                image_memory_barrier_dest.push(
+                                    vk::ImageMemoryBarrier2::default()
+                                        .image(vk_image.handle)
+                                        .subresource_range(
+                                            vk::ImageSubresourceRange::default()
+                                                .aspect_mask(image.format.aspect_mask())
+                                                .base_array_layer(region.base_array_layer)
+                                                .base_mip_level(region.mip)
+                                                .layer_count(region.num_layers.get())
+                                                .level_count(region.num_mips.get()),
+                                        )
+                                        .old_layout(vk::ImageLayout::UNDEFINED)
+                                        .new_layout(new_layout)
+                                        .src_access_mask(vk::AccessFlags2::empty())
+                                        .dst_access_mask(dst_access_mask)
+                                        .src_stage_mask(vk::PipelineStageFlags2::empty())
+                                        .dst_stage_mask(dst_stage_mask)
+                                        .src_queue_family_index(source_qfi)
+                                        .dst_queue_family_index(dest_qfi),
+                                );
+                            }
                             vk_image.set_subresource_layout(
                                 *region,
                                 LayoutInfo {
@@ -1386,29 +1420,45 @@ impl Hal for VulkanHal {
                             size,
                         } => {
                             let buffer = buffers.resolve_mut(*buffer).unwrap();
-                            buffer_memory_barrier_source.push(
-                                vk::BufferMemoryBarrier2::default()
-                                    .buffer(buffer.handle)
-                                    .offset(*offset as _)
-                                    .size(*size as _)
-                                    .src_queue_family_index(source_qfi)
-                                    .dst_queue_family_index(dest_qfi)
-                                    .src_access_mask(buffer.current_access_mask)
-                                    // .dst_access_mask(dst_access_mask)
-                                    .src_stage_mask(buffer.current_stage_mask), // .dst_stage_mask(dst_stage_mask),
-                            );
-                            buffer_memory_barrier_dest.push(
-                                vk::BufferMemoryBarrier2::default()
-                                    .buffer(buffer.handle)
-                                    .offset(*offset as _)
-                                    .size(*size as _)
-                                    .src_queue_family_index(source_qfi)
-                                    .dst_queue_family_index(dest_qfi)
-                                    // .src_access_mask(buffer.current_access_mask)
-                                    .dst_access_mask(dst_access_mask)
-                                    // .src_stage_mask(buffer.current_stage_mask)
-                                    .dst_stage_mask(dst_stage_mask),
-                            );
+
+                            if vk_buffer_src.is_some() {
+                                buffer_memory_barrier_source.push(
+                                    vk::BufferMemoryBarrier2::default()
+                                        .buffer(buffer.handle)
+                                        .offset(*offset as _)
+                                        .size(*size as _)
+                                        .src_queue_family_index(source_qfi)
+                                        .dst_queue_family_index(dest_qfi)
+                                        .src_access_mask(buffer.current_access_mask)
+                                        // .dst_access_mask(dst_access_mask)
+                                        .src_stage_mask(buffer.current_stage_mask), // .dst_stage_mask(dst_stage_mask),
+                                );
+                                buffer_memory_barrier_dest.push(
+                                    vk::BufferMemoryBarrier2::default()
+                                        .buffer(buffer.handle)
+                                        .offset(*offset as _)
+                                        .size(*size as _)
+                                        .src_queue_family_index(source_qfi)
+                                        .dst_queue_family_index(dest_qfi)
+                                        // .src_access_mask(buffer.current_access_mask)
+                                        .dst_access_mask(dst_access_mask)
+                                        // .src_stage_mask(buffer.current_stage_mask)
+                                        .dst_stage_mask(dst_stage_mask),
+                                );
+                            } else {
+                                buffer_memory_barrier_dest.push(
+                                    vk::BufferMemoryBarrier2::default()
+                                        .buffer(buffer.handle)
+                                        .offset(*offset as _)
+                                        .size(*size as _)
+                                        .src_queue_family_index(source_qfi)
+                                        .dst_queue_family_index(dest_qfi)
+                                        .src_access_mask(vk::AccessFlags2::empty())
+                                        .dst_access_mask(dst_access_mask)
+                                        .src_stage_mask(vk::PipelineStageFlags2::empty())
+                                        .dst_stage_mask(dst_stage_mask),
+                                );
+                            }
                             buffer.current_access_mask = dst_access_mask;
                             buffer.current_stage_mask = dst_stage_mask;
                         }
@@ -1426,7 +1476,9 @@ impl Hal for VulkanHal {
                     .dependency_flags(vk::DependencyFlags::BY_REGION);
 
                 unsafe {
-                    device.cmd_pipeline_barrier2(vk_buffer_src, &depedency_info_source);
+                    if let Some(cb) = vk_buffer_src {
+                        device.cmd_pipeline_barrier2(cb, &depedency_info_source);
+                    }
                     device.cmd_pipeline_barrier2(vk_buffer_dst, &depedency_info_dest);
                 }
             } else {

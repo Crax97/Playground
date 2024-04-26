@@ -617,12 +617,6 @@ pub struct DescriptorPoolInfo {
     pub allocated: usize,
     pub max: usize,
 }
-
-pub struct DescriptorPoolAllocation {
-    pub index: usize,
-    pub layout: vk::DescriptorSetLayout,
-}
-
 #[derive(Clone, Copy)]
 pub struct DescriptorSetAllocation {
     pub descriptor_set: vk::DescriptorSet,

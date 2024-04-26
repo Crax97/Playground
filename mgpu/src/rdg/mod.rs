@@ -63,6 +63,14 @@ pub struct Rdg {
     last_on_graphics: Option<usize>,
     last_on_compute: Option<usize>,
     last_on_transfer: Option<usize>,
+    ownerships: HashMap<Resource, QueueOwnership>,
+}
+
+#[derive(Debug)]
+struct QueueOwnership {
+    queue: QueueType,
+    node: usize,
+    access_mode: ResourceAccessMode,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
@@ -161,8 +169,11 @@ impl Rdg {
         }
     }
 
-    pub fn take(&mut self) -> Self {
-        std::mem::take(self)
+    pub fn clear(&mut self) {
+        self.last_on_compute = None;
+        self.last_on_graphics = None;
+        self.last_on_transfer = None;
+        self.nodes.clear();
     }
 
     fn add_on_queue(
@@ -179,7 +190,7 @@ impl Rdg {
         nodes.push(node);
     }
 
-    pub fn compile(mut self) -> MgpuResult<RdgCompiledGraph> {
+    pub fn compile(&mut self) -> MgpuResult<RdgCompiledGraph> {
         if self.nodes.is_empty() {
             return Ok(RdgCompiledGraph::default());
         }
@@ -268,13 +279,7 @@ impl Rdg {
         adjacency_list: Vec<HashSet<usize>>,
         topological_sorting: &[usize],
     ) -> Result<RdgCompiledGraph, crate::MgpuError> {
-        #[derive(Debug)]
-        struct QueueOwnership {
-            queue: QueueType,
-            node: usize,
-            access_mode: ResourceAccessMode,
-        }
-        let mut ownerships = HashMap::<Resource, QueueOwnership>::new();
+        let ownerships = &mut self.ownerships;
         let mut steps = Vec::<Step>::new();
 
         let mut barrier_info = Vec::<OwnershipTransfer>::default();
@@ -322,16 +327,23 @@ impl Rdg {
                         });
 
                 ownership.node = node_info.global_index;
-                ownership.queue = node_info.queue;
+                if ownership.queue != node_info.queue {
+                    barrier_info.push(OwnershipTransfer {
+                        source: ownership.queue,
+                        destination: node_info.queue,
+                        resource: written_resource,
+                    });
 
-                if ownership.access_mode != written_resource.access_mode {
+                    ownership.queue = node_info.queue;
+                } else if ownership.access_mode != written_resource.access_mode {
                     prequisites.push(ResourceTransition {
                         resource: written_resource.resource,
                         old_usage: ownership.access_mode,
                         new_usage: written_resource.access_mode,
                     });
-                    ownership.access_mode = written_resource.access_mode;
                 }
+
+                ownership.access_mode = written_resource.access_mode;
             }
 
             if !barrier_info.is_empty() {

@@ -515,8 +515,8 @@ pub enum PolygonMode {
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CullMode {
-    #[default]
     None,
+    #[default]
     Back,
     Front,
 }

@@ -112,9 +112,10 @@ fn main() {
         16, 17, 18, 19, 17, 16, // Up
         22, 21, 20, 20, 21, 23, // Down
     ];
+    let mut rotation = 0.0f32;
     let view = glam::Mat4::look_at_rh(vec3(-5.0, 10.0, -5.0), Vec3::default(), vec3(0.0, 1.0, 0.0));
     let projection = glam::Mat4::perspective_rh(75.0f32.to_radians(), 800.0 / 600.0, 0.01, 1000.0);
-    let model = glam::Mat4::from_scale(Vec3::ONE);
+    let model = glam::Mat4::from_rotation_y(rotation) * glam::Mat4::from_scale(Vec3::ONE);
     let mvp = projection * view * model;
     let mvp = [mvp];
 
@@ -379,6 +380,17 @@ fn main() {
                     event_loop.exit();
                 }
                 WindowEvent::RedrawRequested => {
+                    let model =
+                        glam::Mat4::from_rotation_y(rotation) * glam::Mat4::from_scale(Vec3::ONE);
+                    let mvp = projection * view * model;
+                    let mvp = [mvp];
+                    device
+                        .write_buffer(
+                            cube_object_data,
+                            &cube_object_data.write_all_params(bytemuck::cast_slice(&mvp)),
+                        )
+                        .unwrap();
+
                     let swapchain_image = swapchain.acquire_next_image().unwrap();
 
                     let mut command_recorder = device.create_command_recorder::<Graphics>();
@@ -409,6 +421,7 @@ fn main() {
                         render_pass.set_index_buffer(cube_index_buffer);
                         render_pass.set_binding_sets(&[binding_set.clone()]);
                         render_pass.draw_indexed(36, 1, 0, 0, 0).unwrap();
+                        rotation += 0.01;
                     }
                     command_recorder.submit().unwrap();
 

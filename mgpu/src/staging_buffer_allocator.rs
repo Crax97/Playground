@@ -102,6 +102,7 @@ mod tests {
 
     struct DummyHal;
 
+    #[allow(unused_variables)]
     impl Hal for DummyHal {
         fn device_wait_idle(&self) -> crate::MgpuResult<()> {
             todo!()
