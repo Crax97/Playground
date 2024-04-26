@@ -103,13 +103,14 @@ bitflags! {
 pub enum ImageFormat {
     Unknown,
     Rgba8,
+    Bgra8,
     Depth32,
 }
 impl ImageFormat {
     fn byte_size(&self) -> usize {
         match self {
             ImageFormat::Unknown => 0,
-            ImageFormat::Rgba8 => 4,
+            ImageFormat::Rgba8 | ImageFormat::Bgra8 => 4,
             ImageFormat::Depth32 => 4,
         }
     }
@@ -810,7 +811,7 @@ impl ImageFormat {
     pub fn aspect(self) -> ImageAspect {
         match self {
             ImageFormat::Unknown => unreachable!(),
-            ImageFormat::Rgba8 => ImageAspect::Color,
+            ImageFormat::Rgba8 | ImageFormat::Bgra8  => ImageAspect::Color,
             ImageFormat::Depth32 => ImageAspect::Depth,
         }
     }

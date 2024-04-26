@@ -34,9 +34,10 @@ use spirv_reflect::types::{
     ReflectDecorationFlags, ReflectInterfaceVariable, ReflectShaderStageFlags,
 };
 use std::borrow::Cow;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{self, c_char, CStr, CString};
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::{Hash, Hasher};
 use std::iter;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -1338,9 +1339,6 @@ impl Hal for VulkanHal {
         &self,
         infos: &[super::SynchronizationInfo],
     ) -> MgpuResult<()> {
-        let mut buffers = self.resolver.get_mut::<VulkanBuffer>();
-        let mut images = self.resolver.get_mut::<VulkanImage>();
-
         let device = &self.logical_device.handle;
         for info in infos {
             let vk_buffer_src = info
@@ -1360,6 +1358,8 @@ impl Hal for VulkanHal {
             };
 
             if source_qfi != dest_qfi {
+                let mut buffers = self.resolver.get_mut::<VulkanBuffer>();
+                let mut images = self.resolver.get_mut::<VulkanImage>();
                 let mut image_memory_barrier_source = vec![];
                 let mut buffer_memory_barrier_source = vec![];
 

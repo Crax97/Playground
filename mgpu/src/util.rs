@@ -1,5 +1,6 @@
 use std::{
-    hash::{DefaultHasher, Hash, Hasher},
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
     marker::PhantomData,
     sync::atomic::AtomicBool,
 };

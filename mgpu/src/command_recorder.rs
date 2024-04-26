@@ -73,14 +73,14 @@ pub(crate) struct RenderStep {
 }
 
 #[derive(Default, Debug, Hash)]
-pub(crate) struct Framebuffer {
+pub struct Framebuffer {
     pub(crate) render_targets: Vec<RenderTarget>,
     pub(crate) depth_stencil_target: Option<DepthStencilTarget>,
     pub(crate) extents: Extents2D,
 }
 
 #[derive(Default, Debug, Hash)]
-pub(crate) struct RenderPassInfo {
+pub struct RenderPassInfo {
     pub(crate) label: Option<String>,
     pub(crate) framebuffer: Framebuffer,
     pub(crate) render_area: Rect2D,

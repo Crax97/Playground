@@ -39,6 +39,7 @@ impl ToVk for ImageFormat {
         match self {
             ImageFormat::Unknown => vk::Format::UNDEFINED,
             ImageFormat::Rgba8 => vk::Format::R8G8B8A8_UNORM,
+            ImageFormat::Bgra8 => vk::Format::B8G8R8A8_UNORM,
             ImageFormat::Depth32 => vk::Format::D32_SFLOAT,
         }
     }
@@ -50,8 +51,9 @@ impl FromVk for vk::Format {
         match self {
             vk::Format::R8G8B8A8_UNORM => ImageFormat::Rgba8,
             vk::Format::D32_SFLOAT => ImageFormat::Depth32,
+            vk::Format::B8G8R8A8_UNORM => ImageFormat::Bgra8,
             vk::Format::UNDEFINED => ImageFormat::Unknown,
-            _ => unreachable!("Format not known"),
+            _ => unreachable!("Format not known {:?}", self),
         }
     }
 }
@@ -758,7 +760,7 @@ impl ImageFormat {
     pub(super) fn aspect_mask(&self) -> ash::vk::ImageAspectFlags {
         match self {
             ImageFormat::Unknown => vk::ImageAspectFlags::empty(),
-            ImageFormat::Rgba8 => vk::ImageAspectFlags::COLOR,
+            ImageFormat::Rgba8 | ImageFormat::Bgra8 => vk::ImageAspectFlags::COLOR,
             ImageFormat::Depth32 => vk::ImageAspectFlags::DEPTH,
         }
     }
