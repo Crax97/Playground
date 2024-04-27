@@ -115,9 +115,6 @@ fn main() {
     let mut rotation = 0.0f32;
     let view = glam::Mat4::look_at_rh(vec3(-5.0, 10.0, -5.0), Vec3::default(), vec3(0.0, 1.0, 0.0));
     let projection = glam::Mat4::perspective_rh(75.0f32.to_radians(), 800.0 / 600.0, 0.01, 1000.0);
-    let model = glam::Mat4::from_rotation_y(rotation) * glam::Mat4::from_scale(Vec3::ONE);
-    let mvp = projection * view * model;
-    let mvp = [mvp];
 
     let texture_data = util::read_image_data("examples/assets/david.jpg");
     let mut depth_image = device
@@ -217,7 +214,7 @@ fn main() {
         .create_buffer(&BufferDescription {
             label: Some("Cube Object Data"),
             usage_flags: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
-            size: std::mem::size_of_val(mvp.as_slice()),
+            size: std::mem::size_of::<glam::Mat4>(),
             memory_domain: MemoryDomain::DeviceLocal,
         })
         .unwrap();
@@ -233,13 +230,6 @@ fn main() {
         .write_buffer(
             cube_index_buffer,
             &cube_index_buffer.write_all_params(bytemuck::cast_slice(&cube_indices)),
-        )
-        .unwrap();
-
-    device
-        .write_buffer(
-            cube_object_data,
-            &cube_object_data.write_all_params(bytemuck::cast_slice(&mvp)),
         )
         .unwrap();
 

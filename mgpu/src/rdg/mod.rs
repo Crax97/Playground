@@ -622,79 +622,129 @@ impl Node {
 }
 
 impl RdgCompiledGraph {
-    pub fn dump_dot(&self) -> String {
-        let mut nodes: String = "".into();
-        let mut edges: String = "".into();
-
-        for (node, children) in self.adjacency_list.iter().enumerate() {
-            let info = &self.nodes[node];
-            let node_label = match &info.ty {
-                Node::RenderPass { info } => {
-                    format!(
-                        "RenderPass '{}'",
-                        info.label.as_deref().unwrap_or("Unknown")
-                    )
-                }
-                Node::CopyBufferToBuffer {
-                    source,
-                    dest,
-                    source_offset,
-                    dest_offset,
-                    size,
-                } => format!(
-                    "Copy {:?}:{:?} -> {:?}:{:?} {} bytes",
-                    source.id, source_offset, dest.id, dest_offset, size
-                ),
-                Node::CopyBufferToImage {
-                    source,
-                    dest,
-                    source_offset,
-                    dest_region,
-                } => format!(
-                    "Copy {} texels {}:{} -> {}",
-                    dest_region.extents.area(),
-                    source.id,
-                    source_offset,
-                    dest.id,
-                ),
-                Node::Blit {
-                    source,
-                    source_region,
-                    dest,
-                    dest_region,
-                    filter,
-                } => {
-                    format!(
-                        "{}Blit {} l{}m{} -> {} l{}m{}",
-                        match filter {
-                            FilterMode::Nearest => "Near",
-                            FilterMode::Linear => "Lin",
-                        },
-                        source.id,
-                        source_region.base_array_layer,
-                        source_region.mip,
-                        dest.id,
-                        dest_region.base_array_layer,
-                        dest_region.mip
-                    )
-                }
-            };
-            let label = format!("\t{} [label = \"{}\"];\n", node, node_label);
-            nodes += label.as_str();
-
-            let mut node_connections: String = Default::default();
-            for child in children {
-                node_connections += &format!("\t{} -> {};\n", node, child)
+    fn node_name(info: &RdgNode) -> String {
+        match &info.ty {
+            Node::RenderPass { info } => {
+                format!(
+                    "RenderPass '{}'",
+                    info.label.as_deref().unwrap_or("Unknown")
+                )
             }
-            edges += node_connections.as_str();
+            Node::CopyBufferToBuffer {
+                source,
+                dest,
+                source_offset,
+                dest_offset,
+                size,
+            } => format!(
+                "Copy {:?}:{:?} -> {:?}:{:?} {} bytes",
+                source.id, source_offset, dest.id, dest_offset, size
+            ),
+            Node::CopyBufferToImage {
+                source,
+                dest,
+                source_offset,
+                dest_region,
+            } => format!(
+                "Copy {} texels {}:{} -> {}",
+                dest_region.extents.area(),
+                source.id,
+                source_offset,
+                dest.id,
+            ),
+            Node::Blit {
+                source,
+                source_region,
+                dest,
+                dest_region,
+                filter,
+            } => {
+                format!(
+                    "{}Blit {} l{}m{} -> {} l{}m{}",
+                    match filter {
+                        FilterMode::Nearest => "Near",
+                        FilterMode::Linear => "Lin",
+                    },
+                    source.id,
+                    source_region.base_array_layer,
+                    source_region.mip,
+                    dest.id,
+                    dest_region.base_array_layer,
+                    dest_region.mip
+                )
+            }
         }
-        let mut result = "digraph rdg {\n".into();
+    }
 
-        result += nodes.as_str();
-        result += edges.as_str();
-        result += "}";
+    pub fn dump_dot(&self) -> String {
+        let mut content = "digraph rdg {\n".into();
+        let mut edges = "".into();
 
-        result
+        let mut subgraph_id = 0;
+        for step in &self.sequence {
+            match step {
+                Step::OwnershipTransfer { transfers } => {}
+                Step::ExecutePasses(pass) => {
+                    let mut subgraph = format!("\tsubgraph clusterStep{} {{\n", subgraph_id);
+                    subgraph_id += 1;
+                    self.extract_pass_info(
+                        &pass.graphics_passes,
+                        subgraph_id,
+                        "Graphics",
+                        &mut subgraph,
+                        &mut edges,
+                    );
+                    self.extract_pass_info(
+                        &pass.compute_passes,
+                        subgraph_id,
+                        "Compute",
+                        &mut subgraph,
+                        &mut edges,
+                    );
+                    self.extract_pass_info(
+                        &pass.transfer_passes,
+                        subgraph_id,
+                        "Copy",
+                        &mut subgraph,
+                        &mut edges,
+                    );
+                    subgraph += "\t};\n";
+
+                    content += subgraph.as_str();
+                }
+            }
+        }
+
+        content += edges.as_str();
+        content += "}";
+        content
+    }
+
+    fn extract_pass_info(
+        &self,
+        passes: &[Pass],
+        pass_id: usize,
+        prefix: &str,
+        nodes: &mut String,
+        edges: &mut String,
+    ) {
+        if !passes.is_empty() {
+            let mut node = format!(
+                "\t\tsubgraph cluster{}{} {{\n\t\t\tlabel=\"{}{}\";\n",
+                prefix, pass_id, prefix, pass_id
+            );
+            for gfx in passes {
+                let info = &self.nodes[gfx.node_id];
+                let name = Self::node_name(info);
+                node += &format!("\t\t\t{} [label=\"{}\"];\n", gfx.node_id, name);
+
+                for child in self.adjacency_list[gfx.node_id].iter() {
+                    *edges += &format!("\t{} -> {};\n", gfx.node_id, child);
+                }
+            }
+            node += "\t\t};\n";
+            *nodes += node.as_str();
+        }
     }
 }
 
