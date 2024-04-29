@@ -209,7 +209,10 @@ impl Rdg {
         let mut adjacency_list = Vec::with_capacity(self.nodes.len());
         adjacency_list.resize(self.nodes.len(), HashSet::default());
 
+        let mut parent_list = Vec::with_capacity(self.nodes.len());
+        parent_list.resize(self.nodes.len(), HashSet::default());
         // Helper map to track which node currently owns a resource
+
         let mut ownerships = HashMap::<Resource, usize>::new();
 
         for node in &self.nodes {
@@ -256,6 +259,7 @@ impl Rdg {
                             .is_some_and(|o| *o == node.global_index)
                     {
                         adjacency_list[node.global_index].insert(other.global_index);
+                        parent_list[other.global_index].insert(node.global_index);
                     }
 
                     for other_written in &other.writes {
@@ -263,12 +267,60 @@ impl Rdg {
                     }
                 }
             }
-            if let Some(predecessor) = node.predecessor {
-                adjacency_list[predecessor].insert(node.global_index);
+        }
+
+        self.simplify_adjacency_list(&mut adjacency_list, parent_list);
+
+        // Make sure each node depends on its parent on the queue
+        for node in 0..self.nodes.len() {
+            if let Some(pred) = self.nodes[node].predecessor {
+                adjacency_list[pred].insert(node);
             }
         }
 
         adjacency_list
+    }
+
+    fn simplify_adjacency_list(
+        &self,
+        adjacency_list: &mut Vec<HashSet<usize>>,
+        parent_list: Vec<HashSet<usize>>,
+    ) {
+        *adjacency_list = Vec::with_capacity(self.nodes.len());
+        adjacency_list.resize(self.nodes.len(), HashSet::default());
+        for node in 0..self.nodes.len() {
+            let parents: &HashSet<usize> = &parent_list[node];
+
+            let mut nearest_gfx: Option<usize> = None;
+            let mut nearest_copy: Option<usize> = None;
+            let mut nearest_compute: Option<usize> = None;
+
+            for &parent in parents {
+                let parent_node = &self.nodes[parent];
+                let nearest = match parent_node.queue {
+                    QueueType::Graphics => &mut nearest_gfx,
+                    QueueType::AsyncCompute => &mut nearest_copy,
+                    QueueType::AsyncTransfer => &mut nearest_compute,
+                };
+
+                nearest.replace(nearest.unwrap_or_default().max(parent));
+            }
+
+            let mut nearest_parents = HashSet::new();
+            if let Some(n) = nearest_gfx {
+                nearest_parents.insert(n);
+            }
+            if let Some(n) = nearest_compute {
+                nearest_parents.insert(n);
+            }
+            if let Some(n) = nearest_copy {
+                nearest_parents.insert(n);
+            }
+
+            for parent in nearest_parents {
+                adjacency_list[parent].insert(node);
+            }
+        }
     }
 
     fn do_topological_sorting(&self, adjacency_list: &[HashSet<usize>]) -> MgpuResult<Vec<usize>> {
