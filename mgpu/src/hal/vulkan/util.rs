@@ -3,15 +3,16 @@ use gpu_allocator::vulkan::Allocation;
 
 use crate::{
     hal::{
-        GraphicsPipelineLayout, OwnedFragmentStageInfo, OwnedVertexStageInfo, ResourceAccessMode,
+        ComputePipelineLayout, GraphicsPipelineLayout, OwnedFragmentStageInfo,
+        OwnedVertexStageInfo, ResourceAccessMode,
     },
     util::{define_resource_resolver, Handle},
     AddressMode, BindingSet, BindingSetElementKind, BindingSetLayout, BindingSetLayoutInfo,
     BlendFactor, BlendOp, BorderColor, Buffer, BufferUsageFlags, ColorWriteMask, CompareOp,
-    CullMode, Extents2D, Extents3D, FilterMode, FrontFace, GraphicsPipeline,
-    GraphicsPipelineDescription, Image, ImageDimension, ImageFormat, ImageSubresource,
-    ImageUsageFlags, ImageView, MipmapMode, Offset2D, Offset3D, PolygonMode, PresentMode,
-    PrimitiveTopology, Rect2D, SampleCount, Sampler, ShaderModule, ShaderModuleLayout,
+    ComputePipeline, ComputePipelineDescription, CullMode, Extents2D, Extents3D, FilterMode,
+    FrontFace, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDimension, ImageFormat,
+    ImageSubresource, ImageUsageFlags, ImageView, MipmapMode, Offset2D, Offset3D, PolygonMode,
+    PresentMode, PrimitiveTopology, Rect2D, SampleCount, Sampler, ShaderModule, ShaderModuleLayout,
     ShaderStageFlags, Swapchain, VertexAttributeFormat, VertexInputFrequency,
 };
 
@@ -70,6 +71,10 @@ impl ToVk for ShaderStageFlags {
 
         if self.contains(Self::FRAGMENT) {
             res |= Self::Target::FRAGMENT;
+        }
+
+        if self.contains(Self::COMPUTE) {
+            res |= Self::Target::COMPUTE;
         }
 
         res
@@ -687,6 +692,13 @@ pub(super) struct VulkanGraphicsPipelineInfo {
     pub(super) vk_layout: vk::PipelineLayout,
     pub(super) pipelines: Vec<vk::Pipeline>,
 }
+#[derive(Clone)]
+pub(super) struct VulkanComputePipelineInfo {
+    pub(super) label: Option<String>,
+    pub(super) handle: vk::Pipeline,
+    pub(super) layout: ComputePipelineLayout,
+    pub(super) vk_layout: vk::PipelineLayout,
+}
 
 #[derive(Clone)]
 pub(super) struct SpirvShaderModule {
@@ -756,6 +768,20 @@ impl<'a> GraphicsPipelineDescription<'a> {
     }
 }
 
+impl<'a> ComputePipelineDescription<'a> {
+    pub(super) fn to_vk_owned(
+        self,
+        binding_sets_infos: Vec<BindingSetLayoutInfo>,
+    ) -> ComputePipelineLayout {
+        ComputePipelineLayout {
+            label: self.label.map(ToOwned::to_owned),
+            binding_sets_infos,
+            shader: self.shader,
+            entry_point: self.entry_point.to_string(),
+        }
+    }
+}
+
 impl ImageFormat {
     pub(super) fn aspect_mask(&self) -> ash::vk::ImageAspectFlags {
         match self {
@@ -770,53 +796,53 @@ impl ResourceAccessMode {
     pub(super) fn image_layout(self) -> vk::ImageLayout {
         match self {
             ResourceAccessMode::Undefined => vk::ImageLayout::UNDEFINED,
-            crate::hal::ResourceAccessMode::AttachmentRead(ty) => match ty {
+            ResourceAccessMode::AttachmentRead(ty) => match ty {
                 crate::hal::AttachmentType::Color => vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 crate::hal::AttachmentType::DepthStencil => {
                     vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL
                 }
             },
-            crate::hal::ResourceAccessMode::AttachmentWrite(ty) => match ty {
+            ResourceAccessMode::AttachmentWrite(ty) => match ty {
                 crate::hal::AttachmentType::Color => vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 crate::hal::AttachmentType::DepthStencil => {
                     vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
                 }
             },
-            crate::hal::ResourceAccessMode::VertexInput => unreachable!(),
-            crate::hal::ResourceAccessMode::ShaderRead => vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            crate::hal::ResourceAccessMode::ShaderWrite => vk::ImageLayout::GENERAL,
-            crate::hal::ResourceAccessMode::TransferSrc => vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-            crate::hal::ResourceAccessMode::TransferDst => vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            ResourceAccessMode::VertexInput => unreachable!(),
+            ResourceAccessMode::ShaderRead(..) => vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            ResourceAccessMode::ShaderWrite(..) => vk::ImageLayout::GENERAL,
+            ResourceAccessMode::TransferSrc => vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            ResourceAccessMode::TransferDst => vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         }
     }
 
     pub(super) fn access_mask(self) -> vk::AccessFlags2 {
         match self {
             ResourceAccessMode::Undefined => Default::default(),
-            crate::hal::ResourceAccessMode::AttachmentRead(ty) => match ty {
+            ResourceAccessMode::AttachmentRead(ty) => match ty {
                 crate::hal::AttachmentType::Color => vk::AccessFlags2::COLOR_ATTACHMENT_READ,
                 crate::hal::AttachmentType::DepthStencil => {
                     vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ_KHR
                 }
             },
-            crate::hal::ResourceAccessMode::AttachmentWrite(ty) => match ty {
+            ResourceAccessMode::AttachmentWrite(ty) => match ty {
                 crate::hal::AttachmentType::Color => vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
                 crate::hal::AttachmentType::DepthStencil => {
                     vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE
                 }
             },
-            crate::hal::ResourceAccessMode::VertexInput => vk::AccessFlags2::VERTEX_ATTRIBUTE_READ,
-            crate::hal::ResourceAccessMode::ShaderRead => vk::AccessFlags2::SHADER_READ,
-            crate::hal::ResourceAccessMode::ShaderWrite => vk::AccessFlags2::SHADER_WRITE,
-            crate::hal::ResourceAccessMode::TransferSrc => vk::AccessFlags2::TRANSFER_READ,
-            crate::hal::ResourceAccessMode::TransferDst => vk::AccessFlags2::TRANSFER_WRITE,
+            ResourceAccessMode::VertexInput => vk::AccessFlags2::VERTEX_ATTRIBUTE_READ,
+            ResourceAccessMode::ShaderRead(..) => vk::AccessFlags2::SHADER_READ,
+            ResourceAccessMode::ShaderWrite(..) => vk::AccessFlags2::SHADER_WRITE,
+            ResourceAccessMode::TransferSrc => vk::AccessFlags2::TRANSFER_READ,
+            ResourceAccessMode::TransferDst => vk::AccessFlags2::TRANSFER_WRITE,
         }
     }
 
     pub(super) fn pipeline_flags(self) -> vk::PipelineStageFlags2 {
         match self {
             ResourceAccessMode::Undefined => Default::default(),
-            crate::hal::ResourceAccessMode::AttachmentRead(ty) => match ty {
+            ResourceAccessMode::AttachmentRead(ty) => match ty {
                 crate::hal::AttachmentType::Color => {
                     vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT
                 }
@@ -824,7 +850,7 @@ impl ResourceAccessMode {
                     vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
                 }
             },
-            crate::hal::ResourceAccessMode::AttachmentWrite(ty) => match ty {
+            ResourceAccessMode::AttachmentWrite(ty) => match ty {
                 crate::hal::AttachmentType::Color => {
                     vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT
                 }
@@ -833,17 +859,22 @@ impl ResourceAccessMode {
                         | vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS
                 }
             },
-            crate::hal::ResourceAccessMode::VertexInput => {
-                vk::PipelineStageFlags2::VERTEX_ATTRIBUTE_INPUT
+            ResourceAccessMode::VertexInput => vk::PipelineStageFlags2::VERTEX_ATTRIBUTE_INPUT,
+            ResourceAccessMode::ShaderRead(flags) | ResourceAccessMode::ShaderWrite(flags) => {
+                let mut ret = vk::PipelineStageFlags2::default();
+                if flags.contains(ShaderStageFlags::VERTEX) {
+                    ret |= vk::PipelineStageFlags2::VERTEX_SHADER
+                }
+                if flags.contains(ShaderStageFlags::FRAGMENT) {
+                    ret |= vk::PipelineStageFlags2::FRAGMENT_SHADER
+                }
+                if flags.contains(ShaderStageFlags::COMPUTE) {
+                    ret |= vk::PipelineStageFlags2::COMPUTE_SHADER
+                }
+                ret
             }
-            crate::hal::ResourceAccessMode::ShaderRead => {
-                vk::PipelineStageFlags2::VERTEX_SHADER | vk::PipelineStageFlags2::FRAGMENT_SHADER
-            }
-            crate::hal::ResourceAccessMode::ShaderWrite => {
-                vk::PipelineStageFlags2::VERTEX_SHADER | vk::PipelineStageFlags2::FRAGMENT_SHADER
-            }
-            crate::hal::ResourceAccessMode::TransferSrc => vk::PipelineStageFlags2::TRANSFER,
-            crate::hal::ResourceAccessMode::TransferDst => vk::PipelineStageFlags2::TRANSFER,
+            ResourceAccessMode::TransferSrc => vk::PipelineStageFlags2::TRANSFER,
+            ResourceAccessMode::TransferDst => vk::PipelineStageFlags2::TRANSFER,
         }
     }
 }
@@ -918,6 +949,12 @@ define_resource_resolver!(
           }
           Ok(())
         }) => graphics_pipeline_infos,
+    (VulkanComputePipelineInfo, |hal, pipeline| {
+            unsafe {
+                hal.logical_device.handle.destroy_pipeline(pipeline.handle, get_allocation_callbacks());
+            }
+          Ok(())
+        }) => compute_pipeline_infos,
     (SpirvShaderModule, |hal, module| unsafe { hal.logical_device.handle.destroy_shader_module(module.handle, get_allocation_callbacks()); Ok(()) }) => shader_modules,
     (VulkanSampler, |hal, sampler| unsafe { hal.logical_device.handle.destroy_sampler(sampler.handle, get_allocation_callbacks()); Ok(())}) => samplers,
     (VulkanBindingSet,  |hal, bs| {
@@ -990,4 +1027,5 @@ impl_util_methods!(ShaderModule, SpirvShaderModule, vk::ShaderModule);
 impl_util_methods!(Sampler, VulkanSampler, vk::Sampler);
 impl_util_methods!(BindingSet, VulkanBindingSet, vk::DescriptorSet);
 impl_util_methods!(GraphicsPipeline, VulkanGraphicsPipelineInfo);
+impl_util_methods!(ComputePipeline, VulkanComputePipelineInfo, vk::Pipeline);
 impl_util_methods!(Swapchain, VulkanSwapchain, vk::SwapchainKHR);

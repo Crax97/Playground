@@ -67,7 +67,7 @@ fn main() {
             label: Some("Triangle data"),
             usage_flags: BufferUsageFlags::VERTEX_BUFFER | BufferUsageFlags::TRANSFER_DST,
             size: std::mem::size_of_val(triangle_data.as_slice()),
-            memory_domain: MemoryDomain::DeviceLocal,
+            memory_domain: MemoryDomain::Gpu,
         })
         .unwrap();
 

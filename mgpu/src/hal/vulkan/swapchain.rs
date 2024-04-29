@@ -280,7 +280,7 @@ impl VulkanSwapchain {
                         array_layers: 1.try_into().unwrap(),
                         samples: crate::SampleCount::One,
                         format: image_format.format.to_mgpu(),
-                        memory_domain: crate::MemoryDomain::DeviceLocal,
+                        memory_domain: crate::MemoryDomain::Gpu,
                     },
                     vk::ImageLayout::PRESENT_SRC_KHR,
                     vk::AccessFlags2::empty(),

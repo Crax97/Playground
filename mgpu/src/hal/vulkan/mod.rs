@@ -12,12 +12,12 @@ use crate::util::{check, hash_type, Handle};
 use crate::{
     AttachmentAccessMode, AttachmentStoreOp, BindingSet, BindingSetDescription, BindingSetElement,
     BindingSetElementKind, BindingSetLayout, BindingSetLayoutInfo, Buffer, BufferDescription,
-    DeviceConfiguration, DeviceFeatures, DevicePreference, FilterMode, Framebuffer,
-    GraphicsPipeline, GraphicsPipelineDescription, GraphicsPipelineLayout, Image, ImageDescription,
-    ImageDimension, ImageFormat, ImageRegion, ImageSubresource, MemoryDomain, MgpuError,
-    MgpuResult, PresentMode, RenderPassInfo, Sampler, SamplerDescription, ShaderAttribute,
-    ShaderModule, ShaderModuleLayout, ShaderStageFlags, StorageAccessMode, SwapchainCreationInfo,
-    VertexAttributeFormat,
+    ComputePassInfo, ComputePipeline, ComputePipelineDescription, DeviceConfiguration,
+    DeviceFeatures, DevicePreference, FilterMode, Framebuffer, GraphicsPipeline,
+    GraphicsPipelineDescription, GraphicsPipelineLayout, Image, ImageDescription, ImageDimension,
+    ImageFormat, ImageRegion, ImageSubresource, MemoryDomain, MgpuError, MgpuResult, PresentMode,
+    RenderPassInfo, Sampler, SamplerDescription, ShaderAttribute, ShaderModule, ShaderModuleLayout,
+    ShaderStageFlags, StorageAccessMode, SwapchainCreationInfo, VertexAttributeFormat,
 };
 
 #[cfg(feature = "swapchain")]
@@ -45,10 +45,10 @@ use std::sync::{Arc, Mutex, RwLock};
 use self::swapchain::{SwapchainError, VulkanSwapchain};
 use self::util::{
     DescriptorPoolInfos, DescriptorSetAllocation, FromVk, ResolveVulkan, SpirvShaderModule,
-    VulkanGraphicsPipelineInfo, VulkanImageView, VulkanResolver,
+    VulkanComputePipelineInfo, VulkanGraphicsPipelineInfo, VulkanImageView, VulkanResolver,
 };
 
-use super::{RenderState, ResourceTransition, SubmitInfo};
+use super::{ComputePipelineLayout, RenderState, ResourceTransition, SubmitInfo};
 
 pub(crate) const FLIP_VIEWPORT: bool = true;
 
@@ -436,7 +436,7 @@ impl Hal for VulkanHal {
         if image_description.extents.depth > 1 {
             flags |= vk::ImageCreateFlags::CUBE_COMPATIBLE;
         }
-        let tiling = if image_description.memory_domain == MemoryDomain::DeviceLocal {
+        let tiling = if image_description.memory_domain == MemoryDomain::Gpu {
             vk::ImageTiling::OPTIMAL
         } else {
             vk::ImageTiling::LINEAR
@@ -465,15 +465,15 @@ impl Hal for VulkanHal {
 
         let requirements = unsafe { device.get_image_memory_requirements(image) };
         let location = match image_description.memory_domain {
-            MemoryDomain::HostVisible | MemoryDomain::HostCoherent => MemoryLocation::CpuToGpu,
-            MemoryDomain::DeviceLocal => MemoryLocation::GpuOnly,
+            MemoryDomain::Cpu => MemoryLocation::CpuToGpu,
+            MemoryDomain::Gpu => MemoryLocation::GpuOnly,
         };
         let fallback_name = format!("Memory allocation for image {:?}", image);
         let allocation_create_desc = AllocationCreateDesc {
             name: image_description.label.unwrap_or(&fallback_name),
             requirements,
             location,
-            linear: image_description.memory_domain == MemoryDomain::DeviceLocal,
+            linear: image_description.memory_domain == MemoryDomain::Gpu,
             allocation_scheme: AllocationScheme::GpuAllocatorManaged,
         };
         let allocation = self
@@ -554,8 +554,8 @@ impl Hal for VulkanHal {
             name,
             requirements: memory_requirements,
             location: match buffer_description.memory_domain {
-                MemoryDomain::HostVisible | MemoryDomain::HostCoherent => MemoryLocation::CpuToGpu,
-                MemoryDomain::DeviceLocal => MemoryLocation::GpuOnly,
+                MemoryDomain::Cpu => MemoryLocation::CpuToGpu,
+                MemoryDomain::Gpu => MemoryLocation::GpuOnly,
             },
             linear: true,
             allocation_scheme: AllocationScheme::GpuAllocatorManaged,
@@ -672,67 +672,18 @@ impl Hal for VulkanHal {
         graphics_pipeline_description: &GraphicsPipelineDescription,
     ) -> MgpuResult<GraphicsPipeline> {
         // The actual creation of the pipeline is deferred until a render pass using the pipeline is executed
-        let validate_all_binding_sets = |layout: &ShaderModuleLayout| {
-            for shader_set in &layout.binding_sets {
-                let entry = graphics_pipeline_description
-                    .binding_set_layouts
-                    .iter()
-                    .find(|s| s.set == shader_set.set);
-                check!(
-                    entry.is_some(),
-                    "Pipeline expects a binding set at index {}",
-                    shader_set.set
-                );
-                let ds_binding = entry.unwrap();
-                for shader_binding in &shader_set.layout.binding_set_elements {
-                    let pipeline_binding = ds_binding
-                        .layout
-                        .binding_set_elements
-                        .iter()
-                        .find(|s| s.binding == shader_binding.binding);
-                    check!(
-                        pipeline_binding.is_some(),
-                        "Shader expects a binding element at index {} in set {}, but none was provided",
-                        shader_binding.binding, shader_set.set
-                    );
-                    let pipeline_binding = pipeline_binding.unwrap();
 
-                    check!(
-                        pipeline_binding
-                            .shader_stage_flags
-                            .contains(shader_binding.shader_stage_flags),
-                        "Binding set {} binding {} expects at least a visibility of {:?}, got {:?}",
-                        shader_set.set,
-                        shader_binding.binding,
-                        shader_binding.shader_stage_flags,
-                        pipeline_binding.shader_stage_flags
-                    );
-
-                    check!(
-                        pipeline_binding.array_length == shader_binding.array_length,
-                        "Differing array lengths for set {} binding {}, got {} expected {}",
-                        shader_set.set,
-                        shader_binding.binding,
-                        pipeline_binding.array_length,
-                        shader_binding.array_length
-                    );
-                }
-            }
-        };
-        let vs_layout =
-            self.get_shader_module_layout(*graphics_pipeline_description.vertex_stage.shader)?;
-        validate_all_binding_sets(&vs_layout);
-
-        if let Some(fs) = graphics_pipeline_description.fragment_stage {
-            let fs_layout = self.get_shader_module_layout(*fs.shader)?;
-            validate_all_binding_sets(&fs_layout);
-        }
+        #[cfg(debug_assertions)]
+        self.validate_graphics_pipeline_shader_layouts(graphics_pipeline_description);
 
         let bind_set_layouts = graphics_pipeline_description.binding_set_layouts.to_vec();
 
         let owned_info = graphics_pipeline_description.to_vk_owned(bind_set_layouts);
 
-        let pipeline_layout = self.get_pipeline_layout(&owned_info)?;
+        let pipeline_layout = self.get_pipeline_layout(
+            graphics_pipeline_description.label,
+            &owned_info.binding_sets_infos,
+        )?;
         let vulkan_graphics_pipeline_info = VulkanGraphicsPipelineInfo {
             label: graphics_pipeline_description.label.map(ToOwned::to_owned),
             layout: owned_info,
@@ -749,6 +700,72 @@ impl Hal for VulkanHal {
         Ok(GraphicsPipeline {
             id: handle.to_u64(),
         })
+    }
+
+    fn create_compute_pipeline(
+        &self,
+        compute_pipeline_description: &ComputePipelineDescription,
+    ) -> MgpuResult<ComputePipeline> {
+        #[cfg(debug_assertions)]
+        self.validate_compute_pipeline_shader_layouts(compute_pipeline_description);
+        let bind_set_layouts = compute_pipeline_description.binding_set_layouts.to_vec();
+
+        let owned_info = compute_pipeline_description.to_vk_owned(bind_set_layouts);
+
+        let pipeline_layout = self.get_pipeline_layout(
+            compute_pipeline_description.label,
+            &owned_info.binding_sets_infos,
+        )?;
+        let compute_entrypt = CString::new(compute_pipeline_description.entry_point).unwrap();
+        let pipeline_create_info = vk::ComputePipelineCreateInfo::default()
+            .layout(pipeline_layout)
+            .stage(
+                vk::PipelineShaderStageCreateInfo::default()
+                    .stage(vk::ShaderStageFlags::COMPUTE)
+                    .module(
+                        self.resolver
+                            .resolve_vulkan(compute_pipeline_description.shader)
+                            .ok_or(MgpuError::InvalidHandle)?,
+                    )
+                    .name(&compute_entrypt),
+            );
+
+        let pipeline = unsafe {
+            self.logical_device
+                .handle
+                .create_compute_pipelines(
+                    vk::PipelineCache::null(),
+                    &[pipeline_create_info],
+                    get_allocation_callbacks(),
+                )
+                .map_err(|(_, err)| VulkanHalError::ApiError(err))?[0]
+        };
+
+        if let Some(name) = compute_pipeline_description.label {
+            self.try_assign_debug_name(pipeline, name)?;
+        }
+
+        let vk_pipeline = VulkanComputePipelineInfo {
+            label: compute_pipeline_description.label.map(ToOwned::to_owned),
+            handle: pipeline,
+            layout: owned_info,
+            vk_layout: pipeline_layout,
+        };
+        let handle = self.resolver.add(vk_pipeline);
+        info!(
+            "Created vulkan compute pipeline {:?}",
+            compute_pipeline_description.label
+        );
+        Ok(ComputePipeline {
+            id: handle.to_u64(),
+        })
+    }
+    fn get_compute_pipeline_layout(
+        &self,
+        compute_pipeline: ComputePipeline,
+    ) -> MgpuResult<ComputePipelineLayout> {
+        self.resolver
+            .apply(compute_pipeline, |pipeline| Ok(pipeline.layout.clone()))
     }
 
     fn destroy_graphics_pipeline(&self, graphics_pipeline: GraphicsPipeline) -> MgpuResult<()> {
@@ -1016,7 +1033,7 @@ impl Hal for VulkanHal {
         Ok(())
     }
 
-    unsafe fn set_binding_sets(
+    unsafe fn bind_graphics_binding_sets(
         &self,
         command_recorder: CommandRecorder,
         binding_sets: &[BindingSet],
@@ -1135,6 +1152,79 @@ impl Hal for VulkanHal {
         Ok(())
     }
 
+    unsafe fn bind_compute_pipeline(
+        &self,
+        command_recorder: CommandRecorder,
+        pipeline: ComputePipeline,
+    ) -> MgpuResult<()> {
+        let cb = vk::CommandBuffer::from_raw(command_recorder.id);
+        let pipeline = self
+            .resolver
+            .resolve_vulkan(pipeline)
+            .ok_or(MgpuError::InvalidHandle)?;
+        unsafe {
+            self.logical_device.handle.cmd_bind_pipeline(
+                cb,
+                vk::PipelineBindPoint::COMPUTE,
+                pipeline,
+            );
+        }
+        Ok(())
+    }
+
+    unsafe fn bind_compute_binding_sets(
+        &self,
+        command_recorder: CommandRecorder,
+        binding_sets: &[BindingSet],
+        pipeline: ComputePipeline,
+    ) -> MgpuResult<()> {
+        if binding_sets.is_empty() {
+            return Ok(());
+        }
+        let sets = self.resolver.get::<VulkanBindingSet>();
+        let vk_sets = binding_sets
+            .iter()
+            .map(|s| {
+                sets.resolve(s)
+                    .map(|b| b.handle)
+                    .expect("Binding Set handle not valid")
+            })
+            .collect::<Vec<_>>();
+        let cb = vk::CommandBuffer::from_raw(command_recorder.id);
+        let compute_pipeline = self.resolver.apply(pipeline, |g| Ok(g.vk_layout))?;
+
+        unsafe {
+            self.logical_device.handle.cmd_bind_descriptor_sets(
+                cb,
+                vk::PipelineBindPoint::COMPUTE,
+                compute_pipeline,
+                0,
+                &vk_sets,
+                &[],
+            );
+        }
+
+        Ok(())
+    }
+
+    unsafe fn dispatch(
+        &self,
+        command_recorder: CommandRecorder,
+        group_count_x: u32,
+        group_count_y: u32,
+        group_count_z: u32,
+    ) -> MgpuResult<()> {
+        let cb = vk::CommandBuffer::from_raw(command_recorder.id);
+        unsafe {
+            self.logical_device.handle.cmd_dispatch(
+                cb,
+                group_count_x,
+                group_count_y,
+                group_count_z,
+            );
+        }
+        Ok(())
+    }
     fn device_wait_idle(&self) -> MgpuResult<()> {
         unsafe { self.logical_device.handle.device_wait_idle() }?;
         Ok(())
@@ -1212,12 +1302,18 @@ impl Hal for VulkanHal {
 
         let mut copy_layout = layout.image_layout;
 
+        let src_stage_mask = if command_buffer.queue_type == QueueType::AsyncTransfer {
+            vk::PipelineStageFlags2::ALL_COMMANDS
+        } else {
+            layout.stage_mask
+        };
+
         if !valid_transfer_layouts.contains(&copy_layout) {
             // transition the image to transfer_dst
             let image_barrier = vk::ImageMemoryBarrier2::default()
                 .image(image)
                 .src_access_mask(layout.access_mask)
-                .src_stage_mask(layout.stage_mask)
+                .src_stage_mask(src_stage_mask)
                 .old_layout(layout.image_layout)
                 .dst_access_mask(ResourceAccessMode::TransferDst.access_mask())
                 .dst_stage_mask(ResourceAccessMode::TransferDst.pipeline_flags())
@@ -1365,7 +1461,6 @@ impl Hal for VulkanHal {
 
                 let mut image_memory_barrier_dest = vec![];
                 let mut buffer_memory_barrier_dest = vec![];
-
                 for resource in &info.resources {
                     assert!(resource.new_usage != ResourceAccessMode::Undefined);
                     let dst_stage_mask = resource.new_usage.pipeline_flags();
@@ -1378,6 +1473,12 @@ impl Hal for VulkanHal {
                             let new_layout = resource.new_usage.image_layout();
                             let vk_image = images.resolve_mut(*image).unwrap();
                             let current_layout_info = vk_image.get_subresource_layout(*region);
+
+                            let src_stage_mask = if info.source_queue == QueueType::AsyncTransfer {
+                                vk::PipelineStageFlags2::ALL_COMMANDS
+                            } else {
+                                current_layout_info.stage_mask
+                            };
                             if vk_buffer_src.is_some() {
                                 image_memory_barrier_source.push(
                                     vk::ImageMemoryBarrier2::default()
@@ -1393,7 +1494,7 @@ impl Hal for VulkanHal {
                                         .old_layout(current_layout_info.image_layout)
                                         .new_layout(new_layout)
                                         .src_access_mask(current_layout_info.access_mask)
-                                        .src_stage_mask(current_layout_info.stage_mask)
+                                        .src_stage_mask(src_stage_mask)
                                         .src_queue_family_index(source_qfi)
                                         .dst_queue_family_index(dest_qfi),
                                 );
@@ -1929,7 +2030,7 @@ impl VulkanHal {
         // and queue submissions are done out of order.
         // As stated in the issues, those VUID should be validated at execution time, not queue submission time
         static KHRONOS_VALIDATION_IGNORE_VUIDS: &[&[u8]] = &[
-            b"UNASSIGNED-VkBufferMemoryBarrier-buffer-00004,UNASSIGNED-VkImageMemoryBarrier-image-00004,UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout\0",
+            b"VUID-VkImageMemoryBarrier2-oldLayout-01197,UNASSIGNED-VkBufferMemoryBarrier-buffer-00004,UNASSIGNED-VkImageMemoryBarrier-image-00004,UNASSIGNED-CoreValidation-DrawState-InvalidImageLayout\0",
         ];
 
         let application_name = configuration.app_name.unwrap_or("mgpu application");
@@ -2873,9 +2974,10 @@ impl VulkanHal {
 
     fn get_pipeline_layout(
         &self,
-        pipeline_info: &GraphicsPipelineLayout,
+        label: Option<&str>,
+        binding_sets_infos: &[BindingSetLayoutInfo],
     ) -> MgpuResult<vk::PipelineLayout> {
-        let descriptor_layouts = self.get_descriptor_set_layouts(pipeline_info)?;
+        let descriptor_layouts = self.get_descriptor_set_layouts(binding_sets_infos)?;
 
         let hash = hash_type(&descriptor_layouts);
         let mut pipeline_layouts = self
@@ -2894,20 +2996,16 @@ impl VulkanHal {
                 )?
             };
 
-            if let Some(label) = pipeline_info.label.as_deref() {
+            if let Some(label) = label.as_deref() {
                 self.try_assign_debug_name(layout, label)?;
             }
 
-            info!(
-                "Created pipeline layout for pipeline {:?}",
-                pipeline_info.label
-            );
+            info!("Created pipeline layout for pipeline {:?}", label);
 
             pipeline_layouts.insert(hash, layout);
             Ok(layout)
         }
     }
-
     fn reflect_layout(
         &self,
         shader_module_description: &crate::ShaderModuleDescription<'_>,
@@ -3053,6 +3151,8 @@ impl VulkanHal {
                             ShaderStageFlags::VERTEX
                         } else if reflect_shader_stage.contains(ReflectShaderStageFlags::FRAGMENT) {
                             ShaderStageFlags::FRAGMENT
+                        } else if reflect_shader_stage.contains(ReflectShaderStageFlags::COMPUTE) {
+                            ShaderStageFlags::COMPUTE
                         } else {
                             todo!(
                                 "Add support for shader stage flags {:?}",
@@ -3085,18 +3185,15 @@ impl VulkanHal {
 
     fn get_descriptor_set_layouts(
         &self,
-        pipeline_info: &GraphicsPipelineLayout,
+        binding_sets_infos: &[BindingSetLayoutInfo],
     ) -> MgpuResult<Vec<vk::DescriptorSetLayout>> {
         let mut cached_layouts = self
             .descriptor_set_layouts
             .write()
             .expect("Failed to lock ds layouts");
         let mut layouts = vec![];
-        layouts.resize(
-            pipeline_info.binding_sets_infos.len(),
-            vk::DescriptorSetLayout::default(),
-        );
-        for (idx, set) in pipeline_info.binding_sets_infos.iter().enumerate() {
+        layouts.resize(binding_sets_infos.len(), vk::DescriptorSetLayout::default());
+        for (idx, set) in binding_sets_infos.iter().enumerate() {
             let set_layout = &set.layout;
 
             let layout =
@@ -3143,6 +3240,55 @@ impl VulkanHal {
             ds_layout
         };
         Ok(layout)
+    }
+
+    fn validate_shader_layout_against_binding_layouts(
+        layout: &ShaderModuleLayout,
+        binding_set_layouts: &[BindingSetLayoutInfo],
+    ) {
+        for shader_set in &layout.binding_sets {
+            let entry = binding_set_layouts.iter().find(|s| s.set == shader_set.set);
+            check!(
+                entry.is_some(),
+                "Pipeline expects a binding set at index {}",
+                shader_set.set
+            );
+            let ds_binding = entry.unwrap();
+            for shader_binding in &shader_set.layout.binding_set_elements {
+                let pipeline_binding = ds_binding
+                    .layout
+                    .binding_set_elements
+                    .iter()
+                    .find(|s| s.binding == shader_binding.binding);
+                check!(
+                    pipeline_binding.is_some(),
+                    "Shader expects a binding element at index {} in set {}, but none was provided",
+                    shader_binding.binding,
+                    shader_set.set
+                );
+                let pipeline_binding = pipeline_binding.unwrap();
+
+                check!(
+                    pipeline_binding
+                        .shader_stage_flags
+                        .contains(shader_binding.shader_stage_flags),
+                    "Binding set {} binding {} expects at least a visibility of {:?}, got {:?}",
+                    shader_set.set,
+                    shader_binding.binding,
+                    shader_binding.shader_stage_flags,
+                    pipeline_binding.shader_stage_flags
+                );
+
+                check!(
+                    pipeline_binding.array_length == shader_binding.array_length,
+                    "Differing array lengths for set {} binding {}, got {} expected {}",
+                    shader_set.set,
+                    shader_binding.binding,
+                    pipeline_binding.array_length,
+                    shader_binding.array_length
+                );
+            }
+        }
     }
 
     fn validate_submission_info(&self, submission_info: &SubmitInfo) -> MgpuResult<()> {
@@ -3289,6 +3435,21 @@ impl VulkanHal {
                         )
                         .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
                 )),
+                crate::BindingType::StorageImage { view, access_mode } => image_ops.push((
+                    binding.binding,
+                    binding.ty.binding_type().to_vk(),
+                    vk::DescriptorImageInfo::default()
+                        .image_view(
+                            self.resolver
+                                .resolve_vulkan(view)
+                                .ok_or(MgpuError::InvalidHandle)?,
+                        )
+                        .image_layout(match access_mode {
+                            StorageAccessMode::Read => vk::ImageLayout::GENERAL,
+                            StorageAccessMode::Write => vk::ImageLayout::GENERAL,
+                            StorageAccessMode::ReadWrite => vk::ImageLayout::GENERAL,
+                        }),
+                )),
             }
         }
 
@@ -3323,6 +3484,40 @@ impl VulkanHal {
         };
 
         Ok(())
+    }
+
+    fn validate_graphics_pipeline_shader_layouts(
+        &self,
+        graphics_pipeline_description: &GraphicsPipelineDescription<'_>,
+    ) {
+        let vs_layout = self
+            .get_shader_module_layout(*graphics_pipeline_description.vertex_stage.shader)
+            .expect("Invalid vertex shader handle");
+        Self::validate_shader_layout_against_binding_layouts(
+            &vs_layout,
+            graphics_pipeline_description.binding_set_layouts,
+        );
+        if let Some(fs) = graphics_pipeline_description.fragment_stage {
+            let fs_layout = self
+                .get_shader_module_layout(*fs.shader)
+                .expect("Invalid fragment shader handle");
+            Self::validate_shader_layout_against_binding_layouts(
+                &fs_layout,
+                graphics_pipeline_description.binding_set_layouts,
+            );
+        }
+    }
+    fn validate_compute_pipeline_shader_layouts(
+        &self,
+        compute_pipeline_description: &ComputePipelineDescription<'_>,
+    ) {
+        let cs_layout = self
+            .get_shader_module_layout(compute_pipeline_description.shader)
+            .expect("Invalid handle");
+        Self::validate_shader_layout_against_binding_layouts(
+            &cs_layout,
+            compute_pipeline_description.binding_set_layouts,
+        );
     }
 }
 

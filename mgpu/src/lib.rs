@@ -45,9 +45,8 @@ pub type MgpuResult<T> = Result<T, MgpuError>;
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 pub enum MemoryDomain {
-    HostVisible,
-    HostCoherent,
-    DeviceLocal,
+    Cpu,
+    Gpu,
 }
 
 bitflags! {
@@ -282,6 +281,10 @@ pub struct RenderPassDescription<'a> {
     pub render_targets: &'a [RenderTarget],
     pub depth_stencil_attachment: Option<&'a DepthStencilTarget>,
     pub render_area: Rect2D,
+}
+
+pub struct ComputePassDescription<'a> {
+    pub label: Option<&'a str>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
@@ -549,6 +552,14 @@ pub struct GraphicsPipelineDescription<'a> {
     pub binding_set_layouts: &'a [BindingSetLayoutInfo],
 }
 
+#[derive(Copy, Clone, Debug, Hash)]
+pub struct ComputePipelineDescription<'a> {
+    pub label: Option<&'a str>,
+    pub shader: ShaderModule,
+    pub entry_point: &'a str,
+    pub binding_set_layouts: &'a [BindingSetLayoutInfo],
+}
+
 #[derive(Clone, Debug)]
 pub struct ShaderAttribute {
     pub name: String,
@@ -617,6 +628,10 @@ pub enum BindingType {
     SampledImage {
         view: ImageView,
     },
+    StorageImage {
+        view: ImageView,
+        access_mode: StorageAccessMode,
+    },
     UniformBuffer {
         buffer: Buffer,
         offset: usize,
@@ -632,6 +647,12 @@ impl BindingType {
                 ty: BufferType::Uniform,
                 access_mode: StorageAccessMode::Read,
             },
+            BindingType::StorageImage { view, access_mode } => {
+                BindingSetElementKind::StorageImage {
+                    format: view.owner.format,
+                    access_mode: *access_mode,
+                }
+            }
         }
     }
 }
@@ -640,6 +661,7 @@ impl BindingType {
 pub struct Binding {
     pub binding: usize,
     pub ty: BindingType,
+    pub visibility: ShaderStageFlags,
 }
 
 pub struct BindingSetDescription<'a> {
@@ -648,12 +670,13 @@ pub struct BindingSetDescription<'a> {
 }
 
 bitflags! {
-    #[derive(Clone, Copy, Default, Debug, Hash)]
+    #[derive(Clone, Copy, Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
     pub struct ShaderStageFlags : u32 {
         const VERTEX = 0x01;
         const FRAGMENT = 0x02;
+        const COMPUTE = 0x04;
 
-        const ALL = Self::VERTEX.bits() | Self::FRAGMENT.bits();
+        const ALL_GRAPHICS = Self::VERTEX.bits() | Self::FRAGMENT.bits();
     }
 }
 
@@ -796,6 +819,11 @@ pub struct GraphicsPipeline {
     id: u64,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+pub struct ComputePipeline {
+    id: u64,
+}
+
 #[derive(Clone, Debug, Hash)]
 pub struct BindingSet {
     id: u64,
@@ -811,7 +839,7 @@ impl ImageFormat {
     pub fn aspect(self) -> ImageAspect {
         match self {
             ImageFormat::Unknown => unreachable!(),
-            ImageFormat::Rgba8 | ImageFormat::Bgra8  => ImageAspect::Color,
+            ImageFormat::Rgba8 | ImageFormat::Bgra8 => ImageAspect::Color,
             ImageFormat::Depth32 => ImageAspect::Depth,
         }
     }

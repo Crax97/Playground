@@ -2,8 +2,9 @@ use std::marker::PhantomData;
 
 use crate::{
     hal::QueueType, rdg::Node, util::check, AttachmentStoreOp, BindingSet, Buffer,
-    BufferUsageFlags, DepthStencilTarget, Device, Extents2D, GraphicsPipeline, ImageUsageFlags,
-    MgpuResult, Rect2D, RenderPassDescription, RenderTarget,
+    BufferUsageFlags, ComputePassDescription, ComputePipeline, DepthStencilTarget, Device,
+    Extents2D, GraphicsPipeline, ImageUsageFlags, MgpuResult, Rect2D, RenderPassDescription,
+    RenderTarget,
 };
 
 pub struct CommandRecorder<T: CommandRecorderType> {
@@ -19,6 +20,12 @@ pub struct RenderPass<'c> {
     pipeline: Option<GraphicsPipeline>,
     vertex_buffers: Vec<Buffer>,
     index_buffer: Option<Buffer>,
+}
+
+pub struct ComputePass<'c, C: ComputeCommandRecorder> {
+    command_recorder: &'c mut CommandRecorder<C>,
+    info: ComputePassInfo,
+    pipeline: Option<ComputePipeline>,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -57,6 +64,11 @@ pub(crate) enum DrawType {
 }
 
 #[derive(Debug, Hash)]
+pub(crate) enum DispatchType {
+    Dispatch(u32, u32, u32),
+}
+
+#[derive(Debug, Hash)]
 pub(crate) struct DrawCommand {
     pub(crate) pipeline: GraphicsPipeline,
     pub(crate) vertex_buffers: Vec<Buffer>,
@@ -66,10 +78,22 @@ pub(crate) struct DrawCommand {
 }
 
 #[derive(Debug, Hash)]
+pub(crate) struct DispatchCommand {
+    pub(crate) pipeline: ComputePipeline,
+    pub(crate) binding_sets: Vec<BindingSet>,
+    pub(crate) dispatch_type: DispatchType,
+}
+
+#[derive(Debug, Hash)]
 pub(crate) struct RenderStep {
     pub(crate) color_attachments: Vec<RenderAttachmentReference>,
     pub(crate) depth_stencil_attachment: Option<DepthStencilAttachmentReference>,
     pub(crate) commands: Vec<DrawCommand>,
+}
+
+#[derive(Debug, Hash, Default)]
+pub(crate) struct ComputeStep {
+    pub(crate) commands: Vec<DispatchCommand>,
 }
 
 #[derive(Default, Debug, Hash)]
@@ -87,11 +111,14 @@ pub struct RenderPassInfo {
     pub(crate) steps: Vec<RenderStep>,
 }
 
+#[derive(Default, Debug, Hash)]
+pub struct ComputePassInfo {
+    pub(crate) label: Option<String>,
+    pub(crate) steps: Vec<ComputeStep>,
+}
+
 // The commands recorded on this command recorder will be put on the graphics queue
 pub struct Graphics;
-
-// The commands recorded on this command recorder will be put on the async compute queue
-pub struct Compute;
 
 // The commands recorded on this command recorder will be put on the async compute queue
 pub struct AsyncCompute;
@@ -279,7 +306,27 @@ impl CommandRecorder<Graphics> {
     }
 }
 
+impl<C: ComputeCommandRecorder> CommandRecorder<C> {
+    pub fn begin_compute_pass(
+        &mut self,
+        compute_pass_description: &ComputePassDescription,
+    ) -> ComputePass<C> {
+        ComputePass {
+            command_recorder: self,
+            info: ComputePassInfo {
+                label: compute_pass_description.label.map(ToOwned::to_owned),
+                steps: vec![ComputeStep::default()],
+            },
+            pipeline: None,
+        }
+    }
+}
+
 impl<'c> RenderPass<'c> {
+    pub fn set_pipeline(&mut self, pipeline: GraphicsPipeline) {
+        self.pipeline = Some(pipeline);
+    }
+
     pub fn set_vertex_buffers(&mut self, vertex_buffers: impl IntoIterator<Item = Buffer>) {
         self.vertex_buffers = vertex_buffers.into_iter().collect()
     }
@@ -290,10 +337,6 @@ impl<'c> RenderPass<'c> {
 
     pub fn set_binding_sets(&mut self, binding_sets: &[BindingSet]) {
         self.command_recorder.set_binding_sets(binding_sets);
-    }
-
-    pub fn set_pipeline(&mut self, pipeline: GraphicsPipeline) {
-        self.pipeline = Some(pipeline);
     }
 
     pub fn draw(
@@ -400,6 +443,57 @@ impl<'c> RenderPass<'c> {
     }
 }
 
+impl<'c, C: ComputeCommandRecorder> ComputePass<'c, C> {
+    pub fn set_pipeline(&mut self, pipeline: ComputePipeline) {
+        self.pipeline = Some(pipeline);
+    }
+
+    pub fn set_binding_sets(&mut self, binding_sets: &[BindingSet]) {
+        self.command_recorder.set_binding_sets(binding_sets);
+    }
+
+    pub fn dispatch(
+        &mut self,
+        group_count_x: u32,
+        group_count_y: u32,
+        group_count_z: u32,
+    ) -> MgpuResult<()> {
+        self.validate_state()?;
+        let last_command_step = self.info.steps.last_mut().unwrap();
+        last_command_step.commands.push(DispatchCommand {
+            pipeline: self.pipeline.unwrap(),
+            dispatch_type: DispatchType::Dispatch(group_count_x, group_count_y, group_count_z),
+            binding_sets: self.command_recorder.binding_sets.to_vec(),
+        });
+        Ok(())
+    }
+
+    fn validate_state(&self) -> MgpuResult<()> {
+        check!(
+            self.pipeline.is_some(),
+            "Issued a dispatch call without a pipeline set"
+        );
+        let pipeline = self.pipeline.unwrap();
+        let pipeline_layout = self
+            .command_recorder
+            .device
+            .hal
+            .get_compute_pipeline_layout(pipeline)?;
+        for set in &pipeline_layout.binding_sets_infos {
+            let bound_set = self.command_recorder.binding_sets.get(set.set);
+            check!(
+                bound_set.is_some(),
+                &format!(
+                    "Pipeline '{}' expects a binding set at location {}, but none was bound",
+                    pipeline_layout.label.as_deref().unwrap_or("Unknown"),
+                    set.set
+                )
+            );
+        }
+
+        Ok(())
+    }
+}
 impl<'c> Drop for RenderPass<'c> {
     fn drop(&mut self) {
         if self.info.steps.is_empty() {
@@ -411,20 +505,28 @@ impl<'c> Drop for RenderPass<'c> {
     }
 }
 
-pub trait CommandRecorderType {
-    const PREFERRED_QUEUE_TYPE: QueueType;
+impl<'c, C: ComputeCommandRecorder> Drop for ComputePass<'c, C> {
+    fn drop(&mut self) {
+        if self.info.steps.is_empty() {
+            return;
+        }
+        self.command_recorder.new_nodes.push(Node::ComputePass {
+            info: std::mem::take(&mut self.info),
+        })
+    }
 }
 
-pub(crate) struct ComputeParams {
-    label: Option<String>,
+pub trait CommandRecorderType {
+    const PREFERRED_QUEUE_TYPE: QueueType;
 }
 
 impl CommandRecorderType for Graphics {
     const PREFERRED_QUEUE_TYPE: QueueType = QueueType::Graphics;
 }
-impl CommandRecorderType for Compute {
-    const PREFERRED_QUEUE_TYPE: QueueType = QueueType::Graphics;
-}
 impl CommandRecorderType for AsyncCompute {
     const PREFERRED_QUEUE_TYPE: QueueType = QueueType::AsyncCompute;
 }
+
+pub trait ComputeCommandRecorder: CommandRecorderType {}
+impl ComputeCommandRecorder for Graphics {}
+impl ComputeCommandRecorder for AsyncCompute {}

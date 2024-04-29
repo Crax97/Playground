@@ -5,13 +5,14 @@ use std::num::NonZeroU32;
 use bytemuck::offset_of;
 use glam::{vec3, Vec3};
 use mgpu::{
-    AttachmentStoreOp, Binding, BindingSetDescription, BindingSetElement, BindingSetLayout,
-    BindingSetLayoutInfo, BindingType, BufferDescription, BufferUsageFlags, CompareOp,
-    DepthStencilState, DepthStencilTarget, DepthStencilTargetInfo, DepthStencilTargetLoadOp,
-    DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D, Extents3D, FilterMode,
-    FragmentStageInfo, Graphics, GraphicsPipelineDescription, ImageDescription, ImageDimension,
-    ImageFormat, ImageUsageFlags, ImageViewDescription, ImageWriteParams, MemoryDomain, MipmapMode,
-    Rect2D, RenderPassDescription, RenderTarget, RenderTargetInfo, RenderTargetLoadOp, SampleCount,
+    AsyncCompute, AttachmentStoreOp, Binding, BindingSetDescription, BindingSetElement,
+    BindingSetLayout, BindingSetLayoutInfo, BindingType, BufferDescription, BufferUsageFlags,
+    CompareOp, ComputePassDescription, ComputePipelineDescription, DepthStencilState,
+    DepthStencilTarget, DepthStencilTargetInfo, DepthStencilTargetLoadOp, DeviceConfiguration,
+    DeviceFeatures, DevicePreference, Extents2D, Extents3D, FilterMode, FragmentStageInfo,
+    Graphics, GraphicsPipelineDescription, ImageDescription, ImageDimension, ImageFormat,
+    ImageUsageFlags, ImageViewDescription, ImageWriteParams, MemoryDomain, MipmapMode, Rect2D,
+    RenderPassDescription, RenderTarget, RenderTargetInfo, RenderTargetLoadOp, SampleCount,
     SamplerDescription, ShaderModuleDescription, ShaderStageFlags, SwapchainCreationInfo,
     VertexInputDescription, VertexInputFrequency, VertexStageInfo,
 };
@@ -50,6 +51,23 @@ layout(location = 0) out vec4 color;
 
 void main() {
     color = texture(sampler2D(tex, tex_sampler), uv);
+}
+";
+
+const COMPUTE_SHADER: &str = "
+#version 460
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform ComputeData {
+    float time;
+};
+
+layout(rgba8, set = 0, binding = 1) uniform image2D storage_image;
+
+void main() {
+    vec2 col = vec2(sin(gl_GlobalInvocationID.x + time), cos(gl_GlobalInvocationID.y + time));
+    ivec2 coord = ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y);
+    imageStore(storage_image, coord, vec4(col, 0.0, 1.0));
 }
 ";
 
@@ -149,7 +167,8 @@ fn main() {
             label: Some("Cube Texture"),
             usage_flags: ImageUsageFlags::SAMPLED
                 | ImageUsageFlags::TRANSFER_DST
-                | ImageUsageFlags::TRANSFER_SRC,
+                | ImageUsageFlags::TRANSFER_SRC
+                | ImageUsageFlags::STORAGE,
             extents: Extents3D {
                 width: 512,
                 height: 512,
@@ -192,6 +211,14 @@ fn main() {
         })
         .unwrap();
 
+    let compute_pass_data = device
+        .create_buffer(&BufferDescription {
+            label: Some("Compute pass data"),
+            usage_flags: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
+            size: std::mem::size_of::<f32>(),
+            memory_domain: MemoryDomain::Gpu,
+        })
+        .unwrap();
     let cube_data_buffer = device
         .create_buffer(&BufferDescription {
             label: Some("Triangle data"),
@@ -235,6 +262,7 @@ fn main() {
 
     let vertex_shader_source = compile_glsl(VERTEX_SHADER, ShaderKind::Vertex);
     let fragment_shader_source = compile_glsl(FRAGMENT_SHADER, ShaderKind::Fragment);
+    let compute_shader_source = compile_glsl(COMPUTE_SHADER, ShaderKind::Compute);
     let vertex_shader_module = device
         .create_shader_module(&ShaderModuleDescription {
             label: Some("Triangle Vertex Shader"),
@@ -245,6 +273,12 @@ fn main() {
         .create_shader_module(&ShaderModuleDescription {
             label: Some("Triangle Fragment Shader"),
             source: &fragment_shader_source,
+        })
+        .unwrap();
+    let compute_shader_module = device
+        .create_shader_module(&ShaderModuleDescription {
+            label: Some("Texture Generation Compute Shader"),
+            source: &compute_shader_source,
         })
         .unwrap();
     let binding_set_layout = BindingSetLayout {
@@ -269,6 +303,28 @@ fn main() {
                     access_mode: mgpu::StorageAccessMode::Read,
                 },
                 shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
+            },
+        ],
+    };
+    let compute_set_layout = BindingSetLayout {
+        binding_set_elements: vec![
+            BindingSetElement {
+                binding: 0,
+                array_length: 1,
+                ty: mgpu::BindingSetElementKind::Buffer {
+                    ty: mgpu::BufferType::Uniform,
+                    access_mode: mgpu::StorageAccessMode::Read,
+                },
+                shader_stage_flags: ShaderStageFlags::COMPUTE,
+            },
+            BindingSetElement {
+                binding: 1,
+                array_length: 1,
+                ty: mgpu::BindingSetElementKind::StorageImage {
+                    format: ImageFormat::Rgba8,
+                    access_mode: mgpu::StorageAccessMode::ReadWrite,
+                },
+                shader_stage_flags: ShaderStageFlags::COMPUTE,
             },
         ],
     };
@@ -320,6 +376,18 @@ fn main() {
         )
         .unwrap();
 
+    let compute_pipeline = device
+        .create_compute_pipeline(&ComputePipelineDescription {
+            label: Some("Compute pipeline"),
+            shader: compute_shader_module,
+            entry_point: "main",
+            binding_set_layouts: &[BindingSetLayoutInfo {
+                set: 0,
+                layout: compute_set_layout.clone(),
+            }],
+        })
+        .unwrap();
+
     let sampler = device
         .create_sampler(&SamplerDescription {
             label: Some("Cube Texture Sampler"),
@@ -330,6 +398,29 @@ fn main() {
         })
         .unwrap();
 
+    let compute_binding_set = device
+        .create_binding_set(
+            &BindingSetDescription {
+                label: Some("Cube Parameters"),
+                bindings: &[
+                    Binding {
+                        binding: 0,
+                        ty: compute_pass_data.bind_whole_range_uniform_buffer(),
+                        visibility: ShaderStageFlags::COMPUTE,
+                    },
+                    Binding {
+                        binding: 1,
+                        ty: BindingType::StorageImage {
+                            view: texture_image_view,
+                            access_mode: mgpu::StorageAccessMode::ReadWrite,
+                        },
+                        visibility: ShaderStageFlags::COMPUTE,
+                    },
+                ],
+            },
+            &compute_set_layout,
+        )
+        .unwrap();
     let binding_set = device
         .create_binding_set(
             &BindingSetDescription {
@@ -383,40 +474,62 @@ fn main() {
                             &cube_object_data.write_all_params(bytemuck::cast_slice(&mvp)),
                         )
                         .unwrap();
+                    device
+                        .write_buffer(
+                            compute_pass_data,
+                            &compute_pass_data.write_all_params(bytemuck::cast_slice(&[0.0f32])),
+                        )
+                        .unwrap();
 
                     let swapchain_image = swapchain.acquire_next_image().unwrap();
-
-                    let mut command_recorder = device.create_command_recorder::<Graphics>();
                     {
-                        let mut render_pass = command_recorder
-                            .begin_render_pass(&RenderPassDescription {
-                                label: Some("Cube Rendering"),
-                                render_targets: &[RenderTarget {
-                                    view: swapchain_image.view,
-                                    sample_count: SampleCount::One,
-                                    load_op: RenderTargetLoadOp::Clear([0.3, 0.0, 0.5, 1.0]),
-                                    store_op: AttachmentStoreOp::Store,
-                                }],
-                                depth_stencil_attachment: Some(&DepthStencilTarget {
-                                    view: depth_image_view,
-                                    sample_count: SampleCount::One,
-                                    load_op: DepthStencilTargetLoadOp::Clear(1.0, 0),
-                                    store_op: AttachmentStoreOp::Store,
-                                }),
-                                render_area: Rect2D {
-                                    offset: Default::default(),
-                                    extents: swapchain_image.extents,
+                        let mut compute_command_recorder =
+                            device.create_command_recorder::<AsyncCompute>();
+                        {
+                            let mut compute_pass = compute_command_recorder.begin_compute_pass(
+                                &ComputePassDescription {
+                                    label: Some("Compute Buffer Output"),
                                 },
-                            })
-                            .unwrap();
-                        render_pass.set_pipeline(pipeline);
-                        render_pass.set_vertex_buffers([cube_data_buffer, cube_data_buffer]);
-                        render_pass.set_index_buffer(cube_index_buffer);
-                        render_pass.set_binding_sets(&[binding_set.clone()]);
-                        render_pass.draw_indexed(36, 1, 0, 0, 0).unwrap();
-                        rotation += 0.01;
+                            );
+                            compute_pass.set_pipeline(compute_pipeline);
+                            compute_pass.set_binding_sets(&[compute_binding_set.clone()]);
+                            compute_pass.dispatch(16, 16, 16).unwrap();
+                        }
+                        compute_command_recorder.submit().unwrap();
                     }
-                    command_recorder.submit().unwrap();
+                    {
+                        let mut command_recorder = device.create_command_recorder::<Graphics>();
+                        {
+                            let mut render_pass = command_recorder
+                                .begin_render_pass(&RenderPassDescription {
+                                    label: Some("Cube Rendering"),
+                                    render_targets: &[RenderTarget {
+                                        view: swapchain_image.view,
+                                        sample_count: SampleCount::One,
+                                        load_op: RenderTargetLoadOp::Clear([0.3, 0.0, 0.5, 1.0]),
+                                        store_op: AttachmentStoreOp::Store,
+                                    }],
+                                    depth_stencil_attachment: Some(&DepthStencilTarget {
+                                        view: depth_image_view,
+                                        sample_count: SampleCount::One,
+                                        load_op: DepthStencilTargetLoadOp::Clear(1.0, 0),
+                                        store_op: AttachmentStoreOp::Store,
+                                    }),
+                                    render_area: Rect2D {
+                                        offset: Default::default(),
+                                        extents: swapchain_image.extents,
+                                    },
+                                })
+                                .unwrap();
+                            render_pass.set_pipeline(pipeline);
+                            render_pass.set_vertex_buffers([cube_data_buffer, cube_data_buffer]);
+                            render_pass.set_index_buffer(cube_index_buffer);
+                            render_pass.set_binding_sets(&[binding_set.clone()]);
+                            render_pass.draw_indexed(36, 1, 0, 0, 0).unwrap();
+                            rotation += 0.01;
+                        }
+                        command_recorder.submit().unwrap();
+                    }
 
                     swapchain.present().unwrap();
 

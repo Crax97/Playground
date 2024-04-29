@@ -1,12 +1,12 @@
 use crate::hal::{
-    Hal, QueueType, ResourceInfo, ResourceTransition, SubmissionGroup, SubmitInfo, SynchronizationInfo
+    Hal, QueueType, ResourceTransition, SubmissionGroup, SubmitInfo, SynchronizationInfo
 };
 use crate::rdg::{Node, OwnershipTransfer, Rdg, Step};
 use crate::staging_buffer_allocator::StagingBufferAllocator;
 use crate::util::check;
 use crate::DrawType::Draw;
 use crate::{
-    hal, BindingSet, BindingSetDescription, BindingSetLayout, BlitParams, Buffer, BufferDescription, BufferWriteParams, CommandRecorder, CommandRecorderType, DrawCommand, Extents3D, FilterMode, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageAspect, ImageDescription, ImageDimension, ImageUsageFlags, ImageView, ImageViewDescription, MemoryDomain, MgpuResult, Sampler, SamplerDescription, ShaderModule, ShaderModuleDescription, ShaderModuleLayout
+    hal, BindingSet, BindingSetDescription, BindingSetLayout, BlitParams, Buffer, BufferDescription, BufferWriteParams, CommandRecorder, CommandRecorderType, ComputePipeline, ComputePipelineDescription, DispatchCommand, DispatchType, DrawCommand, Extents3D, FilterMode, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageAspect, ImageDescription, ImageDimension, ImageUsageFlags, ImageView, ImageViewDescription, MemoryDomain, MgpuResult, Sampler, SamplerDescription, ShaderModule, ShaderModuleDescription, ShaderModuleLayout
 };
 use crate::{BufferUsageFlags, ImageWriteParams};
 use bitflags::bitflags;
@@ -55,6 +55,7 @@ pub struct Device {
     pub(crate) device_info: DeviceInfo,
 
     pub(crate) rdg: Arc<Mutex<Rdg>>,
+    cleanup_context: Arc<DeviceCleanupContext>,
     pub(crate) staging_buffer_allocator: Arc<Mutex<StagingBufferAllocator>>,
 
     #[cfg(feature = "swapchain")]
@@ -63,16 +64,34 @@ pub struct Device {
     pub(crate) hal: Arc<dyn Hal>,
 }
 
+struct DeviceCleanupContext {
+    hal: Arc<dyn Hal>,
+    staging_buffer: Buffer,
+}
+
 impl Device {
     const MB_128: usize = 1024 * 1024 * 128;
     pub fn new(configuration: DeviceConfiguration) -> MgpuResult<Self> {
         let hal = hal::create(&configuration)?;
         let device_info = hal.device_info();
-        let staging_buffer_allocator = StagingBufferAllocator::new(hal.clone(), Self::MB_128, configuration.desired_frames_in_flight)?;
+
+        let staging_buffer = hal.create_buffer(&BufferDescription {
+            label: Some("Staging buffer"),
+            usage_flags: BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::TRANSFER_SRC,
+            size: Self::MB_128,
+            memory_domain: MemoryDomain::Cpu,
+        })?;
+        let staging_buffer_allocator = StagingBufferAllocator::new(staging_buffer,  configuration.desired_frames_in_flight)?;
+
+        let cleanup_context = DeviceCleanupContext {
+            hal: hal.clone(),
+            staging_buffer,
+        };
         unsafe { hal.prepare_next_frame() }?;
         Ok(Self {
             hal,
             device_info,
+            cleanup_context: Arc::new(cleanup_context),
             rdg: Default::default(),
             staging_buffer_allocator: Arc::new(Mutex::new(staging_buffer_allocator)),
         
@@ -87,6 +106,7 @@ impl Device {
         rdg.clear();
         static DUMP: AtomicBool = AtomicBool::new(true);
         if DUMP.load(std::sync::atomic::Ordering::Relaxed) {
+            // println!("{:#?}", compiled.adjacency_list);
             println!("{}", compiled.dump_dot());
             DUMP.store(false, std::sync::atomic::Ordering::Relaxed);
         }
@@ -107,7 +127,7 @@ impl Device {
                     };
                     graphics_command_recorders.push(command_recorder);
                 }
-                if !passes.compute_passes.is_empty() {
+                if !passes.async_compute_passes.is_empty() {
                     let command_recorder = unsafe {
                         self.hal
                             .request_command_recorder(queues.async_compute_allocator)?
@@ -115,7 +135,7 @@ impl Device {
                     async_compute_command_recorders.push(command_recorder);
                 }
 
-                if !passes.transfer_passes.is_empty() {
+                if !passes.async_copy_passes.is_empty() {
                     let command_recorder = unsafe {
                         self.hal
                             .request_command_recorder(queues.async_transfer_allocator)?
@@ -170,7 +190,7 @@ impl Device {
                                                 }
 
                                                 if !binding_sets.is_empty() {
-                                                    self.hal.set_binding_sets(
+                                                    self.hal.bind_graphics_binding_sets(
                                                         command_recorder,
                                                         binding_sets,
                                                         *pipeline,
@@ -234,30 +254,49 @@ impl Device {
                                 Node::Blit { source, source_region, dest, dest_region, filter } => unsafe {
                                     self.hal.cmd_blit_image(command_recorder, *source, *source_region, *dest, *dest_region, *filter)?;
                                 },
+                                Node::ComputePass { info } => {
+                                    
+                                    self.execute_compute_pass(info, command_recorder)?;
+                                },
                             }
                         }
 
                         current_graphics += 1;
                     }
-                    if !passes.compute_passes.is_empty() {
+                    if !passes.async_compute_passes.is_empty() {
                         let command_recorder = async_compute_command_recorders[current_compute];
                         current_submission_group
                             .command_recorders
                             .push(command_recorder);
-                        for pass in &passes.compute_passes {
-                        self.hal.transition_resources(command_recorder, &pass.prequisites)?;
-                            todo!();
+                        for pass in &passes.async_compute_passes {
+                            let node = &compiled.nodes[pass.node_id];
+                            self.hal.transition_resources(command_recorder, &pass.prequisites)?;
+                            match &node.ty {
+                                Node::RenderPass {..} => {
+                                    unreachable!()
+                                }
+                                Node::CopyBufferToBuffer {..} => {
+                                    unreachable!()
+                                },
+                                Node::CopyBufferToImage {..} => {
+                                    unreachable!()
+                                }
+                                Node::Blit {..} => {
+                                    unreachable!()
+                                },
+                                Node::ComputePass { info } => self.execute_compute_pass(info, command_recorder)?,
+                            }
                         }
                         current_compute += 1;
                     }
-                    if !passes.transfer_passes.is_empty() {
+                    if !passes.async_copy_passes.is_empty() {
                         let command_recorder =
                             async_transfer_command_recorders[current_transfer];
                         current_submission_group
                             .command_recorders
                             .push(command_recorder);
 
-                        for pass in &passes.transfer_passes {
+                        for pass in &passes.async_copy_passes {
                         self.hal.transition_resources(command_recorder, &pass.prequisites)?;
                             match &compiled.nodes[pass.node_id].ty {
                                 Node::RenderPass {..} => unreachable!(),
@@ -289,6 +328,7 @@ impl Device {
                                 Node::Blit {..} => {
                                    unreachable!()
                                 },
+                                Node::ComputePass {..} => unreachable!(),
                             }
                         }
                         current_transfer += 1;
@@ -389,6 +429,43 @@ impl Device {
         Ok(())
     }
 
+    fn execute_compute_pass(&self, info: &crate::ComputePassInfo, command_recorder: hal::CommandRecorder) -> Result<(), crate::MgpuError> {
+        for step in info.steps.iter() {
+                for command in &step.commands {
+                    let DispatchCommand {
+                        pipeline,
+                        binding_sets,
+                        dispatch_type,
+                    } = command;
+        
+                    unsafe {
+                        self.hal.bind_compute_pipeline(
+                            command_recorder,
+                            *pipeline,
+                        )?;
+        
+        
+                        if !binding_sets.is_empty() {
+                            self.hal.bind_compute_binding_sets(
+                                command_recorder,
+                                binding_sets,
+                                *pipeline,
+                            )?;
+                        }
+                        match *dispatch_type {
+                            DispatchType::Dispatch (gx, gy, gz) => {
+                                self.hal.dispatch(
+                                    command_recorder,
+                                    gx, gy, gz
+                                )?;
+                            }
+                        }
+                    }
+                }
+            };
+        Ok(())
+    }
+    
     pub fn get_info(&self) -> DeviceInfo {
         self.device_info.clone()
     }
@@ -420,7 +497,7 @@ impl Device {
         #[cfg(debug_assertions)]
         self.validate_buffer_write_params(buffer, params);
 
-        if buffer.memory_domain == MemoryDomain::DeviceLocal {
+        if buffer.memory_domain == MemoryDomain::Gpu {
             todo!()
         } else {
             // SAFETY: The write parameters have been validated
@@ -574,6 +651,15 @@ impl Device {
             .create_graphics_pipeline(graphics_pipeline_description)
     }
 
+    pub fn create_compute_pipeline(
+        &self,
+        compute_pipeline_description: &ComputePipelineDescription,
+    ) -> MgpuResult<ComputePipeline> {
+        self.validate_compute_pipeline_description(compute_pipeline_description)?;
+        self.hal
+            .create_compute_pipeline(compute_pipeline_description)
+    }
+
     pub fn destroy_graphics_pipeline(&self, graphics_pipeline: GraphicsPipeline) -> MgpuResult<()> {
         self.hal.destroy_graphics_pipeline(graphics_pipeline)
     }
@@ -672,7 +758,7 @@ impl Device {
             )
         );
         check!(
-            buffer.memory_domain == MemoryDomain::HostVisible ||
+            buffer.memory_domain == MemoryDomain::Cpu ||
             buffer.usage_flags.contains(BufferUsageFlags::TRANSFER_DST),
             "If a buffer write operation is initiated, the buffer must either be host visible, or it must have the TRANSFER_DST flag"
         );
@@ -702,6 +788,8 @@ impl Device {
         // Validate vertex inputs
         let vertex_shader_layout =
             self.get_shader_module_layout(*graphics_pipeline_description.vertex_stage.shader)?;
+        let fragment_shader_layout =
+            graphics_pipeline_description.fragment_stage.map(|fs| self.get_shader_module_layout(*fs.shader)).transpose()?;
         for input in &vertex_shader_layout.inputs {
             let pipeline_input = graphics_pipeline_description
                 .vertex_stage
@@ -722,8 +810,43 @@ impl Device {
             }
         }
 
+        let all_shader_binding_entries = vertex_shader_layout.binding_sets.iter().chain(fragment_shader_layout.iter().flat_map(|fl| fl.binding_sets.iter()));
+        for binding_set_layout_info in graphics_pipeline_description.binding_set_layouts {
+            for bs_element in &binding_set_layout_info.layout.binding_set_elements {
+                let matching_element = all_shader_binding_entries.clone().filter(|entry| entry.set == binding_set_layout_info.set)
+                    .flat_map(|shader_bs| shader_bs.layout.binding_set_elements.iter().find(|l| l.binding == bs_element.binding && bs_element.shader_stage_flags.contains(l.shader_stage_flags))).next();
+
+                check!(matching_element.is_some(), "No matching element at set {} binding {} of type {:#?} found in any shader", binding_set_layout_info.set, bs_element.binding, bs_element);
+                let matching_element = matching_element.unwrap();
+                check!(matching_element.ty == bs_element.ty, "Mismatching types in set {}: expected {:?} got {:?}", binding_set_layout_info.set, matching_element, bs_element)
+            }
+        }
+
         Ok(())
     }
+    fn validate_compute_pipeline_description(
+        &self,
+        compute_pipeline_description: &ComputePipelineDescription,
+    ) -> MgpuResult<()> {
+       
+        let shader_layout = self.hal.get_shader_module_layout(compute_pipeline_description.shader)?;
+        let all_shader_binding_entries = shader_layout.binding_sets.iter();
+        for binding_set_layout_info in compute_pipeline_description.binding_set_layouts {
+            for bs_element in &binding_set_layout_info.layout.binding_set_elements {
+                let matching_element = all_shader_binding_entries.clone().filter(|entry| entry.set == binding_set_layout_info.set)
+                    .flat_map(|shader_bs| shader_bs.layout.binding_set_elements.iter().find(|l| l.binding == bs_element.binding && bs_element.shader_stage_flags.contains(l.shader_stage_flags))).next();
+
+                check!(matching_element.is_some(), "No matching element at set {} binding {} of type {:#?} found in any shader", binding_set_layout_info.set, bs_element.binding, bs_element);
+
+                let matching_element = matching_element.unwrap();
+                check!(matching_element.ty == bs_element.ty, "Mismatching types in set {}: expected {:?} got {:?}", binding_set_layout_info.set, matching_element, bs_element)
+            }
+        }
+       
+       Ok(())
+
+    }
+    
     
     fn validate_bdinging_set_description(description: &BindingSetDescription, layout: &BindingSetLayout) {
         for layout_binding in &layout.binding_set_elements {
@@ -732,7 +855,7 @@ impl Device {
 
             let description_binding = description_binding.unwrap();
 
-            check!(layout_binding.ty == description_binding.ty.binding_type(), "eLayout binding and description binding differs in type, got {:?} expected {:?}", description_binding.ty, layout_binding.ty);
+            check!(layout_binding.ty == description_binding.ty.binding_type(), "Layout binding and description binding differs in type, got {:?} expected {:?}", description_binding.ty, layout_binding.ty);
         }
     }
 
@@ -761,6 +884,12 @@ fn validate_blit_params(params: &BlitParams) {
 
 }
 
+}
+
+impl Drop for DeviceCleanupContext {
+    fn drop(&mut self) {
+        self.hal.destroy_buffer(self.staging_buffer).unwrap();
+    }
 }
 
 #[cfg(feature = "swapchain")]

@@ -1,11 +1,12 @@
 use crate::{
     BindingSet, BindingSetDescription, BindingSetLayout, BindingSetLayoutInfo, Buffer,
-    BufferDescription, BufferWriteParams, CullMode, DepthStencilState, DepthStencilTargetInfo,
+    BufferDescription, BufferWriteParams, ComputePassInfo, ComputePipeline,
+    ComputePipelineDescription, CullMode, DepthStencilState, DepthStencilTargetInfo,
     DeviceConfiguration, DeviceInfo, FilterMode, FrontFace, GraphicsPipeline,
     GraphicsPipelineDescription, Image, ImageDescription, ImageRegion, ImageSubresource, ImageView,
     ImageViewDescription, MgpuResult, MultisampleState, PolygonMode, PrimitiveTopology,
     RenderPassInfo, RenderTargetInfo, Sampler, SamplerDescription, ShaderModule,
-    ShaderModuleDescription, ShaderModuleLayout, VertexInputDescription,
+    ShaderModuleDescription, ShaderModuleLayout, ShaderStageFlags, VertexInputDescription,
 };
 use std::sync::Arc;
 
@@ -43,6 +44,14 @@ pub struct GraphicsPipelineLayout {
     pub front_face: FrontFace,
     pub multisample_state: Option<MultisampleState>,
     pub depth_stencil_state: DepthStencilState,
+}
+
+#[derive(Clone, Hash)]
+pub struct ComputePipelineLayout {
+    pub label: Option<String>,
+    pub binding_sets_infos: Vec<BindingSetLayoutInfo>,
+    pub shader: ShaderModule,
+    pub entry_point: String,
 }
 
 #[derive(Clone, Copy)]
@@ -83,9 +92,9 @@ pub enum ResourceAccessMode {
 
     VertexInput,
 
-    ShaderRead,
+    ShaderRead(ShaderStageFlags),
     #[allow(dead_code)]
-    ShaderWrite,
+    ShaderWrite(ShaderStageFlags),
 
     TransferSrc,
     TransferDst,
@@ -176,7 +185,7 @@ pub(crate) trait Hal: Send + Sync {
         index_buffer: Buffer,
     ) -> MgpuResult<()>;
 
-    unsafe fn set_binding_sets(
+    unsafe fn bind_graphics_binding_sets(
         &self,
         command_recorder: CommandRecorder,
         binding_sets: &[BindingSet],
@@ -206,6 +215,26 @@ pub(crate) trait Hal: Send + Sync {
     unsafe fn present_image(&self, swapchain_id: u64, image: Image) -> MgpuResult<()>;
     unsafe fn submit(&self, end_rendering_info: SubmitInfo) -> MgpuResult<()>;
     unsafe fn end_rendering(&self) -> MgpuResult<()>;
+
+    unsafe fn bind_compute_pipeline(
+        &self,
+        command_recorder: CommandRecorder,
+        pipeline: ComputePipeline,
+    ) -> MgpuResult<()>;
+    unsafe fn bind_compute_binding_sets(
+        &self,
+        command_recorder: CommandRecorder,
+        binding_sets: &[BindingSet],
+        pipeline: ComputePipeline,
+    ) -> MgpuResult<()>;
+
+    unsafe fn dispatch(
+        &self,
+        command_recorder: CommandRecorder,
+        group_count_x: u32,
+        group_count_y: u32,
+        group_count_z: u32,
+    ) -> MgpuResult<()>;
 
     unsafe fn cmd_copy_buffer_to_buffer(
         &self,
@@ -290,10 +319,20 @@ pub(crate) trait Hal: Send + Sync {
         &self,
         graphics_pipeline_description: &GraphicsPipelineDescription,
     ) -> MgpuResult<GraphicsPipeline>;
+
+    fn create_compute_pipeline(
+        &self,
+        compute_pipeline_description: &ComputePipelineDescription,
+    ) -> MgpuResult<ComputePipeline>;
+
     fn get_graphics_pipeline_layout(
         &self,
         graphics_pipeline: GraphicsPipeline,
     ) -> MgpuResult<GraphicsPipelineLayout>;
+    fn get_compute_pipeline_layout(
+        &self,
+        compute_pipeline: ComputePipeline,
+    ) -> MgpuResult<ComputePipelineLayout>;
     fn destroy_graphics_pipeline(&self, graphics_pipeline: GraphicsPipeline) -> MgpuResult<()>;
 
     fn create_shader_module(

@@ -5,14 +5,17 @@ use crate::{
         AttachmentType, QueueType, Resource, ResourceAccessMode, ResourceInfo, ResourceTransition,
     },
     util::check,
-    AttachmentStoreOp, Buffer, FilterMode, Image, ImageRegion, MgpuResult, RenderPassInfo,
-    SwapchainImage,
+    AttachmentStoreOp, Buffer, ComputePassInfo, FilterMode, Image, ImageRegion, MgpuResult,
+    RenderPassInfo, ShaderStageFlags, StorageAccessMode, SwapchainImage,
 };
 
 #[derive(Debug)]
 pub enum Node {
     RenderPass {
         info: RenderPassInfo,
+    },
+    ComputePass {
+        info: ComputePassInfo,
     },
     CopyBufferToBuffer {
         source: Buffer,
@@ -91,8 +94,8 @@ pub struct Pass {
 #[derive(Default, Debug)]
 pub struct PassGroup {
     pub graphics_passes: Vec<Pass>,
-    pub compute_passes: Vec<Pass>,
-    pub transfer_passes: Vec<Pass>,
+    pub async_compute_passes: Vec<Pass>,
+    pub async_copy_passes: Vec<Pass>,
 }
 
 #[derive(Debug)]
@@ -121,11 +124,11 @@ impl Rdg {
     pub fn add_async_compute_pass(&mut self, node: Node) {
         check!(
             !matches!(node, Node::RenderPass { .. }),
-            "Cannot add a render pass node on a transfer queue!"
+            "Cannot add a render pass node on a compute queue!"
         );
         check!(
             !matches!(node, Node::CopyBufferToBuffer { .. }),
-            "Cannot add a copy pass node on a transfer queue!"
+            "Cannot add a copy pass node on a compute queue!"
         );
         Self::add_on_queue(
             QueueType::AsyncCompute,
@@ -164,6 +167,7 @@ impl Rdg {
                 Node::CopyBufferToBuffer { .. } => {}
                 Node::CopyBufferToImage { .. } => {}
                 Node::Blit { .. } => {}
+                Node::ComputePass { .. } => {}
             }
             if stop {
                 return;
@@ -215,7 +219,37 @@ impl Rdg {
                 inner_ownerships.insert(written_resource.resource, node.global_index);
 
                 for other in &self.nodes {
-                    if other.reads.iter().any(|r| r.resource == written_resource.resource)
+                    if other.global_index == node.global_index {
+                        continue;
+                    }
+                    let has_dependency_on_other_node = other.reads.iter().any(|r| {
+                        if r.resource == written_resource.resource {
+                            true
+                        } else {
+                            // if the other node reads a whole resource, and this node wrote a part of it
+                            // there's a dependency
+                            match (&r.resource, &written_resource.resource) {
+                                (
+                                    Resource::Image {
+                                        image: ri,
+                                        subresource: sr,
+                                    },
+                                    Resource::Image { image: wi, .. },
+                                ) => ri == wi && *sr == ri.whole_subresource(),
+                                (
+                                    Resource::Buffer {
+                                        buffer: sb,
+                                        offset: so,
+                                        size: ss,
+                                    },
+                                    Resource::Buffer { buffer: wb, .. },
+                                ) => sb == wb && *so == 0 && *ss == sb.size,
+
+                                _ => false,
+                            }
+                        }
+                    });
+                    if has_dependency_on_other_node
                         // Avoid incorrectly adding a dependency when a resource changes in ownership
                         && inner_ownerships
                             .get(&written_resource.resource)
@@ -238,6 +272,12 @@ impl Rdg {
     }
 
     fn do_topological_sorting(&self, adjacency_list: &[HashSet<usize>]) -> MgpuResult<Vec<usize>> {
+        #[derive(Clone, Copy, Debug, Default)]
+        struct NodeToVisit {
+            node_index: usize,
+            first_encouter_depth: usize,
+        }
+
         let mut visited = Vec::with_capacity(adjacency_list.len());
         visited.resize(adjacency_list.len(), false);
 
@@ -247,10 +287,23 @@ impl Rdg {
         let mut sorted = Vec::with_capacity(adjacency_list.len());
 
         let mut to_visit = VecDeque::new();
-        to_visit.push_front((0usize, 0usize));
-        while let Some((node, depth)) = to_visit.pop_front() {
+        to_visit.push_front(NodeToVisit {
+            node_index: 0,
+            first_encouter_depth: 0,
+        });
+        while let Some(node_to_visit) = to_visit.pop_front() {
+            let NodeToVisit {
+                node_index: node,
+                first_encouter_depth: depth,
+            } = node_to_visit;
             if node_depths[node] != usize::MAX && depth > node_depths[node] {
-                panic!("Loop!");
+                panic!(
+                    "Encountered a loop while sorting the nodes for execution
+                    On node 
+                    {:#?}
+                    first encountered at depth {} and then at depth {}",
+                    self.nodes[node], node_depths[node], depth
+                );
             }
             node_depths[node] = depth;
             if visited[node] {
@@ -261,9 +314,12 @@ impl Rdg {
                 .filter(|&&node| !visited[node])
                 .collect::<Vec<_>>();
             if !children_to_visit.is_empty() {
-                to_visit.push_front((node, depth));
+                to_visit.push_front(node_to_visit);
                 for &child in children_to_visit {
-                    to_visit.push_front((child, depth + 1));
+                    to_visit.push_front(NodeToVisit {
+                        node_index: child,
+                        first_encouter_depth: depth + 1,
+                    });
                 }
             } else {
                 visited[node] = true;
@@ -363,20 +419,20 @@ impl Rdg {
                     prequisites,
                     node_id: node_info.global_index,
                 }),
-                QueueType::AsyncCompute => current_group.compute_passes.push(Pass {
+                QueueType::AsyncCompute => current_group.async_compute_passes.push(Pass {
                     prequisites,
                     node_id: node_info.global_index,
                 }),
-                QueueType::AsyncTransfer => current_group.transfer_passes.push(Pass {
+                QueueType::AsyncTransfer => current_group.async_copy_passes.push(Pass {
                     prequisites,
                     node_id: node_info.global_index,
                 }),
             }
         }
 
-        if !current_group.compute_passes.is_empty()
+        if !current_group.async_compute_passes.is_empty()
             || !current_group.graphics_passes.is_empty()
-            || !current_group.transfer_passes.is_empty()
+            || !current_group.async_copy_passes.is_empty()
         {
             steps.push(Step::ExecutePasses(std::mem::take(&mut current_group)));
         }
@@ -415,16 +471,32 @@ impl Node {
                         },
                     });
 
-                // let all_buffers_written =
-                //     info.steps
-                //         .iter()
-                //         .flat_map(|step| {})
-                //         .map(|buffer| Resource::Buffer {
-                //             buffer,
-                //             offset: 0,
-                //             size: buffer.size,
-                //         });
-
+                let all_resource_bindings_written = info.steps.iter().flat_map(|step| {
+                    step.commands.iter().flat_map(|cmd| {
+                        cmd.binding_sets.iter().flat_map(|set| {
+                            set.bindings.iter().filter_map(|b| match b.ty {
+                                crate::BindingType::Sampler(_) => None,
+                                crate::BindingType::UniformBuffer { .. } => None,
+                                crate::BindingType::SampledImage { .. } => None,
+                                crate::BindingType::StorageImage { view, access_mode } => {
+                                    if access_mode != StorageAccessMode::Read {
+                                        Some(ResourceInfo {
+                                            resource: Resource::Image {
+                                                image: view.owner,
+                                                subresource: view.subresource,
+                                            },
+                                            access_mode: ResourceAccessMode::ShaderWrite(
+                                                b.visibility,
+                                            ),
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                }
+                            })
+                        })
+                    })
+                });
                 let all_resource_bindings_read = info.steps.iter().flat_map(|step| {
                     step.commands.iter().flat_map(|cmd| {
                         cmd.binding_sets.iter().flat_map(|set| {
@@ -435,7 +507,7 @@ impl Node {
                                     offset,
                                     range,
                                 } => Some(ResourceInfo {
-                                    access_mode: ResourceAccessMode::ShaderRead,
+                                    access_mode: ResourceAccessMode::ShaderRead(b.visibility),
                                     resource: Resource::Buffer {
                                         buffer,
                                         offset,
@@ -444,12 +516,27 @@ impl Node {
                                 }),
                                 crate::BindingType::SampledImage { view, .. } => {
                                     Some(ResourceInfo {
-                                        access_mode: ResourceAccessMode::ShaderRead,
+                                        access_mode: ResourceAccessMode::ShaderRead(b.visibility),
                                         resource: Resource::Image {
                                             image: view.owner,
                                             subresource: view.subresource,
                                         },
                                     })
+                                }
+                                crate::BindingType::StorageImage { view, access_mode } => {
+                                    if access_mode == StorageAccessMode::Read {
+                                        Some(ResourceInfo {
+                                            resource: Resource::Image {
+                                                image: view.owner,
+                                                subresource: view.subresource,
+                                            },
+                                            access_mode: ResourceAccessMode::ShaderRead(
+                                                b.visibility,
+                                            ),
+                                        })
+                                    } else {
+                                        None
+                                    }
                                 }
                             })
                         })
@@ -530,7 +617,7 @@ impl Node {
                         .chain(all_resource_bindings_read)
                         .collect(),
                     attachments_written
-                        // .chain(all_buffers_written)
+                        .chain(all_resource_bindings_written)
                         .collect(),
                 )
             }
@@ -608,6 +695,84 @@ impl Node {
                 }]
                 .into(),
             ),
+            Node::ComputePass { info } => {
+                let all_resource_bindings_written = info.steps.iter().flat_map(|step| {
+                    step.commands.iter().flat_map(|cmd| {
+                        cmd.binding_sets.iter().flat_map(|set| {
+                            set.bindings.iter().filter_map(|b| match b.ty {
+                                crate::BindingType::Sampler(_) => None,
+                                crate::BindingType::UniformBuffer { .. } => None,
+                                crate::BindingType::SampledImage { .. } => None,
+                                crate::BindingType::StorageImage { view, access_mode } => {
+                                    if access_mode != StorageAccessMode::Read {
+                                        Some(ResourceInfo {
+                                            resource: Resource::Image {
+                                                image: view.owner,
+                                                subresource: view.subresource,
+                                            },
+                                            access_mode: ResourceAccessMode::ShaderWrite(
+                                                b.visibility,
+                                            ),
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                }
+                            })
+                        })
+                    })
+                });
+                let all_resource_bindings_read = info.steps.iter().flat_map(|step| {
+                    step.commands.iter().flat_map(|cmd| {
+                        cmd.binding_sets.iter().flat_map(|set| {
+                            set.bindings.iter().filter_map(|b| match b.ty {
+                                crate::BindingType::Sampler(_) => None,
+                                crate::BindingType::UniformBuffer {
+                                    buffer,
+                                    offset,
+                                    range,
+                                } => Some(ResourceInfo {
+                                    access_mode: ResourceAccessMode::ShaderRead(b.visibility),
+                                    resource: Resource::Buffer {
+                                        buffer,
+                                        offset,
+                                        size: range,
+                                    },
+                                }),
+                                crate::BindingType::SampledImage { view, .. } => {
+                                    Some(ResourceInfo {
+                                        access_mode: ResourceAccessMode::ShaderRead(b.visibility),
+                                        resource: Resource::Image {
+                                            image: view.owner,
+                                            subresource: view.subresource,
+                                        },
+                                    })
+                                }
+                                crate::BindingType::StorageImage { view, access_mode } => {
+                                    if access_mode != StorageAccessMode::Write {
+                                        Some(ResourceInfo {
+                                            resource: Resource::Image {
+                                                image: view.owner,
+                                                subresource: view.subresource,
+                                            },
+                                            access_mode: ResourceAccessMode::ShaderRead(
+                                                b.visibility,
+                                            ),
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                }
+                            })
+                        })
+                    })
+                });
+
+                (
+                    all_resource_bindings_read.collect(),
+                    all_resource_bindings_written.collect(),
+                )
+            }
         };
 
         RdgNode {
@@ -630,6 +795,10 @@ impl RdgCompiledGraph {
                     info.label.as_deref().unwrap_or("Unknown")
                 )
             }
+            Node::ComputePass { info } => format!(
+                "ComputePass '{}'",
+                info.label.as_deref().unwrap_or("Unknown")
+            ),
             Node::CopyBufferToBuffer {
                 source,
                 dest,
@@ -683,7 +852,7 @@ impl RdgCompiledGraph {
         let mut subgraph_id = 0;
         for step in &self.sequence {
             match step {
-                Step::OwnershipTransfer { transfers } => {}
+                Step::OwnershipTransfer { .. } => {}
                 Step::ExecutePasses(pass) => {
                     let mut subgraph = format!("\tsubgraph clusterStep{} {{\n", subgraph_id);
                     subgraph_id += 1;
@@ -695,14 +864,14 @@ impl RdgCompiledGraph {
                         &mut edges,
                     );
                     self.extract_pass_info(
-                        &pass.compute_passes,
+                        &pass.async_compute_passes,
                         subgraph_id,
                         "Compute",
                         &mut subgraph,
                         &mut edges,
                     );
                     self.extract_pass_info(
-                        &pass.transfer_passes,
+                        &pass.async_copy_passes,
                         subgraph_id,
                         "Copy",
                         &mut subgraph,
@@ -793,20 +962,20 @@ mod tests {
             id: 0,
             usage_flags: Default::default(),
             size: 1000,
-            memory_domain: crate::MemoryDomain::DeviceLocal,
+            memory_domain: crate::MemoryDomain::Gpu,
         };
         let buffer_0 = Buffer {
             id: 1,
             usage_flags: Default::default(),
             size: 10,
-            memory_domain: crate::MemoryDomain::DeviceLocal,
+            memory_domain: crate::MemoryDomain::Gpu,
         };
 
         let buffer_1 = Buffer {
             id: 2,
             usage_flags: Default::default(),
             size: 10,
-            memory_domain: crate::MemoryDomain::DeviceLocal,
+            memory_domain: crate::MemoryDomain::Gpu,
         };
 
         let gp = GraphicsPipeline { id: 0 };
@@ -858,9 +1027,9 @@ mod tests {
         match step_0 {
             crate::rdg::Step::OwnershipTransfer { .. } => panic!("Barrier with only a present"),
             crate::rdg::Step::ExecutePasses(passes) => {
-                assert_eq!(passes.transfer_passes.len(), 2);
+                assert_eq!(passes.async_copy_passes.len(), 2);
                 assert_eq!(passes.graphics_passes.len(), 0);
-                assert_eq!(passes.compute_passes.len(), 0);
+                assert_eq!(passes.async_compute_passes.len(), 0);
             }
         }
     }
