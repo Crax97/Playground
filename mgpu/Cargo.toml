@@ -6,10 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["swapchain", "vulkan"]
+default = ["swapchain", "vulkan", "rdg_to_svg"]
 swapchain = ["dep:raw-window-handle"]
 vulkan = ["dep:ash", "dep:ash-window", "dep:gpu-allocator", "gpu-allocator/ash"]
 serde = ["dep:serde", "bitflags/serde"]
+rdg_to_svg = ["dep:layout-rs"]
 
 [dependencies]
 bitflags = "2.5.0"
@@ -20,6 +21,7 @@ raw-window-handle = { version = "0.6.*", optional = true }
 gpu-allocator = { git = "https://github.com/Traverse-Research/gpu-allocator.git", branch = "ash-0.38", optional = true }
 spirv-reflect = "0.2.3"
 log = "0.4.21"
+layout-rs = { version = "0.1.*", optional = true }
 
 
 [dev-dependencies]

@@ -941,6 +941,41 @@ impl RdgCompiledGraph {
         content
     }
 
+    #[cfg(feature = "rdg_to_svg")]
+    pub fn save_to_svg(&self, path: &str) {
+        use layout::backends::svg::SVGWriter;
+        use layout::gv::*;
+        use log::error;
+        let content = self.dump_dot();
+        let mut svg = SVGWriter::new();
+
+        let mut parser = DotParser::new(&content);
+
+        let mut graph = if let Ok(graph) = parser.process() {
+            let mut gb = GraphBuilder::new();
+            gb.visit_graph(&graph);
+            gb.get()
+        } else {
+            error!(
+                "Failed to parse dot graph, source
+            {content}
+            "
+            );
+            return;
+        };
+
+        graph.do_it(false, false, false, &mut svg);
+        let content = svg.finalize();
+
+        if let Err(e) = std::fs::write(path, &content) {
+            error!(
+                "Failed to write svg file to {path}, error {e:?}, content
+            {}",
+                content
+            );
+        }
+    }
+
     fn extract_pass_info(
         &self,
         passes: &[Pass],

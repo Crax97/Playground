@@ -106,8 +106,7 @@ impl Device {
         rdg.clear();
         static DUMP: AtomicBool = AtomicBool::new(true);
         if DUMP.load(std::sync::atomic::Ordering::Relaxed) {
-            // println!("{:#?}", compiled.adjacency_list);
-            println!("{}", compiled.dump_dot());
+            compiled.save_to_svg(&format!("rdg_graph_{}.svg", std::time::SystemTime::now().elapsed().unwrap().as_millis()));
             DUMP.store(false, std::sync::atomic::Ordering::Relaxed);
         }
 
