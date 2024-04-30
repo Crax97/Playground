@@ -139,7 +139,7 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
             }
             QueueType::AsyncTransfer => {
                 for node in self.new_nodes {
-                    rdg.add_async_transfer_node(node);
+                    rdg.add_async_copy_node(node);
                 }
             }
         }

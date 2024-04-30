@@ -53,26 +53,6 @@ pub fn hash_type<T: Hash>(value: &T) -> u64 {
 /// a concrete structured used to implement the Hal.
 /// Additionally, the ResourceResolver defers the destruction of every item by a certain amount of frames
 /// specified at creation time (to ensure that e.g an image is not destroyed while in use by a command buffer)
-/// E.g the api `Foo` uses a `foo::Buffer` for buffers and a `foo::Image` for images, therefore
-/// a ResourceResolver might be defined as
-/// ```
-/// pub mod foo {
-/// pub struct Buffer(pub String);
-/// pub struct Image(pub u64);
-/// }
-/// ```
-/// ```
-/// define_resource_resolver! {
-///     foo::Buffer -> foo_buffer,
-///     foo::Image -> foo_image,
-/// }
-///
-/// let mut resolver = ResourceResolver::default();
-/// let foo_buffer = foo::Buffer("Hello World!");
-/// let handle = resolver.add(foo_buffer);
-///
-/// assert_eq!(resolver.resolve_clone(handle).0, "Hello World!".to_string());
-/// ```
 /// For a more concrete example, take a look at `[crate::hal::vulkan::util::VulkanResolver]`
 macro_rules! define_resource_resolver {
     ($self:ty, $(($resource:ty, $deallocate_fn:expr) => $map_name:ident),* $(,)?) => {
@@ -521,6 +501,7 @@ mod tests {
         assert_eq!(arena[handle_1], 0);
 
         assert_eq!(arena.len(), 3);
+        assert!(arena.remove(handle_2).is_ok());
         assert_eq!(arena.len(), 2);
 
         assert!(arena.resolve(handle_2).is_none());

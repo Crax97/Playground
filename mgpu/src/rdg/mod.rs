@@ -138,7 +138,7 @@ impl Rdg {
         );
     }
 
-    pub fn add_async_transfer_node(&mut self, node: Node) {
+    pub fn add_async_copy_node(&mut self, node: Node) {
         check!(
             !matches!(node, Node::RenderPass { .. }),
             "Cannot add a render pass node on a transfer queue!"
@@ -972,9 +972,103 @@ impl RdgCompiledGraph {
 #[cfg(test)]
 mod tests {
 
-    use crate::{rdg::Node, Buffer, DrawCommand, GraphicsPipeline, Image, ImageView, RenderStep};
+    use std::sync::atomic::AtomicU64;
+
+    use crate::{
+        rdg::Node, Binding, BindingSet, Buffer, ComputeStep, DispatchCommand, DrawCommand,
+        Extents2D, Extents3D, GraphicsPipeline, Image, ImageFormat, ImageRegion, ImageSubresource,
+        ImageUsageFlags, ImageView, Rect2D, RenderAttachmentReference, RenderStep, RenderTarget,
+    };
 
     use super::Rdg;
+    static BUFFER_ID: AtomicU64 = AtomicU64::new(0);
+    static IMAGE_ID: AtomicU64 = AtomicU64::new(0);
+    static IMAGE_VIEW_ID: AtomicU64 = AtomicU64::new(0);
+
+    #[derive(Clone, Copy)]
+    struct BufferBuilder {
+        buffer: Buffer,
+    }
+
+    impl BufferBuilder {
+        fn new() -> Self {
+            Self {
+                buffer: Buffer {
+                    id: BUFFER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+                    usage_flags: Default::default(),
+                    size: 100,
+                    memory_domain: crate::MemoryDomain::Gpu,
+                },
+            }
+        }
+        fn build(self) -> Buffer {
+            self.buffer
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct ImageBuilder {
+        image: Image,
+    }
+    impl ImageBuilder {
+        fn new() -> Self {
+            Self {
+                image: Image {
+                    id: IMAGE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+                    usage_flags: ImageUsageFlags::default(),
+                    extents: Extents3D {
+                        width: 512,
+                        height: 512,
+                        depth: 1,
+                    },
+                    dimension: crate::ImageDimension::D2,
+                    num_mips: 1.try_into().unwrap(),
+                    array_layers: 1.try_into().unwrap(),
+                    samples: crate::SampleCount::One,
+                    format: crate::ImageFormat::Rgba8,
+                },
+            }
+        }
+
+        fn width_height(mut self, width: u32, height: u32) -> Self {
+            self.image.extents.width = width;
+            self.image.extents.height = height;
+            self
+        }
+
+        fn format(mut self, format: ImageFormat) -> Self {
+            self.image.format = format;
+            self
+        }
+
+        fn build(self) -> Image {
+            self.image
+        }
+    }
+    #[derive(Clone, Copy)]
+    struct ImageViewBuilder {
+        view: ImageView,
+    }
+    impl ImageViewBuilder {
+        fn new(owner: Image) -> Self {
+            Self {
+                view: ImageView {
+                    owner,
+                    subresource: ImageSubresource {
+                        mip: 0,
+                        num_mips: owner.num_mips,
+                        base_array_layer: 0,
+                        num_layers: owner.array_layers,
+                    },
+                    id: IMAGE_VIEW_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+                },
+            }
+        }
+
+        fn build(self) -> ImageView {
+            self.view
+        }
+    }
 
     #[test]
     fn present() {
@@ -1032,14 +1126,14 @@ mod tests {
 
         let gp = GraphicsPipeline { id: 0 };
 
-        rdg.add_async_transfer_node(Node::CopyBufferToBuffer {
+        rdg.add_async_copy_node(Node::CopyBufferToBuffer {
             source: buffer_src,
             dest: buffer_0,
             source_offset: 0,
             dest_offset: 0,
             size: 10,
         });
-        rdg.add_async_transfer_node(Node::CopyBufferToBuffer {
+        rdg.add_async_copy_node(Node::CopyBufferToBuffer {
             source: buffer_src,
             dest: buffer_1,
             source_offset: 10,
@@ -1084,5 +1178,407 @@ mod tests {
                 assert_eq!(passes.async_compute_passes.len(), 0);
             }
         }
+    }
+
+    #[test]
+    fn compute_1() {
+        /*
+        0. Copy buffer S -> buffer A
+        1. Copy buffer S -> buffer B
+        2. Copy buffer S -> buffer C
+        3. Copy buffer S -> image D
+        4. Compute uses C to write image F
+        5. Render pass uses A, B, F, D to write P
+        Topological sorting should impose that 5 is executed after (4, 3, 1, 0)
+        and that 4 is executed before 2
+        */
+        let buffer_s = BufferBuilder::new().build();
+        let buffer_a = BufferBuilder::new().build();
+        let buffer_b = BufferBuilder::new().build();
+        let buffer_c = BufferBuilder::new().build();
+        let image_d = ImageBuilder::new().build();
+        let image_f = ImageBuilder::new().build();
+        let image_p = ImageBuilder::new().build();
+        let view_d = ImageViewBuilder::new(image_d).build();
+        let view_f = ImageViewBuilder::new(image_f).build();
+        let view_p = ImageViewBuilder::new(image_p).build();
+
+        let mut rdg = Rdg::default();
+        rdg.add_async_copy_node(Node::CopyBufferToBuffer {
+            source: buffer_s,
+            dest: buffer_a,
+            source_offset: 0,
+            dest_offset: 0,
+            size: 10,
+        });
+        rdg.add_async_copy_node(Node::CopyBufferToBuffer {
+            source: buffer_s,
+            dest: buffer_b,
+            source_offset: 10,
+            dest_offset: 0,
+            size: 10,
+        });
+        rdg.add_async_copy_node(Node::CopyBufferToBuffer {
+            source: buffer_s,
+            dest: buffer_c,
+            source_offset: 20,
+            dest_offset: 0,
+            size: 10,
+        });
+        rdg.add_async_copy_node(Node::CopyBufferToImage {
+            source: buffer_s,
+            dest: image_d,
+            source_offset: 30,
+            dest_region: image_d.whole_region(),
+        });
+        rdg.add_async_compute_pass(Node::ComputePass {
+            info: crate::ComputePassInfo {
+                label: None,
+                steps: vec![ComputeStep {
+                    commands: vec![DispatchCommand {
+                        pipeline: crate::ComputePipeline { id: 0 },
+                        binding_sets: vec![BindingSet {
+                            id: 1,
+                            bindings: vec![
+                                Binding {
+                                    binding: 0,
+                                    ty: crate::BindingType::UniformBuffer {
+                                        buffer: buffer_c,
+                                        offset: 0,
+                                        range: 10,
+                                    },
+                                    visibility: Default::default(),
+                                },
+                                Binding {
+                                    binding: 1,
+                                    ty: crate::BindingType::StorageImage {
+                                        view: view_f,
+                                        access_mode: crate::StorageAccessMode::Write,
+                                    },
+                                    visibility: Default::default(),
+                                },
+                            ],
+                        }],
+                        dispatch_type: crate::DispatchType::Dispatch(1, 1, 1),
+                    }],
+                }],
+            },
+        });
+
+        rdg.add_graphics_pass(Node::RenderPass {
+            info: crate::RenderPassInfo {
+                label: None,
+                framebuffer: crate::Framebuffer {
+                    render_targets: vec![RenderTarget {
+                        view: view_p,
+                        sample_count: crate::SampleCount::One,
+                        load_op: crate::RenderTargetLoadOp::DontCare,
+                        store_op: crate::AttachmentStoreOp::Store,
+                    }],
+                    depth_stencil_target: None,
+                    extents: Extents2D::default(),
+                },
+                render_area: Rect2D::default(),
+                steps: vec![RenderStep {
+                    color_attachments: vec![RenderAttachmentReference {
+                        index: 0,
+                        access_mode: crate::AttachmentAccessMode::Write,
+                    }],
+                    depth_stencil_attachment: None,
+                    commands: vec![DrawCommand {
+                        pipeline: GraphicsPipeline { id: 0 },
+                        vertex_buffers: vec![buffer_a],
+                        index_buffer: Some(buffer_b),
+                        binding_sets: vec![BindingSet {
+                            id: 1,
+                            bindings: vec![
+                                Binding {
+                                    binding: 0,
+                                    ty: crate::BindingType::SampledImage { view: view_f },
+                                    visibility: Default::default(),
+                                },
+                                Binding {
+                                    binding: 1,
+                                    ty: crate::BindingType::SampledImage { view: view_d },
+                                    visibility: Default::default(),
+                                },
+                            ],
+                        }],
+                        draw_type: crate::DrawType::DrawIndexed {
+                            indices: 10,
+                            instances: 1,
+                            first_index: 0,
+                            vertex_offset: 0,
+                            first_instance: 0,
+                        },
+                    }],
+                }],
+            },
+        });
+
+        let compiled = rdg.compile().unwrap();
+        /*
+        Topological sorting should impose that 5 is executed after (4, 3, 1, 0)
+        and that 4 is executed before 2
+        */
+        assert!(*compiled.topological_sorting.last().unwrap() == 5);
+        assert!(
+            compiled
+                .topological_sorting
+                .iter()
+                .position(|&i| i == 4)
+                .unwrap()
+                > compiled
+                    .topological_sorting
+                    .iter()
+                    .position(|&i| i == 2)
+                    .unwrap()
+        );
+    }
+
+    #[test]
+    fn post_process() {
+        /*
+        0. Copy buffer S -> buffer A
+        1. Copy buffer S -> buffer B
+        2. Copy buffer S -> buffer C
+        3. Copy buffer S -> image D
+        4. Compute uses C to write image F
+        5. Render pass uses A, B, F, D to write P1
+        6. Render pass uses P1 to write P2
+        7. Render pass uses P2 to write P1 again
+        Topological sorting should impose that 5 is executed after (4, 3, 1, 0)
+        and that 4 is executed before 2
+        */
+        let buffer_s = BufferBuilder::new().build();
+        let buffer_a = BufferBuilder::new().build();
+        let buffer_b = BufferBuilder::new().build();
+        let buffer_c = BufferBuilder::new().build();
+        let image_d = ImageBuilder::new().build();
+        let image_f = ImageBuilder::new().build();
+        let image_p1 = ImageBuilder::new().build();
+        let image_p2 = ImageBuilder::new().build();
+        let view_d = ImageViewBuilder::new(image_d).build();
+        let view_f = ImageViewBuilder::new(image_f).build();
+        let view_p1 = ImageViewBuilder::new(image_p1).build();
+        let view_p2 = ImageViewBuilder::new(image_p2).build();
+
+        let mut rdg = Rdg::default();
+        rdg.add_async_copy_node(Node::CopyBufferToBuffer {
+            source: buffer_s,
+            dest: buffer_a,
+            source_offset: 0,
+            dest_offset: 0,
+            size: 10,
+        });
+        rdg.add_async_copy_node(Node::CopyBufferToBuffer {
+            source: buffer_s,
+            dest: buffer_b,
+            source_offset: 10,
+            dest_offset: 0,
+            size: 10,
+        });
+        rdg.add_async_copy_node(Node::CopyBufferToBuffer {
+            source: buffer_s,
+            dest: buffer_c,
+            source_offset: 20,
+            dest_offset: 0,
+            size: 10,
+        });
+        rdg.add_async_copy_node(Node::CopyBufferToImage {
+            source: buffer_s,
+            dest: image_d,
+            source_offset: 30,
+            dest_region: image_d.whole_region(),
+        });
+        rdg.add_async_compute_pass(Node::ComputePass {
+            info: crate::ComputePassInfo {
+                label: None,
+                steps: vec![ComputeStep {
+                    commands: vec![DispatchCommand {
+                        pipeline: crate::ComputePipeline { id: 0 },
+                        binding_sets: vec![BindingSet {
+                            id: 1,
+                            bindings: vec![
+                                Binding {
+                                    binding: 0,
+                                    ty: crate::BindingType::UniformBuffer {
+                                        buffer: buffer_c,
+                                        offset: 0,
+                                        range: 10,
+                                    },
+                                    visibility: Default::default(),
+                                },
+                                Binding {
+                                    binding: 1,
+                                    ty: crate::BindingType::StorageImage {
+                                        view: view_f,
+                                        access_mode: crate::StorageAccessMode::Write,
+                                    },
+                                    visibility: Default::default(),
+                                },
+                            ],
+                        }],
+                        dispatch_type: crate::DispatchType::Dispatch(1, 1, 1),
+                    }],
+                }],
+            },
+        });
+
+        rdg.add_graphics_pass(Node::RenderPass {
+            info: crate::RenderPassInfo {
+                label: None,
+                framebuffer: crate::Framebuffer {
+                    render_targets: vec![RenderTarget {
+                        view: view_p1,
+                        sample_count: crate::SampleCount::One,
+                        load_op: crate::RenderTargetLoadOp::DontCare,
+                        store_op: crate::AttachmentStoreOp::Store,
+                    }],
+                    depth_stencil_target: None,
+                    extents: Extents2D::default(),
+                },
+                render_area: Rect2D::default(),
+                steps: vec![RenderStep {
+                    color_attachments: vec![RenderAttachmentReference {
+                        index: 0,
+                        access_mode: crate::AttachmentAccessMode::Write,
+                    }],
+                    depth_stencil_attachment: None,
+                    commands: vec![DrawCommand {
+                        pipeline: GraphicsPipeline { id: 0 },
+                        vertex_buffers: vec![buffer_a],
+                        index_buffer: Some(buffer_b),
+                        binding_sets: vec![BindingSet {
+                            id: 1,
+                            bindings: vec![
+                                Binding {
+                                    binding: 0,
+                                    ty: crate::BindingType::SampledImage { view: view_f },
+                                    visibility: Default::default(),
+                                },
+                                Binding {
+                                    binding: 1,
+                                    ty: crate::BindingType::SampledImage { view: view_d },
+                                    visibility: Default::default(),
+                                },
+                            ],
+                        }],
+                        draw_type: crate::DrawType::DrawIndexed {
+                            indices: 10,
+                            instances: 1,
+                            first_index: 0,
+                            vertex_offset: 0,
+                            first_instance: 0,
+                        },
+                    }],
+                }],
+            },
+        });
+        rdg.add_graphics_pass(Node::RenderPass {
+            info: crate::RenderPassInfo {
+                label: None,
+                framebuffer: crate::Framebuffer {
+                    render_targets: vec![RenderTarget {
+                        view: view_p2,
+                        sample_count: crate::SampleCount::One,
+                        load_op: crate::RenderTargetLoadOp::DontCare,
+                        store_op: crate::AttachmentStoreOp::Store,
+                    }],
+                    depth_stencil_target: None,
+                    extents: Extents2D::default(),
+                },
+                render_area: Rect2D::default(),
+                steps: vec![RenderStep {
+                    color_attachments: vec![RenderAttachmentReference {
+                        index: 0,
+                        access_mode: crate::AttachmentAccessMode::Write,
+                    }],
+                    depth_stencil_attachment: None,
+                    commands: vec![DrawCommand {
+                        pipeline: GraphicsPipeline { id: 0 },
+                        vertex_buffers: vec![],
+                        index_buffer: None,
+                        binding_sets: vec![BindingSet {
+                            id: 1,
+                            bindings: vec![Binding {
+                                binding: 0,
+                                ty: crate::BindingType::SampledImage { view: view_p1 },
+                                visibility: Default::default(),
+                            }],
+                        }],
+                        draw_type: crate::DrawType::DrawIndexed {
+                            indices: 10,
+                            instances: 1,
+                            first_index: 0,
+                            vertex_offset: 0,
+                            first_instance: 0,
+                        },
+                    }],
+                }],
+            },
+        });
+        rdg.add_graphics_pass(Node::RenderPass {
+            info: crate::RenderPassInfo {
+                label: None,
+                framebuffer: crate::Framebuffer {
+                    render_targets: vec![RenderTarget {
+                        view: view_p1,
+                        sample_count: crate::SampleCount::One,
+                        load_op: crate::RenderTargetLoadOp::DontCare,
+                        store_op: crate::AttachmentStoreOp::Store,
+                    }],
+                    depth_stencil_target: None,
+                    extents: Extents2D::default(),
+                },
+                render_area: Rect2D::default(),
+                steps: vec![RenderStep {
+                    color_attachments: vec![RenderAttachmentReference {
+                        index: 0,
+                        access_mode: crate::AttachmentAccessMode::Write,
+                    }],
+                    depth_stencil_attachment: None,
+                    commands: vec![DrawCommand {
+                        pipeline: GraphicsPipeline { id: 0 },
+                        vertex_buffers: vec![],
+                        index_buffer: None,
+                        binding_sets: vec![BindingSet {
+                            id: 1,
+                            bindings: vec![Binding {
+                                binding: 0,
+                                ty: crate::BindingType::SampledImage { view: view_p2 },
+                                visibility: Default::default(),
+                            }],
+                        }],
+                        draw_type: crate::DrawType::DrawIndexed {
+                            indices: 10,
+                            instances: 1,
+                            first_index: 0,
+                            vertex_offset: 0,
+                            first_instance: 0,
+                        },
+                    }],
+                }],
+            },
+        });
+        let compiled = rdg.compile().unwrap();
+        let index_of_pass = |id| {
+            compiled
+                .topological_sorting
+                .iter()
+                .position(|&i| i == id)
+                .unwrap()
+        };
+        /*
+        Topological sorting should impose that 5 is executed after (4, 3, 1, 0),
+        7 after 6 and 6 after 5 and that 4 is executed before 2
+        */
+        assert!(*compiled.topological_sorting.last().unwrap() == 7);
+        assert!(index_of_pass(7) > index_of_pass(6));
+        assert!(index_of_pass(7) - index_of_pass(6) == 1);
+        assert!(index_of_pass(6) > index_of_pass(5));
+        assert!(index_of_pass(6) - index_of_pass(5) == 1);
+        assert!(index_of_pass(5) > index_of_pass(4));
+        assert!(index_of_pass(4) > index_of_pass(2));
     }
 }

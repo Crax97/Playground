@@ -525,7 +525,7 @@ impl Device {
         }?;
 
         self.write_rdg()
-            .add_async_transfer_node(Node::CopyBufferToBuffer {
+            .add_async_copy_node(Node::CopyBufferToBuffer {
                 source: allocation.buffer,
                 dest: buffer,
                 source_offset: allocation.offset,
@@ -567,7 +567,7 @@ impl Device {
         }?;
 
         self.write_rdg()
-            .add_async_transfer_node(Node::CopyBufferToImage { 
+            .add_async_copy_node(Node::CopyBufferToImage { 
                 source: allocation.buffer,
                 dest: image,
                 source_offset: allocation.offset,
