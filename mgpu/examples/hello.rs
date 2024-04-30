@@ -9,7 +9,7 @@ fn main() {
         features: DeviceFeatures::HAL_DEBUG_LAYERS,
         device_preference: Some(DevicePreference::HighPerformance),
         desired_frames_in_flight: 3,
-        display_handle: event_loop.display_handle().unwrap().as_raw(),
+        display_handle: Some(event_loop.display_handle().unwrap().as_raw()),
     })
     .expect("Failed to create gpu device");
 

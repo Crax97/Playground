@@ -2,13 +2,13 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::{any::TypeId, sync::Arc};
 
-use gpu::Gpu;
 use log::{error, info};
+use mgpu::Device;
 use notify::event::ModifyKind;
 use notify::{RecommendedWatcher, Watcher};
 
 use super::{ErasedResourceLoader, LoadedResources, ResourcePtr};
-use crate::AssetId;
+use crate::asset_map::AssetId;
 use crossbeam::channel::{unbounded, Receiver};
 
 pub(super) struct ReloadedResource {
@@ -41,12 +41,9 @@ impl HotReloadServer {
                     if let Ok(event) = result {
                         let kind = event.kind;
                         let paths = event.paths;
-                        match kind {
-                            notify::EventKind::Modify(ModifyKind::Any) => {
-                                info!("File {:?} changed, sending reload event", &paths[0]);
-                                sender.send(paths[0].clone()).unwrap();
-                            }
-                            _ => {}
+                        if let notify::EventKind::Modify(ModifyKind::Any) = kind {
+                            info!("File {:?} changed, sending reload event", &paths[0]);
+                            sender.send(paths[0].clone()).unwrap();
                         }
                     }
                 },
@@ -84,7 +81,7 @@ impl HotReloadServer {
         &mut self,
         resource_loaders: &HashMap<TypeId, Box<dyn ErasedResourceLoader>>,
         loaded_resources: &mut LoadedResources,
-        gpu: &Arc<dyn Gpu>,
+        device: &Device,
     ) -> anyhow::Result<()> {
         let new_resources = self.get_new_resources(resource_loaders)?;
         for resources in new_resources {
@@ -98,9 +95,7 @@ impl HotReloadServer {
                     .expect("Could not find resource");
                 let mut old_resource =
                     std::mem::replace(&mut resource_slot.resource, resource.new_resource);
-                Arc::get_mut(&mut old_resource)
-                    .unwrap()
-                    .destroyed(gpu.as_ref());
+                Arc::get_mut(&mut old_resource).unwrap().destroyed(device);
             }
         }
         Ok(())

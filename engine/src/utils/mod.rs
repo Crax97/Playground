@@ -1,10 +1,7 @@
 pub mod immutable_string;
-mod texture_packer;
 mod tick;
 
 pub use tick::Tick;
-
-pub use texture_packer::*;
 
 pub fn ensure_vec_length<T: Default + Clone>(vec: &mut Vec<T>, index: usize) {
     if vec.len() <= index {

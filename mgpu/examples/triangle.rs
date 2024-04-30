@@ -44,7 +44,7 @@ fn main() {
         app_name: Some("Triangle Application"),
         features: DeviceFeatures::HAL_DEBUG_LAYERS,
         device_preference: Some(DevicePreference::HighPerformance),
-        display_handle: event_loop.display_handle().unwrap().as_raw(),
+        display_handle: Some(event_loop.display_handle().unwrap().as_raw()),
         desired_frames_in_flight: 3,
     })
     .expect("Failed to create gpu device");

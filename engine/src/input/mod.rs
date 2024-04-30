@@ -1,11 +1,10 @@
 #![allow(dead_code)]
 pub mod key;
 
-use nalgebra::Vector2;
+use glam::{UVec2, Vec2};
 
 use std::collections::HashMap;
 
-use bevy_ecs::prelude::Resource;
 use strum::EnumCount;
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -15,7 +14,7 @@ use winit::{
 
 pub use self::key::*;
 
-#[derive(Debug, Resource)]
+#[derive(Debug)]
 pub struct InputState {
     current_cursor_position: PhysicalPosition<f32>,
     last_update_cursor_position: PhysicalPosition<f32>,
@@ -179,8 +178,8 @@ impl InputState {
             .or_insert(state);
     }
 
-    pub fn mouse_position(&self) -> Vector2<f32> {
-        Vector2::new(
+    pub fn mouse_position(&self) -> Vec2 {
+        Vec2::new(
             self.current_cursor_position.x,
             self.current_cursor_position.y,
         )
@@ -189,28 +188,28 @@ impl InputState {
     pub fn last_position(&self) -> PhysicalPosition<f32> {
         self.last_update_cursor_position
     }
-    pub fn normalized_mouse_position(&self) -> Vector2<f32> {
-        Vector2::new(
+    pub fn normalized_mouse_position(&self) -> Vec2 {
+        Vec2::new(
             (self.current_cursor_position.x / self.window_size.width as f32) * 2.0 - 1.0,
             (self.current_cursor_position.y / self.window_size.height as f32) * 2.0 - 1.0,
         )
     }
     #[allow(dead_code)]
-    pub fn normalized_last_mouse_position(&self) -> Vector2<f32> {
-        Vector2::new(
+    pub fn normalized_last_mouse_position(&self) -> Vec2 {
+        Vec2::new(
             (self.last_update_cursor_position.x / self.window_size.width as f32) * 2.0 - 1.0,
             (self.last_update_cursor_position.y / self.window_size.height as f32) * 2.0 - 1.0,
         )
     }
     #[allow(dead_code)]
-    pub fn mouse_delta(&self) -> Vector2<f32> {
-        Vector2::new(
+    pub fn mouse_delta(&self) -> Vec2 {
+        Vec2::new(
             self.current_cursor_position.x - self.last_update_cursor_position.x,
             self.current_cursor_position.y - self.last_update_cursor_position.y,
         )
     }
     #[allow(dead_code)]
-    pub fn normalized_mouse_delta(&self) -> Vector2<f32> {
+    pub fn normalized_mouse_delta(&self) -> Vec2 {
         self.normalized_mouse_position() - self.normalized_last_mouse_position()
     }
 
@@ -259,8 +258,8 @@ impl InputState {
         self.current_pointer_pressure
     }
 
-    pub fn window_size(&self) -> Vector2<u32> {
-        Vector2::new(self.window_size.width, self.window_size.height)
+    pub fn window_size(&self) -> UVec2 {
+        UVec2::new(self.window_size.width, self.window_size.height)
     }
 
     pub fn is_key_just_pressed(&self, key: Key) -> bool {

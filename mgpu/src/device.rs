@@ -1,13 +1,19 @@
 use crate::hal::{
-    Hal, QueueType, ResourceTransition, SubmissionGroup, SubmitInfo, SynchronizationInfo
+    Hal, QueueType, ResourceTransition, SubmissionGroup, SubmitInfo, SynchronizationInfo,
 };
 use crate::rdg::{Node, OwnershipTransfer, Rdg, Step};
 use crate::staging_buffer_allocator::StagingBufferAllocator;
-use crate::util::check;
 use crate::DrawType::Draw;
 use crate::{
-    hal, BindingSet, BindingSetDescription, BindingSetLayout, BlitParams, Buffer, BufferDescription, BufferWriteParams, CommandRecorder, CommandRecorderType, ComputePipeline, ComputePipelineDescription, DispatchCommand, DispatchType, DrawCommand, Extents3D, FilterMode, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageAspect, ImageDescription, ImageDimension, ImageUsageFlags, ImageView, ImageViewDescription, MemoryDomain, MgpuResult, Sampler, SamplerDescription, ShaderModule, ShaderModuleDescription, ShaderModuleLayout
+    hal, BindingSet, BindingSetDescription, BindingSetLayout, BlitParams, Buffer,
+    BufferDescription, BufferWriteParams, CommandRecorder, CommandRecorderType, ComputePipeline,
+    ComputePipelineDescription, DispatchCommand, DispatchType, DrawCommand, FilterMode,
+    GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageView,
+    ImageViewDescription, MemoryDomain, MgpuResult, Sampler, SamplerDescription, ShaderModule,
+    ShaderModuleDescription, ShaderModuleLayout,
 };
+#[cfg(debug_assertions)]
+use crate::{util::check, Extents3D, ImageAspect, ImageDimension, ImageUsageFlags};
 use crate::{BufferUsageFlags, ImageWriteParams};
 use bitflags::bitflags;
 use std::collections::HashMap;
@@ -20,7 +26,7 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use crate::swapchain::*;
 
 bitflags! {
-    #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
+    #[derive(Default, Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
     pub struct DeviceFeatures : u32 {
         const HAL_DEBUG_LAYERS = 0b01;
     }
@@ -41,7 +47,7 @@ pub struct DeviceConfiguration<'a> {
     pub desired_frames_in_flight: usize,
 
     #[cfg(feature = "swapchain")]
-    pub display_handle: raw_window_handle::RawDisplayHandle,
+    pub display_handle: Option<raw_window_handle::RawDisplayHandle>,
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +61,8 @@ pub struct Device {
     pub(crate) device_info: DeviceInfo,
 
     pub(crate) rdg: Arc<Mutex<Rdg>>,
+    #[allow(dead_code)]
+    // This is only needed to ensure that the StagingBuffer data is destroyed with the last Device instance
     cleanup_context: Arc<DeviceCleanupContext>,
     pub(crate) staging_buffer_allocator: Arc<Mutex<StagingBufferAllocator>>,
 
@@ -81,7 +89,8 @@ impl Device {
             size: Self::MB_128,
             memory_domain: MemoryDomain::Cpu,
         })?;
-        let staging_buffer_allocator = StagingBufferAllocator::new(staging_buffer,  configuration.desired_frames_in_flight)?;
+        let staging_buffer_allocator =
+            StagingBufferAllocator::new(staging_buffer, configuration.desired_frames_in_flight)?;
 
         let cleanup_context = DeviceCleanupContext {
             hal: hal.clone(),
@@ -94,7 +103,7 @@ impl Device {
             cleanup_context: Arc::new(cleanup_context),
             rdg: Default::default(),
             staging_buffer_allocator: Arc::new(Mutex::new(staging_buffer_allocator)),
-        
+
             #[cfg(feature = "swapchain")]
             presentation_requests: Default::default(),
         })
@@ -106,7 +115,10 @@ impl Device {
         rdg.clear();
         static DUMP: AtomicBool = AtomicBool::new(true);
         if DUMP.load(std::sync::atomic::Ordering::Relaxed) {
-            compiled.save_to_svg(&format!("rdg_graph_{}.svg", std::time::SystemTime::now().elapsed().unwrap().as_millis()));
+            compiled.save_to_svg(&format!(
+                "rdg_graph_{}.svg",
+                std::time::SystemTime::now().elapsed().unwrap().as_millis()
+            ));
             DUMP.store(false, std::sync::atomic::Ordering::Relaxed);
         }
 
@@ -160,7 +172,8 @@ impl Device {
 
                         for pass in &passes.graphics_passes {
                             let node = &compiled.nodes[pass.node_id];
-                            self.hal.transition_resources(command_recorder, &pass.prequisites)?;
+                            self.hal
+                                .transition_resources(command_recorder, &pass.prequisites)?;
                             match &node.ty {
                                 Node::RenderPass { info } => {
                                     unsafe { self.hal.begin_render_pass(command_recorder, info)? };
@@ -185,7 +198,10 @@ impl Device {
                                                 )?;
 
                                                 if let Some(index_buffer) = index_buffer {
-                                                    self.hal.set_index_buffer(command_recorder, *index_buffer)?;
+                                                    self.hal.set_index_buffer(
+                                                        command_recorder,
+                                                        *index_buffer,
+                                                    )?;
                                                 }
 
                                                 if !binding_sets.is_empty() {
@@ -210,8 +226,21 @@ impl Device {
                                                             first_instance,
                                                         )?;
                                                     }
-                                                    crate::DrawType::DrawIndexed { indices, instances, first_index, vertex_offset, first_instance } =>  {
-                                                        self.hal.draw_indexed(command_recorder, indices, instances, first_index, vertex_offset, first_instance)?;
+                                                    crate::DrawType::DrawIndexed {
+                                                        indices,
+                                                        instances,
+                                                        first_index,
+                                                        vertex_offset,
+                                                        first_instance,
+                                                    } => {
+                                                        self.hal.draw_indexed(
+                                                            command_recorder,
+                                                            indices,
+                                                            instances,
+                                                            first_index,
+                                                            vertex_offset,
+                                                            first_instance,
+                                                        )?;
                                                     }
                                                 }
                                             }
@@ -241,7 +270,12 @@ impl Device {
                                         *size,
                                     )?
                                 },
-                                Node::CopyBufferToImage { source, dest, source_offset, dest_region } => unsafe {
+                                Node::CopyBufferToImage {
+                                    source,
+                                    dest,
+                                    source_offset,
+                                    dest_region,
+                                } => unsafe {
                                     self.hal.cmd_copy_buffer_to_image(
                                         command_recorder,
                                         *source,
@@ -249,14 +283,26 @@ impl Device {
                                         *source_offset,
                                         *dest_region,
                                     )?
-                                }
-                                Node::Blit { source, source_region, dest, dest_region, filter } => unsafe {
-                                    self.hal.cmd_blit_image(command_recorder, *source, *source_region, *dest, *dest_region, *filter)?;
+                                },
+                                Node::Blit {
+                                    source,
+                                    source_region,
+                                    dest,
+                                    dest_region,
+                                    filter,
+                                } => unsafe {
+                                    self.hal.cmd_blit_image(
+                                        command_recorder,
+                                        *source,
+                                        *source_region,
+                                        *dest,
+                                        *dest_region,
+                                        *filter,
+                                    )?;
                                 },
                                 Node::ComputePass { info } => {
-                                    
                                     self.execute_compute_pass(info, command_recorder)?;
-                                },
+                                }
                             }
                         }
 
@@ -269,36 +315,39 @@ impl Device {
                             .push(command_recorder);
                         for pass in &passes.async_compute_passes {
                             let node = &compiled.nodes[pass.node_id];
-                            self.hal.transition_resources(command_recorder, &pass.prequisites)?;
+                            self.hal
+                                .transition_resources(command_recorder, &pass.prequisites)?;
                             match &node.ty {
-                                Node::RenderPass {..} => {
+                                Node::RenderPass { .. } => {
                                     unreachable!()
                                 }
-                                Node::CopyBufferToBuffer {..} => {
-                                    unreachable!()
-                                },
-                                Node::CopyBufferToImage {..} => {
+                                Node::CopyBufferToBuffer { .. } => {
                                     unreachable!()
                                 }
-                                Node::Blit {..} => {
+                                Node::CopyBufferToImage { .. } => {
                                     unreachable!()
-                                },
-                                Node::ComputePass { info } => self.execute_compute_pass(info, command_recorder)?,
+                                }
+                                Node::Blit { .. } => {
+                                    unreachable!()
+                                }
+                                Node::ComputePass { info } => {
+                                    self.execute_compute_pass(info, command_recorder)?
+                                }
                             }
                         }
                         current_compute += 1;
                     }
                     if !passes.async_copy_passes.is_empty() {
-                        let command_recorder =
-                            async_transfer_command_recorders[current_transfer];
+                        let command_recorder = async_transfer_command_recorders[current_transfer];
                         current_submission_group
                             .command_recorders
                             .push(command_recorder);
 
                         for pass in &passes.async_copy_passes {
-                        self.hal.transition_resources(command_recorder, &pass.prequisites)?;
+                            self.hal
+                                .transition_resources(command_recorder, &pass.prequisites)?;
                             match &compiled.nodes[pass.node_id].ty {
-                                Node::RenderPass {..} => unreachable!(),
+                                Node::RenderPass { .. } => unreachable!(),
                                 Node::CopyBufferToBuffer {
                                     source,
                                     dest,
@@ -315,7 +364,12 @@ impl Device {
                                         *size,
                                     )?
                                 },
-                                Node::CopyBufferToImage { source, dest, source_offset, dest_region } => unsafe {
+                                Node::CopyBufferToImage {
+                                    source,
+                                    dest,
+                                    source_offset,
+                                    dest_region,
+                                } => unsafe {
                                     self.hal.cmd_copy_buffer_to_image(
                                         command_recorder,
                                         *source,
@@ -323,11 +377,11 @@ impl Device {
                                         *source_offset,
                                         *dest_region,
                                     )?
-                                }
-                                Node::Blit {..} => {
-                                   unreachable!()
                                 },
-                                Node::ComputePass {..} => unreachable!(),
+                                Node::Blit { .. } => {
+                                    unreachable!()
+                                }
+                                Node::ComputePass { .. } => unreachable!(),
                             }
                         }
                         current_transfer += 1;
@@ -346,12 +400,26 @@ impl Device {
 
                     let synchronization_infos = resources.into_iter().map(|((src, dest), res)| {
                         let source_command_recorder = match src {
-                            QueueType::Graphics => if current_graphics > 0 { Some(graphics_command_recorders[current_graphics - 1]) } else { None },
+                            QueueType::Graphics => {
+                                if current_graphics > 0 {
+                                    Some(graphics_command_recorders[current_graphics - 1])
+                                } else {
+                                    None
+                                }
+                            }
                             QueueType::AsyncCompute => {
-                                if current_compute > 0 { Some(async_compute_command_recorders[current_compute - 1]) } else { None }
+                                if current_compute > 0 {
+                                    Some(async_compute_command_recorders[current_compute - 1])
+                                } else {
+                                    None
+                                }
                             }
                             QueueType::AsyncTransfer => {
-                                if current_transfer > 0 { Some(async_transfer_command_recorders[current_transfer - 1]) } else {None}
+                                if current_transfer > 0 {
+                                    Some(async_transfer_command_recorders[current_transfer - 1])
+                                } else {
+                                    None
+                                }
                             }
                         };
 
@@ -364,21 +432,22 @@ impl Device {
                                 async_transfer_command_recorders.last().unwrap()
                             }
                         };
-                        
-                        let resources = res.iter().map(|ot| {
-                            ResourceTransition {
+
+                        let resources = res
+                            .iter()
+                            .map(|ot| ResourceTransition {
                                 resource: ot.resource.resource,
                                 old_usage: ot.source_usage,
                                 new_usage: ot.dest_usage,
-                            }
-                        }).collect();
+                            })
+                            .collect();
 
                         SynchronizationInfo {
                             source_queue: src,
                             source_command_recorder,
                             destination_queue: dest,
                             destination_command_recorder,
-                            resources ,
+                            resources,
                         }
                     });
                     let infos = synchronization_infos.collect::<Vec<_>>();
@@ -421,50 +490,51 @@ impl Device {
 
         unsafe { self.hal.end_rendering()? };
 
-        self.staging_buffer_allocator.lock().expect("Failed to lock staging buffer").end_frame();
+        self.staging_buffer_allocator
+            .lock()
+            .expect("Failed to lock staging buffer")
+            .end_frame();
 
         unsafe { self.hal.prepare_next_frame()? };
 
         Ok(())
     }
 
-    fn execute_compute_pass(&self, info: &crate::ComputePassInfo, command_recorder: hal::CommandRecorder) -> Result<(), crate::MgpuError> {
+    fn execute_compute_pass(
+        &self,
+        info: &crate::ComputePassInfo,
+        command_recorder: hal::CommandRecorder,
+    ) -> Result<(), crate::MgpuError> {
         for step in info.steps.iter() {
-                for command in &step.commands {
-                    let DispatchCommand {
-                        pipeline,
-                        binding_sets,
-                        dispatch_type,
-                    } = command;
-        
-                    unsafe {
-                        self.hal.bind_compute_pipeline(
+            for command in &step.commands {
+                let DispatchCommand {
+                    pipeline,
+                    binding_sets,
+                    dispatch_type,
+                } = command;
+
+                unsafe {
+                    self.hal
+                        .bind_compute_pipeline(command_recorder, *pipeline)?;
+
+                    if !binding_sets.is_empty() {
+                        self.hal.bind_compute_binding_sets(
                             command_recorder,
+                            binding_sets,
                             *pipeline,
                         )?;
-        
-        
-                        if !binding_sets.is_empty() {
-                            self.hal.bind_compute_binding_sets(
-                                command_recorder,
-                                binding_sets,
-                                *pipeline,
-                            )?;
-                        }
-                        match *dispatch_type {
-                            DispatchType::Dispatch (gx, gy, gz) => {
-                                self.hal.dispatch(
-                                    command_recorder,
-                                    gx, gy, gz
-                                )?;
-                            }
+                    }
+                    match *dispatch_type {
+                        DispatchType::Dispatch(gx, gy, gz) => {
+                            self.hal.dispatch(command_recorder, gx, gy, gz)?;
                         }
                     }
                 }
-            };
+            }
+        }
         Ok(())
     }
-    
+
     pub fn get_info(&self) -> DeviceInfo {
         self.device_info.clone()
     }
@@ -553,40 +623,46 @@ impl Device {
             .staging_buffer_allocator
             .lock()
             .expect("Failed to lock staging buffer allocator");
-        let allocation = allocator.allocate_staging_buffer_region( size)?;
+        let allocation = allocator.allocate_staging_buffer_region(size)?;
         unsafe {
             self.hal.write_host_visible_buffer(
                 allocation.buffer,
                 &BufferWriteParams {
                     data: params.data,
                     offset: allocation.offset,
-                    size
+                    size,
                 },
             )
         }?;
 
         self.write_rdg()
-            .add_async_copy_node(Node::CopyBufferToImage { 
+            .add_async_copy_node(Node::CopyBufferToImage {
                 source: allocation.buffer,
                 dest: image,
                 source_offset: allocation.offset,
-                dest_region: params.region
-                
+                dest_region: params.region,
             });
 
         Ok(())
     }
 
     pub fn blit_image(&self, params: &BlitParams) -> MgpuResult<()> {
+        #[cfg(debug_assertions)]
         Self::validate_blit_params(params);
         let mut rdg = self.write_rdg();
-        let BlitParams { src_image, src_region, dst_image, dst_region, filter } = *params;
+        let BlitParams {
+            src_image,
+            src_region,
+            dst_image,
+            dst_region,
+            filter,
+        } = *params;
         rdg.add_graphics_pass(Node::Blit {
             source: src_image,
             source_region: src_region,
             dest: dst_image,
             dest_region: dst_region,
-            filter
+            filter,
         });
         Ok(())
     }
@@ -599,7 +675,6 @@ impl Device {
         &self,
         image_view_description: &ImageViewDescription,
     ) -> MgpuResult<ImageView> {
-        
         #[cfg(debug_assertions)]
         Self::validate_image_view_description(image_view_description);
         self.hal.create_image_view(image_view_description)
@@ -620,7 +695,7 @@ impl Device {
     ) -> MgpuResult<ShaderModuleLayout> {
         self.hal.get_shader_module_layout(shader_module)
     }
-    
+
     pub fn create_sampler(&self, sampler_description: &SamplerDescription) -> MgpuResult<Sampler> {
         #[cfg(debug_assertions)]
         self.validate_sampler_description(sampler_description)?;
@@ -630,8 +705,12 @@ impl Device {
     pub fn destroy_sampler(&self, sampler: Sampler) -> MgpuResult<()> {
         self.hal.destroy_sampler(sampler)
     }
-    
-    pub fn create_binding_set(&self, description: &BindingSetDescription, layout: &BindingSetLayout) -> MgpuResult<BindingSet> {
+
+    pub fn create_binding_set(
+        &self,
+        description: &BindingSetDescription,
+        layout: &BindingSetLayout,
+    ) -> MgpuResult<BindingSet> {
         #[cfg(debug_assertions)]
         Self::validate_bdinging_set_description(description, layout);
         self.hal.create_binding_set(description, layout)
@@ -645,6 +724,7 @@ impl Device {
         &self,
         graphics_pipeline_description: &GraphicsPipelineDescription,
     ) -> MgpuResult<GraphicsPipeline> {
+        #[cfg(debug_assertions)]
         self.validate_graphics_pipeline_description(graphics_pipeline_description)?;
         self.hal
             .create_graphics_pipeline(graphics_pipeline_description)
@@ -654,6 +734,7 @@ impl Device {
         &self,
         compute_pipeline_description: &ComputePipelineDescription,
     ) -> MgpuResult<ComputePipeline> {
+        #[cfg(debug_assertions)]
         self.validate_compute_pipeline_description(compute_pipeline_description)?;
         self.hal
             .create_compute_pipeline(compute_pipeline_description)
@@ -666,7 +747,7 @@ impl Device {
     pub fn destroy_shader_module(&self, shader_module: ShaderModule) -> MgpuResult<()> {
         self.hal.destroy_shader_module(shader_module)
     }
-    
+
     pub fn generate_mip_chain(&self, image: Image, filter: FilterMode) -> MgpuResult<()> {
         for mip_level in 1..image.num_mips.get() {
             let source = mip_level - 1;
@@ -694,12 +775,12 @@ impl Device {
             new_nodes: Default::default(),
         }
     }
-    
 
     pub(crate) fn write_rdg(&self) -> MutexGuard<'_, Rdg> {
         self.rdg.lock().expect("Failed to lock rdg")
     }
 
+    #[cfg(debug_assertions)]
     fn validate_image_description(image_description: &ImageDescription) {
         check!(
             image_description.dimension != ImageDimension::D3
@@ -716,9 +797,10 @@ impl Device {
         );
     }
 
-    fn validate_image_view_description(_image_view_description: &ImageViewDescription) {
-    }
+    #[cfg(debug_assertions)]
+    fn validate_image_view_description(_image_view_description: &ImageViewDescription) {}
 
+    #[cfg(debug_assertions)]
     fn validate_buffer_description(buffer_description: &BufferDescription) {
         check!(
             buffer_description.size > 0,
@@ -726,6 +808,7 @@ impl Device {
         );
     }
 
+    #[cfg(debug_assertions)]
     fn validate_image_write_params(&self, image: Image, params: &ImageWriteParams) {
         let total_image_texels = image.extents.area();
         let texel_byte_size = image.format.byte_size();
@@ -733,16 +816,44 @@ impl Device {
 
         check!(params.data.len() >= total_bytes, 
             &format!("Attempted to execute a write operation without enough source data, expected at least {total_bytes} bytes, got {}", params.data.len()));
-        check!(params.region.extents.area() > 0, "Image write region is empty");
+        check!(
+            params.region.extents.area() > 0,
+            "Image write region is empty"
+        );
 
-        check!(params.region.offset.z + params.region.extents.depth as i32 <= image.extents.depth as i32, "Image write region goes beyond the image");
-        check!(params.region.offset.x + params.region.extents.width as i32 <= image.extents.width as i32, "Image write region goes beyond the image");
-        check!(params.region.offset.y + params.region.extents.height as i32 <= image.extents.height as i32, "Image write region goes beyond the image");
-        check!(params.region.mip < image.num_mips.get(), "Trying to write image mip {}, but the image has only {} mips", params.region.mip, image.num_mips,);
-        check!(params.region.base_array_layer < params.region.num_layers.get(), "base_array_layer must be <= num_layers");
-        check!(params.region.base_array_layer + params.region.num_layers.get() <= image.array_layers.get(), "Trying to write more image layers than supported by the image");
+        check!(
+            params.region.offset.z + params.region.extents.depth as i32
+                <= image.extents.depth as i32,
+            "Image write region goes beyond the image"
+        );
+        check!(
+            params.region.offset.x + params.region.extents.width as i32
+                <= image.extents.width as i32,
+            "Image write region goes beyond the image"
+        );
+        check!(
+            params.region.offset.y + params.region.extents.height as i32
+                <= image.extents.height as i32,
+            "Image write region goes beyond the image"
+        );
+        check!(
+            params.region.mip < image.num_mips.get(),
+            "Trying to write image mip {}, but the image has only {} mips",
+            params.region.mip,
+            image.num_mips,
+        );
+        check!(
+            params.region.base_array_layer < params.region.num_layers.get(),
+            "base_array_layer must be <= num_layers"
+        );
+        check!(
+            params.region.base_array_layer + params.region.num_layers.get()
+                <= image.array_layers.get(),
+            "Trying to write more image layers than supported by the image"
+        );
     }
 
+    #[cfg(debug_assertions)]
     fn validate_buffer_write_params(&self, buffer: Buffer, params: &BufferWriteParams) {
         check!(
             params.size > 0,
@@ -763,6 +874,7 @@ impl Device {
         );
     }
 
+    #[cfg(debug_assertions)]
     fn validate_shader_module_description(
         &self,
         shader_module_description: &ShaderModuleDescription,
@@ -772,14 +884,15 @@ impl Device {
         Ok(())
     }
 
+    #[cfg(debug_assertions)]
     fn validate_sampler_description(
         &self,
         _sampler_description: &SamplerDescription,
     ) -> MgpuResult<()> {
-
         Ok(())
     }
 
+    #[cfg(debug_assertions)]
     fn validate_graphics_pipeline_description(
         &self,
         graphics_pipeline_description: &GraphicsPipelineDescription,
@@ -787,8 +900,10 @@ impl Device {
         // Validate vertex inputs
         let vertex_shader_layout =
             self.get_shader_module_layout(*graphics_pipeline_description.vertex_stage.shader)?;
-        let fragment_shader_layout =
-            graphics_pipeline_description.fragment_stage.map(|fs| self.get_shader_module_layout(*fs.shader)).transpose()?;
+        let fragment_shader_layout = graphics_pipeline_description
+            .fragment_stage
+            .map(|fs| self.get_shader_module_layout(*fs.shader))
+            .transpose()?;
         for input in &vertex_shader_layout.inputs {
             let pipeline_input = graphics_pipeline_description
                 .vertex_stage
@@ -805,63 +920,134 @@ impl Device {
 
         if let Some(fs) = &graphics_pipeline_description.fragment_stage {
             if let Some(ds) = &fs.depth_stencil_target {
-                check!(ds.format.aspect() == ImageAspect::Depth, "Depth stencil target format isn't a valid depth format");
+                check!(
+                    ds.format.aspect() == ImageAspect::Depth,
+                    "Depth stencil target format isn't a valid depth format"
+                );
             }
         }
 
-        let all_shader_binding_entries = vertex_shader_layout.binding_sets.iter().chain(fragment_shader_layout.iter().flat_map(|fl| fl.binding_sets.iter()));
+        let all_shader_binding_entries = vertex_shader_layout.binding_sets.iter().chain(
+            fragment_shader_layout
+                .iter()
+                .flat_map(|fl| fl.binding_sets.iter()),
+        );
         for binding_set_layout_info in graphics_pipeline_description.binding_set_layouts {
             for bs_element in &binding_set_layout_info.layout.binding_set_elements {
-                let matching_element = all_shader_binding_entries.clone().filter(|entry| entry.set == binding_set_layout_info.set)
-                    .flat_map(|shader_bs| shader_bs.layout.binding_set_elements.iter().find(|l| l.binding == bs_element.binding && bs_element.shader_stage_flags.contains(l.shader_stage_flags))).next();
+                let matching_element = all_shader_binding_entries
+                    .clone()
+                    .filter(|entry| entry.set == binding_set_layout_info.set)
+                    .flat_map(|shader_bs| {
+                        shader_bs.layout.binding_set_elements.iter().find(|l| {
+                            l.binding == bs_element.binding
+                                && bs_element.shader_stage_flags.contains(l.shader_stage_flags)
+                        })
+                    })
+                    .next();
 
-                check!(matching_element.is_some(), "No matching element at set {} binding {} of type {:#?} found in any shader", binding_set_layout_info.set, bs_element.binding, bs_element);
+                check!(
+                    matching_element.is_some(),
+                    "No matching element at set {} binding {} of type {:#?} found in any shader",
+                    binding_set_layout_info.set,
+                    bs_element.binding,
+                    bs_element
+                );
                 let matching_element = matching_element.unwrap();
-                check!(matching_element.ty == bs_element.ty, "Mismatching types in set {}: expected {:?} got {:?}", binding_set_layout_info.set, matching_element, bs_element)
+                check!(
+                    matching_element.ty == bs_element.ty,
+                    "Mismatching types in set {}: expected {:?} got {:?}",
+                    binding_set_layout_info.set,
+                    matching_element,
+                    bs_element
+                )
             }
         }
 
         Ok(())
     }
+    #[cfg(debug_assertions)]
     fn validate_compute_pipeline_description(
         &self,
         compute_pipeline_description: &ComputePipelineDescription,
     ) -> MgpuResult<()> {
-       
-        let shader_layout = self.hal.get_shader_module_layout(compute_pipeline_description.shader)?;
+        let shader_layout = self
+            .hal
+            .get_shader_module_layout(compute_pipeline_description.shader)?;
         let all_shader_binding_entries = shader_layout.binding_sets.iter();
         for binding_set_layout_info in compute_pipeline_description.binding_set_layouts {
             for bs_element in &binding_set_layout_info.layout.binding_set_elements {
-                let matching_element = all_shader_binding_entries.clone().filter(|entry| entry.set == binding_set_layout_info.set)
-                    .flat_map(|shader_bs| shader_bs.layout.binding_set_elements.iter().find(|l| l.binding == bs_element.binding && bs_element.shader_stage_flags.contains(l.shader_stage_flags))).next();
+                let matching_element = all_shader_binding_entries
+                    .clone()
+                    .filter(|entry| entry.set == binding_set_layout_info.set)
+                    .flat_map(|shader_bs| {
+                        shader_bs.layout.binding_set_elements.iter().find(|l| {
+                            l.binding == bs_element.binding
+                                && bs_element.shader_stage_flags.contains(l.shader_stage_flags)
+                        })
+                    })
+                    .next();
 
-                check!(matching_element.is_some(), "No matching element at set {} binding {} of type {:#?} found in any shader", binding_set_layout_info.set, bs_element.binding, bs_element);
+                check!(
+                    matching_element.is_some(),
+                    "No matching element at set {} binding {} of type {:#?} found in any shader",
+                    binding_set_layout_info.set,
+                    bs_element.binding,
+                    bs_element
+                );
 
                 let matching_element = matching_element.unwrap();
-                check!(matching_element.ty == bs_element.ty, "Mismatching types in set {}: expected {:?} got {:?}", binding_set_layout_info.set, matching_element, bs_element)
+                check!(
+                    matching_element.ty == bs_element.ty,
+                    "Mismatching types in set {}: expected {:?} got {:?}",
+                    binding_set_layout_info.set,
+                    matching_element,
+                    bs_element
+                )
             }
         }
-       
-       Ok(())
 
+        Ok(())
     }
-    
-    
-    fn validate_bdinging_set_description(description: &BindingSetDescription, layout: &BindingSetLayout) {
+
+    #[cfg(debug_assertions)]
+    fn validate_bdinging_set_description(
+        description: &BindingSetDescription,
+        layout: &BindingSetLayout,
+    ) {
         for layout_binding in &layout.binding_set_elements {
-            let description_binding = description.bindings.iter().find(|b| b.binding == layout_binding.binding);
+            let description_binding = description
+                .bindings
+                .iter()
+                .find(|b| b.binding == layout_binding.binding);
             check!(description_binding.is_some(), "Layout defines a binding at index {} of type {:?}, but none was found in the description", layout_binding.binding, layout_binding.ty);
 
             let description_binding = description_binding.unwrap();
 
-            check!(layout_binding.ty == description_binding.ty.binding_type(), "Layout binding and description binding differs in type, got {:?} expected {:?}", description_binding.ty, layout_binding.ty);
+            check!(
+                layout_binding.ty == description_binding.ty.binding_type(),
+                "Layout binding and description binding differs in type, got {:?} expected {:?}",
+                description_binding.ty,
+                layout_binding.ty
+            );
         }
     }
 
-
-fn validate_blit_params(params: &BlitParams) {
-    check!(params.src_image.usage_flags.contains(ImageUsageFlags::TRANSFER_SRC), "Cannot blit from an image that doesn't have the TRANSFER_SRC flag");
-    check!(params.dst_image.usage_flags.contains(ImageUsageFlags::TRANSFER_DST), "Cannot blit to an image that doesn't have the TRANSFER_DST flag");
+    #[cfg(debug_assertions)]
+    fn validate_blit_params(params: &BlitParams) {
+        check!(
+            params
+                .src_image
+                .usage_flags
+                .contains(ImageUsageFlags::TRANSFER_SRC),
+            "Cannot blit from an image that doesn't have the TRANSFER_SRC flag"
+        );
+        check!(
+            params
+                .dst_image
+                .usage_flags
+                .contains(ImageUsageFlags::TRANSFER_DST),
+            "Cannot blit to an image that doesn't have the TRANSFER_DST flag"
+        );
 
         let mut dst_image_mip_extents = params.dst_image.extents;
         for _ in 1..params.dst_region.mip {
@@ -880,9 +1066,7 @@ fn validate_blit_params(params: &BlitParams) {
                 depth: (src_image_mip_extents.depth as f32).sqrt() as u32,
             }
         }
-
-}
-
+    }
 }
 
 impl Drop for DeviceCleanupContext {

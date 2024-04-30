@@ -2,10 +2,7 @@
 resolver="2"
 members = [
     "engine",
-    "engine_macros",
-    "engine_macros_tests",
-    "gpu", "mgpu",
-    "testbench",
+    "mgpu",
 ]
 
 [profile.release]

@@ -1,11 +1,12 @@
 use std::marker::PhantomData;
 
 use crate::{
-    hal::QueueType, rdg::Node, util::check, AttachmentStoreOp, BindingSet, Buffer,
-    BufferUsageFlags, ComputePassDescription, ComputePipeline, DepthStencilTarget, Device,
-    Extents2D, GraphicsPipeline, ImageUsageFlags, MgpuResult, Rect2D, RenderPassDescription,
-    RenderTarget,
+    hal::QueueType, rdg::Node, AttachmentStoreOp, BindingSet, Buffer, ComputePassDescription,
+    ComputePipeline, DepthStencilTarget, Device, Extents2D, GraphicsPipeline, MgpuResult, Rect2D,
+    RenderPassDescription, RenderTarget,
 };
+#[cfg(debug_assertions)]
+use crate::{util::check, BufferUsageFlags, ImageUsageFlags};
 
 pub struct CommandRecorder<T: CommandRecorderType> {
     pub(crate) _ph: PhantomData<T>,
@@ -147,6 +148,7 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
         Ok(())
     }
 
+    #[cfg(debug_assertions)]
     fn validate_render_pass_description(
         &self,
         render_pass_description: &RenderPassDescription<'_>,
@@ -393,6 +395,7 @@ impl<'c> RenderPass<'c> {
         Ok(())
     }
 
+    #[cfg(debug_assertions)]
     fn validate_state(&self, check_index_buffer: bool) -> MgpuResult<()> {
         check!(
             self.pipeline.is_some(),
@@ -458,6 +461,7 @@ impl<'c, C: ComputeCommandRecorder> ComputePass<'c, C> {
         group_count_y: u32,
         group_count_z: u32,
     ) -> MgpuResult<()> {
+        #[cfg(debug_assertions)]
         self.validate_state()?;
         let last_command_step = self.info.steps.last_mut().unwrap();
         last_command_step.commands.push(DispatchCommand {
@@ -468,6 +472,7 @@ impl<'c, C: ComputeCommandRecorder> ComputePass<'c, C> {
         Ok(())
     }
 
+    #[cfg(debug_assertions)]
     fn validate_state(&self) -> MgpuResult<()> {
         check!(
             self.pipeline.is_some(),

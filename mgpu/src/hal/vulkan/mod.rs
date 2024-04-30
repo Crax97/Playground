@@ -8,17 +8,21 @@ use crate::hal::vulkan::util::{
     VulkanSampler,
 };
 use crate::hal::{CommandRecorder, CommandRecorderAllocator, Hal, QueueType, ResourceAccessMode};
-use crate::util::{check, hash_type, Handle};
+#[cfg(debug_assertions)]
+use crate::util::check;
+use crate::util::{hash_type, Handle};
 use crate::{
     AttachmentAccessMode, AttachmentStoreOp, BindingSet, BindingSetDescription, BindingSetElement,
     BindingSetElementKind, BindingSetLayout, BindingSetLayoutInfo, Buffer, BufferDescription,
-    ComputePassInfo, ComputePipeline, ComputePipelineDescription, DeviceConfiguration,
-    DeviceFeatures, DevicePreference, FilterMode, Framebuffer, GraphicsPipeline,
-    GraphicsPipelineDescription, GraphicsPipelineLayout, Image, ImageDescription, ImageDimension,
-    ImageFormat, ImageRegion, ImageSubresource, MemoryDomain, MgpuError, MgpuResult, PresentMode,
-    RenderPassInfo, Sampler, SamplerDescription, ShaderAttribute, ShaderModule, ShaderModuleLayout,
-    ShaderStageFlags, StorageAccessMode, SwapchainCreationInfo, VertexAttributeFormat,
+    ComputePipeline, ComputePipelineDescription, DeviceConfiguration, DeviceFeatures,
+    DevicePreference, FilterMode, Framebuffer, GraphicsPipeline, GraphicsPipelineDescription,
+    GraphicsPipelineLayout, Image, ImageDescription, ImageDimension, ImageFormat, ImageRegion,
+    ImageSubresource, MemoryDomain, MgpuError, MgpuResult, PresentMode, RenderPassInfo, Sampler,
+    SamplerDescription, ShaderAttribute, ShaderModule, ShaderModuleLayout, ShaderStageFlags,
+    StorageAccessMode, SwapchainCreationInfo, VertexAttributeFormat,
 };
+#[cfg(debug_assertions)]
+use std::collections::HashSet;
 
 #[cfg(feature = "swapchain")]
 use crate::SwapchainInfo;
@@ -35,7 +39,7 @@ use spirv_reflect::types::{
 };
 use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ffi::{self, c_char, CStr, CString};
 use std::hash::{Hash, Hasher};
 use std::iter;
@@ -1784,7 +1788,6 @@ impl Hal for VulkanHal {
             label: description.label.map(ToOwned::to_owned),
             handle: allocation.descriptor_set,
             allocation,
-            layout: layout.clone(),
         };
 
         if let Some(name) = description.label {
@@ -2055,9 +2058,10 @@ impl VulkanHal {
         }
 
         if cfg!(feature = "swapchain") {
-            let extensions =
-                ash_window::enumerate_required_extensions(configuration.display_handle)?;
-            requested_instance_extensions.extend(extensions);
+            if let Some(display_handle) = &configuration.display_handle {
+                let extensions = ash_window::enumerate_required_extensions(*display_handle)?;
+                requested_instance_extensions.extend(extensions);
+            }
         }
 
         Self::ensure_requested_layers_are_avaliable(entry, &requested_layers)?;
@@ -2432,17 +2436,13 @@ impl VulkanHal {
         if let Some(name) = name {
             self.try_assign_debug_name(view, name)?;
         }
-        let vulkan_image = self
-            .resolver
-            .resolve_vulkan(image)
-            .expect("Failed to resolve resource");
-        let vulkan_image = VulkanImageView {
+
+        let vulkan_image_view = VulkanImageView {
             label: name.map(ToOwned::to_owned),
             handle: view,
-            owner: vulkan_image,
             external: true,
         };
-        let handle = self.resolver.add(vulkan_image);
+        let handle = self.resolver.add(vulkan_image_view);
         Ok(crate::ImageView {
             id: handle.to_u64(),
             owner: image,
@@ -2996,7 +2996,7 @@ impl VulkanHal {
                 )?
             };
 
-            if let Some(label) = label.as_deref() {
+            if let Some(label) = label {
                 self.try_assign_debug_name(layout, label)?;
             }
 
@@ -3242,6 +3242,7 @@ impl VulkanHal {
         Ok(layout)
     }
 
+    #[cfg(debug_assertions)]
     fn validate_shader_layout_against_binding_layouts(
         layout: &ShaderModuleLayout,
         binding_set_layouts: &[BindingSetLayoutInfo],
@@ -3291,6 +3292,7 @@ impl VulkanHal {
         }
     }
 
+    #[cfg(debug_assertions)]
     fn validate_submission_info(&self, submission_info: &SubmitInfo) -> MgpuResult<()> {
         let mut command_buffer_ids = HashSet::new();
         for group in &submission_info.submission_groups {
@@ -3486,6 +3488,7 @@ impl VulkanHal {
         Ok(())
     }
 
+    #[cfg(debug_assertions)]
     fn validate_graphics_pipeline_shader_layouts(
         &self,
         graphics_pipeline_description: &GraphicsPipelineDescription<'_>,
@@ -3507,6 +3510,7 @@ impl VulkanHal {
             );
         }
     }
+    #[cfg(debug_assertions)]
     fn validate_compute_pipeline_shader_layouts(
         &self,
         compute_pipeline_description: &ComputePipelineDescription<'_>,

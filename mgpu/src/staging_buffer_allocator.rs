@@ -1,6 +1,6 @@
-use std::sync::Arc;
-
-use crate::{hal::Hal, Buffer, BufferUsageFlags, MemoryDomain, MgpuResult};
+use crate::{Buffer, MgpuResult};
+#[cfg(debug_assertions)]
+use crate::{BufferUsageFlags, MemoryDomain};
 
 pub(crate) struct StagingBufferAllocator {
     staging_buffer: Buffer,
@@ -100,9 +100,8 @@ impl Drop for StagingBufferAllocator {
 }
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
-    use crate::{hal::Hal, BufferUsageFlags, SwapchainInfo};
+    use crate::BufferUsageFlags;
 
     use super::StagingBufferAllocator;
 

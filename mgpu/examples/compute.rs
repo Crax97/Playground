@@ -83,7 +83,7 @@ fn main() {
         app_name: Some("Triangle Application"),
         features: DeviceFeatures::HAL_DEBUG_LAYERS,
         device_preference: Some(DevicePreference::HighPerformance),
-        display_handle: event_loop.display_handle().unwrap().as_raw(),
+        display_handle: Some(event_loop.display_handle().unwrap().as_raw()),
         desired_frames_in_flight: 3,
     })
     .expect("Failed to create gpu device");
@@ -134,7 +134,7 @@ fn main() {
     let view = glam::Mat4::look_at_rh(vec3(-5.0, 10.0, -5.0), Vec3::default(), vec3(0.0, 1.0, 0.0));
     let projection = glam::Mat4::perspective_rh(75.0f32.to_radians(), 800.0 / 600.0, 0.01, 1000.0);
 
-    let texture_data = util::read_image_data("examples/assets/david.jpg");
+    let texture_data = util::read_image_data("mgpu/examples/assets/david.jpg");
     let mut depth_image = device
         .create_image(&ImageDescription {
             label: Some("Depth image"),

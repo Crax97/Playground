@@ -7,10 +7,10 @@ use crate::{
         OwnedVertexStageInfo, ResourceAccessMode,
     },
     util::{define_resource_resolver, Handle},
-    AddressMode, BindingSet, BindingSetElementKind, BindingSetLayout, BindingSetLayoutInfo,
-    BlendFactor, BlendOp, BorderColor, Buffer, BufferUsageFlags, ColorWriteMask, CompareOp,
-    ComputePipeline, ComputePipelineDescription, CullMode, Extents2D, Extents3D, FilterMode,
-    FrontFace, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDimension, ImageFormat,
+    AddressMode, BindingSet, BindingSetElementKind, BindingSetLayoutInfo, BlendFactor, BlendOp,
+    BorderColor, Buffer, BufferUsageFlags, ColorWriteMask, CompareOp, ComputePipeline,
+    ComputePipelineDescription, CullMode, Extents2D, Extents3D, FilterMode, FrontFace,
+    GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDimension, ImageFormat,
     ImageSubresource, ImageUsageFlags, ImageView, MipmapMode, Offset2D, Offset3D, PolygonMode,
     PresentMode, PrimitiveTopology, Rect2D, SampleCount, Sampler, ShaderModule, ShaderModuleLayout,
     ShaderStageFlags, Swapchain, VertexAttributeFormat, VertexInputFrequency,
@@ -665,7 +665,6 @@ pub(super) struct VulkanBuffer {
 pub(super) struct VulkanImageView {
     pub(super) label: Option<String>,
     pub(super) handle: vk::ImageView,
-    pub(super) owner: vk::Image,
     /// if true then the image was created outside of the vulkan instance
     /// e.g it could be a swapchain image
     pub(super) external: bool,
@@ -682,7 +681,6 @@ pub(super) struct VulkanBindingSet {
     pub(super) label: Option<String>,
     pub(super) handle: vk::DescriptorSet,
     pub(super) allocation: DescriptorSetAllocation,
-    pub(super) layout: BindingSetLayout,
 }
 
 #[derive(Clone)]

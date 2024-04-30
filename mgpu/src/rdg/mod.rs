@@ -6,7 +6,7 @@ use crate::{
     },
     util::check,
     AttachmentStoreOp, Buffer, ComputePassInfo, FilterMode, Image, ImageRegion, MgpuResult,
-    RenderPassInfo, ShaderStageFlags, StorageAccessMode, SwapchainImage,
+    RenderPassInfo, StorageAccessMode, SwapchainImage,
 };
 
 #[derive(Debug)]
@@ -288,6 +288,7 @@ impl Rdg {
     ) {
         *adjacency_list = Vec::with_capacity(self.nodes.len());
         adjacency_list.resize(self.nodes.len(), HashSet::default());
+        #[allow(clippy::needless_range_loop)]
         for node in 0..self.nodes.len() {
             let parents: &HashSet<usize> = &parent_list[node];
 
@@ -945,7 +946,7 @@ impl RdgCompiledGraph {
     pub fn save_to_svg(&self, path: &str) {
         use layout::backends::svg::SVGWriter;
         use layout::gv::*;
-        use log::error;
+        use log::{error, info};
         let content = self.dump_dot();
         let mut svg = SVGWriter::new();
 
@@ -964,6 +965,10 @@ impl RdgCompiledGraph {
             return;
         };
 
+        if graph.dag.is_empty() {
+            info!("save_to_svg: the graph was empty");
+            return;
+        }
         graph.do_it(false, false, false, &mut svg);
         let content = svg.finalize();
 
@@ -1011,7 +1016,7 @@ mod tests {
 
     use crate::{
         rdg::Node, Binding, BindingSet, Buffer, ComputeStep, DispatchCommand, DrawCommand,
-        Extents2D, Extents3D, GraphicsPipeline, Image, ImageFormat, ImageRegion, ImageSubresource,
+        Extents2D, Extents3D, GraphicsPipeline, Image, ImageFormat, ImageSubresource,
         ImageUsageFlags, ImageView, Rect2D, RenderAttachmentReference, RenderStep, RenderTarget,
     };
 
@@ -1065,12 +1070,14 @@ mod tests {
             }
         }
 
+        #[allow(dead_code)]
         fn width_height(mut self, width: u32, height: u32) -> Self {
             self.image.extents.width = width;
             self.image.extents.height = height;
             self
         }
 
+        #[allow(dead_code)]
         fn format(mut self, format: ImageFormat) -> Self {
             self.image.format = format;
             self
