@@ -1,5 +1,6 @@
 pub const SMALL_NUMBER: f32 = 0.005;
 pub mod app;
+pub mod asset_map;
 pub mod input;
 
 mod utils;
