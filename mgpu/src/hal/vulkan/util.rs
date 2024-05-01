@@ -1026,4 +1026,37 @@ impl_util_methods!(Sampler, VulkanSampler, vk::Sampler);
 impl_util_methods!(BindingSet, VulkanBindingSet, vk::DescriptorSet);
 impl_util_methods!(GraphicsPipeline, VulkanGraphicsPipelineInfo);
 impl_util_methods!(ComputePipeline, VulkanComputePipelineInfo, vk::Pipeline);
-impl_util_methods!(Swapchain, VulkanSwapchain, vk::SwapchainKHR);
+impl From<Swapchain> for Handle<VulkanSwapchain> {
+    fn from(handle: Swapchain) -> Handle<VulkanSwapchain> {
+        unsafe { Handle::from_u64(handle.info.id) }
+    }
+}
+impl From<&Swapchain> for Handle<VulkanSwapchain> {
+    fn from(handle: &Swapchain) -> Handle<VulkanSwapchain> {
+        unsafe { Handle::from_u64(handle.info.id) }
+    }
+}
+impl crate::util::HasLabel for VulkanSwapchain {
+    fn label(&self) -> Option<&str> {
+        self.label
+    }
+}
+impl<H> ResolveVulkan<vk::SwapchainKHR, H> for VulkanResolver
+where
+    H: Into<Handle<VulkanSwapchain>>,
+{
+    fn resolve_vulkan(&self, handle: H) -> Option<vk::SwapchainKHR> {
+        self.get::<VulkanSwapchain>()
+            .resolve(handle.into())
+            .map(|v| v.handle)
+    }
+}
+impl<H: crate::util::HasLabel> ResolveVulkan<vk::SwapchainKHR, H>
+    for ResourceArena<VulkanHal, VulkanSwapchain>
+where
+    H: Into<Handle<VulkanSwapchain>>,
+{
+    fn resolve_vulkan(&self, handle: H) -> Option<vk::SwapchainKHR> {
+        self.resolve(handle.into()).map(|v| v.handle)
+    }
+}

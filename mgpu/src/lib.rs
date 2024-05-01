@@ -830,11 +830,6 @@ pub struct BindingSet {
     bindings: Vec<Binding>,
 }
 
-#[derive(Clone)]
-pub struct Swapchain {
-    id: u64,
-}
-
 impl ImageFormat {
     pub fn aspect(self) -> ImageAspect {
         match self {
