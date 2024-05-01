@@ -47,7 +47,8 @@ pub struct ErasedArena {
     // a new item is added if there's an index here, it's used for the new item
     freed_indices: Vec<Index>,
 
-    drop_fn: unsafe fn(*mut u8),
+    // Tries to drop the entry at the pointer, returning the new generation if the operation succeeds
+    drop_fn: unsafe fn(*mut u8) -> Option<u32>,
 
     // The second arg is an offset, the third is a count
     // Function responsibile for setting the entries in (ptr)[offset..count] to their default value
@@ -86,6 +87,7 @@ impl ErasedArena {
 
     pub fn add<T: 'static>(&mut self, value: T) -> Index {
         debug_assert!(DebugOnlyTypeId::of::<T>() == self.stored_type_id);
+        debug_assert!(DebugOnlyTypeId::of::<T>() == self.stored_type_id);
         let index = unsafe { self.allocate_index() };
 
         let entry_ptr = self.entry_mut_ptr_at::<T>(index.index as usize);
@@ -98,6 +100,7 @@ impl ErasedArena {
 
     pub fn get<T: 'static>(&self, index: Index) -> Option<&T> {
         debug_assert!(index.stored_type_id == self.stored_type_id);
+        debug_assert!(DebugOnlyTypeId::of::<T>() == self.stored_type_id);
         if index.index as usize >= self.capacity() {
             return None;
         }
@@ -113,6 +116,7 @@ impl ErasedArena {
 
     pub fn get_mut<T: 'static>(&mut self, index: Index) -> Option<&mut T> {
         debug_assert!(index.stored_type_id == self.stored_type_id);
+        debug_assert!(DebugOnlyTypeId::of::<T>() == self.stored_type_id);
         if index.index as usize >= self.capacity() {
             return None;
         }
@@ -132,6 +136,7 @@ impl ErasedArena {
 
     pub fn remove<T: 'static>(&mut self, index: Index) -> Option<T> {
         debug_assert!(index.stored_type_id == self.stored_type_id);
+        debug_assert!(DebugOnlyTypeId::of::<T>() == self.stored_type_id);
         if index.index as usize >= self.capacity() {
             return None;
         }
@@ -162,8 +167,14 @@ impl ErasedArena {
         // Count up to capacity because when calling remove len is decreased
         // thus we might miss the elements at the end of the arena
         for index in 0..self.capacity {
-            let entry = self.erased_payload_mut_ptr_at(index);
-            unsafe { (self.drop_fn)(entry) }
+            let payload = self.erased_payload_mut_ptr_at(index);
+            if let Some(generation) = unsafe { (self.drop_fn)(payload) } {
+                self.freed_indices.push(Index {
+                    index: index as u32,
+                    generation,
+                    stored_type_id: self.stored_type_id,
+                })
+            }
         }
         self.len = 0;
     }
@@ -253,11 +264,16 @@ impl ErasedArena {
         Layout::new::<Entry<T>>()
     }
 
-    fn drop_fn<T: 'static>(data: *mut u8) {
+    fn drop_fn<T: 'static>(data: *mut u8) -> Option<u32> {
         let ptr_t = data.cast::<Entry<T>>();
         let ref_t = unsafe { ptr_t.as_mut().unwrap_unchecked() };
         // Take takes care of actually dropping the value
-        ref_t.payload.take();
+        if ref_t.payload.take().is_some() {
+            ref_t.generation += 1;
+            Some(ref_t.generation)
+        } else {
+            None
+        }
     }
     fn default_fn<T: 'static>(data: *mut u8, offset: usize, count: usize) {
         let data = unsafe { data.cast::<Entry<T>>().add(offset) };
@@ -378,9 +394,9 @@ mod tests {
         assert!(erased_arena.is_empty());
         assert_eq!(erased_arena.capacity(), 3);
 
-        assert!(erased_arena.get::<u32>(index_of_first).is_none());
-        assert!(erased_arena.get::<u32>(index_of_second).is_none());
-        assert!(erased_arena.get::<u32>(index_of_third).is_none());
+        assert!(erased_arena.get::<WeirdAlign>(index_of_first).is_none());
+        assert!(erased_arena.get::<WeirdAlign>(index_of_second).is_none());
+        assert!(erased_arena.get::<WeirdAlign>(index_of_third).is_none());
     }
 
     #[test]

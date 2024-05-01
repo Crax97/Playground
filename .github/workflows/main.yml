@@ -7,14 +7,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '3.18.x'
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --all-features
+      - run: cargo test --all-features 
   miri:
     name: cargo miri
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: jwlawson/actions-setup-cmake@v2
         with:
+          cmake-version: '3.18.x'
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "nightly-1.77"
           components: miri
-      - run: cargo miri test 
+      - run: cargo miri test --all-features

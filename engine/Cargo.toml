@@ -2,13 +2,14 @@
 name = "engine"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.77"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = { version = "1.0.*", features = ["backtrace"] }
 anymap = "0.12.*"
-winit = { version = "0.29", features = [ "x11" ] }
+winit = { version = "0.29", features = ["x11"] }
 raw-window-handle = "0.6.*"
 thiserror = "1.0"
 log = "0.4.17"
@@ -22,7 +23,7 @@ env_logger = "0.10.0"
 bitflags = "2.*"
 
 
-kecs = { git="https://github.com/Crax97/kecs.git" }
+kecs = { git = "https://github.com/Crax97/kecs.git" }
 
 mgpu = { path = "../mgpu", features = ["serde"] }
 rand = "0.8.5"
