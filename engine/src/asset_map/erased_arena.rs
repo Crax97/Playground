@@ -86,41 +86,19 @@ impl ErasedArena {
 
     pub fn add<T: 'static>(&mut self, value: T) -> Index {
         debug_assert!(DebugOnlyTypeId::of::<T>() == self.stored_type_id);
-        const GROWTH_FACTOR: f32 = 1.5;
-        let index = if let Some(index) = self.freed_indices.pop() {
-            index
-        } else {
-            if self.capacity() - self.len() == 0 {
-                let new_capacity = if self.capacity == 0 {
-                    2
-                } else {
-                    (self.capacity as f32 * GROWTH_FACTOR).ceil() as usize
-                };
-                let difference = new_capacity - self.capacity;
-                self.grow(difference);
-            }
-
-            let index: Index = Index {
-                index: self.len as u32,
-                generation: 0,
-                stored_type_id: self.stored_type_id,
-            };
-            index
-        };
+        let index = unsafe { self.allocate_index() };
 
         let entry_ptr = self.entry_mut_ptr_at::<T>(index.index as usize);
         let entry_slot = unsafe { entry_ptr.as_mut().unwrap() };
         debug_assert!(entry_slot.payload.is_none());
         entry_slot.payload = Some(value);
-        entry_slot.generation = index.generation;
 
-        self.len += 1;
         index
     }
 
     pub fn get<T: 'static>(&self, index: Index) -> Option<&T> {
         debug_assert!(index.stored_type_id == self.stored_type_id);
-        if index.index as usize >= self.len() {
+        if index.index as usize >= self.capacity() {
             return None;
         }
 
@@ -135,7 +113,7 @@ impl ErasedArena {
 
     pub fn get_mut<T: 'static>(&mut self, index: Index) -> Option<&mut T> {
         debug_assert!(index.stored_type_id == self.stored_type_id);
-        if index.index as usize >= self.len() {
+        if index.index as usize >= self.capacity() {
             return None;
         }
 
@@ -154,7 +132,7 @@ impl ErasedArena {
 
     pub fn remove<T: 'static>(&mut self, index: Index) -> Option<T> {
         debug_assert!(index.stored_type_id == self.stored_type_id);
-        if index.index as usize >= self.len() {
+        if index.index as usize >= self.capacity() {
             return None;
         }
 
@@ -188,6 +166,40 @@ impl ErasedArena {
             unsafe { (self.drop_fn)(entry) }
         }
         self.len = 0;
+    }
+
+    pub unsafe fn allocate_index(&mut self) -> Index {
+        const GROWTH_FACTOR: f32 = 1.5;
+
+        let index = if let Some(index) = self.freed_indices.pop() {
+            index
+        } else {
+            if self.capacity() - self.len() == 0 {
+                let new_capacity = if self.capacity == 0 {
+                    2
+                } else {
+                    (self.capacity as f32 * GROWTH_FACTOR).ceil() as usize
+                };
+                let difference = new_capacity - self.capacity;
+                self.grow(difference);
+            }
+
+            let index: Index = Index {
+                index: self.len as u32,
+                generation: 0,
+                stored_type_id: self.stored_type_id,
+            };
+            index
+        };
+        self.len += 1;
+
+        index
+    }
+
+    pub unsafe fn preallocate_entry(&mut self) -> (Index, *mut u8) {
+        let index = self.allocate_index();
+        let ptr = self.erased_payload_mut_ptr_at(index.index as usize);
+        (index, ptr)
     }
 
     fn erased_payload_mut_ptr_at(&mut self, index: usize) -> *mut u8 {
@@ -255,6 +267,10 @@ impl ErasedArena {
         }
     }
 }
+
+// ErasedArena is Send + Sync because the only way to modify it is through &mut refs
+unsafe impl Send for ErasedArena {}
+unsafe impl Sync for ErasedArena {}
 
 impl Drop for ErasedArena {
     fn drop(&mut self) {
