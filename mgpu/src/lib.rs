@@ -106,7 +106,7 @@ pub enum ImageFormat {
     Depth32,
 }
 impl ImageFormat {
-    fn byte_size(&self) -> usize {
+    pub fn byte_size(&self) -> usize {
         match self {
             ImageFormat::Unknown => 0,
             ImageFormat::Rgba8 | ImageFormat::Bgra8 => 4,
@@ -712,6 +712,10 @@ impl Buffer {
             range: self.size,
         }
     }
+
+    pub fn size(&self) -> usize {
+        self.size
+    }
 }
 
 /// An image is a multidimensional buffer of data, with an associated format
@@ -784,6 +788,10 @@ impl Image {
             base_array_layer: layer,
             num_layers: self.array_layers,
         }
+    }
+
+    pub fn extents(&self) -> Extents3D {
+        self.extents
     }
 }
 
@@ -876,6 +884,13 @@ impl std::ops::Add<Extents3D> for Offset3D {
 impl Extents3D {
     pub fn area(&self) -> u32 {
         self.width * self.height * self.depth
+    }
+
+    pub fn to_2d(&self) -> Extents2D {
+        Extents2D {
+            width: self.width,
+            height: self.height,
+        }
     }
 }
 

@@ -1,18 +1,17 @@
 use mgpu::{
-    DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D, SwapchainCreationInfo,
+    Device, DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D, Swapchain,
+    SwapchainCreationInfo,
 };
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-use winit::event::{Event, WindowEvent};
+use winit::application::ApplicationHandler;
+use winit::event::WindowEvent;
 use winit::event_loop::EventLoop;
+use winit::window::{Window, WindowAttributes};
 
 fn main() {
     env_logger::init();
     let event_loop = EventLoop::new().unwrap();
-    let window = winit::window::WindowBuilder::new()
-        .with_title("Triangle")
-        .build(&event_loop)
-        .unwrap();
 
     let device = mgpu::Device::new(DeviceConfiguration {
         app_name: Some("Triangle Application"),
@@ -22,55 +21,81 @@ fn main() {
         desired_frames_in_flight: 3,
     })
     .expect("Failed to create gpu device");
-    let mut swapchain = device
-        .create_swapchain(&SwapchainCreationInfo {
-            display_handle: window.display_handle().unwrap(),
-            window_handle: window.window_handle().unwrap(),
-            preferred_format: None,
-            preferred_present_mode: None,
-        })
-        .expect("Failed to create swapchain");
 
-    event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+    struct Application {
+        device: Device,
+        window: Option<Window>,
+        swapchain: Option<Swapchain>,
+    }
 
-    event_loop
-        .run(|event, event_loop| match event {
-            Event::NewEvents(_) => {}
-            Event::WindowEvent { event, .. } => match event {
+    impl ApplicationHandler for Application {
+        fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+            let window = event_loop
+                .create_window(WindowAttributes::default().with_title("Empty window"))
+                .unwrap();
+            let swapchain = self
+                .device
+                .create_swapchain(&SwapchainCreationInfo {
+                    display_handle: window.display_handle().unwrap(),
+                    window_handle: window.window_handle().unwrap(),
+                    preferred_format: None,
+                    preferred_present_mode: None,
+                })
+                .expect("Failed to create swapchain");
+
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+
+            self.swapchain = Some(swapchain);
+            self.window = Some(window);
+        }
+
+        fn window_event(
+            &mut self,
+            event_loop: &winit::event_loop::ActiveEventLoop,
+            _window_id: winit::window::WindowId,
+            event: WindowEvent,
+        ) {
+            match event {
                 WindowEvent::CloseRequested => {
+                    self.swapchain.as_mut().unwrap().destroy().unwrap();
                     event_loop.exit();
                 }
                 WindowEvent::RedrawRequested => {
-                    let _ = swapchain.acquire_next_image().unwrap();
+                    let _ = self
+                        .swapchain
+                        .as_mut()
+                        .unwrap()
+                        .acquire_next_image()
+                        .unwrap();
 
-                    swapchain.present().unwrap();
+                    self.swapchain.as_mut().unwrap().present().unwrap();
 
-                    device.submit().unwrap();
-                    window.request_redraw();
+                    self.device.submit().unwrap();
+                    self.window.as_ref().unwrap().request_redraw();
                 }
-                WindowEvent::Resized(new_size) => swapchain
+                WindowEvent::Resized(new_size) => self
+                    .swapchain
+                    .as_mut()
+                    .unwrap()
                     .resized(
                         Extents2D {
                             width: new_size.width,
                             height: new_size.height,
                         },
-                        window.window_handle().unwrap(),
-                        window.display_handle().unwrap(),
+                        self.window.as_ref().unwrap().window_handle().unwrap(),
+                        self.window.as_ref().unwrap().display_handle().unwrap(),
                     )
                     .unwrap(),
                 _ => {}
-            },
-            Event::DeviceEvent { .. } => {}
-            Event::UserEvent(_) => {}
-            Event::Suspended => {}
-            Event::Resumed => {}
-            Event::AboutToWait => {}
-            Event::LoopExiting => {
-                event_loop.exit();
-            }
-            Event::MemoryWarning => {}
+            };
+        }
+    }
+
+    event_loop
+        .run_app(&mut Application {
+            device,
+            window: None,
+            swapchain: None,
         })
         .unwrap();
-
-    swapchain.destroy().unwrap();
 }

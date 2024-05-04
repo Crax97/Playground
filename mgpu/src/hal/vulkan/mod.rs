@@ -176,6 +176,7 @@ impl Hal for VulkanHal {
             name: self.physical_device.name.clone(),
             api_description: format!("Vulkan {}.{}.{}", major, minor, patch),
             swapchain_support: self.physical_device.features.swapchain_support,
+            frames_in_flight: self.configuration.frames_in_flight,
         }
     }
 

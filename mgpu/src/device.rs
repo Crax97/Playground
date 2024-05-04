@@ -55,6 +55,7 @@ pub struct DeviceInfo {
     pub name: String,
     pub api_description: String,
     pub swapchain_support: bool,
+    pub frames_in_flight: usize,
 }
 #[derive(Clone)]
 pub struct Device {

@@ -1,18 +1,21 @@
 mod util;
 
 use mgpu::{
-    AttachmentStoreOp, BufferDescription, BufferUsageFlags, DeviceConfiguration, DeviceFeatures,
-    DevicePreference, Extents2D, FragmentStageInfo, Graphics, GraphicsPipelineDescription,
-    ImageFormat, MemoryDomain, Rect2D, RenderPassDescription, RenderTarget, RenderTargetInfo,
-    RenderTargetLoadOp, SampleCount, ShaderModuleDescription, SwapchainCreationInfo,
-    VertexInputDescription, VertexInputFrequency, VertexStageInfo,
+    AttachmentStoreOp, Buffer, BufferDescription, BufferUsageFlags, Device, DeviceConfiguration,
+    DeviceFeatures, DevicePreference, Extents2D, FragmentStageInfo, Graphics, GraphicsPipeline,
+    GraphicsPipelineDescription, ImageFormat, MemoryDomain, Rect2D, RenderPassDescription,
+    RenderTarget, RenderTargetInfo, RenderTargetLoadOp, SampleCount, ShaderModule,
+    ShaderModuleDescription, Swapchain, SwapchainCreationInfo, VertexInputDescription,
+    VertexInputFrequency, VertexStageInfo,
 };
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use shaderc::ShaderKind;
 use util::*;
-use winit::event::{Event, WindowEvent};
+use winit::application::ApplicationHandler;
+use winit::event::WindowEvent;
 use winit::event_loop::EventLoop;
+use winit::window::{Window, WindowAttributes};
 
 const VERTEX_SHADER: &str = "
 #version 460
@@ -35,10 +38,6 @@ void main() {
 fn main() {
     env_logger::init();
     let event_loop = EventLoop::new().unwrap();
-    let window = winit::window::WindowBuilder::new()
-        .with_title("Triangle")
-        .build(&event_loop)
-        .unwrap();
 
     let device = mgpu::Device::new(DeviceConfiguration {
         app_name: Some("Triangle Application"),
@@ -48,14 +47,7 @@ fn main() {
         desired_frames_in_flight: 3,
     })
     .expect("Failed to create gpu device");
-    let mut swapchain = device
-        .create_swapchain(&SwapchainCreationInfo {
-            display_handle: window.display_handle().unwrap(),
-            window_handle: window.window_handle().unwrap(),
-            preferred_format: None,
-            preferred_present_mode: None,
-        })
-        .expect("Failed to create swapchain");
+
     let triangle_data = vec![
         pos(-1.0, -1.0, 0.0),
         pos(1.0, -1.0, 0.0),
@@ -121,18 +113,82 @@ fn main() {
         .unwrap();
 
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+    struct TriangleApplication {
+        device: Device,
+        swapchain: Option<Swapchain>,
+        window: Option<Window>,
 
-    event_loop
-        .run(|event, event_loop| match event {
-            Event::NewEvents(_) => {}
-            Event::WindowEvent { event, .. } => match event {
+        vertex_shader_module: ShaderModule,
+        fragment_shader_module: ShaderModule,
+        triangle_buffer: Buffer,
+        pipeline: GraphicsPipeline,
+    }
+
+    impl ApplicationHandler for TriangleApplication {
+        fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+            let window = event_loop
+                .create_window(WindowAttributes::default().with_title("Triangle"))
+                .unwrap();
+            self.swapchain = Some(
+                self.device
+                    .create_swapchain(&SwapchainCreationInfo {
+                        display_handle: window.display_handle().unwrap(),
+                        window_handle: window.window_handle().unwrap(),
+                        preferred_format: None,
+                        preferred_present_mode: None,
+                    })
+                    .expect("Failed to create swapchain!"),
+            );
+            self.window = Some(window);
+        }
+
+        fn exiting(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+            self.swapchain.as_mut().unwrap().destroy().unwrap();
+            self.device
+                .destroy_graphics_pipeline(self.pipeline)
+                .unwrap();
+            self.device
+                .destroy_shader_module(self.vertex_shader_module)
+                .unwrap();
+            self.device
+                .destroy_shader_module(self.fragment_shader_module)
+                .unwrap();
+            self.device.destroy_buffer(self.triangle_buffer).unwrap();
+        }
+
+        fn window_event(
+            &mut self,
+            event_loop: &winit::event_loop::ActiveEventLoop,
+            _window_id: winit::window::WindowId,
+            event: WindowEvent,
+        ) {
+            match event {
+                WindowEvent::Resized(size) => self
+                    .swapchain
+                    .as_mut()
+                    .unwrap()
+                    .resized(
+                        Extents2D {
+                            width: size.width,
+                            height: size.height,
+                        },
+                        self.window.as_ref().unwrap().window_handle().unwrap(),
+                        self.window.as_ref().unwrap().display_handle().unwrap(),
+                    )
+                    .unwrap(),
+
                 WindowEvent::CloseRequested => {
                     event_loop.exit();
                 }
                 WindowEvent::RedrawRequested => {
-                    let swapchain_image = swapchain.acquire_next_image().unwrap();
+                    let swapchain_image = self
+                        .swapchain
+                        .as_mut()
+                        .unwrap()
+                        .acquire_next_image()
+                        .unwrap();
 
-                    let mut command_recorder = device.create_command_recorder::<Graphics>();
+                    let mut command_recorder = self.device.create_command_recorder::<Graphics>();
                     {
                         let mut render_pass = command_recorder
                             .begin_render_pass(&RenderPassDescription {
@@ -150,46 +206,29 @@ fn main() {
                                 },
                             })
                             .unwrap();
-                        render_pass.set_pipeline(pipeline);
-                        render_pass.set_vertex_buffers([triangle_buffer]);
+                        render_pass.set_pipeline(self.pipeline);
+                        render_pass.set_vertex_buffers([self.triangle_buffer]);
                         render_pass.draw(3, 1, 0, 0).unwrap();
                     }
                     command_recorder.submit().unwrap();
+                    self.swapchain.as_mut().unwrap().present().unwrap();
 
-                    swapchain.present().unwrap();
-
-                    device.submit().unwrap();
-                    window.request_redraw();
+                    self.device.submit().unwrap();
+                    self.window.as_ref().unwrap().request_redraw();
                 }
-                WindowEvent::Resized(new_size) => swapchain
-                    .resized(
-                        Extents2D {
-                            width: new_size.width,
-                            height: new_size.height,
-                        },
-                        window.window_handle().unwrap(),
-                        window.display_handle().unwrap(),
-                    )
-                    .unwrap(),
                 _ => {}
-            },
-            Event::DeviceEvent { .. } => {}
-            Event::UserEvent(_) => {}
-            Event::Suspended => {}
-            Event::Resumed => {}
-            Event::AboutToWait => {}
-            Event::LoopExiting => {
-                event_loop.exit();
-            }
-            Event::MemoryWarning => {}
+            };
+        }
+    }
+    event_loop
+        .run_app(&mut TriangleApplication {
+            device,
+            swapchain: None,
+            window: None,
+            vertex_shader_module,
+            fragment_shader_module,
+            triangle_buffer,
+            pipeline,
         })
         .unwrap();
-
-    swapchain.destroy().unwrap();
-    device.destroy_graphics_pipeline(pipeline).unwrap();
-    device.destroy_shader_module(vertex_shader_module).unwrap();
-    device
-        .destroy_shader_module(fragment_shader_module)
-        .unwrap();
-    device.destroy_buffer(triangle_buffer).unwrap();
 }

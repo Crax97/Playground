@@ -3,24 +3,28 @@ mod util;
 use std::num::NonZeroU32;
 
 use bytemuck::offset_of;
-use glam::{vec3, Vec3};
+use glam::{vec3, Mat4, Vec3};
 use mgpu::{
-    AttachmentStoreOp, Binding, BindingSetDescription, BindingSetElement, BindingSetLayout,
-    BindingSetLayoutInfo, BindingType, BufferDescription, BufferUsageFlags, CompareOp,
-    DepthStencilState, DepthStencilTarget, DepthStencilTargetInfo, DepthStencilTargetLoadOp,
-    DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D, Extents3D, FilterMode,
-    FragmentStageInfo, Graphics, GraphicsPipelineDescription, ImageDescription, ImageDimension,
-    ImageFormat, ImageUsageFlags, ImageViewDescription, ImageWriteParams, MemoryDomain, MipmapMode,
+    AttachmentStoreOp, Binding, BindingSet, BindingSetDescription, BindingSetElement,
+    BindingSetLayout, BindingSetLayoutInfo, BindingType, Buffer, BufferDescription,
+    BufferUsageFlags, CompareOp, DepthStencilState, DepthStencilTarget, DepthStencilTargetInfo,
+    DepthStencilTargetLoadOp, Device, DeviceConfiguration, DeviceFeatures, DevicePreference,
+    Extents2D, Extents3D, FilterMode, FragmentStageInfo, Graphics, GraphicsPipeline,
+    GraphicsPipelineDescription, Image, ImageDescription, ImageDimension, ImageFormat,
+    ImageUsageFlags, ImageView, ImageViewDescription, ImageWriteParams, MemoryDomain, MipmapMode,
     Rect2D, RenderPassDescription, RenderTarget, RenderTargetInfo, RenderTargetLoadOp, SampleCount,
-    SamplerDescription, ShaderModuleDescription, ShaderStageFlags, SwapchainCreationInfo,
-    VertexInputDescription, VertexInputFrequency, VertexStageInfo,
+    Sampler, SamplerDescription, ShaderModule, ShaderModuleDescription, ShaderStageFlags,
+    Swapchain, SwapchainCreationInfo, VertexInputDescription, VertexInputFrequency,
+    VertexStageInfo,
 };
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use shaderc::ShaderKind;
 use util::*;
-use winit::event::{Event, WindowEvent};
+use winit::application::ApplicationHandler;
+use winit::event::WindowEvent;
 use winit::event_loop::EventLoop;
+use winit::window::{Window, WindowAttributes};
 
 const VERTEX_SHADER: &str = "
 #version 460
@@ -56,10 +60,6 @@ void main() {
 fn main() {
     env_logger::init();
     let event_loop = EventLoop::new().unwrap();
-    let window = winit::window::WindowBuilder::new()
-        .with_title("Textured Cube")
-        .build(&event_loop)
-        .unwrap();
 
     let device = mgpu::Device::new(DeviceConfiguration {
         app_name: Some("Triangle Application"),
@@ -69,14 +69,201 @@ fn main() {
         desired_frames_in_flight: 3,
     })
     .expect("Failed to create gpu device");
-    let mut swapchain = device
-        .create_swapchain(&SwapchainCreationInfo {
-            display_handle: window.display_handle().unwrap(),
-            window_handle: window.window_handle().unwrap(),
-            preferred_format: None,
-            preferred_present_mode: None,
-        })
-        .expect("Failed to create swapchain");
+
+    struct CubeApplication {
+        device: Device,
+        swapchain: Option<Swapchain>,
+        window: Option<Window>,
+
+        projection: Mat4,
+        view: Mat4,
+        rotation: f32,
+        vertex_shader_module: ShaderModule,
+        fragment_shader_module: ShaderModule,
+        sampler: Sampler,
+        texture_image: Image,
+        texture_image_view: ImageView,
+        depth_image: Image,
+        depth_image_view: ImageView,
+        cube_object_data: Buffer,
+        cube_data_buffer: Buffer,
+        cube_index_buffer: Buffer,
+        pipeline: GraphicsPipeline,
+        binding_set: BindingSet,
+    }
+
+    impl ApplicationHandler for CubeApplication {
+        fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+            let window = event_loop
+                .create_window(WindowAttributes::default().with_title("Cube Example"))
+                .unwrap();
+            self.swapchain = Some(
+                self.device
+                    .create_swapchain(&SwapchainCreationInfo {
+                        display_handle: window.display_handle().unwrap(),
+                        window_handle: window.window_handle().unwrap(),
+                        preferred_format: None,
+                        preferred_present_mode: None,
+                    })
+                    .expect("Failed to create swapchain!"),
+            );
+            self.window = Some(window);
+        }
+
+        fn exiting(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+            self.swapchain.as_mut().unwrap().destroy().unwrap();
+            self.device
+                .destroy_graphics_pipeline(self.pipeline)
+                .unwrap();
+            self.device
+                .destroy_shader_module(self.vertex_shader_module)
+                .unwrap();
+            self.device
+                .destroy_shader_module(self.fragment_shader_module)
+                .unwrap();
+            self.device
+                .destroy_binding_set(self.binding_set.clone())
+                .unwrap();
+            self.device
+                .destroy_image_view(self.depth_image_view)
+                .unwrap();
+            self.device
+                .destroy_image_view(self.texture_image_view)
+                .unwrap();
+            self.device.destroy_image(self.depth_image).unwrap();
+            self.device.destroy_image(self.texture_image).unwrap();
+            self.device.destroy_sampler(self.sampler).unwrap();
+            self.device.destroy_buffer(self.cube_data_buffer).unwrap();
+            self.device.destroy_buffer(self.cube_index_buffer).unwrap();
+            self.device.destroy_buffer(self.cube_object_data).unwrap();
+        }
+
+        fn window_event(
+            &mut self,
+            event_loop: &winit::event_loop::ActiveEventLoop,
+            _window_id: winit::window::WindowId,
+            event: WindowEvent,
+        ) {
+            match event {
+                WindowEvent::Resized(size) => {
+                    self.swapchain
+                        .as_mut()
+                        .unwrap()
+                        .resized(
+                            Extents2D {
+                                width: size.width,
+                                height: size.height,
+                            },
+                            self.window.as_ref().unwrap().window_handle().unwrap(),
+                            self.window.as_ref().unwrap().display_handle().unwrap(),
+                        )
+                        .unwrap();
+
+                    self.device
+                        .destroy_image_view(self.depth_image_view)
+                        .unwrap();
+                    self.device.destroy_image(self.depth_image).unwrap();
+                    self.depth_image = self
+                        .device
+                        .create_image(&ImageDescription {
+                            label: Some("Depth image"),
+                            usage_flags: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                            extents: Extents3D {
+                                width: size.width,
+                                height: size.height,
+                                depth: 1,
+                            },
+                            dimension: ImageDimension::D2,
+                            mips: NonZeroU32::new(1).unwrap(),
+                            array_layers: NonZeroU32::new(1).unwrap(),
+                            samples: SampleCount::One,
+                            format: ImageFormat::Depth32,
+                            memory_domain: MemoryDomain::Gpu,
+                        })
+                        .unwrap();
+                    self.depth_image_view = self
+                        .device
+                        .create_image_view(&ImageViewDescription {
+                            label: Some("Depth image view"),
+                            format: ImageFormat::Depth32,
+                            aspect: mgpu::ImageAspect::Depth,
+                            image: self.depth_image,
+                            image_subresource: self.depth_image.whole_subresource(),
+                            dimension: ImageDimension::D2,
+                        })
+                        .unwrap();
+                }
+
+                WindowEvent::CloseRequested => {
+                    event_loop.exit();
+                }
+                WindowEvent::RedrawRequested => {
+                    let model = glam::Mat4::from_rotation_y(self.rotation)
+                        * glam::Mat4::from_scale(Vec3::ONE);
+                    let mvp = self.projection * self.view * model;
+                    let mvp = [mvp];
+                    self.device
+                        .write_buffer(
+                            self.cube_object_data,
+                            &self
+                                .cube_object_data
+                                .write_all_params(bytemuck::cast_slice(&mvp)),
+                        )
+                        .unwrap();
+
+                    let swapchain_image = self
+                        .swapchain
+                        .as_mut()
+                        .unwrap()
+                        .acquire_next_image()
+                        .unwrap();
+
+                    {
+                        let mut command_recorder =
+                            self.device.create_command_recorder::<Graphics>();
+                        {
+                            let mut render_pass = command_recorder
+                                .begin_render_pass(&RenderPassDescription {
+                                    label: Some("Cube Rendering"),
+                                    render_targets: &[RenderTarget {
+                                        view: swapchain_image.view,
+                                        sample_count: SampleCount::One,
+                                        load_op: RenderTargetLoadOp::Clear([0.3, 0.0, 0.5, 1.0]),
+                                        store_op: AttachmentStoreOp::Store,
+                                    }],
+                                    depth_stencil_attachment: Some(&DepthStencilTarget {
+                                        view: self.depth_image_view,
+                                        sample_count: SampleCount::One,
+                                        load_op: DepthStencilTargetLoadOp::Clear(1.0, 0),
+                                        store_op: AttachmentStoreOp::Store,
+                                    }),
+                                    render_area: Rect2D {
+                                        offset: Default::default(),
+                                        extents: swapchain_image.extents,
+                                    },
+                                })
+                                .unwrap();
+                            render_pass.set_pipeline(self.pipeline);
+                            render_pass
+                                .set_vertex_buffers([self.cube_data_buffer, self.cube_data_buffer]);
+                            render_pass.set_index_buffer(self.cube_index_buffer);
+                            render_pass.set_binding_sets(&[self.binding_set.clone()]);
+                            render_pass.draw_indexed(36, 1, 0, 0, 0).unwrap();
+                            self.rotation += 0.01;
+                        }
+                        command_recorder.submit().unwrap();
+                    }
+
+                    self.swapchain.as_mut().unwrap().present().unwrap();
+
+                    self.device.submit().unwrap();
+                    self.window.as_ref().unwrap().request_redraw();
+                }
+                _ => {}
+            };
+        }
+    }
+
     let cube_data = vec![
         vertex(-1.0, -1.0, 1.0, 0.0, 0.0),
         vertex(1.0, 1.0, 1.0, 1.0, 1.0),
@@ -112,12 +299,12 @@ fn main() {
         16, 17, 18, 19, 17, 16, // Up
         22, 21, 20, 20, 21, 23, // Down
     ];
-    let mut rotation = 0.0f32;
+    let rotation = 0.0f32;
     let view = glam::Mat4::look_at_rh(vec3(-5.0, 10.0, -5.0), Vec3::default(), vec3(0.0, 1.0, 0.0));
     let projection = glam::Mat4::perspective_rh(75.0f32.to_radians(), 800.0 / 600.0, 0.01, 1000.0);
 
     let texture_data = util::read_image_data("mgpu/examples/assets/david.jpg");
-    let mut depth_image = device
+    let depth_image = device
         .create_image(&ImageDescription {
             label: Some("Depth image"),
             usage_flags: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
@@ -134,7 +321,7 @@ fn main() {
             memory_domain: MemoryDomain::Gpu,
         })
         .unwrap();
-    let mut depth_image_view = device
+    let depth_image_view = device
         .create_image_view(&ImageViewDescription {
             label: Some("Depth image view"),
             format: ImageFormat::Depth32,
@@ -149,7 +336,8 @@ fn main() {
             label: Some("Cube Texture"),
             usage_flags: ImageUsageFlags::SAMPLED
                 | ImageUsageFlags::TRANSFER_DST
-                | ImageUsageFlags::TRANSFER_SRC,
+                | ImageUsageFlags::TRANSFER_SRC
+                | ImageUsageFlags::STORAGE,
             extents: Extents3D {
                 width: 512,
                 height: 512,
@@ -247,6 +435,7 @@ fn main() {
             source: &fragment_shader_source,
         })
         .unwrap();
+
     let binding_set_layout = BindingSetLayout {
         binding_set_elements: vec![
             BindingSetElement {
@@ -272,6 +461,7 @@ fn main() {
             },
         ],
     };
+
     let pipeline = device
         .create_graphics_pipeline(
             &GraphicsPipelineDescription::new(
@@ -358,141 +548,28 @@ fn main() {
         )
         .unwrap();
 
-    // device.destroy_shader_module(vertex_shader_module).unwrap();
-    // device
-    //     .destroy_shader_module(fragment_shader_module)
-    //     .unwrap();
-
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
     event_loop
-        .run(|event, event_loop| match event {
-            Event::NewEvents(_) => {}
-            Event::WindowEvent { event, .. } => match event {
-                WindowEvent::CloseRequested => {
-                    event_loop.exit();
-                }
-                WindowEvent::RedrawRequested => {
-                    let model =
-                        glam::Mat4::from_rotation_y(rotation) * glam::Mat4::from_scale(Vec3::ONE);
-                    let mvp = projection * view * model;
-                    let mvp = [mvp];
-                    device
-                        .write_buffer(
-                            cube_object_data,
-                            &cube_object_data.write_all_params(bytemuck::cast_slice(&mvp)),
-                        )
-                        .unwrap();
-
-                    let swapchain_image = swapchain.acquire_next_image().unwrap();
-
-                    let mut command_recorder = device.create_command_recorder::<Graphics>();
-                    {
-                        let mut render_pass = command_recorder
-                            .begin_render_pass(&RenderPassDescription {
-                                label: Some("Cube Rendering"),
-                                render_targets: &[RenderTarget {
-                                    view: swapchain_image.view,
-                                    sample_count: SampleCount::One,
-                                    load_op: RenderTargetLoadOp::Clear([0.3, 0.0, 0.5, 1.0]),
-                                    store_op: AttachmentStoreOp::Store,
-                                }],
-                                depth_stencil_attachment: Some(&DepthStencilTarget {
-                                    view: depth_image_view,
-                                    sample_count: SampleCount::One,
-                                    load_op: DepthStencilTargetLoadOp::Clear(1.0, 0),
-                                    store_op: AttachmentStoreOp::Store,
-                                }),
-                                render_area: Rect2D {
-                                    offset: Default::default(),
-                                    extents: swapchain_image.extents,
-                                },
-                            })
-                            .unwrap();
-                        render_pass.set_pipeline(pipeline);
-                        render_pass.set_vertex_buffers([cube_data_buffer, cube_data_buffer]);
-                        render_pass.set_index_buffer(cube_index_buffer);
-                        render_pass.set_binding_sets(&[binding_set.clone()]);
-                        render_pass.draw_indexed(36, 1, 0, 0, 0).unwrap();
-                        rotation += 0.01;
-                    }
-                    command_recorder.submit().unwrap();
-
-                    swapchain.present().unwrap();
-
-                    device.submit().unwrap();
-                    window.request_redraw();
-                }
-                WindowEvent::Resized(new_size) => {
-                    swapchain
-                        .resized(
-                            Extents2D {
-                                width: new_size.width,
-                                height: new_size.height,
-                            },
-                            window.window_handle().unwrap(),
-                            window.display_handle().unwrap(),
-                        )
-                        .unwrap();
-
-                    device.destroy_image_view(depth_image_view).unwrap();
-                    device.destroy_image(depth_image).unwrap();
-                    depth_image = device
-                        .create_image(&ImageDescription {
-                            label: Some("Depth image"),
-                            usage_flags: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                            extents: Extents3D {
-                                width: new_size.width,
-                                height: new_size.height,
-                                depth: 1,
-                            },
-                            dimension: ImageDimension::D2,
-                            mips: NonZeroU32::new(1).unwrap(),
-                            array_layers: NonZeroU32::new(1).unwrap(),
-                            samples: SampleCount::One,
-                            format: ImageFormat::Depth32,
-                            memory_domain: MemoryDomain::Gpu,
-                        })
-                        .unwrap();
-                    depth_image_view = device
-                        .create_image_view(&ImageViewDescription {
-                            label: Some("Depth image view"),
-                            format: ImageFormat::Depth32,
-                            aspect: mgpu::ImageAspect::Depth,
-                            image: depth_image,
-                            image_subresource: depth_image.whole_subresource(),
-                            dimension: ImageDimension::D2,
-                        })
-                        .unwrap();
-                }
-                _ => {}
-            },
-            Event::DeviceEvent { .. } => {}
-            Event::UserEvent(_) => {}
-            Event::Suspended => {}
-            Event::Resumed => {}
-            Event::AboutToWait => {}
-            Event::LoopExiting => {
-                event_loop.exit();
-            }
-            Event::MemoryWarning => {}
+        .run_app(&mut CubeApplication {
+            device,
+            swapchain: None,
+            window: None,
+            projection,
+            view,
+            rotation,
+            vertex_shader_module,
+            fragment_shader_module,
+            sampler,
+            texture_image,
+            texture_image_view,
+            depth_image,
+            depth_image_view,
+            cube_object_data,
+            cube_data_buffer,
+            cube_index_buffer,
+            pipeline,
+            binding_set,
         })
         .unwrap();
-
-    swapchain.destroy().unwrap();
-
-    device.destroy_graphics_pipeline(pipeline).unwrap();
-    device.destroy_shader_module(vertex_shader_module).unwrap();
-    device
-        .destroy_shader_module(fragment_shader_module)
-        .unwrap();
-    device.destroy_binding_set(binding_set).unwrap();
-    device.destroy_image_view(depth_image_view).unwrap();
-    device.destroy_image_view(texture_image_view).unwrap();
-    device.destroy_image(depth_image).unwrap();
-    device.destroy_image(texture_image).unwrap();
-    device.destroy_sampler(sampler).unwrap();
-    device.destroy_buffer(cube_data_buffer).unwrap();
-    device.destroy_buffer(cube_index_buffer).unwrap();
-    device.destroy_buffer(cube_object_data).unwrap();
 }
