@@ -101,16 +101,37 @@ bitflags! {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ImageFormat {
     Unknown,
+    R32f,
+    Rg32f,
+    Rgb32f,
+    Rgba32f,
+
+    R8,
+    Rg8,
+    Rgb8,
     Rgba8,
+    R8Signed,
+    Rg8Signed,
+    Rgb8Signed,
+    Rgba8Signed,
     Bgra8,
     Depth32,
 }
 impl ImageFormat {
     pub fn byte_size(&self) -> usize {
+        use ImageFormat::*;
         match self {
-            ImageFormat::Unknown => 0,
-            ImageFormat::Rgba8 | ImageFormat::Bgra8 => 4,
-            ImageFormat::Depth32 => 4,
+            Unknown => 0,
+            R32f => 4,
+            Rg32f => 8,
+            Rgb32f => 12,
+            Rgba32f => 16,
+            R8 | R8Signed => 1,
+            Rg8 | Rg8Signed => 2,
+            Rgb8 | Rgb8Signed => 3,
+            Rgba8 | Rgba8Signed => 4,
+            Bgra8 => 4,
+            Depth32 => 4,
         }
     }
 }
@@ -562,7 +583,6 @@ pub struct ComputePipelineDescription<'a> {
 
 #[derive(Clone, Debug)]
 pub struct ShaderAttribute {
-    pub name: String,
     pub location: usize,
     pub format: VertexAttributeFormat,
 }
@@ -842,8 +862,8 @@ impl ImageFormat {
     pub fn aspect(self) -> ImageAspect {
         match self {
             ImageFormat::Unknown => unreachable!(),
-            ImageFormat::Rgba8 | ImageFormat::Bgra8 => ImageAspect::Color,
             ImageFormat::Depth32 => ImageAspect::Depth,
+            _ => ImageAspect::Color,
         }
     }
 }

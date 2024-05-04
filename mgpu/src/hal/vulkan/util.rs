@@ -10,7 +10,7 @@ use crate::{
     AddressMode, BindingSet, BindingSetElementKind, BindingSetLayoutInfo, BlendFactor, BlendOp,
     BorderColor, Buffer, BufferUsageFlags, ColorWriteMask, CompareOp, ComputePipeline,
     ComputePipelineDescription, CullMode, Extents2D, Extents3D, FilterMode, FrontFace,
-    GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDimension, ImageFormat,
+    GraphicsPipeline, GraphicsPipelineDescription, Image, ImageAspect, ImageDimension, ImageFormat,
     ImageSubresource, ImageUsageFlags, ImageView, MipmapMode, Offset2D, Offset3D, PolygonMode,
     PresentMode, PrimitiveTopology, Rect2D, SampleCount, Sampler, ShaderModule, ShaderModuleLayout,
     ShaderStageFlags, Swapchain, VertexAttributeFormat, VertexInputFrequency,
@@ -39,9 +39,20 @@ impl ToVk for ImageFormat {
     fn to_vk(self) -> Self::Target {
         match self {
             ImageFormat::Unknown => vk::Format::UNDEFINED,
-            ImageFormat::Rgba8 => vk::Format::R8G8B8A8_UNORM,
             ImageFormat::Bgra8 => vk::Format::B8G8R8A8_UNORM,
             ImageFormat::Depth32 => vk::Format::D32_SFLOAT,
+            ImageFormat::R32f => vk::Format::R32_SFLOAT,
+            ImageFormat::Rg32f => vk::Format::R32G32_SFLOAT,
+            ImageFormat::Rgb32f => vk::Format::R32G32B32_SFLOAT,
+            ImageFormat::Rgba32f => vk::Format::R32G32B32A32_SFLOAT,
+            ImageFormat::R8 => vk::Format::R8_UNORM,
+            ImageFormat::Rg8 => vk::Format::R8G8_UNORM,
+            ImageFormat::Rgb8 => vk::Format::R8G8B8_UNORM,
+            ImageFormat::Rgba8 => vk::Format::R8G8B8A8_UNORM,
+            ImageFormat::R8Signed => vk::Format::R8_SNORM,
+            ImageFormat::Rg8Signed => vk::Format::R8G8_SNORM,
+            ImageFormat::Rgb8Signed => vk::Format::R8G8B8_SNORM,
+            ImageFormat::Rgba8Signed => vk::Format::R8G8B8A8_SNORM,
         }
     }
 }
@@ -50,10 +61,21 @@ impl FromVk for vk::Format {
     type Target = ImageFormat;
     fn to_mgpu(self) -> Self::Target {
         match self {
-            vk::Format::R8G8B8A8_UNORM => ImageFormat::Rgba8,
-            vk::Format::D32_SFLOAT => ImageFormat::Depth32,
-            vk::Format::B8G8R8A8_UNORM => ImageFormat::Bgra8,
             vk::Format::UNDEFINED => ImageFormat::Unknown,
+            vk::Format::B8G8R8A8_UNORM => ImageFormat::Bgra8,
+            vk::Format::D32_SFLOAT => ImageFormat::Depth32,
+            vk::Format::R32_SFLOAT => ImageFormat::R32f,
+            vk::Format::R32G32_SFLOAT => ImageFormat::Rg32f,
+            vk::Format::R32G32B32_SFLOAT => ImageFormat::Rgb32f,
+            vk::Format::R32G32B32A32_SFLOAT => ImageFormat::Rgba32f,
+            vk::Format::R8_UNORM => ImageFormat::R8,
+            vk::Format::R8G8_UNORM => ImageFormat::Rg8,
+            vk::Format::R8G8B8_UNORM => ImageFormat::Rgb8,
+            vk::Format::R8G8B8A8_UNORM => ImageFormat::Rgba8,
+            vk::Format::R8_SNORM => ImageFormat::R8Signed,
+            vk::Format::R8G8_SNORM => ImageFormat::Rg8Signed,
+            vk::Format::R8G8B8_SNORM => ImageFormat::Rgb8Signed,
+            vk::Format::R8G8B8A8_SNORM => ImageFormat::Rgba8Signed,
             _ => unreachable!("Format not known {:?}", self),
         }
     }
@@ -593,6 +615,17 @@ impl ToVk for ColorWriteMask {
     }
 }
 
+impl ToVk for ImageAspect {
+    type Target = vk::ImageAspectFlags;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            ImageAspect::Color => vk::ImageAspectFlags::COLOR,
+            ImageAspect::Depth => vk::ImageAspectFlags::DEPTH,
+        }
+    }
+}
+
 #[cfg(feature = "swapchain")]
 impl ToVk for PresentMode {
     type Target = vk::PresentModeKHR;
@@ -782,11 +815,7 @@ impl<'a> ComputePipelineDescription<'a> {
 
 impl ImageFormat {
     pub(super) fn aspect_mask(&self) -> ash::vk::ImageAspectFlags {
-        match self {
-            ImageFormat::Unknown => vk::ImageAspectFlags::empty(),
-            ImageFormat::Rgba8 | ImageFormat::Bgra8 => vk::ImageAspectFlags::COLOR,
-            ImageFormat::Depth32 => vk::ImageAspectFlags::DEPTH,
-        }
+        self.aspect().to_vk()
     }
 }
 

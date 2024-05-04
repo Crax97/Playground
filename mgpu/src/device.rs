@@ -911,11 +911,11 @@ impl Device {
                 .vertex_inputs
                 .get(input.location);
             check!(pipeline_input.is_some(),
-                &format!("Vertex shader expects input '{}' at location {} with format {:?}, but the pipeline description does not provide it",
-                input.name, input.location, input.format));
+                &format!("Vertex shader expects input at location {} with format {:?}, but the pipeline description does not provide it",
+                input.location, input.format));
             let pipeline_input = pipeline_input.unwrap();
             check!(pipeline_input.format == input.format,
-                &format!("The format of vertex attribute '{}' differs from the one in the pipeline description! Expected {:?}, got {:?}", input.name, input.format, pipeline_input.format)
+                &format!("The format of vertex attribute at location '{}' differs from the one in the pipeline description! Expected {:?}, got {:?}", input.location, input.format, pipeline_input.format)
             )
         }
 

@@ -34,9 +34,9 @@ use gpu_allocator::vulkan::{
 use gpu_allocator::{AllocatorDebugSettings, MemoryLocation};
 use log::info;
 use raw_window_handle::{DisplayHandle, WindowHandle};
-use spirv_reflect::types::{
-    ReflectDecorationFlags, ReflectInterfaceVariable, ReflectShaderStageFlags,
-};
+use spirq::ty::{AccessType, CombinedImageSamplerType, Type, VectorType};
+use spirq::var::Variable;
+use spirq::ReflectConfig;
 use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -3011,165 +3011,191 @@ impl VulkanHal {
         &self,
         shader_module_description: &crate::ShaderModuleDescription<'_>,
     ) -> MgpuResult<ShaderModuleLayout> {
-        use spirv_reflect::*;
-        let spirv_mgpu_err = |s: &str| MgpuError::Dynamic(format!("SpirV reflection error: {s}"));
-        let module = ShaderModule::load_u32_data(shader_module_description.source)
+        use spirq::ty::ImageFormat as SpirqImageFormat;
+        let spirv_mgpu_err =
+            |s: spirq::prelude::Error| MgpuError::Dynamic(format!("SpirV reflection error: {s:?}"));
+        let module_entry_points = ReflectConfig::new()
+            .spv(shader_module_description.source)
+            .ref_all_rscs(true)
+            .reflect()
             .map_err(spirv_mgpu_err)?;
-        let entry_points = module
-            .enumerate_entry_points()
-            .map_err(spirv_mgpu_err)?
-            .into_iter()
-            .map(|entry| entry.name)
+        let entry_points: Vec<_> = module_entry_points
+            .iter()
+            .map(|entry| entry.name.clone())
             .collect();
 
-        let inputs = module
-            .enumerate_input_variables(None)
-            .map_err(spirv_mgpu_err)?;
+        let mut inputs = vec![];
+        let mut outputs = vec![];
+        let mut descriptors = HashMap::<u32, HashMap<u32, _>>::default();
 
-        let outputs = module
-            .enumerate_output_variables(None)
-            .map_err(spirv_mgpu_err)?;
-
-        let descriptor_layouts = module
-            .enumerate_descriptor_sets(None)
-            .map_err(spirv_mgpu_err)?;
-        let filter_out_semantics = |input: &ReflectInterfaceVariable| {
-            !input
-                .decoration_flags
-                .contains(ReflectDecorationFlags::BUILT_IN)
-        };
-        let spirv_to_attribute_input = |input: ReflectInterfaceVariable| {
-            let format = match input.format {
-                types::ReflectFormat::Undefined => unreachable!("{input:?}"),
-                types::ReflectFormat::R32_UINT => VertexAttributeFormat::Uint,
-                types::ReflectFormat::R32_SINT => VertexAttributeFormat::Int,
-                types::ReflectFormat::R32_SFLOAT => VertexAttributeFormat::Float,
-                types::ReflectFormat::R32G32_UINT => VertexAttributeFormat::Uint2,
-                types::ReflectFormat::R32G32_SINT => VertexAttributeFormat::Int2,
-                types::ReflectFormat::R32G32_SFLOAT => VertexAttributeFormat::Float2,
-                types::ReflectFormat::R32G32B32_UINT => VertexAttributeFormat::Uint3,
-                types::ReflectFormat::R32G32B32_SINT => VertexAttributeFormat::Int3,
-                types::ReflectFormat::R32G32B32_SFLOAT => VertexAttributeFormat::Float3,
-                types::ReflectFormat::R32G32B32A32_UINT => VertexAttributeFormat::Uint4,
-                types::ReflectFormat::R32G32B32A32_SINT => VertexAttributeFormat::Int4,
-                types::ReflectFormat::R32G32B32A32_SFLOAT => VertexAttributeFormat::Float4,
-            };
-            ShaderAttribute {
-                name: input.name,
-                location: input.location as _,
-                format,
+        module_entry_points.iter().for_each(|entry| {
+            for var in &entry.vars {
+                match var {
+                    Variable::Input { location, ty, .. } => {
+                        inputs.push(ShaderAttribute {
+                            location: location.loc() as usize,
+                            format: ty_to_vertex_attribute_format(ty),
+                        });
+                    }
+                    Variable::Output { location, ty, .. } => {
+                        outputs.push(ShaderAttribute {
+                            location: location.loc() as usize,
+                            format: ty_to_vertex_attribute_format(ty),
+                        });
+                    }
+                    Variable::Descriptor {
+                        desc_bind,
+                        desc_ty,
+                        ty,
+                        ..
+                    } => {
+                        descriptors
+                            .entry(desc_bind.set())
+                            .or_default()
+                            .entry(desc_bind.bind())
+                            .or_insert((desc_ty.clone(), ty.clone(), ShaderStageFlags::empty()))
+                            .2 |= match entry.exec_model {
+                            spirq::spirv::ExecutionModel::Vertex => ShaderStageFlags::VERTEX,
+                            spirq::spirv::ExecutionModel::Fragment => ShaderStageFlags::FRAGMENT,
+                            spirq::spirv::ExecutionModel::GLCompute => ShaderStageFlags::COMPUTE,
+                            _ => todo!(),
+                        };
+                    }
+                    Variable::PushConstant { .. } => {
+                        todo!()
+                    }
+                    Variable::SpecConstant { .. } => {
+                        todo!()
+                    }
+                }
             }
+        });
+
+        let access_mode = |ty: Option<AccessType>| match ty.unwrap_or(AccessType::ReadWrite) {
+            AccessType::ReadOnly => StorageAccessMode::Read,
+            AccessType::WriteOnly => StorageAccessMode::Write,
+            AccessType::ReadWrite => StorageAccessMode::ReadWrite,
         };
-
-        let inputs = inputs
+        let format = |fmt: SpirqImageFormat| match fmt {
+            SpirqImageFormat::Unknown => unreachable!(),
+            SpirqImageFormat::Rgba32f => todo!(),
+            SpirqImageFormat::Rgba16f => todo!(),
+            SpirqImageFormat::R32f => todo!(),
+            SpirqImageFormat::Rgba8 => ImageFormat::Rgba8,
+            SpirqImageFormat::Rgba8Snorm => todo!(),
+            SpirqImageFormat::Rg32f => todo!(),
+            SpirqImageFormat::Rg16f => todo!(),
+            SpirqImageFormat::R11fG11fB10f => todo!(),
+            SpirqImageFormat::R16f => todo!(),
+            SpirqImageFormat::Rgba16 => todo!(),
+            SpirqImageFormat::Rgb10A2 => todo!(),
+            SpirqImageFormat::Rg16 => todo!(),
+            SpirqImageFormat::Rg8 => todo!(),
+            SpirqImageFormat::R16 => todo!(),
+            SpirqImageFormat::R8 => todo!(),
+            SpirqImageFormat::Rgba16Snorm => todo!(),
+            SpirqImageFormat::Rg16Snorm => todo!(),
+            SpirqImageFormat::Rg8Snorm => todo!(),
+            SpirqImageFormat::R16Snorm => todo!(),
+            SpirqImageFormat::R8Snorm => todo!(),
+            SpirqImageFormat::Rgba32i => todo!(),
+            SpirqImageFormat::Rgba16i => todo!(),
+            SpirqImageFormat::Rgba8i => todo!(),
+            SpirqImageFormat::R32i => todo!(),
+            SpirqImageFormat::Rg32i => todo!(),
+            SpirqImageFormat::Rg16i => todo!(),
+            SpirqImageFormat::Rg8i => todo!(),
+            SpirqImageFormat::R16i => todo!(),
+            SpirqImageFormat::R8i => todo!(),
+            SpirqImageFormat::Rgba32ui => todo!(),
+            SpirqImageFormat::Rgba16ui => todo!(),
+            SpirqImageFormat::Rgba8ui => todo!(),
+            SpirqImageFormat::R32ui => todo!(),
+            SpirqImageFormat::Rgb10a2ui => todo!(),
+            SpirqImageFormat::Rg32ui => todo!(),
+            SpirqImageFormat::Rg16ui => todo!(),
+            SpirqImageFormat::Rg8ui => todo!(),
+            SpirqImageFormat::R16ui => todo!(),
+            SpirqImageFormat::R8ui => todo!(),
+            SpirqImageFormat::R64ui => todo!(),
+            SpirqImageFormat::R64i => todo!(),
+        };
+        let binding_sets = descriptors
             .into_iter()
-            .filter(filter_out_semantics)
-            .map(spirv_to_attribute_input)
-            .collect::<Vec<_>>();
-        let outputs = outputs
-            .into_iter()
-            .filter(filter_out_semantics)
-            .map(spirv_to_attribute_input)
-            .collect::<Vec<_>>();
-        let binding_sets = descriptor_layouts
-            .into_iter()
-            .map(|set| {
-                let elements = set
-                    .bindings
+            .map(|(set_idx, elements)| {
+                let elements = elements
                     .into_iter()
-                    .map(|element| {
-                        let image_format = match element.image.image_format {
-                            types::ReflectImageFormat::Undefined => ImageFormat::Unknown,
-                            types::ReflectImageFormat::RGBA8 => ImageFormat::Rgba8,
-                            _ => todo!("Unknown image format {:?}", element.image.image_format),
-                        };
-
-                        let dimension = match element.image.dim {
-                            types::ReflectDimension::Undefined => None,
-                            types::ReflectDimension::Type1d => Some(ImageDimension::D1),
-                            types::ReflectDimension::Type2d => Some(ImageDimension::D2),
-                            types::ReflectDimension::Type3d => Some(ImageDimension::D3),
-                            _ => todo!("Unknown dimension {:?}", element.image.dim),
-                        };
-                        let access_mode = match element.resource_type {
-                            types::ReflectResourceType::Undefined => unreachable!(),
-                            types::ReflectResourceType::Sampler => StorageAccessMode::Read,
-                            types::ReflectResourceType::CombinedImageSampler => {
-                                StorageAccessMode::Read
-                            }
-                            types::ReflectResourceType::ConstantBufferView => {
-                                StorageAccessMode::Read
-                            }
-                            types::ReflectResourceType::ShaderResourceView => {
-                                StorageAccessMode::Read
-                            }
-                            types::ReflectResourceType::UnorderedAccessView => {
-                                StorageAccessMode::ReadWrite
-                            }
-                        };
-
-                        let kind = match element.descriptor_type {
-                            types::ReflectDescriptorType::Undefined => unreachable!(),
-                            types::ReflectDescriptorType::Sampler => BindingSetElementKind::Sampler,
-                            types::ReflectDescriptorType::CombinedImageSampler => {
+                    .map(|(bind_idx, (desc_ty, ty, flags))| {
+                        let kind = match desc_ty {
+                            spirq::ty::DescriptorType::Sampler() => BindingSetElementKind::Sampler,
+                            spirq::ty::DescriptorType::CombinedImageSampler() => {
+                                let CombinedImageSamplerType { sampled_image_ty } =
+                                    ty.as_combined_image_sampler().unwrap();
                                 BindingSetElementKind::CombinedImageSampler {
-                                    format: image_format,
-                                    dimension: dimension.unwrap(),
+                                    format: if sampled_image_ty.is_depth.unwrap_or_default() {
+                                        ImageFormat::Depth32
+                                    } else {
+                                        match sampled_image_ty.scalar_ty {
+                                            spirq::ty::ScalarType::Void => todo!(),
+                                            spirq::ty::ScalarType::Boolean => todo!(),
+                                            spirq::ty::ScalarType::Integer { is_signed, bits } => {
+                                                match (is_signed, bits) {
+                                                    (true, 8) => ImageFormat::Rgba8,
+                                                    e => todo!("Handle case {e:?}"),
+                                                }
+                                            }
+                                            spirq::ty::ScalarType::Float { .. } => todo!(),
+                                        }
+                                    },
+                                    dimension: match sampled_image_ty.dim {
+                                        spirq::ty::Dim::Dim1D => ImageDimension::D1,
+                                        spirq::ty::Dim::Dim2D => ImageDimension::D2,
+                                        spirq::ty::Dim::Dim3D => ImageDimension::D3,
+                                        spirq::ty::Dim::DimCube => todo!(),
+                                        spirq::ty::Dim::DimRect => todo!(),
+                                        spirq::ty::Dim::DimBuffer => todo!(),
+                                        spirq::ty::Dim::DimSubpassData => todo!(),
+                                        spirq::ty::Dim::DimTileImageDataEXT => todo!(),
+                                    },
                                 }
                             }
-                            types::ReflectDescriptorType::SampledImage => {
+                            spirq::ty::DescriptorType::SampledImage() => {
                                 BindingSetElementKind::SampledImage
                             }
-                            types::ReflectDescriptorType::StorageImage => {
+                            spirq::ty::DescriptorType::StorageImage(access) => {
+                                let storage_image = ty.as_storage_image().unwrap();
                                 BindingSetElementKind::StorageImage {
-                                    format: image_format,
-                                    access_mode,
+                                    format: format(storage_image.fmt),
+                                    access_mode: access_mode(Some(access)),
                                 }
                             }
-                            types::ReflectDescriptorType::UniformTexelBuffer => todo!(),
-                            types::ReflectDescriptorType::StorageTexelBuffer => todo!(),
-                            types::ReflectDescriptorType::UniformBuffer => {
+                            spirq::ty::DescriptorType::UniformTexelBuffer() => todo!(),
+                            spirq::ty::DescriptorType::StorageTexelBuffer(_) => todo!(),
+                            spirq::ty::DescriptorType::UniformBuffer() => {
                                 BindingSetElementKind::Buffer {
                                     ty: crate::BufferType::Uniform,
-                                    access_mode: crate::StorageAccessMode::Read,
+                                    access_mode: StorageAccessMode::Read,
                                 }
                             }
-                            types::ReflectDescriptorType::StorageBuffer => {
+                            spirq::ty::DescriptorType::StorageBuffer(access) => {
                                 BindingSetElementKind::Buffer {
+                                    access_mode: access_mode(Some(access)),
                                     ty: crate::BufferType::Storage,
-                                    access_mode,
                                 }
                             }
-                            types::ReflectDescriptorType::UniformBufferDynamic => todo!(),
-                            types::ReflectDescriptorType::StorageBufferDynamic => todo!(),
-                            types::ReflectDescriptorType::InputAttachment => todo!(),
-                            types::ReflectDescriptorType::AccelerationStructureNV => todo!(),
-                        };
-                        let reflect_shader_stage = module.get_shader_stage();
-                        let shader_stage_flags = if reflect_shader_stage
-                            .contains(ReflectShaderStageFlags::VERTEX)
-                        {
-                            ShaderStageFlags::VERTEX
-                        } else if reflect_shader_stage.contains(ReflectShaderStageFlags::FRAGMENT) {
-                            ShaderStageFlags::FRAGMENT
-                        } else if reflect_shader_stage.contains(ReflectShaderStageFlags::COMPUTE) {
-                            ShaderStageFlags::COMPUTE
-                        } else {
-                            todo!(
-                                "Add support for shader stage flags {:?}",
-                                reflect_shader_stage
-                            )
+                            _ => todo!(),
                         };
                         BindingSetElement {
-                            binding: element.binding as _,
-                            array_length: element.array.dims.first().copied().unwrap_or(1) as usize,
+                            binding: bind_idx as _,
+                            array_length: 1,
                             ty: kind,
-                            shader_stage_flags,
+                            shader_stage_flags: flags,
                         }
                     })
                     .collect();
+
                 BindingSetLayoutInfo {
-                    set: set.set as _,
+                    set: set_idx as _,
                     layout: BindingSetLayout {
                         binding_set_elements: elements,
                     },
@@ -3523,6 +3549,47 @@ impl VulkanHal {
             &cs_layout,
             compute_pipeline_description.binding_set_layouts,
         );
+    }
+}
+
+fn ty_to_vertex_attribute_format(ty: &Type) -> VertexAttributeFormat {
+    match ty {
+        Type::Scalar(s) => match s {
+            spirq::ty::ScalarType::Void => unreachable!(),
+            spirq::ty::ScalarType::Boolean => todo!(),
+            spirq::ty::ScalarType::Integer { is_signed, .. } => {
+                if *is_signed {
+                    VertexAttributeFormat::Int
+                } else {
+                    VertexAttributeFormat::Uint
+                }
+            }
+            spirq::ty::ScalarType::Float { .. } => VertexAttributeFormat::Float,
+        },
+        Type::Vector(VectorType { scalar_ty, nscalar }) => match scalar_ty {
+            spirq::ty::ScalarType::Void => unreachable!(),
+            spirq::ty::ScalarType::Boolean => todo!(),
+            spirq::ty::ScalarType::Integer { is_signed, .. } => match (is_signed, nscalar) {
+                (true, 2) => VertexAttributeFormat::Int2,
+                (true, 3) => VertexAttributeFormat::Int3,
+                (true, 4) => VertexAttributeFormat::Int4,
+                (false, 2) => VertexAttributeFormat::Uint2,
+                (false, 3) => VertexAttributeFormat::Uint3,
+                (false, 4) => VertexAttributeFormat::Uint4,
+                _ => {
+                    todo!()
+                }
+            },
+            spirq::ty::ScalarType::Float { .. } => match nscalar {
+                2 => VertexAttributeFormat::Float2,
+                3 => VertexAttributeFormat::Float3,
+                4 => VertexAttributeFormat::Float4,
+                _ => unreachable!(),
+            },
+        },
+        Type::Matrix(_) => todo!(),
+
+        _ => todo!(),
     }
 }
 
