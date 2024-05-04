@@ -1,3 +1,5 @@
+pub mod arena;
+pub mod erased_arena;
 pub mod immutable_string;
 mod tick;
 

@@ -5,12 +5,11 @@ use std::{
 };
 
 use log::warn;
+use serde::{Deserialize, Serialize};
 
 use crate::immutable_string::ImmutableString;
 
-use self::erased_arena::{ErasedArena, Index};
-
-mod erased_arena;
+use crate::utils::erased_arena::{ErasedArena, Index};
 
 pub trait Asset: 'static {}
 
@@ -37,7 +36,7 @@ impl AssetMap {
     pub fn new() -> Self {
         Self::default()
     }
-    fn add_loader<L: AssetLoader>(&mut self, loader: L) {
+    pub fn add_loader<L: AssetLoader>(&mut self, loader: L) {
         let unsafe_loader: Box<dyn UnsafeAssetLoader> = Box::new(loader);
         let old_loader = self
             .loaders
@@ -51,7 +50,23 @@ impl AssetMap {
         }
     }
 
-    fn load<A: Asset>(&mut self, identifier: &str) -> anyhow::Result<AssetHandle<A>> {
+    pub fn add<A: Asset>(&mut self, asset: A, identifier: &str) -> AssetHandle<A> {
+        let asset_ty = TypeId::of::<A>();
+        let map = self
+            .arenas
+            .entry(asset_ty)
+            .or_insert_with(|| ErasedArena::new::<A>());
+
+        let index = map.add(asset);
+        let identifier = ImmutableString::new_dynamic(identifier);
+        self.loaded_assets.insert(identifier.clone(), index);
+        AssetHandle {
+            _phantom_data: PhantomData,
+            identifier,
+        }
+    }
+
+    pub fn load<A: Asset>(&mut self, identifier: &str) -> anyhow::Result<AssetHandle<A>> {
         let asset_ty = TypeId::of::<A>();
         let loader = if let Some(loader) = self.loaders.get_mut(&asset_ty) {
             loader
@@ -61,7 +76,7 @@ impl AssetMap {
         let map = self
             .arenas
             .entry(asset_ty)
-            .or_insert_with(|| loader.create_arena());
+            .or_insert_with(|| ErasedArena::new::<A>());
 
         let (index, ptr) = unsafe { map.preallocate_entry() };
         unsafe { loader.load_asset(identifier, ptr)? };
@@ -73,22 +88,22 @@ impl AssetMap {
         })
     }
 
-    fn get<A: Asset>(&self, handle: &AssetHandle<A>) -> Option<&A> {
+    pub fn get<A: Asset>(&self, handle: &AssetHandle<A>) -> Option<&A> {
         let index = self.loaded_assets.get(&handle.identifier).copied()?;
         self.arenas
             .get(&TypeId::of::<A>())
             .and_then(|map| map.get(index))
     }
 
-    fn get_mut<A: Asset>(&mut self, handle: &AssetHandle<A>) -> Option<&mut A> {
+    pub fn get_mut<A: Asset>(&mut self, handle: &AssetHandle<A>) -> Option<&mut A> {
         let index = self.loaded_assets.get(&handle.identifier).copied()?;
         self.arenas
             .get_mut(&TypeId::of::<A>())
             .and_then(|map| map.get_mut(index))
     }
 
-    fn unload<A: Asset>(&mut self, handle: &AssetHandle<A>) {
-        let index = if let Some(index) = self.loaded_assets.get(&handle.identifier).copied() {
+    pub fn unload<A: Asset>(&mut self, handle: &AssetHandle<A>) {
+        let index = if let Some(index) = self.loaded_assets.remove(&handle.identifier) {
             index
         } else {
             return;
@@ -98,7 +113,7 @@ impl AssetMap {
             .and_then(|map| map.remove::<A>(index));
     }
 
-    fn unload_all(&mut self) {
+    pub fn unload_all(&mut self) {
         for map in self.arenas.values_mut() {
             map.clear()
         }
@@ -108,6 +123,8 @@ impl AssetMap {
 
 /// # Safety
 /// This trait is safely implemented for all the types that implement AssetLoader
+/// It is marked as unsafe because [`UnsafeAssteLoader::load_asset`] directly writes to the payload
+/// pointer of an [`ErasedArena`] entry payload, which is an [`Option<T>`]
 unsafe trait UnsafeAssetLoader: 'static {
     fn accepts_identifier(&self, identifier: &str) -> bool;
     unsafe fn load_asset(
@@ -115,7 +132,6 @@ unsafe trait UnsafeAssetLoader: 'static {
         identifier: &str,
         backing_memory: *mut u8,
     ) -> anyhow::Result<()>;
-    fn create_arena(&self) -> ErasedArena;
 }
 
 unsafe impl<L: AssetLoader> UnsafeAssetLoader for L {
@@ -135,10 +151,6 @@ unsafe impl<L: AssetLoader> UnsafeAssetLoader for L {
         Ok(())
     }
 
-    fn create_arena(&self) -> ErasedArena {
-        ErasedArena::new::<L::LoadedAsset>()
-    }
-
     fn accepts_identifier(&self, identifier: &str) -> bool {
         <Self as AssetLoader>::accepts_identifier(self, identifier)
     }
@@ -150,6 +162,27 @@ impl<A: Asset> Clone for AssetHandle<A> {
             _phantom_data: PhantomData,
             identifier: self.identifier.clone(),
         }
+    }
+}
+
+impl<A: Asset> Serialize for AssetHandle<A> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.identifier.serialize(serializer)
+    }
+}
+
+impl<'de, A: Asset> Deserialize<'de> for AssetHandle<A> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self {
+            _phantom_data: PhantomData,
+            identifier: ImmutableString::deserialize(deserializer)?,
+        })
     }
 }
 

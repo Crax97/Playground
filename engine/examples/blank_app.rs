@@ -14,7 +14,10 @@ impl App for BlankApp {
         Ok(Self)
     }
 
-    fn handle_os_event(&mut self, _event: &winit::event::Event<()>) -> anyhow::Result<()> {
+    fn handle_window_event(&mut self, _event: &winit::event::WindowEvent) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn handle_device_event(&mut self, _event: &winit::event::DeviceEvent) -> anyhow::Result<()> {
         Ok(())
     }
 

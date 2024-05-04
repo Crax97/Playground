@@ -48,87 +48,83 @@ impl InputState {
         }
     }
 
-    pub fn update<T: 'static>(&mut self, event: &winit::event::Event<T>) {
+    pub fn update(&mut self, event: &winit::event::WindowEvent) {
         match event {
-            winit::event::Event::WindowEvent { event, .. } => match event {
-                winit::event::WindowEvent::Resized(new_size) => self.window_size = *new_size,
-                winit::event::WindowEvent::Moved(_) => {}
-                winit::event::WindowEvent::CloseRequested => {}
-                winit::event::WindowEvent::DroppedFile(_) => {}
-                winit::event::WindowEvent::HoveredFile(_) => {}
-                winit::event::WindowEvent::HoveredFileCancelled => {}
-                winit::event::WindowEvent::KeyboardInput { event, .. } => {
-                    self.update_keyboard_state(event);
-                }
-                winit::event::WindowEvent::ModifiersChanged(modifiers) => {
-                    self.update_modifiers_state(&modifiers.state());
-                }
-                winit::event::WindowEvent::CursorMoved { position, .. } => {
-                    self.last_update_cursor_position = self.current_cursor_position;
-                    let mouse_position = position.cast::<f32>();
-                    self.current_cursor_position = PhysicalPosition {
-                        x: mouse_position.x,
-                        y: self.window_size.height as f32 - mouse_position.y,
-                    };
-                }
-                winit::event::WindowEvent::MouseWheel { delta, .. } => {
-                    self.current_wheel_delta = match delta {
-                        MouseScrollDelta::LineDelta(_, y) => *y,
-                        MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
-                    } / self.window_size.height as f32
-                        * 0.5;
-                }
-                winit::event::WindowEvent::MouseInput { state, button, .. } => {
-                    self.set_cursor_button_state(*button, *state);
-                }
-                winit::event::WindowEvent::TouchpadPressure { pressure, .. } => {
-                    self.current_pointer_pressure = *pressure
-                }
-                winit::event::WindowEvent::Touch(touch) => {
-                    let winit::event::Touch {
-                        phase,
-                        location,
-                        force,
-                        ..
-                    } = touch;
+            winit::event::WindowEvent::Resized(new_size) => self.window_size = *new_size,
+            winit::event::WindowEvent::Moved(_) => {}
+            winit::event::WindowEvent::CloseRequested => {}
+            winit::event::WindowEvent::DroppedFile(_) => {}
+            winit::event::WindowEvent::HoveredFile(_) => {}
+            winit::event::WindowEvent::HoveredFileCancelled => {}
+            winit::event::WindowEvent::KeyboardInput { event, .. } => {
+                self.update_keyboard_state(event);
+            }
+            winit::event::WindowEvent::ModifiersChanged(modifiers) => {
+                self.update_modifiers_state(&modifiers.state());
+            }
+            winit::event::WindowEvent::CursorMoved { position, .. } => {
+                self.last_update_cursor_position = self.current_cursor_position;
+                let mouse_position = position.cast::<f32>();
+                self.current_cursor_position = PhysicalPosition {
+                    x: mouse_position.x,
+                    y: self.window_size.height as f32 - mouse_position.y,
+                };
+            }
+            winit::event::WindowEvent::MouseWheel { delta, .. } => {
+                self.current_wheel_delta = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => *y,
+                    MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+                } / self.window_size.height as f32
+                    * 0.5;
+            }
+            winit::event::WindowEvent::MouseInput { state, button, .. } => {
+                self.set_cursor_button_state(*button, *state);
+            }
+            winit::event::WindowEvent::TouchpadPressure { pressure, .. } => {
+                self.current_pointer_pressure = *pressure
+            }
+            winit::event::WindowEvent::Touch(touch) => {
+                let winit::event::Touch {
+                    phase,
+                    location,
+                    force,
+                    ..
+                } = touch;
 
-                    if let Some(force) = force {
-                        self.current_pointer_pressure = match force {
-                            winit::event::Force::Calibrated {
-                                force,
-                                max_possible_force,
-                                ..
-                            } => force / max_possible_force,
-                            winit::event::Force::Normalized(force) => *force,
-                        } as f32;
+                if let Some(force) = force {
+                    self.current_pointer_pressure = match force {
+                        winit::event::Force::Calibrated {
+                            force,
+                            max_possible_force,
+                            ..
+                        } => force / max_possible_force,
+                        winit::event::Force::Normalized(force) => *force,
+                    } as f32;
+                }
+                match phase {
+                    winit::event::TouchPhase::Started => {
+                        self.set_cursor_button_state(
+                            winit::event::MouseButton::Left,
+                            ElementState::Pressed,
+                        );
                     }
-                    match phase {
-                        winit::event::TouchPhase::Started => {
-                            self.set_cursor_button_state(
-                                winit::event::MouseButton::Left,
-                                ElementState::Pressed,
-                            );
-                        }
-                        winit::event::TouchPhase::Moved => {
-                            let location = location.cast::<f32>();
-                            self.current_cursor_position = PhysicalPosition {
-                                x: location.x,
-                                y: self.window_size.height as f32 - location.y,
-                            };
-                        }
-                        winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled => {
-                            self.set_cursor_button_state(
-                                winit::event::MouseButton::Left,
-                                ElementState::Released,
-                            );
-                        }
+                    winit::event::TouchPhase::Moved => {
+                        let location = location.cast::<f32>();
+                        self.current_cursor_position = PhysicalPosition {
+                            x: location.x,
+                            y: self.window_size.height as f32 - location.y,
+                        };
+                    }
+                    winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled => {
+                        self.set_cursor_button_state(
+                            winit::event::MouseButton::Left,
+                            ElementState::Released,
+                        );
                     }
                 }
-                _ => {}
-            },
-            winit::event::Event::DeviceEvent { .. } => {}
+            }
             _ => {}
-        }
+        };
     }
 
     pub fn iter_all_just_pressed_keys(&self) -> impl Iterator<Item = Key> + '_ {

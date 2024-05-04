@@ -3,16 +3,16 @@ use std::{alloc::Layout, fmt::Debug, ptr::NonNull};
 #[cfg(debug_assertions)]
 use std::any::TypeId;
 
-#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Clone, Copy)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Index {
     index: u32,
     generation: u32,
-    stored_type_id: DebugOnlyTypeId,
 }
 
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Clone, Copy)]
 struct DebugOnlyTypeId {
-    // This gets stripped in release builds to ensure that Index is 8 bytes wide
     #[cfg(debug_assertions)]
     id: TypeId,
 }
@@ -85,8 +85,25 @@ impl ErasedArena {
         self.len() == 0
     }
 
-    pub fn add<T: 'static>(&mut self, value: T) -> Index {
+    pub fn iter<T: 'static>(&self) -> impl Iterator<Item = &T> {
         debug_assert!(DebugOnlyTypeId::of::<T>() == self.stored_type_id);
+        (0..self.capacity).flat_map(|index| {
+            let entry = self.entry_ptr_at(index);
+            let entry_ref = unsafe { entry.as_ref().unwrap() };
+            entry_ref.payload.as_ref()
+        })
+    }
+
+    pub fn iter_mut<T: 'static>(&mut self) -> impl Iterator<Item = &mut T> {
+        debug_assert!(DebugOnlyTypeId::of::<T>() == self.stored_type_id);
+        (0..self.capacity).flat_map(|index| {
+            let entry = self.entry_mut_ptr_at(index);
+            let entry_ref = unsafe { entry.as_mut().unwrap() };
+            entry_ref.payload.as_mut()
+        })
+    }
+
+    pub fn add<T: 'static>(&mut self, value: T) -> Index {
         debug_assert!(DebugOnlyTypeId::of::<T>() == self.stored_type_id);
         let index = unsafe { self.allocate_index() };
 
@@ -99,7 +116,6 @@ impl ErasedArena {
     }
 
     pub fn get<T: 'static>(&self, index: Index) -> Option<&T> {
-        debug_assert!(index.stored_type_id == self.stored_type_id);
         debug_assert!(DebugOnlyTypeId::of::<T>() == self.stored_type_id);
         if index.index as usize >= self.capacity() {
             return None;
@@ -115,7 +131,6 @@ impl ErasedArena {
     }
 
     pub fn get_mut<T: 'static>(&mut self, index: Index) -> Option<&mut T> {
-        debug_assert!(index.stored_type_id == self.stored_type_id);
         debug_assert!(DebugOnlyTypeId::of::<T>() == self.stored_type_id);
         if index.index as usize >= self.capacity() {
             return None;
@@ -135,7 +150,6 @@ impl ErasedArena {
     }
 
     pub fn remove<T: 'static>(&mut self, index: Index) -> Option<T> {
-        debug_assert!(index.stored_type_id == self.stored_type_id);
         debug_assert!(DebugOnlyTypeId::of::<T>() == self.stored_type_id);
         if index.index as usize >= self.capacity() {
             return None;
@@ -154,7 +168,6 @@ impl ErasedArena {
             self.freed_indices.push(Index {
                 index: index.index,
                 generation: entry.generation,
-                stored_type_id: index.stored_type_id,
             });
             self.len -= 1;
             Some(payload)
@@ -172,7 +185,6 @@ impl ErasedArena {
                 self.freed_indices.push(Index {
                     index: index as u32,
                     generation,
-                    stored_type_id: self.stored_type_id,
                 })
             }
         }
@@ -198,7 +210,6 @@ impl ErasedArena {
             let index: Index = Index {
                 index: self.len as u32,
                 generation: 0,
-                stored_type_id: self.stored_type_id,
             };
             index
         };

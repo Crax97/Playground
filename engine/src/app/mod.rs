@@ -1,20 +1,23 @@
+use std::mem::MaybeUninit;
+
 use mgpu::{
     Device, DeviceConfiguration, DeviceFeatures, Extents2D, MgpuResult, Swapchain,
     SwapchainCreationInfo, SwapchainImage,
 };
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::{
-    event::Event,
-    event_loop::{EventLoop, EventLoopWindowTarget},
-    window::Window,
+    application::ApplicationHandler,
+    event::{DeviceEvent, Event, WindowEvent},
+    event_loop::{ActiveEventLoop, EventLoop},
+    window::{Window, WindowAttributes},
 };
 
 pub struct AppRunner {}
 
 pub struct AppContext {
     pub device: Device,
-    pub swapchain: Swapchain,
-    pub window: Window,
+    pub swapchain: MaybeUninit<Swapchain>,
+    pub window: MaybeUninit<Window>,
 }
 
 pub struct RenderContext {
@@ -28,7 +31,8 @@ pub trait App {
     where
         Self: Sized;
 
-    fn handle_os_event(&mut self, event: &Event<()>) -> anyhow::Result<()>;
+    fn handle_window_event(&mut self, event: &WindowEvent) -> anyhow::Result<()>;
+    fn handle_device_event(&mut self, event: &DeviceEvent) -> anyhow::Result<()>;
     fn update(&mut self, context: &AppContext) -> anyhow::Result<()>;
     fn render(&mut self, context: &AppContext, render_context: RenderContext)
         -> anyhow::Result<()>;
@@ -39,79 +43,115 @@ pub trait App {
 pub fn bootstrap<A: App>() -> anyhow::Result<()> {
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
-    let window = Window::new(&event_loop)?;
-    window.set_title(A::app_name());
 
+    let app_name = A::app_name();
     let device = Device::new(DeviceConfiguration {
         app_name: Some(A::app_name()),
         features: DeviceFeatures::HAL_DEBUG_LAYERS,
         device_preference: Some(mgpu::DevicePreference::HighPerformance),
         desired_frames_in_flight: 3,
-        display_handle: Some(window.display_handle()?.as_raw()),
-    })?;
-    let swapchain = device.create_swapchain(&SwapchainCreationInfo {
-        display_handle: window.display_handle()?,
-        window_handle: window.window_handle()?,
-        preferred_format: None,
-        preferred_present_mode: None,
+        display_handle: Some(event_loop.display_handle()?.as_raw()),
     })?;
 
     let mut context = AppContext {
         device,
-        swapchain,
-        window,
+        swapchain: MaybeUninit::uninit(),
+        window: MaybeUninit::uninit(),
     };
 
-    let mut app = A::create(&context)?;
+    struct AppRunner<A: App> {
+        app: A,
+        context: AppContext,
+        window_attributes: WindowAttributes,
+    }
 
-    event_loop.run(|event, target| {
-        if let Err(e) = handle_event(&mut app, &mut context, event, target) {
-            panic!("During app loop: {e:#?}");
+    impl<A: App> ApplicationHandler for AppRunner<A> {
+        fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+            let window = event_loop
+                .create_window(self.window_attributes.clone())
+                .unwrap();
+            let swapchain = self
+                .context
+                .device
+                .create_swapchain(&SwapchainCreationInfo {
+                    display_handle: window.display_handle().unwrap(),
+                    window_handle: window.window_handle().unwrap(),
+                    preferred_format: None,
+                    preferred_present_mode: None,
+                })
+                .expect("Failed to create swapchain");
+
+            self.context.window = MaybeUninit::new(window);
+            self.context.swapchain = MaybeUninit::new(swapchain);
         }
-    })?;
+
+        fn window_event(
+            &mut self,
+            event_loop: &winit::event_loop::ActiveEventLoop,
+            _window_id: winit::window::WindowId,
+            event: winit::event::WindowEvent,
+        ) {
+            handle_window_event(&mut self.app, &mut self.context, event, event_loop)
+                .expect("Failed to handle window event");
+        }
+    }
+
+    let app = A::create(&context)?;
+
+    event_loop.run_app(&mut AppRunner {
+        app,
+        context,
+        window_attributes: WindowAttributes::default().with_title(A::app_name()),
+    });
 
     Ok(())
 }
 
-fn handle_event<A: App>(
+fn handle_window_event<A: App>(
     app: &mut A,
     app_context: &mut AppContext,
-    event: Event<()>,
-    target: &EventLoopWindowTarget<()>,
+    event: WindowEvent,
+    target: &ActiveEventLoop,
 ) -> anyhow::Result<()> {
-    app.handle_os_event(&event)?;
+    app.handle_window_event(&event)?;
 
-    if let Event::WindowEvent { event, .. } = event {
-        match event {
-            winit::event::WindowEvent::Resized(new_size) => {
-                let new_extents = Extents2D {
-                    width: new_size.width,
-                    height: new_size.height,
-                };
-                app_context.swapchain.resized(
-                    new_extents,
-                    app_context.window.window_handle()?,
-                    app_context.window.display_handle()?,
-                )?;
-                app.resized(app_context, new_extents)?;
-            }
-
-            winit::event::WindowEvent::CloseRequested => target.exit(),
-            winit::event::WindowEvent::RedrawRequested => {
-                let next_image = app_context.swapchain.acquire_next_image()?;
-                app.update(app_context)?;
-
-                let render_context = RenderContext {
-                    swapchain_image: next_image,
-                };
-
-                app.render(app_context, render_context)?;
-
-                app_context.swapchain.present()?;
-                app_context.device.submit()?;
-            }
-            _ => {}
+    match event {
+        winit::event::WindowEvent::Resized(new_size) => {
+            let swapchain = unsafe { app_context.swapchain.assume_init_mut() };
+            let window = unsafe { app_context.window.assume_init_mut() };
+            let new_extents = Extents2D {
+                width: new_size.width,
+                height: new_size.height,
+            };
+            swapchain.resized(
+                new_extents,
+                window.window_handle()?,
+                window.display_handle()?,
+            )?;
+            app.resized(app_context, new_extents)?;
         }
+
+        winit::event::WindowEvent::CloseRequested => target.exit(),
+        winit::event::WindowEvent::RedrawRequested => {
+            app.update(app_context)?;
+            let next_image = {
+                let swapchain = unsafe { app_context.swapchain.assume_init_mut() };
+                swapchain.acquire_next_image()?
+            };
+
+            let render_context = RenderContext {
+                swapchain_image: next_image,
+            };
+
+            app.render(app_context, render_context)?;
+
+            let swapchain = unsafe { app_context.swapchain.assume_init_mut() };
+            let window = unsafe { app_context.window.assume_init_mut() };
+            swapchain.present()?;
+            app_context.device.submit()?;
+            window.request_redraw();
+        }
+        _ => {}
     };
     Ok(())
 }
