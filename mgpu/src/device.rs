@@ -713,7 +713,7 @@ impl Device {
         layout: &BindingSetLayout,
     ) -> MgpuResult<BindingSet> {
         #[cfg(debug_assertions)]
-        Self::validate_bdinging_set_description(description, layout);
+        Self::validate_binding_set_description(description, layout);
         self.hal.create_binding_set(description, layout)
     }
 
@@ -941,7 +941,7 @@ impl Device {
                     .flat_map(|shader_bs| {
                         shader_bs.layout.binding_set_elements.iter().find(|l| {
                             l.binding == bs_element.binding
-                                && bs_element.shader_stage_flags.contains(l.shader_stage_flags)
+                                
                         })
                     })
                     .next();
@@ -960,7 +960,8 @@ impl Device {
                     binding_set_layout_info.set,
                     matching_element,
                     bs_element
-                )
+                );
+                check!(bs_element.shader_stage_flags.contains(matching_element.shader_stage_flags), "The binding set describes an element with shader flags {:?}, which is not visibile to shader stage {:?}", bs_element.shader_stage_flags, matching_element.shader_stage_flags);
             }
         }
 
@@ -1011,10 +1012,11 @@ impl Device {
     }
 
     #[cfg(debug_assertions)]
-    fn validate_bdinging_set_description(
+    fn validate_binding_set_description(
         description: &BindingSetDescription,
         layout: &BindingSetLayout,
     ) {
+        /// TODO: Ensure that bindings in description are present in layout
         for layout_binding in &layout.binding_set_elements {
             let description_binding = description
                 .bindings
@@ -1089,6 +1091,10 @@ impl std::fmt::Display for DeviceInfo {
         f.write_fmt(format_args!(
             "Supports swapchain: {}\n",
             self.swapchain_support
+        ))?;
+        f.write_fmt(format_args!(
+            "Max frames in flight: {}\n",
+            self.frames_in_flight
         ))
     }
 }

@@ -230,8 +230,8 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
         );
     }
 
-    fn set_binding_sets(&mut self, binding_sets: &[BindingSet]) {
-        self.binding_sets = binding_sets.to_vec();
+    fn set_binding_sets(&mut self, binding_sets: &[&BindingSet]) {
+        self.binding_sets = binding_sets.iter().map(|&c| c.clone()).collect();
     }
 }
 
@@ -337,7 +337,7 @@ impl<'c> RenderPass<'c> {
         self.index_buffer = Some(index_buffer);
     }
 
-    pub fn set_binding_sets(&mut self, binding_sets: &[BindingSet]) {
+    pub fn set_binding_sets(&mut self, binding_sets: &[&BindingSet]) {
         self.command_recorder.set_binding_sets(binding_sets);
     }
 
@@ -451,7 +451,7 @@ impl<'c, C: ComputeCommandRecorder> ComputePass<'c, C> {
         self.pipeline = Some(pipeline);
     }
 
-    pub fn set_binding_sets(&mut self, binding_sets: &[BindingSet]) {
+    pub fn set_binding_sets(&mut self, binding_sets: &[&BindingSet]) {
         self.command_recorder.set_binding_sets(binding_sets);
     }
 

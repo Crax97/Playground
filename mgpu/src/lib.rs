@@ -403,6 +403,9 @@ pub enum VertexAttributeFormat {
     Float2,
     Float3,
     Float4,
+    Mat2x2,
+    Mat3x3,
+    Mat4x4,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
@@ -594,7 +597,7 @@ pub enum BufferType {
     Storage,
 }
 
-#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
+#[derive(Clone, Copy, PartialOrd, Ord, Debug, Hash, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum StorageAccessMode {
     Read,
@@ -684,6 +687,7 @@ pub struct Binding {
     pub visibility: ShaderStageFlags,
 }
 
+#[derive(Debug)]
 pub struct BindingSetDescription<'a> {
     pub label: Option<&'a str>,
     pub bindings: &'a [Binding],
@@ -700,12 +704,31 @@ bitflags! {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum VariableType {
+    Compound(Vec<ShaderVariable>),
+    Field {
+        format: VertexAttributeFormat,
+        offset: usize,
+    },
+    Texture(StorageAccessMode),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct ShaderVariable {
+    pub name: Option<String>,
+    pub binding_set: usize,
+    pub binding_index: usize,
+    pub ty: VariableType,
+}
+
 #[derive(Clone, Default, Debug)]
 pub struct ShaderModuleLayout {
     pub entry_points: Vec<String>,
     pub inputs: Vec<ShaderAttribute>,
     pub outputs: Vec<ShaderAttribute>,
     pub binding_sets: Vec<BindingSetLayoutInfo>,
+    pub variables: Vec<ShaderVariable>,
 }
 
 /// A Buffer is a linear data buffer that can be read or written by a shader

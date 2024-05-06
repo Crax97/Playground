@@ -351,6 +351,9 @@ impl ToVk for VertexAttributeFormat {
             VertexAttributeFormat::Float2 => vk::Format::R32G32_SFLOAT,
             VertexAttributeFormat::Float3 => vk::Format::R32G32B32_SFLOAT,
             VertexAttributeFormat::Float4 => vk::Format::R32G32B32A32_SFLOAT,
+            VertexAttributeFormat::Mat2x2 => unreachable!(),
+            VertexAttributeFormat::Mat3x3 => unreachable!(),
+            VertexAttributeFormat::Mat4x4 => unreachable!(),
         }
     }
 }

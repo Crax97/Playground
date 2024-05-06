@@ -19,7 +19,7 @@ use crate::{
     GraphicsPipelineLayout, Image, ImageDescription, ImageDimension, ImageFormat, ImageRegion,
     ImageSubresource, MemoryDomain, MgpuError, MgpuResult, PresentMode, RenderPassInfo, Sampler,
     SamplerDescription, ShaderAttribute, ShaderModule, ShaderModuleLayout, ShaderStageFlags,
-    StorageAccessMode, SwapchainCreationInfo, VertexAttributeFormat,
+    ShaderVariable, StorageAccessMode, SwapchainCreationInfo, VariableType, VertexAttributeFormat,
 };
 #[cfg(debug_assertions)]
 use std::collections::HashSet;
@@ -3027,6 +3027,7 @@ impl VulkanHal {
         let mut inputs = vec![];
         let mut outputs = vec![];
         let mut descriptors = HashMap::<u32, HashMap<u32, _>>::default();
+        let mut variables = vec![];
 
         module_entry_points.iter().for_each(|entry| {
             for var in &entry.vars {
@@ -3044,6 +3045,7 @@ impl VulkanHal {
                         });
                     }
                     Variable::Descriptor {
+                        name,
                         desc_bind,
                         desc_ty,
                         ty,
@@ -3053,8 +3055,13 @@ impl VulkanHal {
                             .entry(desc_bind.set())
                             .or_default()
                             .entry(desc_bind.bind())
-                            .or_insert((desc_ty.clone(), ty.clone(), ShaderStageFlags::empty()))
-                            .2 |= match entry.exec_model {
+                            .or_insert((
+                                name.clone(),
+                                desc_ty.clone(),
+                                ty.clone(),
+                                ShaderStageFlags::empty(),
+                            ))
+                            .3 |= match entry.exec_model {
                             spirq::spirv::ExecutionModel::Vertex => ShaderStageFlags::VERTEX,
                             spirq::spirv::ExecutionModel::Fragment => ShaderStageFlags::FRAGMENT,
                             spirq::spirv::ExecutionModel::GLCompute => ShaderStageFlags::COMPUTE,
@@ -3125,7 +3132,7 @@ impl VulkanHal {
             .map(|(set_idx, elements)| {
                 let elements = elements
                     .into_iter()
-                    .map(|(bind_idx, (desc_ty, ty, flags))| {
+                    .map(|(bind_idx, (name, desc_ty, ty, flags))| {
                         let kind = match desc_ty {
                             spirq::ty::DescriptorType::Sampler() => BindingSetElementKind::Sampler,
                             spirq::ty::DescriptorType::CombinedImageSampler() => {
@@ -3160,18 +3167,37 @@ impl VulkanHal {
                                 }
                             }
                             spirq::ty::DescriptorType::SampledImage() => {
+                                variables.push(ShaderVariable {
+                                    name,
+                                    binding_set: set_idx as _,
+                                    binding_index: bind_idx as _,
+                                    ty: VariableType::Texture(StorageAccessMode::Read),
+                                });
+
                                 BindingSetElementKind::SampledImage
                             }
                             spirq::ty::DescriptorType::StorageImage(access) => {
                                 let storage_image = ty.as_storage_image().unwrap();
+                                let access_mode = access_mode(Some(access));
+                                variables.push(ShaderVariable {
+                                    name,
+                                    binding_set: set_idx as _,
+                                    binding_index: bind_idx as _,
+                                    ty: VariableType::Texture(access_mode),
+                                });
                                 BindingSetElementKind::StorageImage {
                                     format: format(storage_image.fmt),
-                                    access_mode: access_mode(Some(access)),
+                                    access_mode,
                                 }
                             }
                             spirq::ty::DescriptorType::UniformTexelBuffer() => todo!(),
                             spirq::ty::DescriptorType::StorageTexelBuffer(_) => todo!(),
                             spirq::ty::DescriptorType::UniformBuffer() => {
+                                if let Some(struc) = ty.as_struct() {
+                                    variables
+                                        .extend(get_struct_variables(struc, set_idx, bind_idx));
+                                }
+
                                 BindingSetElementKind::Buffer {
                                     ty: crate::BufferType::Uniform,
                                     access_mode: StorageAccessMode::Read,
@@ -3207,6 +3233,7 @@ impl VulkanHal {
             inputs,
             outputs,
             binding_sets,
+            variables,
         })
     }
 
@@ -3345,19 +3372,24 @@ impl VulkanHal {
     ) -> MgpuResult<DescriptorSetAllocation> {
         const MAX_SETS_PER_POOL: usize = 1000;
         let make_ds_pool = || {
-            let mut descriptor_counts: HashMap<vk::DescriptorType, u32> = HashMap::new();
+            let mut descriptor_counts_map: HashMap<vk::DescriptorType, u32> = HashMap::new();
 
             for binding in &binding_set_layout.binding_set_elements {
                 let ty = binding.ty.to_vk();
-                *descriptor_counts.entry(ty).or_default() += 1;
+                *descriptor_counts_map.entry(ty).or_default() += 1;
             }
-            let descriptor_counts = descriptor_counts
-                .into_iter()
-                .map(|(ty, ds)| vk::DescriptorPoolSize {
+            let mut descriptor_counts = Vec::with_capacity(descriptor_counts_map.len());
+
+            for (ty, ds) in descriptor_counts_map {
+                descriptor_counts.push(vk::DescriptorPoolSize {
                     ty,
                     descriptor_count: ds,
-                })
-                .collect::<Vec<_>>();
+                });
+            }
+
+            for count in &mut descriptor_counts {
+                count.descriptor_count *= MAX_SETS_PER_POOL as u32;
+            }
 
             let ds_pool_create_info = vk::DescriptorPoolCreateInfo::default()
                 .max_sets(MAX_SETS_PER_POOL as _)
@@ -3552,6 +3584,35 @@ impl VulkanHal {
     }
 }
 
+fn get_struct_variables(
+    struc: &spirq::ty::StructType,
+    set_idx: u32,
+    bind_idx: u32,
+) -> Vec<ShaderVariable> {
+    let mut variables = vec![];
+    for member in &struc.members {
+        variables.push(ShaderVariable {
+            name: member.name.clone(),
+            binding_set: set_idx as _,
+            binding_index: bind_idx as _,
+            ty: match &member.ty {
+                Type::Scalar(_) | Type::Vector(_) | Type::Matrix(_) | Type::Array(_) => {
+                    VariableType::Field {
+                        offset: member.offset.unwrap(),
+                        format: ty_to_vertex_attribute_format(&member.ty),
+                    }
+                }
+                Type::Struct(struc) => {
+                    let variables = get_struct_variables(struc, set_idx, bind_idx);
+                    VariableType::Compound(variables)
+                }
+                _ => todo!(),
+            },
+        });
+    }
+    variables
+}
+
 fn ty_to_vertex_attribute_format(ty: &Type) -> VertexAttributeFormat {
     match ty {
         Type::Scalar(s) => match s {
@@ -3587,7 +3648,30 @@ fn ty_to_vertex_attribute_format(ty: &Type) -> VertexAttributeFormat {
                 _ => unreachable!(),
             },
         },
-        Type::Matrix(_) => todo!(),
+        Type::Matrix(m) => match (m.nvector, &m.vector_ty) {
+            (
+                2,
+                VectorType {
+                    scalar_ty: spirq::ty::ScalarType::Float { .. },
+                    nscalar: 2,
+                },
+            ) => VertexAttributeFormat::Mat2x2,
+            (
+                3,
+                VectorType {
+                    scalar_ty: spirq::ty::ScalarType::Float { .. },
+                    nscalar: 3,
+                },
+            ) => VertexAttributeFormat::Mat3x3,
+            (
+                4,
+                VectorType {
+                    scalar_ty: spirq::ty::ScalarType::Float { .. },
+                    nscalar: 4,
+                },
+            ) => VertexAttributeFormat::Mat4x4,
+            _ => todo!("Unhandled case of matrix {:?}", (m.nvector, &m.vector_ty)),
+        },
 
         _ => todo!(),
     }

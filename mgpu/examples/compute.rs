@@ -257,7 +257,7 @@ fn main() {
                                 },
                             );
                             compute_pass.set_pipeline(self.compute_pipeline);
-                            compute_pass.set_binding_sets(&[self.compute_binding_set.clone()]);
+                            compute_pass.set_binding_sets(&[&self.compute_binding_set]);
                             compute_pass.dispatch(16, 16, 16).unwrap();
                         }
                         compute_command_recorder.submit().unwrap();
@@ -291,7 +291,7 @@ fn main() {
                             render_pass
                                 .set_vertex_buffers([self.cube_data_buffer, self.cube_data_buffer]);
                             render_pass.set_index_buffer(self.cube_index_buffer);
-                            render_pass.set_binding_sets(&[self.binding_set.clone()]);
+                            render_pass.set_binding_sets(&[&self.binding_set]);
                             render_pass.draw_indexed(36, 1, 0, 0, 0).unwrap();
                             self.rotation += 0.01;
                         }

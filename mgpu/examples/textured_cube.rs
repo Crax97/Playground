@@ -247,7 +247,7 @@ fn main() {
                             render_pass
                                 .set_vertex_buffers([self.cube_data_buffer, self.cube_data_buffer]);
                             render_pass.set_index_buffer(self.cube_index_buffer);
-                            render_pass.set_binding_sets(&[self.binding_set.clone()]);
+                            render_pass.set_binding_sets(&[&self.binding_set]);
                             render_pass.draw_indexed(36, 1, 0, 0, 0).unwrap();
                             self.rotation += 0.01;
                         }
