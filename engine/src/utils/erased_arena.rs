@@ -301,6 +301,9 @@ unsafe impl Sync for ErasedArena {}
 
 impl Drop for ErasedArena {
     fn drop(&mut self) {
+        if self.capacity == 0 {
+            return;
+        }
         self.clear();
 
         unsafe {
@@ -340,6 +343,11 @@ mod tests {
 
         let array_layout = ErasedArena::array_layout(Layout::new::<u32>(), 0);
         assert_eq!(array_layout, Layout::new::<[u32; 0]>());
+    }
+
+    #[test]
+    fn empty_arena() {
+        let _ = ErasedArena::new::<u32>();
     }
 
     #[test]

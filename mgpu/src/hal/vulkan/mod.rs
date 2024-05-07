@@ -1566,13 +1566,14 @@ impl Hal for VulkanHal {
         let device = &self.logical_device.handle;
         let filter = filter.to_vk();
 
-        let (source_image, source_layout) = self.resolver.apply(source, |img| {
+        let (source_image, mut source_layout) = self.resolver.apply(source, |img| {
             Ok((
                 img.handle,
                 img.get_subresource_layout(source_region.to_image_subresource()),
             ))
         })?;
-        let (dest_image, dest_layout) = self.resolver.apply(dest, |img| {
+
+        let (dest_image, mut dest_layout) = self.resolver.apply(dest, |img| {
             Ok((
                 img.handle,
                 img.get_subresource_layout(dest_region.to_image_subresource()),
@@ -1581,6 +1582,73 @@ impl Hal for VulkanHal {
 
         debug_assert!(source_layout.image_layout != vk::ImageLayout::UNDEFINED);
         debug_assert!(dest_layout.image_layout != vk::ImageLayout::UNDEFINED);
+
+        if source_layout.image_layout != vk::ImageLayout::TRANSFER_SRC_OPTIMAL {
+            device.cmd_pipeline_barrier2(
+                vk_command_buffer,
+                &vk::DependencyInfo::default()
+                    .dependency_flags(vk::DependencyFlags::BY_REGION)
+                    .image_memory_barriers(&[vk::ImageMemoryBarrier2::default()
+                        .src_access_mask(source_layout.access_mask)
+                        .src_stage_mask(source_layout.stage_mask)
+                        .old_layout(source_layout.image_layout)
+                        .dst_access_mask(vk::AccessFlags2::TRANSFER_READ)
+                        .dst_stage_mask(vk::PipelineStageFlags2::TRANSFER)
+                        .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+                        .image(source_image)
+                        .subresource_range(vk::ImageSubresourceRange {
+                            aspect_mask: source.format.aspect_mask(),
+                            base_mip_level: source_region.mip,
+                            level_count: source_region.num_mips.get(),
+                            base_array_layer: source_region.base_array_layer,
+                            layer_count: source_region.num_layers.get(),
+                        })]),
+            );
+
+            source_layout = LayoutInfo {
+                image_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+                stage_mask: vk::PipelineStageFlags2::TRANSFER,
+            };
+
+            self.resolver.apply_mut(source, |i| {
+                i.set_subresource_layout(source_region.to_image_subresource(), source_layout);
+                Ok(())
+            })?;
+        }
+        if dest_layout.image_layout != vk::ImageLayout::TRANSFER_DST_OPTIMAL {
+            device.cmd_pipeline_barrier2(
+                vk_command_buffer,
+                &vk::DependencyInfo::default()
+                    .dependency_flags(vk::DependencyFlags::BY_REGION)
+                    .image_memory_barriers(&[vk::ImageMemoryBarrier2::default()
+                        .src_access_mask(dest_layout.access_mask)
+                        .src_stage_mask(dest_layout.stage_mask)
+                        .old_layout(dest_layout.image_layout)
+                        .dst_access_mask(vk::AccessFlags2::TRANSFER_WRITE)
+                        .dst_stage_mask(vk::PipelineStageFlags2::TRANSFER)
+                        .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                        .image(dest_image)
+                        .subresource_range(vk::ImageSubresourceRange {
+                            aspect_mask: dest.format.aspect_mask(),
+                            base_mip_level: dest_region.mip,
+                            level_count: dest_region.num_mips.get(),
+                            base_array_layer: dest_region.base_array_layer,
+                            layer_count: dest_region.num_layers.get(),
+                        })]),
+            );
+
+            dest_layout = LayoutInfo {
+                image_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+                stage_mask: vk::PipelineStageFlags2::TRANSFER,
+            };
+
+            self.resolver.apply_mut(dest, |i| {
+                i.set_subresource_layout(dest_region.to_image_subresource(), dest_layout);
+                Ok(())
+            })?;
+        }
 
         let blit = vk::ImageBlit {
             src_subresource: vk::ImageSubresourceLayers {

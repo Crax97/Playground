@@ -8,6 +8,11 @@ pub struct Mesh {
     pub(crate) tangent_component: Buffer,
     pub(crate) uv_component: Buffer,
     pub(crate) color_component: Buffer,
+    pub(crate) info: MeshInfo,
+}
+
+pub struct MeshInfo {
+    pub num_indices: usize,
 }
 
 pub struct MeshDescription<'a> {
@@ -141,6 +146,9 @@ impl Mesh {
             tangent_component,
             uv_component,
             color_component,
+            info: MeshInfo {
+                num_indices: description.indices.len(),
+            },
         })
     }
 }

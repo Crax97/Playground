@@ -11,9 +11,10 @@ use engine::{
     },
     compile_glsl,
     input::InputState,
+    math::Transform,
     sampler_allocator::SamplerAllocator,
     scene::{Scene, SceneMesh, SceneNode, SceneNodeId},
-    scene_renderer::{PointOfView, SceneRenderer, SceneRenderingParams},
+    scene_renderer::{PointOfView, ProjectionMode, SceneRenderer, SceneRenderingParams},
     shader_cache::ShaderCache,
 };
 use glam::{vec2, vec3};
@@ -29,11 +30,18 @@ layout(location = 4) in vec2 uv;
 
 layout(location = 0) out vec2 fs_uv;
 
-layout(set = 0, binding = 0, std140) uniform ObjectData {
-    mat4 mvp;
+layout(push_constant, std140) uniform ObjectData {
+    mat4 model;
+};
+
+layout(set = 0, binding = 0, std140) uniform GlobalFrameData {
+    mat4 projection;
+    mat4 view;
+    float frame_time;
 };
 
 void main() {
+    mat4 mvp = projection * view * model;
     vec4 vs_pos = mvp * vec4(pos, 1.0);
     gl_Position = vs_pos;
     fs_uv = uv;
@@ -58,6 +66,7 @@ pub struct CubesSceneApplication {
     first_node_handle: SceneNodeId,
     input: InputState,
     scene_renderer: SceneRenderer,
+    pov: PointOfView,
 }
 
 impl App for CubesSceneApplication {
@@ -115,21 +124,30 @@ impl App for CubesSceneApplication {
         );
         let simple_material = material.unwrap();
         let material_handle = asset_map.add(simple_material, "simple_material");
-        let first_node_handle = scene.add_node(SceneNode::default().label("First Cube").primitive(
-            engine::scene::ScenePrimitive::Mesh(SceneMesh {
-                handle: cube_handle,
-                material: material_handle,
-            }),
-        ));
+        let first_node_handle = scene.add_node(
+            SceneNode::default()
+                .label("First Cube")
+                .primitive(engine::scene::ScenePrimitive::Mesh(SceneMesh {
+                    handle: cube_handle,
+                    material: material_handle,
+                }))
+                .transform(Transform {
+                    location: vec3(0.0, 0.0, 10.0),
+                    ..Default::default()
+                }),
+        );
 
         let scene_renderer = SceneRenderer::new(&context.device)?;
+        let mut pov = PointOfView::new_perspective(0.01, 1000.0, 75.0, 1920.0 / 1080.0);
 
+        pov.transform.location = vec3(0.0, 10.0, -5.0);
         Ok(Self {
             asset_map,
             scene,
             first_node_handle,
             input: InputState::default(),
             scene_renderer,
+            pov,
         })
     }
 
@@ -152,17 +170,15 @@ impl App for CubesSceneApplication {
         context: &engine::app::AppContext,
         render_context: engine::app::RenderContext,
     ) -> anyhow::Result<()> {
-        let pov = PointOfView::new_perspective(
-            0.01,
-            1000.0,
-            75.0,
-            render_context.swapchain_image.extents.width as f32
+        self.pov.projection_mode = ProjectionMode::Perspective {
+            fov_y_radians: 75.0f32.to_radians(),
+            aspect_ratio: render_context.swapchain_image.extents.width as f32
                 / render_context.swapchain_image.extents.height as f32,
-        );
+        };
         self.scene_renderer.render(SceneRenderingParams {
             device: &context.device,
             scene: &self.scene,
-            pov,
+            pov: &self.pov,
             asset_map: &mut self.asset_map,
             output_image: render_context.swapchain_image.view,
         })?;

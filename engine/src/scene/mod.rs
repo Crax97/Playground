@@ -89,4 +89,9 @@ impl SceneNode {
         self.primitive_type = primitive;
         self
     }
+
+    pub fn transform(mut self, transform: Transform) -> Self {
+        self.transform = transform;
+        self
+    }
 }

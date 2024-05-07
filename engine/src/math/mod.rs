@@ -1,3 +1,5 @@
+pub mod color;
+
 use glam::{vec3, Mat4, Quat, Vec3, Vec4Swizzles};
 use serde::{Deserialize, Serialize};
 

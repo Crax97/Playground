@@ -1,22 +1,24 @@
 use bytemuck::{Pod, Zeroable};
-use glam::{vec3, Mat4, Vec3, Vec4};
+use glam::Mat4;
 use mgpu::{
     AttachmentStoreOp, Binding, BindingSet, BindingSetDescription, BindingSetElement,
-    BindingSetLayout, Buffer, BufferDescription, BufferUsageFlags, DepthStencilTarget,
-    DepthStencilTargetLoadOp, Device, Extents3D, Graphics, Image, ImageDescription,
-    ImageUsageFlags, ImageView, ImageViewDescription, MgpuResult, Offset2D, Rect2D,
+    BindingSetLayout, BlitParams, Buffer, BufferDescription, BufferUsageFlags, BufferWriteParams,
+    DepthStencilTarget, DepthStencilTargetLoadOp, Device, Extents3D, Graphics, Image,
+    ImageDescription, ImageUsageFlags, ImageView, ImageViewDescription, Offset2D, Rect2D,
     RenderPassDescription, RenderTarget, RenderTargetLoadOp, ShaderStageFlags,
 };
 
 use crate::{
     assert_size_does_not_exceed,
     asset_map::AssetMap,
-    math::{constants::UP, Transform},
+    math::{color::LinearColor, constants::UP, Transform},
     scene::Scene,
 };
 
 pub struct SceneRenderer {
     frames: Vec<FrameData>,
+    clear_color: LinearColor,
+
     current_frame: usize,
 }
 
@@ -44,8 +46,8 @@ pub enum ProjectionMode {
 }
 
 pub struct PointOfView {
-    transform: Transform,
-    projection_mode: ProjectionMode,
+    pub transform: Transform,
+    pub projection_mode: ProjectionMode,
     near_plane: f32,
     far_plane: f32,
 }
@@ -54,16 +56,16 @@ pub struct SceneRenderingParams<'a> {
     pub device: &'a Device,
     pub output_image: ImageView,
     pub scene: &'a Scene,
-    pub pov: PointOfView,
+    pub pov: &'a PointOfView,
     pub asset_map: &'a mut AssetMap,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Zeroable, Pod)]
-struct GPUPointOfView {
-    matrix: Mat4,
-    position: Vec4,
-    direction: Vec4,
+struct GPUGlobalFrameData {
+    projection: Mat4,
+    view: Mat4,
+    delta_time: [f32; 4],
 }
 
 #[repr(C)]
@@ -100,7 +102,7 @@ impl SceneRenderer {
                 usage_flags: BufferUsageFlags::TRANSFER_DST
                     | BufferUsageFlags::UNIFORM_BUFFER
                     | BufferUsageFlags::STORAGE_BUFFER,
-                size: std::mem::size_of::<[GPUPointOfView; 1000]>(),
+                size: std::mem::size_of::<GPUGlobalFrameData>(),
                 memory_domain: mgpu::MemoryDomain::Gpu,
             })?;
             let final_render_image = device.create_image(&ImageDescription {
@@ -180,13 +182,14 @@ impl SceneRenderer {
 
         Ok(Self {
             frames: frame_data,
+            clear_color: LinearColor::VIOLET,
             current_frame: 0,
         })
     }
-    pub fn render(&mut self, params: SceneRenderingParams) -> MgpuResult<()> {
+    pub fn render(&mut self, params: SceneRenderingParams) -> anyhow::Result<()> {
         let device = params.device;
         let current_frame = &self.frames[self.current_frame];
-        // self.update_buffers(params.device, current_frame);
+        self.update_buffers(params.device, current_frame, &params.pov)?;
         let mut command_recorder = device.create_command_recorder::<Graphics>();
 
         {
@@ -196,13 +199,13 @@ impl SceneRenderer {
                     render_targets: &[RenderTarget {
                         view: current_frame.final_render_image_view,
                         sample_count: mgpu::SampleCount::One,
-                        load_op: RenderTargetLoadOp::Clear([0.0; 4]),
+                        load_op: RenderTargetLoadOp::Clear(self.clear_color.data),
                         store_op: AttachmentStoreOp::Store,
                     }],
                     depth_stencil_attachment: Some(&DepthStencilTarget {
                         view: current_frame.depth_stencil_image_view,
                         sample_count: mgpu::SampleCount::One,
-                        load_op: DepthStencilTargetLoadOp::Clear(0.0, 0),
+                        load_op: DepthStencilTargetLoadOp::Clear(1.0, 0),
                         store_op: AttachmentStoreOp::Store,
                     }),
                     render_area: Rect2D {
@@ -216,7 +219,13 @@ impl SceneRenderer {
                     crate::scene::ScenePrimitive::Mesh(info) => {
                         let mesh = params.asset_map.get(&info.handle).expect("No mesh");
                         let material = params.asset_map.get(&info.material).expect("No material");
+                        let model_matrix = item.transform.matrix();
 
+                        scene_output_pass.set_pipeline(material.pipeline);
+                        scene_output_pass.set_push_constant(
+                            bytemuck::cast_slice(&[model_matrix]),
+                            ShaderStageFlags::ALL_GRAPHICS,
+                        );
                         scene_output_pass.set_binding_sets(&[
                             &current_frame.frame_binding_set,
                             &material.binding_set,
@@ -230,13 +239,47 @@ impl SceneRenderer {
                             mesh.uv_component,
                         ]);
                         scene_output_pass.set_index_buffer(mesh.index_buffer);
+                        scene_output_pass.draw_indexed(mesh.info.num_indices, 1, 0, 0, 0)?;
                     }
                 }
             }
         }
+        command_recorder.blit(&BlitParams {
+            src_image: current_frame.final_render_image,
+            src_region: current_frame.final_render_image.whole_region(),
+            dst_image: params.output_image.owner(),
+            dst_region: params.output_image.owner().whole_region(),
+            filter: mgpu::FilterMode::Linear,
+        });
         command_recorder.submit()?;
+
         self.current_frame = (self.current_frame + 1) % params.device.get_info().frames_in_flight;
 
+        Ok(())
+    }
+
+    fn update_buffers(
+        &self,
+        device: &Device,
+        current_frame: &FrameData,
+        pov: &PointOfView,
+    ) -> anyhow::Result<()> {
+        let pov_projection_matrix = pov.projection_matrix();
+        let pov_view_matrix = pov.view_matrix();
+        let gpu_global_data = GPUGlobalFrameData {
+            projection: pov_projection_matrix,
+            view: pov_view_matrix,
+            delta_time: [1.0 / 60.0, 0.0, 0.0, 0.0],
+        };
+
+        device.write_buffer(
+            current_frame.point_of_view_buffer,
+            &BufferWriteParams {
+                data: bytemuck::cast_slice(&[gpu_global_data]),
+                offset: 0,
+                size: std::mem::size_of::<GPUGlobalFrameData>(),
+            },
+        )?;
         Ok(())
     }
 }
@@ -260,7 +303,11 @@ impl PointOfView {
     }
 
     pub fn view_matrix(&self) -> Mat4 {
-        Mat4::look_at_rh(self.transform.location, self.transform.forward(), UP)
+        Mat4::look_at_rh(
+            self.transform.location,
+            self.transform.location + self.transform.forward(),
+            UP,
+        )
     }
 
     pub fn projection_matrix(&self) -> Mat4 {

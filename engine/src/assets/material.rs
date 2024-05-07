@@ -19,10 +19,7 @@ use crate::{
     shader_cache::ShaderCache,
 };
 
-use super::{
-    shader::{self, Shader},
-    texture::Texture,
-};
+use super::texture::Texture;
 
 pub struct Material {
     pub properties: MaterialProperties,
@@ -186,7 +183,7 @@ impl Material {
                         frequency: VertexInputFrequency::PerVertex,
                     },
                     VertexInputDescription {
-                        location: 3,
+                        location: 4,
                         stride: std::mem::size_of::<[f32; 2]>(),
                         offset: 0,
                         format: VertexAttributeFormat::Float2,
