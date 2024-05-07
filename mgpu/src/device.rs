@@ -213,9 +213,9 @@ impl Device {
                                                         *pipeline,
                                                     )?;
                                                 }
-                        for (i, pc) in push_constants.iter().enumerate() {
-                            self.hal.set_graphics_push_constant(command_recorder, *pipeline, &pc.data, pc.visibility)?;
-                        }
+                                                for pc in push_constants.iter() {
+                                                    self.hal.set_graphics_push_constant(command_recorder, *pipeline, &pc.data, pc.visibility)?;
+                                                }
                                                 match *draw_type {
                                                     Draw {
                                                         vertices,
@@ -976,7 +976,11 @@ impl Device {
         }
 
        if let Some(pc) = &graphics_pipeline_description.push_constant_info {
+            let whole_push_constant_shader_stages = vertex_shader_layout.push_constant.unwrap_or_default() | 
+                fragment_shader_layout.and_then(|v| v.push_constant).unwrap_or_default();
             check!(pc.size <= crate::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES, "A push constant range cannot exceed the maximum size of {} bytes", crate::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES);
+            check!(pc.visibility.contains(whole_push_constant_shader_stages), "The pipeline's push constant visibility doesn't include all the shader stage where the
+             push constant is used, expected {:?} got {:?}", whole_push_constant_shader_stages, pc.visibility);
         }
 
         Ok(())
@@ -1022,6 +1026,13 @@ impl Device {
             }
         }
 
+       if let Some(pc) = &compute_pipeline_description.push_constant_info {
+            let whole_push_constant_shader_stages = shader_layout.push_constant.unwrap_or_default() ;
+            check!(pc.size <= crate::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES, "A push constant range cannot exceed the maximum size of {} bytes", crate::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES);
+            check!(pc.visibility.contains(whole_push_constant_shader_stages), "The pipeline's push constant visibility doesn't include all the shader stage where the
+             push constant is used, expected {:?} got {:?}", whole_push_constant_shader_stages, pc.visibility);
+        }
+
         Ok(())
     }
 
@@ -1030,7 +1041,7 @@ impl Device {
         description: &BindingSetDescription,
         layout: &BindingSetLayout,
     ) {
-        /// TODO: Ensure that bindings in description are present in layout
+        // TODO: Ensure that bindings in description are present in layout
         for layout_binding in &layout.binding_set_elements {
             let description_binding = description
                 .bindings

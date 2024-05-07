@@ -1071,10 +1071,6 @@ impl Hal for VulkanHal {
         data: &[u8],
         visibility: ShaderStageFlags,
     ) -> MgpuResult<()> {
-        check!(
-            visibility.contains(ShaderStageFlags::COMPUTE),
-            "set_compute_push_constant with invalid stage flags"
-        );
         let cb = vk::CommandBuffer::from_raw(command_recorder.id);
         let compute_pipeline = self.resolver.apply(compute_pipeline, |g| Ok(g.vk_layout))?;
 
@@ -3091,8 +3087,10 @@ impl VulkanHal {
         let mut outputs = vec![];
         let mut descriptors = HashMap::<u32, HashMap<u32, _>>::default();
         let mut variables = vec![];
+        let mut push_constant: Option<ShaderStageFlags> = None;
 
         module_entry_points.iter().for_each(|entry| {
+            let shader_stage = entry_point_shader_stage(entry);
             for var in &entry.vars {
                 match var {
                     Variable::Input { location, ty, .. } => {
@@ -3124,15 +3122,10 @@ impl VulkanHal {
                                 ty.clone(),
                                 ShaderStageFlags::empty(),
                             ))
-                            .3 |= match entry.exec_model {
-                            spirq::spirv::ExecutionModel::Vertex => ShaderStageFlags::VERTEX,
-                            spirq::spirv::ExecutionModel::Fragment => ShaderStageFlags::FRAGMENT,
-                            spirq::spirv::ExecutionModel::GLCompute => ShaderStageFlags::COMPUTE,
-                            _ => todo!(),
-                        };
+                            .3 |= shader_stage;
                     }
                     Variable::PushConstant { .. } => {
-                        todo!()
+                        push_constant.replace(push_constant.unwrap_or_default() | shader_stage);
                     }
                     Variable::SpecConstant { .. } => {
                         todo!()
@@ -3297,6 +3290,7 @@ impl VulkanHal {
             outputs,
             binding_sets,
             variables,
+            push_constant,
         })
     }
 
@@ -3644,6 +3638,15 @@ impl VulkanHal {
             &cs_layout,
             compute_pipeline_description.binding_set_layouts,
         );
+    }
+}
+
+fn entry_point_shader_stage(entry: &spirq::prelude::EntryPoint) -> ShaderStageFlags {
+    match entry.exec_model {
+        spirq::spirv::ExecutionModel::Vertex => ShaderStageFlags::VERTEX,
+        spirq::spirv::ExecutionModel::Fragment => ShaderStageFlags::FRAGMENT,
+        spirq::spirv::ExecutionModel::GLCompute => ShaderStageFlags::COMPUTE,
+        _ => todo!(),
     }
 }
 

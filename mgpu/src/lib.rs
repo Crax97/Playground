@@ -591,7 +591,7 @@ pub struct ComputePipelineDescription<'a> {
     pub shader: ShaderModule,
     pub entry_point: &'a str,
     pub binding_set_layouts: &'a [BindingSetLayoutInfo],
-    pub push_constant_ranges: Option<PushConstantInfo>,
+    pub push_constant_info: Option<PushConstantInfo>,
 }
 
 #[derive(Clone, Debug)]
@@ -739,6 +739,7 @@ pub struct ShaderModuleLayout {
     pub outputs: Vec<ShaderAttribute>,
     pub binding_sets: Vec<BindingSetLayoutInfo>,
     pub variables: Vec<ShaderVariable>,
+    pub push_constant: Option<ShaderStageFlags>,
 }
 
 /// A Buffer is a linear data buffer that can be read or written by a shader

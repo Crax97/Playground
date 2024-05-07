@@ -598,7 +598,7 @@ fn main() {
                 set: 0,
                 layout: compute_set_layout.clone(),
             }],
-            push_constant_ranges: None,
+            push_constant_info: None,
         })
         .unwrap();
 

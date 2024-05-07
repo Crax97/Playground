@@ -825,7 +825,7 @@ impl<'a> ComputePipelineDescription<'a> {
             binding_sets_infos,
             shader: self.shader,
             entry_point: self.entry_point.to_string(),
-            push_constant_range: self.push_constant_ranges,
+            push_constant_range: self.push_constant_info,
         }
     }
 }
