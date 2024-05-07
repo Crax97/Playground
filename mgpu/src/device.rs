@@ -185,6 +185,7 @@ impl Device {
                                                 vertex_buffers,
                                                 index_buffer,
                                                 binding_sets,
+                                                push_constants,
                                                 draw_type,
                                             } = command;
 
@@ -212,6 +213,9 @@ impl Device {
                                                         *pipeline,
                                                     )?;
                                                 }
+                        for (i, pc) in push_constants.iter().enumerate() {
+                            self.hal.set_graphics_push_constant(command_recorder, *pipeline, &pc.data, pc.visibility)?;
+                        }
                                                 match *draw_type {
                                                     Draw {
                                                         vertices,
@@ -511,12 +515,17 @@ impl Device {
                 let DispatchCommand {
                     pipeline,
                     binding_sets,
+                    push_constants,
                     dispatch_type,
                 } = command;
 
                 unsafe {
                     self.hal
                         .bind_compute_pipeline(command_recorder, *pipeline)?;
+
+                        if let Some(pc) = &push_constants {
+                            self.hal.set_compute_push_constant(command_recorder, *pipeline, &pc.data, pc.visibility)?;
+                        }
 
                     if !binding_sets.is_empty() {
                         self.hal.bind_compute_binding_sets(
@@ -774,6 +783,7 @@ impl Device {
             device: self.clone(),
             binding_sets: Default::default(),
             new_nodes: Default::default(),
+            push_constants: Default::default(),
         }
     }
 
@@ -963,6 +973,10 @@ impl Device {
                 );
                 check!(bs_element.shader_stage_flags.contains(matching_element.shader_stage_flags), "The binding set describes an element with shader flags {:?}, which is not visibile to shader stage {:?}", bs_element.shader_stage_flags, matching_element.shader_stage_flags);
             }
+        }
+
+       if let Some(pc) = &graphics_pipeline_description.push_constant_info {
+            check!(pc.size <= crate::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES, "A push constant range cannot exceed the maximum size of {} bytes", crate::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES);
         }
 
         Ok(())

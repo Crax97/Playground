@@ -23,6 +23,8 @@ use hal::vulkan::VulkanHalError;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+pub const MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES: usize = 128;
+
 #[derive(Debug)]
 pub enum MgpuError {
     InvalidParams {
@@ -562,6 +564,12 @@ pub enum FrontFace {
 pub struct MultisampleState {}
 
 #[derive(Copy, Clone, Debug, Hash)]
+pub struct PushConstantInfo {
+    pub size: usize,
+    pub visibility: ShaderStageFlags,
+}
+
+#[derive(Copy, Clone, Debug, Hash)]
 pub struct GraphicsPipelineDescription<'a> {
     pub label: Option<&'a str>,
     pub vertex_stage: &'a VertexStageInfo<'a>,
@@ -574,6 +582,7 @@ pub struct GraphicsPipelineDescription<'a> {
     pub multisample_state: Option<MultisampleState>,
     pub depth_stencil_state: DepthStencilState,
     pub binding_set_layouts: &'a [BindingSetLayoutInfo],
+    pub push_constant_info: Option<PushConstantInfo>,
 }
 
 #[derive(Copy, Clone, Debug, Hash)]
@@ -582,6 +591,7 @@ pub struct ComputePipelineDescription<'a> {
     pub shader: ShaderModule,
     pub entry_point: &'a str,
     pub binding_set_layouts: &'a [BindingSetLayoutInfo],
+    pub push_constant_ranges: Option<PushConstantInfo>,
 }
 
 #[derive(Clone, Debug)]
@@ -968,6 +978,7 @@ impl<'a> GraphicsPipelineDescription<'a> {
             multisample_state: Default::default(),
             depth_stencil_state: Default::default(),
             binding_set_layouts: Default::default(),
+            push_constant_info: Default::default(),
         }
     }
 
@@ -983,6 +994,11 @@ impl<'a> GraphicsPipelineDescription<'a> {
 
     pub fn depth_stencil_state(mut self, depth_stencil_state: DepthStencilState) -> Self {
         self.depth_stencil_state = depth_stencil_state;
+        self
+    }
+
+    pub fn push_constant_info(mut self, push_constant_info: Option<PushConstantInfo>) -> Self {
+        self.push_constant_info = push_constant_info;
         self
     }
 }

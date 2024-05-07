@@ -4,8 +4,9 @@ use crate::{
     DepthStencilState, DepthStencilTargetInfo, DeviceConfiguration, DeviceInfo, FilterMode,
     FrontFace, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageRegion,
     ImageSubresource, ImageView, ImageViewDescription, MgpuResult, MultisampleState, PolygonMode,
-    PrimitiveTopology, RenderPassInfo, RenderTargetInfo, Sampler, SamplerDescription, ShaderModule,
-    ShaderModuleDescription, ShaderModuleLayout, ShaderStageFlags, VertexInputDescription,
+    PrimitiveTopology, PushConstantInfo, RenderPassInfo, RenderTargetInfo, Sampler,
+    SamplerDescription, ShaderModule, ShaderModuleDescription, ShaderModuleLayout,
+    ShaderStageFlags, VertexInputDescription,
 };
 use std::sync::Arc;
 
@@ -43,6 +44,7 @@ pub struct GraphicsPipelineLayout {
     pub front_face: FrontFace,
     pub multisample_state: Option<MultisampleState>,
     pub depth_stencil_state: DepthStencilState,
+    pub push_constant_range: Option<PushConstantInfo>,
 }
 
 #[derive(Clone, Hash)]
@@ -51,6 +53,7 @@ pub struct ComputePipelineLayout {
     pub binding_sets_infos: Vec<BindingSetLayoutInfo>,
     pub shader: ShaderModule,
     pub entry_point: String,
+    pub push_constant_range: Option<PushConstantInfo>,
 }
 
 #[derive(Clone, Copy)]
@@ -159,6 +162,22 @@ pub(crate) trait Hal: Send + Sync {
         allocator: CommandRecorderAllocator,
     ) -> MgpuResult<CommandRecorder>;
     unsafe fn finalize_command_recorder(&self, command_buffer: CommandRecorder) -> MgpuResult<()>;
+
+    unsafe fn set_graphics_push_constant(
+        &self,
+        command_recorder: CommandRecorder,
+        graphics_pipeline: GraphicsPipeline,
+        data: &[u8],
+        visibility: ShaderStageFlags,
+    ) -> MgpuResult<()>;
+
+    unsafe fn set_compute_push_constant(
+        &self,
+        command_recorder: CommandRecorder,
+        compute_pipeline: ComputePipeline,
+        data: &[u8],
+        visibility: ShaderStageFlags,
+    ) -> MgpuResult<()>;
 
     unsafe fn begin_render_pass(
         &self,

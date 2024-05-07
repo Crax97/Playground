@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use crate::{
     hal::QueueType, rdg::Node, AttachmentStoreOp, BindingSet, Buffer, ComputePassDescription,
     ComputePipeline, DepthStencilTarget, Device, Extents2D, GraphicsPipeline, MgpuResult, Rect2D,
-    RenderPassDescription, RenderTarget,
+    RenderPassDescription, RenderTarget, ShaderStageFlags,
 };
 #[cfg(debug_assertions)]
 use crate::{util::check, BufferUsageFlags, ImageUsageFlags};
@@ -12,6 +12,7 @@ pub struct CommandRecorder<T: CommandRecorderType> {
     pub(crate) _ph: PhantomData<T>,
     pub(crate) device: Device,
     pub(crate) binding_sets: Vec<BindingSet>,
+    pub(crate) push_constants: Option<PushConstant>,
     pub(crate) new_nodes: Vec<Node>,
 }
 
@@ -69,12 +70,19 @@ pub(crate) enum DispatchType {
     Dispatch(u32, u32, u32),
 }
 
+#[derive(Debug, Hash, Clone)]
+pub(crate) struct PushConstant {
+    pub(crate) data: Vec<u8>,
+    pub(crate) visibility: ShaderStageFlags,
+}
+
 #[derive(Debug, Hash)]
 pub(crate) struct DrawCommand {
     pub(crate) pipeline: GraphicsPipeline,
     pub(crate) vertex_buffers: Vec<Buffer>,
     pub(crate) index_buffer: Option<Buffer>,
     pub(crate) binding_sets: Vec<BindingSet>,
+    pub(crate) push_constants: Option<PushConstant>,
     pub(crate) draw_type: DrawType,
 }
 
@@ -82,6 +90,7 @@ pub(crate) struct DrawCommand {
 pub(crate) struct DispatchCommand {
     pub(crate) pipeline: ComputePipeline,
     pub(crate) binding_sets: Vec<BindingSet>,
+    pub(crate) push_constants: Option<PushConstant>,
     pub(crate) dispatch_type: DispatchType,
 }
 
@@ -341,6 +350,13 @@ impl<'c> RenderPass<'c> {
         self.command_recorder.set_binding_sets(binding_sets);
     }
 
+    pub fn set_push_constant(&mut self, data: &[u8], visibility: ShaderStageFlags) {
+        self.command_recorder.push_constants = Some(PushConstant {
+            data: data.to_vec(),
+            visibility,
+        });
+    }
+
     pub fn draw(
         &mut self,
         vertices: usize,
@@ -357,6 +373,7 @@ impl<'c> RenderPass<'c> {
             vertex_buffers: self.vertex_buffers.clone(),
             index_buffer: self.index_buffer,
             binding_sets: self.command_recorder.binding_sets.clone(),
+            push_constants: self.command_recorder.push_constants.clone(),
             draw_type: DrawType::Draw {
                 vertices,
                 instances,
@@ -384,6 +401,7 @@ impl<'c> RenderPass<'c> {
             vertex_buffers: self.vertex_buffers.clone(),
             index_buffer: self.index_buffer,
             binding_sets: self.command_recorder.binding_sets.clone(),
+            push_constants: self.command_recorder.push_constants.clone(),
             draw_type: DrawType::DrawIndexed {
                 indices,
                 instances,
@@ -442,8 +460,24 @@ impl<'c> RenderPass<'c> {
             );
         }
 
+        if let Some(push_constant) = &self.command_recorder.push_constants {
+            validate_push_constant_visibility(
+                push_constant.visibility,
+                ShaderStageFlags::ALL_GRAPHICS,
+            );
+        }
+
         Ok(())
     }
+}
+
+#[cfg(debug_assertions)]
+fn validate_push_constant_visibility(visibility: ShaderStageFlags, intersected: ShaderStageFlags) {
+    check!(
+        visibility.intersects(intersected),
+        "Tried to set the push constant in a render pass with invalid stage flags: {:?}",
+        visibility
+    );
 }
 
 impl<'c, C: ComputeCommandRecorder> ComputePass<'c, C> {
@@ -453,6 +487,13 @@ impl<'c, C: ComputeCommandRecorder> ComputePass<'c, C> {
 
     pub fn set_binding_sets(&mut self, binding_sets: &[&BindingSet]) {
         self.command_recorder.set_binding_sets(binding_sets);
+    }
+
+    pub fn set_push_constant(&mut self, data: &[u8], visibility: ShaderStageFlags) {
+        self.command_recorder.push_constants = Some(PushConstant {
+            data: data.to_vec(),
+            visibility,
+        });
     }
 
     pub fn dispatch(
@@ -467,6 +508,7 @@ impl<'c, C: ComputeCommandRecorder> ComputePass<'c, C> {
         last_command_step.commands.push(DispatchCommand {
             pipeline: self.pipeline.unwrap(),
             dispatch_type: DispatchType::Dispatch(group_count_x, group_count_y, group_count_z),
+            push_constants: self.command_recorder.push_constants.clone(),
             binding_sets: self.command_recorder.binding_sets.to_vec(),
         });
         Ok(())
@@ -493,6 +535,13 @@ impl<'c, C: ComputeCommandRecorder> ComputePass<'c, C> {
                     pipeline_layout.label.as_deref().unwrap_or("Unknown"),
                     set.set
                 )
+            );
+        }
+
+        if let Some(push_constant) = &self.command_recorder.push_constants {
+            validate_push_constant_visibility(
+                push_constant.visibility,
+                ShaderStageFlags::ALL_GRAPHICS,
             );
         }
 

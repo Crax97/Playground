@@ -41,10 +41,10 @@ pub trait App {
 }
 
 pub fn bootstrap<A: App>() -> anyhow::Result<()> {
+    env_logger::init();
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
-    let app_name = A::app_name();
     let device = Device::new(DeviceConfiguration {
         app_name: Some(A::app_name()),
         features: DeviceFeatures::HAL_DEBUG_LAYERS,
@@ -53,7 +53,7 @@ pub fn bootstrap<A: App>() -> anyhow::Result<()> {
         display_handle: Some(event_loop.display_handle()?.as_raw()),
     })?;
 
-    let mut context = AppContext {
+    let context = AppContext {
         device,
         swapchain: MaybeUninit::uninit(),
         window: MaybeUninit::uninit(),
@@ -102,8 +102,7 @@ pub fn bootstrap<A: App>() -> anyhow::Result<()> {
         app,
         context,
         window_attributes: WindowAttributes::default().with_title(A::app_name()),
-    });
-
+    })?;
     Ok(())
 }
 

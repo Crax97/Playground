@@ -4,8 +4,11 @@ use bitflags::bitflags;
 use mgpu::{
     AddressMode, Device, Extents2D, Extents3D, FilterMode, Image, ImageDescription, ImageDimension,
     ImageFormat, ImageUsageFlags, ImageView, ImageViewDescription, ImageWriteParams, MipmapMode,
+    Sampler,
 };
 use serde::{Deserialize, Serialize};
+
+use crate::sampler_allocator::SamplerAllocator;
 
 #[derive(
     Default, Hash, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
@@ -19,6 +22,7 @@ pub struct Texture {
     pub(crate) image: Image,
     pub(crate) view: ImageView,
     pub(crate) sampler_configuration: SamplerConfiguration,
+    pub(crate) sampler: Sampler,
 }
 pub struct TextureDescription<'a> {
     pub label: Option<&'a str>,
@@ -68,7 +72,11 @@ impl<'a> TextureDescription<'a> {
 }
 
 impl Texture {
-    pub fn new(device: &Device, description: &TextureDescription) -> anyhow::Result<Texture> {
+    pub fn new(
+        device: &Device,
+        description: &TextureDescription,
+        sampler_allocator: &mut SamplerAllocator,
+    ) -> anyhow::Result<Texture> {
         let (extents, dimension, array_layers) = match description.ty {
             TextureType::D1(s) => (
                 Extents3D {
@@ -134,10 +142,12 @@ impl Texture {
             device.generate_mip_chain(image, mgpu::FilterMode::Linear)?;
         }
 
+        let sampler = sampler_allocator.get(device, &description.sampler_configuration);
         Ok(Texture {
             image,
             view,
             sampler_configuration: description.sampler_configuration,
+            sampler,
         })
     }
 }

@@ -1201,6 +1201,7 @@ mod tests {
                             first_vertex: 1,
                             first_instance: 1,
                         },
+                        push_constants: None,
                     }],
                 }],
             },
@@ -1301,6 +1302,7 @@ mod tests {
                                 },
                             ],
                         }],
+                        push_constants: None,
                         dispatch_type: crate::DispatchType::Dispatch(1, 1, 1),
                     }],
                 }],
@@ -1346,6 +1348,7 @@ mod tests {
                                 },
                             ],
                         }],
+                        push_constants: None,
                         draw_type: crate::DrawType::DrawIndexed {
                             indices: 10,
                             instances: 1,
@@ -1461,6 +1464,7 @@ mod tests {
                                 },
                             ],
                         }],
+                        push_constants: None,
                         dispatch_type: crate::DispatchType::Dispatch(1, 1, 1),
                     }],
                 }],
@@ -1506,6 +1510,7 @@ mod tests {
                                 },
                             ],
                         }],
+                        push_constants: None,
                         draw_type: crate::DrawType::DrawIndexed {
                             indices: 10,
                             instances: 1,
@@ -1549,6 +1554,7 @@ mod tests {
                                 visibility: Default::default(),
                             }],
                         }],
+                        push_constants: None,
                         draw_type: crate::DrawType::DrawIndexed {
                             indices: 10,
                             instances: 1,
@@ -1592,6 +1598,7 @@ mod tests {
                                 visibility: Default::default(),
                             }],
                         }],
+                        push_constants: None,
                         draw_type: crate::DrawType::DrawIndexed {
                             indices: 10,
                             instances: 1,

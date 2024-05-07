@@ -3,20 +3,26 @@ use std::{
     path::Path,
 };
 
+use anyhow::Context;
 use mgpu::{Device, Extents2D};
 
 use crate::{
     asset_map::AssetLoader,
     assets::texture::{SamplerConfiguration, Texture, TextureDescription, TextureUsageFlags},
+    sampler_allocator::SamplerAllocator,
 };
 
 pub struct FsTextureLoader {
     device: Device,
+    sampler_allocator: SamplerAllocator,
 }
 
 impl FsTextureLoader {
-    pub fn new(device: Device) -> Self {
-        Self { device }
+    pub fn new(device: Device, sampler_allocator: SamplerAllocator) -> Self {
+        Self {
+            device,
+            sampler_allocator,
+        }
     }
 }
 
@@ -31,7 +37,9 @@ impl AssetLoader for FsTextureLoader {
 
     fn load(&mut self, identifier: &str) -> anyhow::Result<Self::LoadedAsset> {
         let path = Path::new(identifier);
-        let mut reader = BufReader::new(std::fs::File::open(path)?);
+        let full_path = path.canonicalize().unwrap();
+        let full_path = full_path.to_string_lossy().to_string();
+        let mut reader = BufReader::new(std::fs::File::open(path).context(full_path)?);
         let mut content = vec![];
         reader.read_to_end(&mut content)?;
         let image = image::load_from_memory(&content)?;
@@ -52,6 +60,7 @@ impl AssetLoader for FsTextureLoader {
                 auto_generate_mips: false,
                 sampler_configuration: SamplerConfiguration::default(),
             },
+            &mut self.sampler_allocator,
         )
     }
 }

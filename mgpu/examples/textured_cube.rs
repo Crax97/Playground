@@ -12,10 +12,10 @@ use mgpu::{
     Extents2D, Extents3D, FilterMode, FragmentStageInfo, Graphics, GraphicsPipeline,
     GraphicsPipelineDescription, Image, ImageDescription, ImageDimension, ImageFormat,
     ImageUsageFlags, ImageView, ImageViewDescription, ImageWriteParams, MemoryDomain, MipmapMode,
-    Rect2D, RenderPassDescription, RenderTarget, RenderTargetInfo, RenderTargetLoadOp, SampleCount,
-    Sampler, SamplerDescription, ShaderModule, ShaderModuleDescription, ShaderStageFlags,
-    Swapchain, SwapchainCreationInfo, VertexInputDescription, VertexInputFrequency,
-    VertexStageInfo,
+    PushConstantInfo, Rect2D, RenderPassDescription, RenderTarget, RenderTargetInfo,
+    RenderTargetLoadOp, SampleCount, Sampler, SamplerDescription, ShaderModule,
+    ShaderModuleDescription, ShaderStageFlags, Swapchain, SwapchainCreationInfo,
+    VertexInputDescription, VertexInputFrequency, VertexStageInfo,
 };
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -33,7 +33,7 @@ layout(location = 1) in vec2 uv;
 
 layout(location = 0) out vec2 fs_uv;
 
-layout(set = 0, binding = 2, std140) uniform ObjectData {
+layout(push_constant, std140) uniform ObjectData {
     mat4 mvp;
 };
 
@@ -85,7 +85,6 @@ fn main() {
         texture_image_view: ImageView,
         depth_image: Image,
         depth_image_view: ImageView,
-        cube_object_data: Buffer,
         cube_data_buffer: Buffer,
         cube_index_buffer: Buffer,
         pipeline: GraphicsPipeline,
@@ -135,7 +134,6 @@ fn main() {
             self.device.destroy_sampler(self.sampler).unwrap();
             self.device.destroy_buffer(self.cube_data_buffer).unwrap();
             self.device.destroy_buffer(self.cube_index_buffer).unwrap();
-            self.device.destroy_buffer(self.cube_object_data).unwrap();
         }
 
         fn window_event(
@@ -202,14 +200,6 @@ fn main() {
                         * glam::Mat4::from_scale(Vec3::ONE);
                     let mvp = self.projection * self.view * model;
                     let mvp = [mvp];
-                    self.device
-                        .write_buffer(
-                            self.cube_object_data,
-                            &self
-                                .cube_object_data
-                                .write_all_params(bytemuck::cast_slice(&mvp)),
-                        )
-                        .unwrap();
 
                     let swapchain_image = self
                         .swapchain
@@ -248,6 +238,10 @@ fn main() {
                                 .set_vertex_buffers([self.cube_data_buffer, self.cube_data_buffer]);
                             render_pass.set_index_buffer(self.cube_index_buffer);
                             render_pass.set_binding_sets(&[&self.binding_set]);
+                            render_pass.set_push_constant(
+                                bytemuck::cast_slice(&mvp),
+                                ShaderStageFlags::ALL_GRAPHICS,
+                            );
                             render_pass.draw_indexed(36, 1, 0, 0, 0).unwrap();
                             self.rotation += 0.01;
                         }
@@ -398,15 +392,6 @@ fn main() {
         })
         .unwrap();
 
-    let cube_object_data = device
-        .create_buffer(&BufferDescription {
-            label: Some("Cube Object Data"),
-            usage_flags: BufferUsageFlags::UNIFORM_BUFFER | BufferUsageFlags::TRANSFER_DST,
-            size: std::mem::size_of::<glam::Mat4>(),
-            memory_domain: MemoryDomain::Gpu,
-        })
-        .unwrap();
-
     device
         .write_buffer(
             cube_data_buffer,
@@ -448,15 +433,6 @@ fn main() {
                 binding: 1,
                 array_length: 1,
                 ty: mgpu::BindingSetElementKind::SampledImage,
-                shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
-            },
-            BindingSetElement {
-                binding: 2,
-                array_length: 1,
-                ty: mgpu::BindingSetElementKind::Buffer {
-                    ty: mgpu::BufferType::Uniform,
-                    access_mode: mgpu::StorageAccessMode::Read,
-                },
                 shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
             },
         ],
@@ -506,7 +482,11 @@ fn main() {
                 depth_test_enabled: true,
                 depth_write_enabled: true,
                 depth_compare_op: CompareOp::Less,
-            }),
+            })
+            .push_constant_info(Some(PushConstantInfo {
+                size: std::mem::size_of::<Mat4>(),
+                visibility: ShaderStageFlags::ALL_GRAPHICS,
+            })),
         )
         .unwrap();
 
@@ -537,11 +517,6 @@ fn main() {
                         },
                         visibility: ShaderStageFlags::ALL_GRAPHICS,
                     },
-                    Binding {
-                        binding: 2,
-                        ty: cube_object_data.bind_whole_range_uniform_buffer(),
-                        visibility: ShaderStageFlags::ALL_GRAPHICS,
-                    },
                 ],
             },
             &binding_set_layout,
@@ -565,7 +540,6 @@ fn main() {
             texture_image_view,
             depth_image,
             depth_image_view,
-            cube_object_data,
             cube_data_buffer,
             cube_index_buffer,
             pipeline,

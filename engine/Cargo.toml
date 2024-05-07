@@ -21,6 +21,7 @@ strum = { version = "0.25.0", features = ["derive", "strum_macros"] }
 strum_macros = "0.25.1"
 env_logger = "0.10.0"
 bitflags = "2.*"
+shaderc = "0.8.3"
 
 
 kecs = { git = "https://github.com/Crax97/kecs.git" }

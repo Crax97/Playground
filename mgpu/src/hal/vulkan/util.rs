@@ -12,8 +12,8 @@ use crate::{
     ComputePipelineDescription, CullMode, Extents2D, Extents3D, FilterMode, FrontFace,
     GraphicsPipeline, GraphicsPipelineDescription, Image, ImageAspect, ImageDimension, ImageFormat,
     ImageSubresource, ImageUsageFlags, ImageView, MipmapMode, Offset2D, Offset3D, PolygonMode,
-    PresentMode, PrimitiveTopology, Rect2D, SampleCount, Sampler, ShaderModule, ShaderModuleLayout,
-    ShaderStageFlags, Swapchain, VertexAttributeFormat, VertexInputFrequency,
+    PresentMode, PrimitiveTopology, PushConstantInfo, Rect2D, SampleCount, Sampler, ShaderModule,
+    ShaderModuleLayout, ShaderStageFlags, Swapchain, VertexAttributeFormat, VertexInputFrequency,
 };
 
 #[cfg(feature = "swapchain")]
@@ -100,6 +100,18 @@ impl ToVk for ShaderStageFlags {
         }
 
         res
+    }
+}
+
+impl ToVk for PushConstantInfo {
+    type Target = vk::PushConstantRange;
+
+    fn to_vk(self) -> Self::Target {
+        vk::PushConstantRange {
+            stage_flags: self.visibility.to_vk(),
+            offset: 0,
+            size: self.size as _,
+        }
     }
 }
 
@@ -798,6 +810,7 @@ impl<'a> GraphicsPipelineDescription<'a> {
             front_face: self.front_face,
             multisample_state: self.multisample_state,
             depth_stencil_state: self.depth_stencil_state,
+            push_constant_range: self.push_constant_info,
         }
     }
 }
@@ -812,6 +825,7 @@ impl<'a> ComputePipelineDescription<'a> {
             binding_sets_infos,
             shader: self.shader,
             entry_point: self.entry_point.to_string(),
+            push_constant_range: self.push_constant_ranges,
         }
     }
 }

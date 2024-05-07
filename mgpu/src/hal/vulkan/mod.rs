@@ -17,9 +17,10 @@ use crate::{
     ComputePipeline, ComputePipelineDescription, DeviceConfiguration, DeviceFeatures,
     DevicePreference, FilterMode, Framebuffer, GraphicsPipeline, GraphicsPipelineDescription,
     GraphicsPipelineLayout, Image, ImageDescription, ImageDimension, ImageFormat, ImageRegion,
-    ImageSubresource, MemoryDomain, MgpuError, MgpuResult, PresentMode, RenderPassInfo, Sampler,
-    SamplerDescription, ShaderAttribute, ShaderModule, ShaderModuleLayout, ShaderStageFlags,
-    ShaderVariable, StorageAccessMode, SwapchainCreationInfo, VariableType, VertexAttributeFormat,
+    ImageSubresource, MemoryDomain, MgpuError, MgpuResult, PresentMode, PushConstantInfo,
+    RenderPassInfo, Sampler, SamplerDescription, ShaderAttribute, ShaderModule, ShaderModuleLayout,
+    ShaderStageFlags, ShaderVariable, StorageAccessMode, SwapchainCreationInfo, VariableType,
+    VertexAttributeFormat,
 };
 #[cfg(debug_assertions)]
 use std::collections::HashSet;
@@ -688,6 +689,7 @@ impl Hal for VulkanHal {
         let pipeline_layout = self.get_pipeline_layout(
             graphics_pipeline_description.label,
             &owned_info.binding_sets_infos,
+            owned_info.push_constant_range.as_ref(),
         )?;
         let vulkan_graphics_pipeline_info = VulkanGraphicsPipelineInfo {
             label: graphics_pipeline_description.label.map(ToOwned::to_owned),
@@ -720,6 +722,7 @@ impl Hal for VulkanHal {
         let pipeline_layout = self.get_pipeline_layout(
             compute_pipeline_description.label,
             &owned_info.binding_sets_infos,
+            owned_info.push_constant_range.as_ref(),
         )?;
         let compute_entrypt = CString::new(compute_pipeline_description.entry_point).unwrap();
         let pipeline_create_info = vk::ComputePipelineCreateInfo::default()
@@ -872,7 +875,6 @@ impl Hal for VulkanHal {
         }
         Ok(())
     }
-
     unsafe fn begin_render_pass(
         &self,
         command_recorder: CommandRecorder,
@@ -1038,6 +1040,55 @@ impl Hal for VulkanHal {
         Ok(())
     }
 
+    unsafe fn set_graphics_push_constant(
+        &self,
+        command_recorder: CommandRecorder,
+        graphics_pipeline: GraphicsPipeline,
+        data: &[u8],
+        visibility: ShaderStageFlags,
+    ) -> MgpuResult<()> {
+        let cb = vk::CommandBuffer::from_raw(command_recorder.id);
+        let graphics_pipeline = self
+            .resolver
+            .apply(graphics_pipeline, |g| Ok(g.vk_layout))?;
+
+        unsafe {
+            self.logical_device.handle.cmd_push_constants(
+                cb,
+                graphics_pipeline,
+                visibility.to_vk(),
+                0,
+                data,
+            );
+        }
+        Ok(())
+    }
+
+    unsafe fn set_compute_push_constant(
+        &self,
+        command_recorder: CommandRecorder,
+        compute_pipeline: ComputePipeline,
+        data: &[u8],
+        visibility: ShaderStageFlags,
+    ) -> MgpuResult<()> {
+        check!(
+            visibility.contains(ShaderStageFlags::COMPUTE),
+            "set_compute_push_constant with invalid stage flags"
+        );
+        let cb = vk::CommandBuffer::from_raw(command_recorder.id);
+        let compute_pipeline = self.resolver.apply(compute_pipeline, |g| Ok(g.vk_layout))?;
+
+        unsafe {
+            self.logical_device.handle.cmd_push_constants(
+                cb,
+                compute_pipeline,
+                visibility.to_vk(),
+                0,
+                data,
+            );
+        }
+        Ok(())
+    }
     unsafe fn bind_graphics_binding_sets(
         &self,
         command_recorder: CommandRecorder,
@@ -2977,10 +3028,17 @@ impl VulkanHal {
         &self,
         label: Option<&str>,
         binding_sets_infos: &[BindingSetLayoutInfo],
+        push_constant_ranges: Option<&PushConstantInfo>,
     ) -> MgpuResult<vk::PipelineLayout> {
         let descriptor_layouts = self.get_descriptor_set_layouts(binding_sets_infos)?;
 
-        let hash = hash_type(&descriptor_layouts);
+        let hash = {
+            let value = &descriptor_layouts;
+            let mut hasher = DefaultHasher::new();
+            value.hash(&mut hasher);
+            push_constant_ranges.hash(&mut hasher);
+            hasher.finish()
+        };
         let mut pipeline_layouts = self
             .pipeline_layouts
             .write()
@@ -2988,8 +3046,13 @@ impl VulkanHal {
         if let Some(layout) = pipeline_layouts.get(&hash) {
             Ok(*layout)
         } else {
-            let pipeline_layout_create_info =
-                vk::PipelineLayoutCreateInfo::default().set_layouts(&descriptor_layouts);
+            let vk_push_constant_ranges = push_constant_ranges
+                .iter()
+                .map(|pc| pc.to_vk())
+                .collect::<Vec<_>>();
+            let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default()
+                .set_layouts(&descriptor_layouts)
+                .push_constant_ranges(&vk_push_constant_ranges);
             let layout = unsafe {
                 self.logical_device.handle.create_pipeline_layout(
                     &pipeline_layout_create_info,

@@ -1,29 +1,29 @@
-mod material_manager;
-mod shader_cache;
 use bytemuck::{Pod, Zeroable};
 use glam::{vec3, Mat4, Vec3, Vec4};
 use mgpu::{
-    AttachmentStoreOp, BindingSetElement, BindingSetLayout, Buffer, BufferDescription,
-    BufferUsageFlags, DepthStencilTarget, DepthStencilTargetLoadOp, Device, Extents3D, Graphics,
-    Image, ImageDescription, ImageUsageFlags, ImageView, ImageViewDescription, MgpuResult,
-    Offset2D, Rect2D, RenderPassDescription, RenderTarget, RenderTargetLoadOp, ShaderStageFlags,
+    AttachmentStoreOp, Binding, BindingSet, BindingSetDescription, BindingSetElement,
+    BindingSetLayout, Buffer, BufferDescription, BufferUsageFlags, DepthStencilTarget,
+    DepthStencilTargetLoadOp, Device, Extents3D, Graphics, Image, ImageDescription,
+    ImageUsageFlags, ImageView, ImageViewDescription, MgpuResult, Offset2D, Rect2D,
+    RenderPassDescription, RenderTarget, RenderTargetLoadOp, ShaderStageFlags,
 };
 
 use crate::{
+    assert_size_does_not_exceed,
     asset_map::AssetMap,
     math::{constants::UP, Transform},
     scene::Scene,
 };
 
-#[derive(Default)]
 pub struct SceneRenderer {
     frames: Vec<FrameData>,
     current_frame: usize,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct FrameData {
     point_of_view_buffer: Buffer,
+    frame_binding_set: BindingSet,
 
     depth_stencil_image: Image,
     depth_stencil_image_view: ImageView,
@@ -65,6 +65,18 @@ struct GPUPointOfView {
     position: Vec4,
     direction: Vec4,
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Zeroable, Pod)]
+pub(crate) struct GPUPerObjectDrawData {
+    pub model_matrix: Mat4,
+}
+
+assert_size_does_not_exceed!(
+    GPUPerObjectDrawData,
+    mgpu::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES
+);
+
 impl SceneRenderer {
     pub fn scene_data_binding_set_layout() -> BindingSetLayout {
         BindingSetLayout {
@@ -81,7 +93,8 @@ impl SceneRenderer {
     }
     pub fn new(device: &Device) -> anyhow::Result<Self> {
         let mut frame_data = vec![];
-        for i in 0..device.get_info().frames_in_flight {
+        let device_info = device.get_info();
+        for i in 0..device_info.frames_in_flight {
             let point_of_view_buffer = device.create_buffer(&BufferDescription {
                 label: Some(&format!("POV buffer for frame {}", i)),
                 usage_flags: BufferUsageFlags::TRANSFER_DST
@@ -141,8 +154,22 @@ impl SceneRenderer {
                 aspect: mgpu::ImageAspect::Depth,
                 image_subresource: depth_stencil_image.whole_subresource(),
             })?;
+
+            let frame_binding_set = device.create_binding_set(
+                &BindingSetDescription {
+                    label: Some("Frame binding set"),
+                    bindings: &[Binding {
+                        binding: 0,
+                        ty: point_of_view_buffer.bind_whole_range_uniform_buffer(),
+                        visibility: ShaderStageFlags::ALL_GRAPHICS,
+                    }],
+                },
+                &Self::scene_data_binding_set_layout(),
+            )?;
+
             let current_frame_data = FrameData {
                 point_of_view_buffer,
+                frame_binding_set,
                 depth_stencil_image,
                 depth_stencil_image_view,
                 final_render_image,
@@ -190,6 +217,11 @@ impl SceneRenderer {
                         let mesh = params.asset_map.get(&info.handle).expect("No mesh");
                         let material = params.asset_map.get(&info.material).expect("No material");
 
+                        scene_output_pass.set_binding_sets(&[
+                            &current_frame.frame_binding_set,
+                            &material.binding_set,
+                        ]);
+
                         scene_output_pass.set_vertex_buffers([
                             mesh.position_component,
                             mesh.normal_component,
@@ -202,10 +234,10 @@ impl SceneRenderer {
                 }
             }
         }
-        command_recorder.submit();
-        self.current_frame =
-            (self.current_frame + 1) % params.device.get_info().frames_in_flight as usize;
-        todo!()
+        command_recorder.submit()?;
+        self.current_frame = (self.current_frame + 1) % params.device.get_info().frames_in_flight;
+
+        Ok(())
     }
 }
 
