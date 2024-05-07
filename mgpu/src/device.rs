@@ -116,9 +116,11 @@ impl Device {
         rdg.clear();
         static DUMP: AtomicBool = AtomicBool::new(true);
         if DUMP.load(std::sync::atomic::Ordering::Relaxed) {
+            println!("{}", compiled.dump_dot());
             compiled.save_to_svg(&format!(
                 "rdg_graph_{}.svg",
-                std::time::SystemTime::now().elapsed().unwrap().as_millis()
+                std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap().as_millis()
             ));
             DUMP.store(false, std::sync::atomic::Ordering::Relaxed);
         }
@@ -909,18 +911,26 @@ impl Device {
         graphics_pipeline_description: &GraphicsPipelineDescription,
     ) -> MgpuResult<()> {
         // Validate vertex inputs
+
+        use std::collections::HashSet;
         let vertex_shader_layout =
             self.get_shader_module_layout(*graphics_pipeline_description.vertex_stage.shader)?;
         let fragment_shader_layout = graphics_pipeline_description
             .fragment_stage
             .map(|fs| self.get_shader_module_layout(*fs.shader))
             .transpose()?;
+        let mut already_defined_inputs: HashSet<usize> = HashSet::default();
+        for input in graphics_pipeline_description.vertex_stage.vertex_inputs {
+            check!(!already_defined_inputs.contains(&input.location), "Vertex attribute {} was defined twice", input.location);
+            already_defined_inputs.insert(input.location);
+        }
         for input in &vertex_shader_layout.inputs {
             let pipeline_input = graphics_pipeline_description
                 .vertex_stage
                 .vertex_inputs
                 .get(input.location);
-            check!(pipeline_input.is_some(),
+
+            check!(pipeline_input.is_some(), 
                 &format!("Vertex shader expects input at location {} with format {:?}, but the pipeline description does not provide it",
                 input.location, input.format));
             let pipeline_input = pipeline_input.unwrap();
@@ -1061,7 +1071,7 @@ impl Device {
     }
 
     #[cfg(debug_assertions)]
-    fn validate_blit_params(params: &BlitParams) {
+    pub(crate) fn validate_blit_params(params: &BlitParams) {
         check!(
             params
                 .src_image

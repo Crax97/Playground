@@ -132,6 +132,9 @@ pub(crate) struct FrameInFlight {
     transfer_work_ended_fence: vk::Fence,
     allocated_semaphores: Vec<vk::Semaphore>,
     cached_semaphores: Vec<vk::Semaphore>,
+
+    allocated_semaphores_binary: Vec<vk::Semaphore>,
+    cached_semaphores_binary: Vec<vk::Semaphore>,
     work_ended_semaphore: vk::Semaphore,
 
     atomic_semaphore_counter: AtomicU64,
@@ -401,6 +404,7 @@ impl Hal for VulkanHal {
         let current_frame_idx = ff.current_frame_in_flight;
         let current_frame = ff.current_mut();
         current_frame.cached_semaphores = current_frame.allocated_semaphores.to_vec();
+        current_frame.cached_semaphores_binary = current_frame.allocated_semaphores_binary.to_vec();
 
         ff.current_frame_in_flight = (current_frame_idx + 1) % self.configuration.frames_in_flight;
         self.resolver.update(self)?;
@@ -818,45 +822,110 @@ impl Hal for VulkanHal {
         })
     }
 
-    unsafe fn present_image(&self, swapchain_id: u64, _image: Image) -> MgpuResult<()> {
-        let current_frame = self.frames_in_flight.lock().unwrap();
-        let current_frame = current_frame.current();
+    unsafe fn present_image(&self, swapchain_id: u64, image: Image) -> MgpuResult<()> {
+        let mut current_frame = self.frames_in_flight.lock().unwrap();
+        let current_frame = current_frame.current_mut();
         let swapchain = unsafe { Handle::from_u64(swapchain_id) };
-        self.resolver
-            .apply_mut::<VulkanSwapchain, ()>(swapchain, |swapchain| {
-                let queue = self.logical_device.graphics_queue.handle;
-                let current_index = swapchain.current_image_index.take().expect(
-                    "Either a Present has already been issued, or acquire has never been called",
-                );
-                let indices = [current_index];
-                let swapchains = [swapchain.handle];
-                let wait_semaphores = [current_frame.work_ended_semaphore];
-                let present_info = vk::PresentInfoKHR::default()
-                    .swapchains(&swapchains)
-                    .wait_semaphores(&wait_semaphores)
-                    .image_indices(&indices);
-                let swapchain_device = &swapchain.swapchain_device;
+        let mut images = self.resolver.get_mut::<VulkanImage>();
+        let mut swapchains = self.resolver.get_mut::<VulkanSwapchain>();
+        let swapchain = swapchains.resolve_mut(swapchain).unwrap();
+        let vk_image = images.resolve_mut(image).unwrap();
+        let image_layout = vk_image.get_subresource_layout(image.whole_subresource());
 
-                let suboptimal = unsafe { swapchain_device.queue_present(queue, &present_info)? };
-                if suboptimal {
-                    swapchain.rebuild(
-                        self,
-                        &SwapchainCreationInfo {
-                            preferred_format: Some(swapchain.data.current_format.format.to_mgpu()),
-                            preferred_present_mode: Some(
-                                swapchain.data.current_present_mode.to_mgpu(),
-                            ),
-                            display_handle: unsafe {
-                                DisplayHandle::borrow_raw(swapchain.raw_display_handle)
-                            },
-                            window_handle: unsafe {
-                                WindowHandle::borrow_raw(swapchain.raw_window_handle)
-                            },
-                        },
-                    )?;
-                }
-                Ok(())
-            })
+        let queue = self.logical_device.graphics_queue.handle;
+        let current_index = swapchain
+            .current_image_index
+            .take()
+            .expect("Either a Present has already been issued, or acquire has never been called");
+        let indices = [current_index];
+        let swapchains = [swapchain.handle];
+        let mut queue_wait_semaphore = current_frame.work_ended_semaphore;
+        let wait_semaphores = [queue_wait_semaphore];
+
+        if image_layout.image_layout != vk::ImageLayout::PRESENT_SRC_KHR {
+            let device = &self.logical_device.handle;
+            let cb = device.allocate_command_buffers(
+                &vk::CommandBufferAllocateInfo::default()
+                    .command_buffer_count(1)
+                    .command_pool(current_frame.graphics_command_pool)
+                    .level(vk::CommandBufferLevel::PRIMARY),
+            )?[0];
+
+            device.begin_command_buffer(
+                cb,
+                &vk::CommandBufferBeginInfo::default()
+                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+            )?;
+
+            device.cmd_pipeline_barrier2(
+                cb,
+                &vk::DependencyInfo::default()
+                    .dependency_flags(vk::DependencyFlags::BY_REGION)
+                    .image_memory_barriers(&[vk::ImageMemoryBarrier2::default()
+                        .image(vk_image.handle)
+                        .src_access_mask(image_layout.access_mask)
+                        .src_stage_mask(image_layout.stage_mask)
+                        .old_layout(image_layout.image_layout)
+                        .dst_access_mask(vk::AccessFlags2::default())
+                        .dst_stage_mask(vk::PipelineStageFlags2::BOTTOM_OF_PIPE)
+                        .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+                        .subresource_range(vk::ImageSubresourceRange {
+                            aspect_mask: vk::ImageAspectFlags::COLOR,
+                            base_mip_level: 0,
+                            level_count: 1,
+                            base_array_layer: 0,
+                            layer_count: 1,
+                        })]),
+            );
+            device.end_command_buffer(cb)?;
+
+            vk_image.set_subresource_layout(
+                image.whole_subresource(),
+                LayoutInfo {
+                    image_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+                    access_mask: vk::AccessFlags2::empty(),
+                    stage_mask: vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
+                },
+            );
+
+            let present_transition_done_semaphore =
+                current_frame.allocate_binary_semaphore(device)?;
+            let signal = [present_transition_done_semaphore];
+            device.queue_submit(
+                self.logical_device.graphics_queue.handle,
+                &[vk::SubmitInfo::default()
+                    .command_buffers(&[cb])
+                    .wait_semaphores(&wait_semaphores)
+                    .wait_dst_stage_mask(&[vk::PipelineStageFlags::BOTTOM_OF_PIPE])
+                    .signal_semaphores(&signal)],
+                vk::Fence::null(),
+            )?;
+            queue_wait_semaphore = present_transition_done_semaphore;
+        }
+
+        let wait_semaphores = [queue_wait_semaphore];
+
+        let present_info = vk::PresentInfoKHR::default()
+            .swapchains(&swapchains)
+            .wait_semaphores(&wait_semaphores)
+            .image_indices(&indices);
+        let swapchain_device = &swapchain.swapchain_device;
+
+        let suboptimal = unsafe { swapchain_device.queue_present(queue, &present_info)? };
+        if suboptimal {
+            swapchain.rebuild(
+                self,
+                &SwapchainCreationInfo {
+                    preferred_format: Some(swapchain.data.current_format.format.to_mgpu()),
+                    preferred_present_mode: Some(swapchain.data.current_present_mode.to_mgpu()),
+                    display_handle: unsafe {
+                        DisplayHandle::borrow_raw(swapchain.raw_display_handle)
+                    },
+                    window_handle: unsafe { WindowHandle::borrow_raw(swapchain.raw_window_handle) },
+                },
+            )?;
+        }
+        Ok(())
     }
 
     unsafe fn finalize_command_recorder(&self, command_buffer: CommandRecorder) -> MgpuResult<()> {
@@ -948,6 +1017,71 @@ impl Hal for VulkanHal {
             device.cmd_set_scissor(cb, 0, &[render_pass_info.render_area.to_vk()]);
             state.current_render_pass = render_pass;
         };
+
+        for rt in &render_pass_info.framebuffer.render_targets {
+            self.resolver.apply_mut(rt.view.owner, |image| {
+                let image_layout = match rt.store_op {
+                    crate::AttachmentStoreOp::DontCare => vk::ImageLayout::UNDEFINED,
+                    crate::AttachmentStoreOp::Store => vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                    crate::AttachmentStoreOp::Present => vk::ImageLayout::PRESENT_SRC_KHR,
+                };
+                let stage_mask = match rt.store_op {
+                    AttachmentStoreOp::DontCare => Default::default(),
+                    AttachmentStoreOp::Store => vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+                    AttachmentStoreOp::Present => Default::default(),
+                };
+
+                let access_mask = match rt.store_op {
+                    AttachmentStoreOp::DontCare => Default::default(),
+                    AttachmentStoreOp::Store => vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+                    AttachmentStoreOp::Present => vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+                };
+                image.set_subresource_layout(
+                    rt.view.subresource,
+                    LayoutInfo {
+                        image_layout,
+                        access_mask,
+                        stage_mask,
+                    },
+                );
+                Ok(())
+            })?;
+        }
+
+        if let Some(rt) = render_pass_info.framebuffer.depth_stencil_target {
+            self.resolver.apply_mut(rt.view.owner, |image| {
+                let image_layout = match rt.store_op {
+                    crate::AttachmentStoreOp::DontCare => vk::ImageLayout::UNDEFINED,
+                    crate::AttachmentStoreOp::Store => {
+                        vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                    }
+                    crate::AttachmentStoreOp::Present => vk::ImageLayout::PRESENT_SRC_KHR,
+                };
+                let stage_mask = match rt.store_op {
+                    AttachmentStoreOp::DontCare => Default::default(),
+                    AttachmentStoreOp::Store => {
+                        vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
+                            | vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS
+                    }
+                    AttachmentStoreOp::Present => Default::default(),
+                };
+
+                let access_mask = match rt.store_op {
+                    AttachmentStoreOp::DontCare => Default::default(),
+                    AttachmentStoreOp::Store => vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                    AttachmentStoreOp::Present => vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                };
+                image.set_subresource_layout(
+                    rt.view.subresource,
+                    LayoutInfo {
+                        image_layout,
+                        access_mask,
+                        stage_mask,
+                    },
+                );
+                Ok(())
+            })?;
+        }
 
         Ok(())
     }
@@ -2567,6 +2701,8 @@ impl VulkanHal {
                 )?,
                 allocated_semaphores: vec![],
                 cached_semaphores: vec![],
+                allocated_semaphores_binary: vec![],
+                cached_semaphores_binary: vec![],
                 atomic_semaphore_counter: AtomicU64::from(0),
             });
         }
@@ -3799,13 +3935,27 @@ impl FrameInFlight {
             Ok(semaphore)
         }
     }
+    fn allocate_binary_semaphore(
+        &mut self,
+        device: &ash::Device,
+    ) -> VulkanHalResult<vk::Semaphore> {
+        if let Some(sem) = self.cached_semaphores_binary.pop() {
+            Ok(sem)
+        } else {
+            let semaphore = unsafe {
+                device.create_semaphore(
+                    &vk::SemaphoreCreateInfo::default(),
+                    get_allocation_callbacks(),
+                )?
+            };
+            self.allocated_semaphores_binary.push(semaphore);
+            info!("Allocated new binary semaphore for current frame in flight");
+            Ok(semaphore)
+        }
+    }
 }
 
 impl FramesInFlight {
-    fn current(&self) -> &FrameInFlight {
-        let current = self.current_frame_in_flight;
-        &self.frames[current]
-    }
     fn current_mut(&mut self) -> &mut FrameInFlight {
         let current = self.current_frame_in_flight;
         &mut self.frames[current]

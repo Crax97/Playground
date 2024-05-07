@@ -75,7 +75,6 @@ impl Swapchain {
             .current_acquired_image
             .take()
             .expect("Called present without acquire!");
-        self.device.write_rdg().inform_present(image, self.info.id);
         let mut requests = self
             .device
             .presentation_requests

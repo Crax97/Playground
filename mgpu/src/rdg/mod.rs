@@ -6,7 +6,7 @@ use crate::{
     },
     util::check,
     AttachmentStoreOp, Buffer, ComputePassInfo, FilterMode, Image, ImageRegion, MgpuResult,
-    RenderPassInfo, StorageAccessMode, SwapchainImage,
+    RenderPassInfo, StorageAccessMode,
 };
 
 #[derive(Debug)]
@@ -151,30 +151,6 @@ impl Rdg {
         );
     }
 
-    pub fn inform_present(&mut self, swapchain_image: SwapchainImage, _swapchain_id: u64) {
-        for node_info in self.nodes.iter_mut().rev() {
-            let mut stop = false;
-            match &mut node_info.ty {
-                Node::RenderPass { info } => info.steps.iter_mut().for_each(|step| {
-                    step.color_attachments.iter_mut().for_each(|rta| {
-                        if info.framebuffer.render_targets[rta.index].view == swapchain_image.view {
-                            stop = true;
-                            info.framebuffer.render_targets[rta.index].store_op =
-                                AttachmentStoreOp::Present;
-                        }
-                    });
-                }),
-                Node::CopyBufferToBuffer { .. } => {}
-                Node::CopyBufferToImage { .. } => {}
-                Node::Blit { .. } => {}
-                Node::ComputePass { .. } => {}
-            }
-            if stop {
-                return;
-            };
-        }
-    }
-
     pub fn clear(&mut self) {
         self.last_on_compute = None;
         self.last_on_graphics = None;
@@ -209,8 +185,8 @@ impl Rdg {
         let mut adjacency_list = Vec::with_capacity(self.nodes.len());
         adjacency_list.resize(self.nodes.len(), HashSet::default());
 
-        let mut parent_list = Vec::with_capacity(self.nodes.len());
-        parent_list.resize(self.nodes.len(), HashSet::default());
+        let mut parent_list = Vec::<HashSet<_>>::with_capacity(self.nodes.len());
+        parent_list.resize(self.nodes.len(), HashSet::<usize>::default());
         // Helper map to track which node currently owns a resource
 
         let mut ownerships = HashMap::<Resource, usize>::new();
@@ -1112,36 +1088,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn present() {
-        let mut rdg = Rdg::default();
-
-        let image_0 = Image {
-            id: 0,
-            usage_flags: Default::default(),
-            extents: Default::default(),
-            dimension: crate::ImageDimension::D1,
-            num_mips: 1.try_into().unwrap(),
-            array_layers: 1.try_into().unwrap(),
-            samples: crate::SampleCount::One,
-            format: crate::ImageFormat::Rgba8,
-        };
-        let view_0 = ImageView {
-            owner: image_0,
-            subresource: image_0.whole_subresource(),
-            id: 0,
-        };
-        rdg.inform_present(
-            crate::SwapchainImage {
-                image: image_0,
-                view: view_0,
-                extents: Default::default(),
-            },
-            0,
-        );
-        let compiled = rdg.compile().unwrap();
-        assert_eq!(compiled.sequence.len(), 0);
-    }
     #[test]
     fn ttg() {
         let mut rdg = Rdg::default();

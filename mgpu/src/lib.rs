@@ -857,6 +857,9 @@ pub struct ImageView {
     id: u64,
 }
 impl ImageView {
+    pub fn owner(self) -> Image {
+        self.owner
+    }
     pub fn extents_2d(&self) -> Extents2D {
         let exents = self.owner.mip_region(self.subresource.mip).extents;
         Extents2D {

@@ -220,7 +220,9 @@ impl VulkanSwapchain {
         let image_count = surface_capabilities
             .max_image_count
             .min(hal.configuration.frames_in_flight.try_into().unwrap());
-        let image_usage_flags = vk::ImageUsageFlags::COLOR_ATTACHMENT;
+        let image_usage_flags = vk::ImageUsageFlags::COLOR_ATTACHMENT
+            | vk::ImageUsageFlags::TRANSFER_DST
+            | vk::ImageUsageFlags::TRANSFER_SRC;
         let swapchain_create_info = vk::SwapchainCreateInfoKHR::default()
             .surface(surface)
             .min_image_count(image_count)

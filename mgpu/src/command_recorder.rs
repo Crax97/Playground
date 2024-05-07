@@ -1,9 +1,9 @@
 use std::marker::PhantomData;
 
 use crate::{
-    hal::QueueType, rdg::Node, AttachmentStoreOp, BindingSet, Buffer, ComputePassDescription,
-    ComputePipeline, DepthStencilTarget, Device, Extents2D, GraphicsPipeline, MgpuResult, Rect2D,
-    RenderPassDescription, RenderTarget, ShaderStageFlags,
+    hal::QueueType, rdg::Node, AttachmentStoreOp, BindingSet, BlitParams, Buffer,
+    ComputePassDescription, ComputePipeline, DepthStencilTarget, Device, Extents2D,
+    GraphicsPipeline, MgpuResult, Rect2D, RenderPassDescription, RenderTarget, ShaderStageFlags,
 };
 #[cfg(debug_assertions)]
 use crate::{util::check, BufferUsageFlags, ImageUsageFlags};
@@ -314,6 +314,18 @@ impl CommandRecorder<Graphics> {
             vertex_buffers: Default::default(),
             index_buffer: Default::default(),
         })
+    }
+
+    pub fn blit(&mut self, params: &BlitParams) {
+        #[cfg(debug_assertions)]
+        Device::validate_blit_params(params);
+        self.new_nodes.push(Node::Blit {
+            source: params.src_image,
+            source_region: params.src_region,
+            dest: params.dst_image,
+            dest_region: params.dst_region,
+            filter: params.filter,
+        });
     }
 }
 
