@@ -2,11 +2,11 @@ pub const SMALL_NUMBER: f32 = 0.005;
 pub mod app;
 pub mod asset_map;
 pub mod assets;
+pub mod core;
 pub mod input;
 pub mod math;
 pub mod scene;
 pub mod scene_renderer;
-pub mod types;
 
 mod utils;
 

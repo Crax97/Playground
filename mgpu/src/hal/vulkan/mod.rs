@@ -3943,7 +3943,7 @@ fn ty_to_vertex_attribute_format(ty: &Type) -> VertexAttributeFormat {
             _ => todo!("Unhandled case of matrix {:?}", (m.nvector, &m.vector_ty)),
         },
 
-        _ => todo!(),
+        _ => todo!("{:?}", ty),
     }
 }
 

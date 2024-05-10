@@ -1,5 +1,5 @@
 use engine::{
-    app::{bootstrap, App},
+    app::{bootstrap, App, AppDescription},
     asset_map::AssetMap,
     assets::{
         loaders::FsTextureLoader,
@@ -9,7 +9,6 @@ use engine::{
         mesh::{Mesh, MeshDescription},
         texture::Texture,
     },
-    compile_glsl,
     input::InputState,
     math::Transform,
     sampler_allocator::SamplerAllocator,
@@ -17,81 +16,55 @@ use engine::{
     scene_renderer::{PointOfView, ProjectionMode, SceneRenderer, SceneRenderingParams},
     shader_cache::ShaderCache,
 };
-use glam::{vec2, vec3};
-use mgpu::ShaderModuleDescription;
-use shaderc::ShaderKind;
-const VERTEX_SHADER: &str = "
-#version 460
-layout(location = 0) in vec3 pos;
-layout(location = 1) in vec3 norm;
-layout(location = 2) in vec3 tang;
-layout(location = 3) in vec3 color;
-layout(location = 4) in vec2 uv;
+use glam::{vec2, vec3, Vec3};
+use mgpu::{Extents2D, ShaderModuleDescription};
 
-layout(location = 0) out vec2 fs_uv;
+macro_rules! include_bytes_align_as {
+    ($align_ty:ty, $path:literal) => {{
+        #[repr(C)]
+        pub struct AlignedAs<Align, Bytes: ?Sized> {
+            pub _align: [Align; 0],
+            pub bytes: Bytes,
+        }
 
-layout(push_constant, std140) uniform ObjectData {
-    mat4 model;
-};
+        const ALIGNED: &AlignedAs<$align_ty, [u8]> = &AlignedAs {
+            _align: [],
+            bytes: *include_bytes!($path),
+        };
 
-layout(set = 0, binding = 0, std140) uniform GlobalFrameData {
-    mat4 projection;
-    mat4 view;
-    float frame_time;
-};
-
-void main() {
-    mat4 mvp = projection * view * model;
-    vec4 vs_pos = mvp * vec4(pos, 1.0);
-    gl_Position = vs_pos;
-    fs_uv = uv;
+        &ALIGNED.bytes
+    }};
 }
-";
-const FRAGMENT_SHADER: &str = "
-#version 460
-layout(set = 1, binding = 1) uniform texture2D tex;
-layout(set = 1, binding = 2) uniform sampler tex_sampler;
 
-layout(location = 0) in vec2 uv;
-
-layout(location = 0) out vec4 color;
-
-void main() {
-    color = texture(sampler2D(tex, tex_sampler), uv);
-}
-";
+const VERTEX_SHADER: &[u8] = include_bytes_align_as!(u32, "spirv/simple_vertex.vert.spv");
+const FRAGMENT_SHADER: &[u8] = include_bytes_align_as!(u32, "spirv/simple_fragment.frag.spv");
 pub struct CubesSceneApplication {
     asset_map: AssetMap,
     scene: Scene,
     first_node_handle: SceneNodeId,
     input: InputState,
     scene_renderer: SceneRenderer,
+    rotation: f32,
     pov: PointOfView,
 }
 
 impl App for CubesSceneApplication {
-    fn app_name() -> &'static str {
-        "Cube Scene"
-    }
-
     fn create(context: &engine::app::AppContext) -> anyhow::Result<Self>
     where
         Self: Sized,
     {
-        let vertex_shader_source = compile_glsl(VERTEX_SHADER, ShaderKind::Vertex)?;
-        let fragment_shader_source = compile_glsl(FRAGMENT_SHADER, ShaderKind::Fragment)?;
         let vertex_shader_module = context
             .device
             .create_shader_module(&ShaderModuleDescription {
                 label: Some("Simple Vertex Shader"),
-                source: &vertex_shader_source,
+                source: bytemuck::cast_slice(VERTEX_SHADER),
             })
             .unwrap();
         let fragment_shader_module = context
             .device
             .create_shader_module(&ShaderModuleDescription {
                 label: Some("Simple Fragment Shader"),
-                source: &fragment_shader_source,
+                source: bytemuck::cast_slice(FRAGMENT_SHADER),
             })
             .unwrap();
         let mut asset_map = AssetMap::new();
@@ -147,6 +120,7 @@ impl App for CubesSceneApplication {
             first_node_handle,
             input: InputState::default(),
             scene_renderer,
+            rotation: 0.0,
             pov,
         })
     }
@@ -160,7 +134,39 @@ impl App for CubesSceneApplication {
         Ok(())
     }
 
-    fn update(&mut self, context: &engine::app::AppContext) -> anyhow::Result<()> {
+    fn update(&mut self, _context: &engine::app::AppContext) -> anyhow::Result<()> {
+        let mut node_transform = self
+            .scene
+            .get_node_world_transform(self.first_node_handle)
+            .unwrap();
+        node_transform.add_rotation_euler(0.0, 1.0, 0.0);
+        self.scene
+            .set_node_world_transform(self.first_node_handle, node_transform);
+
+        let mut camera_input = Vec3::default();
+
+        if self.input.is_key_pressed(engine::input::Key::A) {
+            camera_input.x = 1.0;
+        } else if self.input.is_key_pressed(engine::input::Key::D) {
+            camera_input.x = -1.0;
+        }
+
+        if self.input.is_key_pressed(engine::input::Key::W) {
+            camera_input.z = 1.0;
+        } else if self.input.is_key_pressed(engine::input::Key::S) {
+            camera_input.z = -1.0;
+        }
+        if self.input.is_key_pressed(engine::input::Key::Q) {
+            camera_input.y = 1.0;
+        } else if self.input.is_key_pressed(engine::input::Key::E) {
+            camera_input.y = -1.0;
+        }
+
+        let new_location_offset = camera_input.x * self.pov.transform.left()
+            + camera_input.y * self.pov.transform.up()
+            + camera_input.z * self.pov.transform.forward();
+        self.pov.transform.location += new_location_offset;
+
         self.input.end_frame();
         Ok(())
     }
@@ -340,5 +346,12 @@ impl CubesSceneApplication {
 }
 
 fn main() -> anyhow::Result<()> {
-    bootstrap::<CubesSceneApplication>()
+    bootstrap::<CubesSceneApplication>(AppDescription {
+        window_size: Extents2D {
+            width: 1920,
+            height: 1080,
+        },
+        initial_title: Some("Cube Scene"),
+        app_identifier: "CubeSceneApp",
+    })
 }

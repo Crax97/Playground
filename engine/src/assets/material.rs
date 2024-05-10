@@ -206,7 +206,7 @@ impl Material {
             primitive_topology: PrimitiveTopology::TriangleList,
             polygon_mode: PolygonMode::Filled,
             cull_mode: CullMode::Back,
-            front_face: FrontFace::ClockWise,
+            front_face: FrontFace::CounterClockWise,
             multisample_state: None,
             depth_stencil_state: DepthStencilState {
                 depth_test_enabled: true,

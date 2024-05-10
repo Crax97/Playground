@@ -2,7 +2,7 @@
 name = "engine"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.76"
+rust-version = "1.77.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -42,3 +42,6 @@ crossbeam = "0.8.4"
 [dev-dependencies]
 approx = "0.5.1"
 ron = "0.8.1"
+
+[build-dependencies]
+engine_build_utils = { path = "../engine_build_utils" }

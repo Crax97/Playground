@@ -191,6 +191,8 @@ impl ErasedArena {
         self.len = 0;
     }
 
+    /// # Safety
+    /// The entry pointed by index must be written with a valid value, before any read operations
     pub unsafe fn allocate_index(&mut self) -> Index {
         const GROWTH_FACTOR: f32 = 1.5;
 
@@ -218,6 +220,9 @@ impl ErasedArena {
         index
     }
 
+    /// # Safety
+    /// The entry pointed by index must be written with a valid value, before any read operations.
+    /// The returned pointer is a pointer to the Option<T> payload of the entry
     pub unsafe fn preallocate_entry(&mut self) -> (Index, *mut u8) {
         let index = self.allocate_index();
         let ptr = self.erased_payload_mut_ptr_at(index.index as usize);

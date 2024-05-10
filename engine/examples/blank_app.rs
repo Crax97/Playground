@@ -1,12 +1,8 @@
-use engine::app::{bootstrap, App};
+use engine::app::{bootstrap, App, AppDescription};
 
 struct BlankApp;
 
 impl App for BlankApp {
-    fn app_name() -> &'static str {
-        "Blank app"
-    }
-
     fn create(_context: &engine::app::AppContext) -> anyhow::Result<Self>
     where
         Self: Sized,
@@ -47,5 +43,5 @@ impl App for BlankApp {
 }
 
 fn main() {
-    bootstrap::<BlankApp>().unwrap()
+    bootstrap::<BlankApp>(AppDescription::default()).unwrap()
 }

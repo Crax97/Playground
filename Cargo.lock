@@ -947,6 +947,7 @@ dependencies = [
  "bytemuck",
  "copypasta",
  "crossbeam",
+ "engine_build_utils",
  "env_logger 0.10.1",
  "erased-serde",
  "glam",
@@ -970,6 +971,15 @@ dependencies = [
  "thiserror",
  "uuid",
  "winit",
+]
+
+[[package]]
+name = "engine_build_utils"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "shaderc",
 ]
 
 [[package]]

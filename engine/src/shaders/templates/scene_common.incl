@@ -1,0 +1,15 @@
+struct VertexOutput {
+    vec4 clip_position;
+    vec3 world_position;
+    vec2 uv;
+};
+
+struct MaterialAttributes {
+    vec4 diffuse_color;
+};
+
+#define DEFINE_USER_TEXTURE(TYPE, NAME, BINDING) \
+    layout(set = 1, binding = (BINDING + 1) * 2) uniform TYPE NAME; \
+    layout(set = 1, binding = (BINDING + 1) * 2 + 1) uniform sampler NAME##_sampler; \
+
+#define SAMPLE_USER_TEXTURE_2D(NAME, UV) texture(sampler2D(NAME, NAME##_sampler), UV)

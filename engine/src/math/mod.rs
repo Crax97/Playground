@@ -48,8 +48,21 @@ impl Transform {
         Self::from_matrix(matrix)
     }
 
+    pub fn left(&self) -> Vec3 {
+        self.matrix().col(0).xyz().normalize()
+    }
+
+    pub fn up(&self) -> Vec3 {
+        self.matrix().col(1).xyz().normalize()
+    }
+
     pub fn forward(&self) -> Vec3 {
         self.matrix().col(2).xyz().normalize()
+    }
+
+    pub fn add_rotation_euler(&mut self, x: f32, y: f32, z: f32) {
+        let quat = Quat::from_euler(glam::EulerRot::XYZ, x, y, z);
+        self.rotation *= quat;
     }
 }
 

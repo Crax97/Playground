@@ -1,0 +1,37 @@
+#include "templates/scene_common.incl"
+
+layout(location = 0) in vec3 vertex_position;
+layout(location = 1) in vec3 vertex_normal;
+layout(location = 2) in vec3 vertex_tangent;
+layout(location = 3) in vec3 vertex_color;
+layout(location = 4) in vec2 vertex_uv;
+
+layout(location = 0) out vec4 clip_position;
+layout(location = 1) out vec3 world_position;
+layout(location = 2) out vec2 uv;
+
+layout(push_constant, std140) uniform ObjectData {
+    mat4 _model;
+};
+
+layout(set = 0, binding = 0, std140) uniform GlobalFrameData {
+    mat4 projection;
+    mat4 view;
+    float frame_time;
+};
+
+mat4 get_model_matrix() {
+    return _model;
+}
+
+VertexOutput vertex();
+
+void main() {
+    VertexOutput vertex_output = vertex();
+
+    clip_position = vertex_output.clip_position;
+    world_position = vertex_output.world_position;
+    uv = vertex_output.uv;
+
+    gl_Position = vertex_output.clip_position;
+}

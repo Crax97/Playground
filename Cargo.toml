@@ -1,7 +1,7 @@
 [workspace]
 resolver="2"
 members = [
-    "engine",
+    "engine", "engine_build_utils",
     "mgpu",
 ]
 
