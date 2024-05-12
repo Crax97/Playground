@@ -13,7 +13,7 @@ use crate::sampler_allocator::SamplerAllocator;
 #[derive(
     Default, Hash, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
-pub struct SamplerConfiguration {
+pub struct TextureSamplerConfiguration {
     pub minmag_filter: FilterMode,
     pub mipmap_mode: MipmapMode,
 }
@@ -21,7 +21,7 @@ pub struct SamplerConfiguration {
 pub struct Texture {
     pub(crate) image: Image,
     pub(crate) view: ImageView,
-    pub(crate) sampler_configuration: SamplerConfiguration,
+    pub(crate) sampler_configuration: TextureSamplerConfiguration,
     pub(crate) sampler: Sampler,
 }
 pub struct TextureDescription<'a> {
@@ -32,7 +32,7 @@ pub struct TextureDescription<'a> {
     pub usage_flags: TextureUsageFlags,
     pub num_mips: NonZeroU32,
     pub auto_generate_mips: bool,
-    pub sampler_configuration: SamplerConfiguration,
+    pub sampler_configuration: TextureSamplerConfiguration,
 }
 
 pub enum TextureType {
@@ -65,6 +65,10 @@ impl<'a> TextureDescription<'a> {
 
         if self.usage_flags.contains(TextureUsageFlags::STORAGE) {
             usages |= ImageUsageFlags::STORAGE;
+        }
+
+        if self.auto_generate_mips && self.num_mips.get() > 1 {
+            usages |= ImageUsageFlags::TRANSFER_SRC;
         }
 
         usages

@@ -1,10 +1,11 @@
-use std::{collections::HashSet, default};
+pub mod serializable_scene;
 
 use glam::Vec3;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     arena::{Arena, Index},
-    asset_map::AssetHandle,
+    asset_map::{AssetHandle, AssetMap},
     assets::{material::Material, mesh::Mesh},
     math::Transform,
 };
@@ -12,19 +13,20 @@ use crate::{
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct SceneNodeId(Index);
 
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SceneMesh {
     pub handle: AssetHandle<Mesh>,
     pub material: AssetHandle<Material>,
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize, Clone)]
 pub enum ScenePrimitive {
     #[default]
     Group,
     Mesh(SceneMesh),
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize, Clone)]
 pub struct SceneNode {
     pub label: Option<String>,
     pub enabled: bool,
@@ -41,6 +43,25 @@ impl Scene {
         Self {
             nodes: Arena::default(),
         }
+    }
+
+    pub fn preload(&self, asset_map: &mut AssetMap) -> anyhow::Result<()> {
+        for node in self.nodes.iter() {
+            match &node.primitive_type {
+                ScenePrimitive::Group => todo!(),
+                ScenePrimitive::Mesh(SceneMesh { handle, material }) => {
+                    asset_map.load(handle)?;
+                    asset_map.load(material)?;
+
+                    let material = asset_map.get(material).unwrap();
+                    let textures = material.get_used_textures();
+                    for tex in textures {
+                        asset_map.load(&tex)?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn add_node(&mut self, node: SceneNode) -> SceneNodeId {

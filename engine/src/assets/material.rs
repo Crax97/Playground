@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use glam::{Vec2, Vec3, Vec4};
 use mgpu::{
@@ -431,6 +431,15 @@ impl Material {
             scalar_parameters_infos: user_scalars,
             texture_parameter_infos: user_textures,
         })
+    }
+
+    pub fn get_used_textures(&self) -> Vec<AssetHandle<Texture>> {
+        let mut result = HashSet::new();
+        for param in &self.parameters.textures {
+            result.insert(param.texture.clone());
+        }
+
+        result.into_iter().collect()
     }
 }
 

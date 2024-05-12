@@ -496,6 +496,7 @@ fn main() {
             min_filter: FilterMode::Linear,
             mag_filter: FilterMode::Linear,
             mipmap_mode: MipmapMode::Linear,
+            max_lod: f32::MAX,
             ..Default::default()
         })
         .unwrap();

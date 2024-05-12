@@ -1,13 +1,13 @@
 use std::{
     any::{type_name, TypeId},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     marker::PhantomData,
 };
 
 use log::warn;
 use serde::{Deserialize, Serialize};
 
-use crate::immutable_string::ImmutableString;
+use crate::{assets::texture::Texture, immutable_string::ImmutableString};
 
 use crate::utils::erased_arena::{ErasedArena, Index};
 
@@ -19,10 +19,10 @@ pub trait AssetLoader: 'static {
     fn accepts_identifier(&self, identifier: &str) -> bool;
     fn load(&mut self, identifier: &str) -> anyhow::Result<Self::LoadedAsset>;
 }
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug)]
 pub struct AssetHandle<A: Asset> {
     _phantom_data: PhantomData<A>,
-    identifier: ImmutableString,
+    pub(crate) identifier: ImmutableString,
 }
 
 #[derive(Default)]
@@ -30,6 +30,11 @@ pub struct AssetMap {
     arenas: HashMap<TypeId, ErasedArena>,
     loaded_assets: HashMap<ImmutableString, Index>,
     loaders: HashMap<TypeId, Box<dyn UnsafeAssetLoader>>,
+}
+
+struct LoadedAsset<A: Asset> {
+    asset: A,
+    ref_count: usize,
 }
 
 impl AssetMap {
@@ -50,15 +55,22 @@ impl AssetMap {
         }
     }
 
-    pub fn add<A: Asset>(&mut self, asset: A, identifier: &str) -> AssetHandle<A> {
+    pub fn add<A: Asset>(
+        &mut self,
+        asset: A,
+        identifier: impl Into<ImmutableString>,
+    ) -> AssetHandle<A> {
+        let identifier = identifier.into();
         let asset_ty = TypeId::of::<A>();
         let map = self
             .arenas
             .entry(asset_ty)
-            .or_insert_with(|| ErasedArena::new::<A>());
+            .or_insert_with(ErasedArena::new::<LoadedAsset<A>>);
 
-        let index = map.add(asset);
-        let identifier = ImmutableString::new_dynamic(identifier);
+        let index = map.add(LoadedAsset {
+            asset,
+            ref_count: 1,
+        });
         self.loaded_assets.insert(identifier.clone(), index);
         AssetHandle {
             _phantom_data: PhantomData,
@@ -66,8 +78,23 @@ impl AssetMap {
         }
     }
 
-    pub fn load<A: Asset>(&mut self, identifier: &str) -> anyhow::Result<AssetHandle<A>> {
+    pub fn load<A: Asset>(&mut self, identifier: &AssetHandle<A>) -> anyhow::Result<()> {
         let asset_ty = TypeId::of::<A>();
+        let identifier = &identifier.identifier;
+        let map = self
+            .arenas
+            .entry(asset_ty)
+            .or_insert_with(ErasedArena::new::<LoadedAsset<A>>);
+
+        if let Some(existing_entry) = self
+            .loaded_assets
+            .get(identifier)
+            .and_then(|index| map.get_mut::<LoadedAsset<A>>(*index))
+        {
+            existing_entry.ref_count += 1;
+            return Ok(());
+        }
+
         let loader = if let Some(loader) = self.loaders.get_mut(&asset_ty) {
             loader
         } else {
@@ -76,41 +103,49 @@ impl AssetMap {
         let map = self
             .arenas
             .entry(asset_ty)
-            .or_insert_with(|| ErasedArena::new::<A>());
+            .or_insert_with(ErasedArena::new::<LoadedAsset<A>>);
 
         let (index, ptr) = unsafe { map.preallocate_entry() };
-        unsafe { loader.load_asset(identifier, ptr)? };
-        let identifier = ImmutableString::new_dynamic(identifier);
+        let asset_entry = unsafe { &mut *ptr.cast::<LoadedAsset<A>>() };
+        asset_entry.ref_count = 1;
+
+        unsafe { loader.load_asset(identifier, (&mut asset_entry.asset as *mut A).cast::<u8>())? };
         self.loaded_assets.insert(identifier.clone(), index);
-        Ok(AssetHandle {
-            _phantom_data: PhantomData,
-            identifier,
-        })
+        Ok(())
     }
 
     pub fn get<A: Asset>(&self, handle: &AssetHandle<A>) -> Option<&A> {
         let index = self.loaded_assets.get(&handle.identifier).copied()?;
         self.arenas
             .get(&TypeId::of::<A>())
-            .and_then(|map| map.get(index))
+            .and_then(|map| map.get::<LoadedAsset<A>>(index))
+            .map(|entry| &entry.asset)
     }
 
     pub fn get_mut<A: Asset>(&mut self, handle: &AssetHandle<A>) -> Option<&mut A> {
         let index = self.loaded_assets.get(&handle.identifier).copied()?;
         self.arenas
             .get_mut(&TypeId::of::<A>())
-            .and_then(|map| map.get_mut(index))
+            .and_then(|map| map.get_mut::<LoadedAsset<A>>(index))
+            .map(|entry| &mut entry.asset)
     }
 
-    pub fn unload<A: Asset>(&mut self, handle: &AssetHandle<A>) {
-        let index = if let Some(index) = self.loaded_assets.remove(&handle.identifier) {
-            index
-        } else {
+    pub fn decrement_reference<A: Asset>(&mut self, handle: impl Into<AssetHandle<A>>) {
+        let handle = handle.into();
+        let Some(index) = self.loaded_assets.remove(&handle.identifier) else {
             return;
         };
-        self.arenas
-            .get_mut(&TypeId::of::<A>())
-            .and_then(|map| map.remove::<A>(index));
+        let Some(arena) = self.arenas.get_mut(&TypeId::of::<A>()) else {
+            return;
+        };
+        let Some(entry) = arena.get_mut::<LoadedAsset<A>>(index) else {
+            return;
+        };
+        entry.ref_count -= 1;
+
+        if entry.ref_count == 0 {
+            arena.remove::<LoadedAsset<A>>(index);
+        }
     }
 
     pub fn unload_all(&mut self) {
@@ -118,6 +153,15 @@ impl AssetMap {
             map.clear()
         }
         self.loaded_assets.clear();
+    }
+}
+
+impl<A: Asset, S: AsRef<str>> From<S> for AssetHandle<A> {
+    fn from(value: S) -> Self {
+        Self {
+            _phantom_data: PhantomData,
+            identifier: ImmutableString::new_dynamic(value.as_ref()),
+        }
     }
 }
 
@@ -155,6 +199,32 @@ unsafe impl<L: AssetLoader> UnsafeAssetLoader for L {
         <Self as AssetLoader>::accepts_identifier(self, identifier)
     }
 }
+impl<A: Asset> Eq for AssetHandle<A> {}
+
+impl<A: Asset> PartialEq for AssetHandle<A> {
+    fn eq(&self, other: &Self) -> bool {
+        self._phantom_data == other._phantom_data && self.identifier == other.identifier
+    }
+}
+
+impl<A: Asset> Ord for AssetHandle<A> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.identifier.cmp(&other.identifier)
+    }
+}
+
+impl<A: Asset> PartialOrd for AssetHandle<A> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.identifier.partial_cmp(&other.identifier)
+    }
+}
+
+impl<A: Asset> std::hash::Hash for AssetHandle<A> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self._phantom_data.hash(state);
+        self.identifier.hash(state);
+    }
+}
 
 impl<A: Asset> Clone for AssetHandle<A> {
     fn clone(&self) -> Self {
@@ -186,10 +256,18 @@ impl<'de, A: Asset> Deserialize<'de> for AssetHandle<A> {
     }
 }
 
+impl<A: Asset> AssetHandle<A> {
+    pub fn new(identifier: impl Into<ImmutableString>) -> Self {
+        Self {
+            _phantom_data: PhantomData,
+            identifier: identifier.into(),
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
 
-    use crate::asset_map::{Asset, AssetLoader, AssetMap};
+    use crate::asset_map::{Asset, AssetHandle, AssetLoader, AssetMap};
 
     #[test]
     fn basic_operations() {
@@ -215,27 +293,44 @@ mod tests {
         }
 
         let mut asset_map = AssetMap::new();
+        let string_one = AssetHandle::<StringAsset>::new("Hello");
+        let string_two = AssetHandle::<StringAsset>::new("World");
         asset_map.add_loader(StringAssetLoader);
-        let string_one = asset_map.load::<StringAsset>("Hello").unwrap();
-        let string_two = asset_map.load::<StringAsset>("World").unwrap();
+        asset_map.load::<StringAsset>(&string_one).unwrap();
+        asset_map.load::<StringAsset>(&string_two).unwrap();
         assert_eq!(
-            asset_map.get(&string_one).unwrap().content.as_str(),
+            asset_map
+                .get::<StringAsset>(&string_one)
+                .unwrap()
+                .content
+                .as_str(),
             "Hello"
         );
         assert_eq!(
-            asset_map.get(&string_two).unwrap().content.as_str(),
+            asset_map
+                .get::<StringAsset>(&string_two)
+                .unwrap()
+                .content
+                .as_str(),
             "World"
         );
-        asset_map.unload(&string_one);
-        assert!(asset_map.get(&string_one).is_none());
+        asset_map.decrement_reference::<StringAsset>("Hello");
+        assert!(asset_map.get::<StringAsset>(&string_one).is_none());
 
-        asset_map.get_mut(&string_two).unwrap().content = "Pippo".to_string();
+        asset_map
+            .get_mut::<StringAsset>(&string_two)
+            .unwrap()
+            .content = "Pippo".to_string();
         assert_eq!(
-            asset_map.get(&string_two).unwrap().content.as_str(),
+            asset_map
+                .get::<StringAsset>(&string_two)
+                .unwrap()
+                .content
+                .as_str(),
             "Pippo"
         );
 
         asset_map.unload_all();
-        assert!(asset_map.get(&string_two).is_none());
+        assert!(asset_map.get::<StringAsset>(&string_two).is_none());
     }
 }

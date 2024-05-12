@@ -8,7 +8,9 @@ use mgpu::{Device, Extents2D};
 
 use crate::{
     asset_map::AssetLoader,
-    assets::texture::{SamplerConfiguration, Texture, TextureDescription, TextureUsageFlags},
+    assets::texture::{
+        Texture, TextureDescription, TextureSamplerConfiguration, TextureUsageFlags,
+    },
     sampler_allocator::SamplerAllocator,
 };
 
@@ -45,6 +47,14 @@ impl AssetLoader for FsTextureLoader {
         let image = image::load_from_memory(&content)?;
         let image_rgba_bytes = image.to_rgba8();
 
+        let mips = if image.width() % 2 == 0 && image.height() % 2 == 0 {
+            let min_dim = image.width().min(image.height());
+
+            (min_dim as f64).log2() as u32
+        } else {
+            1
+        };
+
         Texture::new(
             &self.device,
             &TextureDescription {
@@ -56,9 +66,9 @@ impl AssetLoader for FsTextureLoader {
                 }),
                 format: mgpu::ImageFormat::Rgba8,
                 usage_flags: TextureUsageFlags::default(),
-                num_mips: 1.try_into().unwrap(),
-                auto_generate_mips: false,
-                sampler_configuration: SamplerConfiguration::default(),
+                num_mips: mips.try_into().unwrap(),
+                auto_generate_mips: true,
+                sampler_configuration: TextureSamplerConfiguration::default(),
             },
             &mut self.sampler_allocator,
         )

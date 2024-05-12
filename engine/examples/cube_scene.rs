@@ -1,6 +1,6 @@
 use engine::{
-    app::{bootstrap, App, AppDescription},
-    asset_map::AssetMap,
+    app::{bootstrap, App, AppContext, AppDescription},
+    asset_map::{AssetHandle, AssetMap},
     assets::{
         loaders::FsTextureLoader,
         material::{
@@ -12,12 +12,14 @@ use engine::{
     input::InputState,
     math::Transform,
     sampler_allocator::SamplerAllocator,
-    scene::{Scene, SceneMesh, SceneNode, SceneNodeId},
+    scene::{serializable_scene::SerializableScene, Scene, SceneMesh, SceneNode, SceneNodeId},
     scene_renderer::{PointOfView, ProjectionMode, SceneRenderer, SceneRenderingParams},
     shader_cache::ShaderCache,
 };
-use glam::{vec2, vec3, Vec3};
+use glam::{vec2, vec3, Quat, Vec3};
+use gltf::json::Asset;
 use mgpu::{Extents2D, ShaderModuleDescription};
+use winit::dpi::{LogicalPosition, PhysicalPosition, PhysicalSize, Position};
 
 macro_rules! include_bytes_align_as {
     ($align_ty:ty, $path:literal) => {{
@@ -42,9 +44,9 @@ pub struct CubesSceneApplication {
     asset_map: AssetMap,
     scene: Scene,
     first_node_handle: SceneNodeId,
-    input: InputState,
     scene_renderer: SceneRenderer,
-    rotation: f32,
+    cam_pitch: f32,
+    cam_roll: f32,
     pov: PointOfView,
 }
 
@@ -77,7 +79,8 @@ impl App for CubesSceneApplication {
         let texture_loader =
             FsTextureLoader::new(context.device.clone(), sampler_allocator.clone());
         asset_map.add_loader(texture_loader);
-        let david_texture = asset_map.load::<Texture>("assets/images/david.jpg")?;
+        let david_texture = AssetHandle::<Texture>::new("assets/images/david.jpg");
+        asset_map.load::<Texture>(&david_texture)?;
         let mut scene = Scene::default();
         let cube_mesh = Self::create_cube_mesh(&context.device)?;
         let cube_handle = asset_map.add(cube_mesh, "meshes.cube");
@@ -112,21 +115,20 @@ impl App for CubesSceneApplication {
 
         let scene_renderer = SceneRenderer::new(&context.device)?;
         let mut pov = PointOfView::new_perspective(0.01, 1000.0, 75.0, 1920.0 / 1080.0);
-
         pov.transform.location = vec3(0.0, 10.0, -5.0);
+
         Ok(Self {
             asset_map,
             scene,
             first_node_handle,
-            input: InputState::default(),
             scene_renderer,
-            rotation: 0.0,
+            cam_pitch: 0.0,
+            cam_roll: 0.0,
             pov,
         })
     }
 
-    fn handle_window_event(&mut self, event: &winit::event::WindowEvent) -> anyhow::Result<()> {
-        self.input.update(event);
+    fn handle_window_event(&mut self, _event: &winit::event::WindowEvent) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -134,40 +136,22 @@ impl App for CubesSceneApplication {
         Ok(())
     }
 
-    fn update(&mut self, _context: &engine::app::AppContext) -> anyhow::Result<()> {
+    fn update(&mut self, context: &engine::app::AppContext) -> anyhow::Result<()> {
+        self.update_fps_camera(context);
+
+        const ROTATION_PER_FRAME_DEGS: f64 = 30.0;
         let mut node_transform = self
             .scene
             .get_node_world_transform(self.first_node_handle)
             .unwrap();
-        node_transform.add_rotation_euler(0.0, 1.0, 0.0);
+        node_transform.add_rotation_euler(
+            0.0,
+            (ROTATION_PER_FRAME_DEGS * context.time.delta_seconds()) as f32,
+            0.0,
+        );
         self.scene
             .set_node_world_transform(self.first_node_handle, node_transform);
 
-        let mut camera_input = Vec3::default();
-
-        if self.input.is_key_pressed(engine::input::Key::A) {
-            camera_input.x = 1.0;
-        } else if self.input.is_key_pressed(engine::input::Key::D) {
-            camera_input.x = -1.0;
-        }
-
-        if self.input.is_key_pressed(engine::input::Key::W) {
-            camera_input.z = 1.0;
-        } else if self.input.is_key_pressed(engine::input::Key::S) {
-            camera_input.z = -1.0;
-        }
-        if self.input.is_key_pressed(engine::input::Key::Q) {
-            camera_input.y = 1.0;
-        } else if self.input.is_key_pressed(engine::input::Key::E) {
-            camera_input.y = -1.0;
-        }
-
-        let new_location_offset = camera_input.x * self.pov.transform.left()
-            + camera_input.y * self.pov.transform.up()
-            + camera_input.z * self.pov.transform.forward();
-        self.pov.transform.location += new_location_offset;
-
-        self.input.end_frame();
         Ok(())
     }
 
@@ -193,13 +177,19 @@ impl App for CubesSceneApplication {
 
     fn resized(
         &mut self,
-        context: &engine::app::AppContext,
-        new_extents: mgpu::Extents2D,
+        _context: &engine::app::AppContext,
+        _new_extents: mgpu::Extents2D,
     ) -> mgpu::MgpuResult<()> {
         Ok(())
     }
 
-    fn shutdown(&mut self, context: &engine::app::AppContext) -> anyhow::Result<()> {
+    fn shutdown(&mut self, _context: &engine::app::AppContext) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn on_window_created(&mut self, context: &AppContext) -> anyhow::Result<()> {
+        let window = context.window();
+        window.set_cursor_visible(false);
         Ok(())
     }
 }
@@ -342,6 +332,57 @@ impl CubesSceneApplication {
         };
         let cube_mesh = Mesh::new(device, &mesh_description)?;
         Ok(cube_mesh)
+    }
+
+    fn update_fps_camera(&mut self, context: &AppContext) {
+        const MOVEMENT_SPEED: f64 = 100.0;
+        const ROTATION_DEGREES: f64 = 90.0;
+
+        let mut camera_input = Vec3::default();
+
+        if context.input.is_key_pressed(engine::input::Key::A) {
+            camera_input.x = 1.0;
+        } else if context.input.is_key_pressed(engine::input::Key::D) {
+            camera_input.x = -1.0;
+        }
+
+        if context.input.is_key_pressed(engine::input::Key::W) {
+            camera_input.z = 1.0;
+        } else if context.input.is_key_pressed(engine::input::Key::S) {
+            camera_input.z = -1.0;
+        }
+        if context.input.is_key_pressed(engine::input::Key::Q) {
+            camera_input.y = 1.0;
+        } else if context.input.is_key_pressed(engine::input::Key::E) {
+            camera_input.y = -1.0;
+        }
+
+        camera_input *= (MOVEMENT_SPEED * context.time.delta_seconds()) as f32;
+
+        let mouse_delta = context.input.normalized_mouse_position();
+        self.cam_roll -= mouse_delta.x * (ROTATION_DEGREES * context.time.delta_seconds()) as f32;
+        self.cam_pitch += mouse_delta.y * (ROTATION_DEGREES * context.time.delta_seconds()) as f32;
+        self.cam_pitch = self.cam_pitch.clamp(-89.0, 89.0);
+
+        let new_location_offset = camera_input.x * self.pov.transform.left()
+            + camera_input.y * self.pov.transform.up()
+            + camera_input.z * self.pov.transform.forward();
+        self.pov.transform.location += new_location_offset;
+        self.pov.transform.rotation = Quat::from_euler(
+            glam::EulerRot::XYZ,
+            self.cam_pitch.to_radians(),
+            self.cam_roll.to_radians(),
+            0.0,
+        );
+
+        let cursor_position = context.window().inner_size();
+        context
+            .window()
+            .set_cursor_position(PhysicalPosition::new(
+                cursor_position.width / 2,
+                cursor_position.height / 2,
+            ))
+            .unwrap();
     }
 }
 

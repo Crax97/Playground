@@ -608,6 +608,8 @@ fn main() {
             min_filter: FilterMode::Linear,
             mag_filter: FilterMode::Linear,
             mipmap_mode: MipmapMode::Linear,
+            // Otherwise the first mip, written by the compute shader, wouldn't be visible
+            max_lod: 0.0,
             ..Default::default()
         })
         .unwrap();

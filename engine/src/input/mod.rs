@@ -16,8 +16,8 @@ pub use self::key::*;
 
 #[derive(Debug)]
 pub struct InputState {
-    current_cursor_position: PhysicalPosition<f32>,
-    last_update_cursor_position: PhysicalPosition<f32>,
+    current_cursor_position: PhysicalPosition<u32>,
+    last_update_cursor_position: PhysicalPosition<u32>,
     current_pointer_pressure: f32,
     window_size: PhysicalSize<u32>,
     current_wheel_delta: f32,
@@ -63,11 +63,10 @@ impl InputState {
                 self.update_modifiers_state(&modifiers.state());
             }
             winit::event::WindowEvent::CursorMoved { position, .. } => {
-                self.last_update_cursor_position = self.current_cursor_position;
-                let mouse_position = position.cast::<f32>();
+                let mouse_position = position.cast::<u32>();
                 self.current_cursor_position = PhysicalPosition {
                     x: mouse_position.x,
-                    y: self.window_size.height as f32 - mouse_position.y,
+                    y: self.window_size.height - mouse_position.y,
                 };
             }
             winit::event::WindowEvent::MouseWheel { delta, .. } => {
@@ -109,10 +108,10 @@ impl InputState {
                         );
                     }
                     winit::event::TouchPhase::Moved => {
-                        let location = location.cast::<f32>();
+                        let mouse_position = location.cast::<u32>();
                         self.current_cursor_position = PhysicalPosition {
-                            x: location.x,
-                            y: self.window_size.height as f32 - location.y,
+                            x: mouse_position.x,
+                            y: self.window_size.height - mouse_position.y,
                         };
                     }
                     winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled => {
@@ -165,6 +164,7 @@ impl InputState {
         self.last_key_states = self.key_states;
         self.last_modifiers = self.current_modifiers;
         self.current_wheel_delta = 0.0;
+        self.last_update_cursor_position = self.current_cursor_position;
     }
 
     fn set_cursor_button_state(&mut self, button: MouseButton, state: ElementState) {
@@ -176,32 +176,33 @@ impl InputState {
 
     pub fn mouse_position(&self) -> Vec2 {
         Vec2::new(
-            self.current_cursor_position.x,
-            self.current_cursor_position.y,
+            self.current_cursor_position.x as f32,
+            self.current_cursor_position.y as f32,
         )
     }
     #[allow(dead_code)]
-    pub fn last_position(&self) -> PhysicalPosition<f32> {
+    pub fn last_position(&self) -> PhysicalPosition<u32> {
         self.last_update_cursor_position
     }
     pub fn normalized_mouse_position(&self) -> Vec2 {
         Vec2::new(
-            (self.current_cursor_position.x / self.window_size.width as f32) * 2.0 - 1.0,
-            (self.current_cursor_position.y / self.window_size.height as f32) * 2.0 - 1.0,
+            (self.current_cursor_position.x as f32 / self.window_size.width as f32) * 2.0 - 1.0,
+            -(self.current_cursor_position.y as f32 / self.window_size.height as f32) * 2.0 + 1.0,
         )
     }
     #[allow(dead_code)]
     pub fn normalized_last_mouse_position(&self) -> Vec2 {
         Vec2::new(
-            (self.last_update_cursor_position.x / self.window_size.width as f32) * 2.0 - 1.0,
-            (self.last_update_cursor_position.y / self.window_size.height as f32) * 2.0 - 1.0,
+            (self.last_update_cursor_position.x as f32 / self.window_size.width as f32) * 2.0 - 1.0,
+            (self.last_update_cursor_position.y as f32 / self.window_size.height as f32) * 2.0
+                - 1.0,
         )
     }
     #[allow(dead_code)]
     pub fn mouse_delta(&self) -> Vec2 {
         Vec2::new(
-            self.current_cursor_position.x - self.last_update_cursor_position.x,
-            self.current_cursor_position.y - self.last_update_cursor_position.y,
+            (self.current_cursor_position.x - self.last_update_cursor_position.x) as f32,
+            (self.current_cursor_position.y - self.last_update_cursor_position.y) as f32,
         )
     }
     #[allow(dead_code)]

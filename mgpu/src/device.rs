@@ -114,7 +114,7 @@ impl Device {
         let mut rdg = self.write_rdg();
         let compiled = rdg.compile()?;
         rdg.clear();
-        static DUMP: AtomicBool = AtomicBool::new(true);
+        static DUMP: AtomicBool = AtomicBool::new(false);
         if DUMP.load(std::sync::atomic::Ordering::Relaxed) {
             println!("{}", compiled.dump_dot());
             compiled.save_to_svg(&format!(

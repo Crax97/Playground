@@ -60,8 +60,14 @@ impl Transform {
         self.matrix().col(2).xyz().normalize()
     }
 
+    // The input angles must be in degrees
     pub fn add_rotation_euler(&mut self, x: f32, y: f32, z: f32) {
-        let quat = Quat::from_euler(glam::EulerRot::XYZ, x, y, z);
+        let quat = Quat::from_euler(
+            glam::EulerRot::XYZ,
+            x.to_radians(),
+            y.to_radians(),
+            z.to_radians(),
+        );
         self.rotation *= quat;
     }
 }

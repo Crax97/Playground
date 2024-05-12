@@ -221,8 +221,8 @@ pub enum SampleCount {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FilterMode {
     #[default]
-    Nearest,
     Linear,
+    Nearest,
 }
 
 #[derive(Default, Copy, Clone, PartialEq, PartialOrd, Debug)]
@@ -237,8 +237,8 @@ pub enum BorderColor {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum MipmapMode {
     #[default]
-    Nearest,
     Linear,
+    Nearest,
 }
 
 #[derive(Default, Copy, Clone, PartialEq, PartialOrd, Debug)]

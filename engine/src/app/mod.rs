@@ -13,7 +13,7 @@ use winit::{
     window::{Window, WindowAttributes},
 };
 
-use crate::{core::Time, fps_limiter::FpsLimiter};
+use crate::{core::Time, fps_limiter::FpsLimiter, input::InputState};
 
 pub struct AppRunner {}
 
@@ -27,8 +27,14 @@ pub struct AppContext {
     pub device: Device,
     pub swapchain: MaybeUninit<Swapchain>,
     pub window: MaybeUninit<Window>,
+    pub input: InputState,
     pub time: Time,
     pub fps_limiter: FpsLimiter,
+}
+impl AppContext {
+    pub fn window(&self) -> &Window {
+        unsafe { self.window.assume_init_ref() }
+    }
 }
 
 pub struct RenderContext {
@@ -39,6 +45,11 @@ pub trait App {
     fn create(context: &AppContext) -> anyhow::Result<Self>
     where
         Self: Sized;
+
+    fn on_window_created(&mut self, context: &AppContext) -> anyhow::Result<()> {
+        let _ = context;
+        Ok(())
+    }
 
     fn handle_window_event(&mut self, event: &WindowEvent) -> anyhow::Result<()>;
     fn handle_device_event(&mut self, event: &DeviceEvent) -> anyhow::Result<()>;
@@ -66,6 +77,7 @@ pub fn bootstrap<A: App>(description: AppDescription) -> anyhow::Result<()> {
         device,
         swapchain: MaybeUninit::uninit(),
         window: MaybeUninit::uninit(),
+        input: InputState::default(),
         time: Time::default(),
         fps_limiter: FpsLimiter::new(60),
     };
@@ -95,6 +107,8 @@ pub fn bootstrap<A: App>(description: AppDescription) -> anyhow::Result<()> {
 
             self.context.window = MaybeUninit::new(window);
             self.context.swapchain = MaybeUninit::new(swapchain);
+
+            self.app.on_window_created(&self.context).unwrap();
         }
 
         fn window_event(
@@ -138,6 +152,7 @@ fn handle_window_event<A: App>(
     description: &AppDescription,
 ) -> anyhow::Result<()> {
     app.handle_window_event(&event)?;
+    app_context.input.update(&event);
 
     match event {
         winit::event::WindowEvent::Resized(new_size) => {
@@ -179,6 +194,7 @@ fn handle_window_event<A: App>(
             app_context.fps_limiter.update(frame_time);
             app_context.time.end_frame();
 
+            app_context.input.end_frame();
             let fps = 1.0 / app_context.time.delta_seconds();
             let app_title = format!(
                 "{} - FPS {}",
