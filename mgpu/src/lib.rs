@@ -52,6 +52,22 @@ pub enum MemoryDomain {
 }
 
 bitflags! {
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
+#[cfg_attr(feature="serde", derive(Serialize, Deserialize))]
+pub struct ImageCreationFlags: u32 {
+    #[doc = "Image should support sparse backing"]
+    const SPARSE_BINDING = 0b1;
+    #[doc = "Image should support sparse backing with partial residency"]
+    const SPARSE_RESIDENCY = 0b10;
+    #[doc = "Image should support constant data access to physical memory ranges mapped into multiple locations of sparse images"]
+    const SPARSE_ALIASED = 0b100;
+    #[doc = "Allows image views to have different format than the base image"]
+    const MUTABLE_FORMAT = 0b1000;
+    #[doc = "Allows creating image views with cube type from the created image"]
+    const CUBE_COMPATIBLE = 0b1_0000;
+}
+}
+bitflags! {
     #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
     #[cfg_attr(feature="serde", derive(Serialize, Deserialize))]
     pub struct ImageUsageFlags : u32 {
@@ -105,16 +121,13 @@ pub enum ImageFormat {
     Unknown,
     R32f,
     Rg32f,
-    Rgb32f,
     Rgba32f,
 
     R8,
     Rg8,
-    Rgb8,
     Rgba8,
     R8Signed,
     Rg8Signed,
-    Rgb8Signed,
     Rgba8Signed,
     Bgra8,
     Depth32,
@@ -126,11 +139,9 @@ impl ImageFormat {
             Unknown => 0,
             R32f => 4,
             Rg32f => 8,
-            Rgb32f => 12,
             Rgba32f => 16,
             R8 | R8Signed => 1,
             Rg8 | Rg8Signed => 2,
-            Rgb8 | Rgb8Signed => 3,
             Rgba8 | Rgba8Signed => 4,
             Bgra8 => 4,
             Depth32 => 4,
@@ -314,6 +325,7 @@ pub struct ComputePassDescription<'a> {
 pub struct ImageDescription<'a> {
     pub label: Option<&'a str>,
     pub usage_flags: ImageUsageFlags,
+    pub creation_flags: ImageCreationFlags,
     pub extents: Extents3D,
     pub dimension: ImageDimension,
     pub mips: NonZeroU32,
@@ -777,6 +789,7 @@ impl Buffer {
 pub struct Image {
     id: u64,
     usage_flags: ImageUsageFlags,
+    creation_flags: ImageCreationFlags,
     extents: Extents3D,
     dimension: ImageDimension,
     num_mips: NonZeroU32,

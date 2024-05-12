@@ -10,9 +10,9 @@ use mgpu::{
     BufferUsageFlags, CompareOp, DepthStencilState, DepthStencilTarget, DepthStencilTargetInfo,
     DepthStencilTargetLoadOp, Device, DeviceConfiguration, DeviceFeatures, DevicePreference,
     Extents2D, Extents3D, FilterMode, FragmentStageInfo, Graphics, GraphicsPipeline,
-    GraphicsPipelineDescription, Image, ImageDescription, ImageDimension, ImageFormat,
-    ImageUsageFlags, ImageView, ImageViewDescription, ImageWriteParams, MemoryDomain, MipmapMode,
-    PushConstantInfo, Rect2D, RenderPassDescription, RenderTarget, RenderTargetInfo,
+    GraphicsPipelineDescription, Image, ImageCreationFlags, ImageDescription, ImageDimension,
+    ImageFormat, ImageUsageFlags, ImageView, ImageViewDescription, ImageWriteParams, MemoryDomain,
+    MipmapMode, PushConstantInfo, Rect2D, RenderPassDescription, RenderTarget, RenderTargetInfo,
     RenderTargetLoadOp, SampleCount, Sampler, SamplerDescription, ShaderModule,
     ShaderModuleDescription, ShaderStageFlags, Swapchain, SwapchainCreationInfo,
     VertexInputDescription, VertexInputFrequency, VertexStageInfo,
@@ -165,6 +165,7 @@ fn main() {
                         .device
                         .create_image(&ImageDescription {
                             label: Some("Depth image"),
+                            creation_flags: ImageCreationFlags::default(),
                             usage_flags: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
                             extents: Extents3D {
                                 width: size.width,
@@ -301,6 +302,7 @@ fn main() {
     let depth_image = device
         .create_image(&ImageDescription {
             label: Some("Depth image"),
+            creation_flags: ImageCreationFlags::default(),
             usage_flags: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
             extents: Extents3D {
                 width: 800,
@@ -328,6 +330,7 @@ fn main() {
     let texture_image = device
         .create_image(&ImageDescription {
             label: Some("Cube Texture"),
+            creation_flags: ImageCreationFlags::default(),
             usage_flags: ImageUsageFlags::SAMPLED
                 | ImageUsageFlags::TRANSFER_DST
                 | ImageUsageFlags::TRANSFER_SRC

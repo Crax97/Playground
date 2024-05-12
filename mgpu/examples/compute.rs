@@ -11,12 +11,12 @@ use mgpu::{
     ComputePipelineDescription, DepthStencilState, DepthStencilTarget, DepthStencilTargetInfo,
     DepthStencilTargetLoadOp, Device, DeviceConfiguration, DeviceFeatures, DevicePreference,
     Extents2D, Extents3D, FilterMode, FragmentStageInfo, Graphics, GraphicsPipeline,
-    GraphicsPipelineDescription, Image, ImageDescription, ImageDimension, ImageFormat,
-    ImageUsageFlags, ImageView, ImageViewDescription, ImageWriteParams, MemoryDomain, MipmapMode,
-    Rect2D, RenderPassDescription, RenderTarget, RenderTargetInfo, RenderTargetLoadOp, SampleCount,
-    Sampler, SamplerDescription, ShaderModule, ShaderModuleDescription, ShaderStageFlags,
-    Swapchain, SwapchainCreationInfo, VertexInputDescription, VertexInputFrequency,
-    VertexStageInfo,
+    GraphicsPipelineDescription, Image, ImageCreationFlags, ImageDescription, ImageDimension,
+    ImageFormat, ImageUsageFlags, ImageView, ImageViewDescription, ImageWriteParams, MemoryDomain,
+    MipmapMode, Rect2D, RenderPassDescription, RenderTarget, RenderTargetInfo, RenderTargetLoadOp,
+    SampleCount, Sampler, SamplerDescription, ShaderModule, ShaderModuleDescription,
+    ShaderStageFlags, Swapchain, SwapchainCreationInfo, VertexInputDescription,
+    VertexInputFrequency, VertexStageInfo,
 };
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -189,6 +189,7 @@ fn main() {
                         .device
                         .create_image(&ImageDescription {
                             label: Some("Depth image"),
+                            creation_flags: ImageCreationFlags::default(),
                             usage_flags: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
                             extents: Extents3D {
                                 width: size.width,
@@ -351,6 +352,7 @@ fn main() {
     let depth_image = device
         .create_image(&ImageDescription {
             label: Some("Depth image"),
+            creation_flags: ImageCreationFlags::default(),
             usage_flags: ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
             extents: Extents3D {
                 width: 800,
@@ -378,6 +380,7 @@ fn main() {
     let texture_image = device
         .create_image(&ImageDescription {
             label: Some("Cube Texture"),
+            creation_flags: ImageCreationFlags::default(),
             usage_flags: ImageUsageFlags::SAMPLED
                 | ImageUsageFlags::TRANSFER_DST
                 | ImageUsageFlags::TRANSFER_SRC

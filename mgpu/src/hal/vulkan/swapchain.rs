@@ -277,6 +277,7 @@ impl VulkanSwapchain {
                             height: surface_capabilities.current_extent.height,
                             depth: 1,
                         },
+                        creation_flags: Default::default(),
                         dimension: crate::ImageDimension::D2,
                         mips: 1.try_into().unwrap(),
                         array_layers: 1.try_into().unwrap(),

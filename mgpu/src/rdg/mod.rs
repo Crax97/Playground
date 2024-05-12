@@ -992,8 +992,9 @@ mod tests {
 
     use crate::{
         rdg::Node, Binding, BindingSet, Buffer, ComputeStep, DispatchCommand, DrawCommand,
-        Extents2D, Extents3D, GraphicsPipeline, Image, ImageFormat, ImageSubresource,
-        ImageUsageFlags, ImageView, Rect2D, RenderAttachmentReference, RenderStep, RenderTarget,
+        Extents2D, Extents3D, GraphicsPipeline, Image, ImageCreationFlags, ImageFormat,
+        ImageSubresource, ImageUsageFlags, ImageView, Rect2D, RenderAttachmentReference,
+        RenderStep, RenderTarget,
     };
 
     use super::Rdg;
@@ -1042,6 +1043,7 @@ mod tests {
                     array_layers: 1.try_into().unwrap(),
                     samples: crate::SampleCount::One,
                     format: crate::ImageFormat::Rgba8,
+                    creation_flags: ImageCreationFlags::default(),
                 },
             }
         }

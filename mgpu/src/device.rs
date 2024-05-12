@@ -795,11 +795,17 @@ impl Device {
 
     #[cfg(debug_assertions)]
     fn validate_image_description(image_description: &ImageDescription) {
+        use crate::ImageCreationFlags;
+
         check!(
             image_description.dimension != ImageDimension::D3
                 || image_description.extents.depth > 0,
             "The depth of an image cannot be 0"
         );
+
+        if image_description.creation_flags.contains(ImageCreationFlags::CUBE_COMPATIBLE) {
+            check!(image_description.array_layers.get() == 6, "If an image is CUBE_COMPATIBLE, it must have exactly six layers");
+        }
 
         let total_texels = image_description.extents.width
             * image_description.extents.height
@@ -808,10 +814,25 @@ impl Device {
             total_texels > 0,
             "The width, height and depth of an image cannot be 0"
         );
+
+        match image_description.format.aspect() {
+            ImageAspect::Color => {
+                check!(!image_description.usage_flags.contains(ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT), "A color image cannot be used as a depth attachment!");
+            },
+            ImageAspect::Depth => {
+                check!(!image_description.usage_flags.contains(ImageUsageFlags::COLOR_ATTACHMENT), "A depth image cannot be used as a color attachment!");
+            },
+        }
     }
 
     #[cfg(debug_assertions)]
-    fn validate_image_view_description(_image_view_description: &ImageViewDescription) {}
+    fn validate_image_view_description(image_view_description: &ImageViewDescription) {
+        use crate::ImageCreationFlags;
+
+        if !image_view_description.image.creation_flags.contains(ImageCreationFlags::MUTABLE_FORMAT) {
+            check!(image_view_description.format == image_view_description.image.format, "If an image was not created with the MUTABLE_FORMAT flag, creating a view whose format is different from the image's format is not allowed.");
+        }
+    }
 
     #[cfg(debug_assertions)]
     fn validate_buffer_description(buffer_description: &BufferDescription) {
@@ -987,12 +1008,17 @@ impl Device {
 
        if let Some(pc) = &graphics_pipeline_description.push_constant_info {
             let whole_push_constant_shader_stages = vertex_shader_layout.push_constant.unwrap_or_default() | 
-                fragment_shader_layout.and_then(|v| v.push_constant).unwrap_or_default();
+                fragment_shader_layout.as_ref().and_then(|v| v.push_constant).unwrap_or_default();
             check!(pc.size <= crate::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES, "A push constant range cannot exceed the maximum size of {} bytes", crate::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES);
             check!(pc.visibility.contains(whole_push_constant_shader_stages), "The pipeline's push constant visibility doesn't include all the shader stage where the
              push constant is used, expected {:?} got {:?}", whole_push_constant_shader_stages, pc.visibility);
         }
 
+        if let Some(shader_layout) = &fragment_shader_layout {
+            let fragment_stage = graphics_pipeline_description.fragment_stage.unwrap();
+            check!(shader_layout.outputs.len() == fragment_stage.render_targets.len(), "While creating Graphics Pipeline '{}': mismatch between fragment shader outputs and render targets in fragment stage! They must match exactly, expected {} output(s), got {} render target(s)",
+                graphics_pipeline_description.label.unwrap_or("Unknown"), shader_layout.outputs.len(), fragment_stage.render_targets.len());
+        }
         Ok(())
     }
     #[cfg(debug_assertions)]

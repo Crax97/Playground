@@ -442,10 +442,7 @@ impl Hal for VulkanHal {
         &self,
         image_description: &crate::ImageDescription,
     ) -> MgpuResult<crate::Image> {
-        let mut flags = vk::ImageCreateFlags::default();
-        if image_description.extents.depth > 1 {
-            flags |= vk::ImageCreateFlags::CUBE_COMPATIBLE;
-        }
+        let flags = image_description.creation_flags.to_vk();
         let tiling = if image_description.memory_domain == MemoryDomain::Gpu {
             vk::ImageTiling::OPTIMAL
         } else {
@@ -521,6 +518,7 @@ impl Hal for VulkanHal {
         let image = Image {
             id: handle.to_u64(),
             usage_flags: image_description.usage_flags,
+            creation_flags: image_description.creation_flags,
             extents: image_description.extents,
             dimension: image_description.dimension,
             num_mips: image_description.mips,
@@ -2666,6 +2664,7 @@ impl VulkanHal {
         let handle = self.resolver.add(vulkan_image);
         Ok(crate::Image {
             id: handle.to_u64(),
+            creation_flags: image_description.creation_flags,
             usage_flags: image_description.usage_flags,
             extents: image_description.extents,
             dimension: image_description.dimension,

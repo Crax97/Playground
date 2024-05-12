@@ -10,10 +10,11 @@ use crate::{
     AddressMode, BindingSet, BindingSetElementKind, BindingSetLayoutInfo, BlendFactor, BlendOp,
     BorderColor, Buffer, BufferUsageFlags, ColorWriteMask, CompareOp, ComputePipeline,
     ComputePipelineDescription, CullMode, Extents2D, Extents3D, FilterMode, FrontFace,
-    GraphicsPipeline, GraphicsPipelineDescription, Image, ImageAspect, ImageDimension, ImageFormat,
-    ImageSubresource, ImageUsageFlags, ImageView, MipmapMode, Offset2D, Offset3D, PolygonMode,
-    PresentMode, PrimitiveTopology, PushConstantInfo, Rect2D, SampleCount, Sampler, ShaderModule,
-    ShaderModuleLayout, ShaderStageFlags, Swapchain, VertexAttributeFormat, VertexInputFrequency,
+    GraphicsPipeline, GraphicsPipelineDescription, Image, ImageAspect, ImageCreationFlags,
+    ImageDimension, ImageFormat, ImageSubresource, ImageUsageFlags, ImageView, MipmapMode,
+    Offset2D, Offset3D, PolygonMode, PresentMode, PrimitiveTopology, PushConstantInfo, Rect2D,
+    SampleCount, Sampler, ShaderModule, ShaderModuleLayout, ShaderStageFlags, Swapchain,
+    VertexAttributeFormat, VertexInputFrequency,
 };
 
 #[cfg(feature = "swapchain")]
@@ -43,15 +44,12 @@ impl ToVk for ImageFormat {
             ImageFormat::Depth32 => vk::Format::D32_SFLOAT,
             ImageFormat::R32f => vk::Format::R32_SFLOAT,
             ImageFormat::Rg32f => vk::Format::R32G32_SFLOAT,
-            ImageFormat::Rgb32f => vk::Format::R32G32B32_SFLOAT,
             ImageFormat::Rgba32f => vk::Format::R32G32B32A32_SFLOAT,
             ImageFormat::R8 => vk::Format::R8_UNORM,
             ImageFormat::Rg8 => vk::Format::R8G8_UNORM,
-            ImageFormat::Rgb8 => vk::Format::R8G8B8_UNORM,
             ImageFormat::Rgba8 => vk::Format::R8G8B8A8_UNORM,
             ImageFormat::R8Signed => vk::Format::R8_SNORM,
             ImageFormat::Rg8Signed => vk::Format::R8G8_SNORM,
-            ImageFormat::Rgb8Signed => vk::Format::R8G8B8_SNORM,
             ImageFormat::Rgba8Signed => vk::Format::R8G8B8A8_SNORM,
         }
     }
@@ -66,15 +64,12 @@ impl FromVk for vk::Format {
             vk::Format::D32_SFLOAT => ImageFormat::Depth32,
             vk::Format::R32_SFLOAT => ImageFormat::R32f,
             vk::Format::R32G32_SFLOAT => ImageFormat::Rg32f,
-            vk::Format::R32G32B32_SFLOAT => ImageFormat::Rgb32f,
             vk::Format::R32G32B32A32_SFLOAT => ImageFormat::Rgba32f,
             vk::Format::R8_UNORM => ImageFormat::R8,
             vk::Format::R8G8_UNORM => ImageFormat::Rg8,
-            vk::Format::R8G8B8_UNORM => ImageFormat::Rgb8,
             vk::Format::R8G8B8A8_UNORM => ImageFormat::Rgba8,
             vk::Format::R8_SNORM => ImageFormat::R8Signed,
             vk::Format::R8G8_SNORM => ImageFormat::Rg8Signed,
-            vk::Format::R8G8B8_SNORM => ImageFormat::Rgb8Signed,
             vk::Format::R8G8B8A8_SNORM => ImageFormat::Rgba8Signed,
             _ => unreachable!("Format not known {:?}", self),
         }
@@ -330,6 +325,30 @@ impl FromVk for vk::ImageUsageFlags {
         }
         if self.contains(vk::ImageUsageFlags::INPUT_ATTACHMENT) {
             flags |= Self::Target::INPUT_ATTACHMENT;
+        }
+        flags
+    }
+}
+impl ToVk for ImageCreationFlags {
+    type Target = vk::ImageCreateFlags;
+
+    fn to_vk(self) -> Self::Target {
+        let mut flags = Self::Target::default();
+
+        if self.contains(Self::SPARSE_BINDING) {
+            flags |= vk::ImageCreateFlags::SPARSE_BINDING;
+        }
+        if self.contains(Self::SPARSE_RESIDENCY) {
+            flags |= vk::ImageCreateFlags::SPARSE_RESIDENCY;
+        }
+        if self.contains(Self::SPARSE_ALIASED) {
+            flags |= vk::ImageCreateFlags::SPARSE_ALIASED;
+        }
+        if self.contains(Self::MUTABLE_FORMAT) {
+            flags |= vk::ImageCreateFlags::MUTABLE_FORMAT;
+        }
+        if self.contains(Self::CUBE_COMPATIBLE) {
+            flags |= vk::ImageCreateFlags::CUBE_COMPATIBLE;
         }
         flags
     }
