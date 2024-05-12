@@ -8,9 +8,13 @@ pub mod math;
 pub mod scene;
 pub mod scene_renderer;
 
-mod utils;
+#[macro_use]
+pub mod utils;
 
 pub use utils::*;
+
+pub use glam;
+pub use winit;
 
 /*
  * Conventions used

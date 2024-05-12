@@ -39,7 +39,7 @@ impl Transform {
     }
 
     pub fn compose(&self, transform: &Self) -> Self {
-        let matrix = self.matrix() * transform.matrix();
+        let matrix = transform.matrix() * self.matrix();
         Self::from_matrix(matrix)
     }
 

@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use anyhow::Context;
 use shaderc::ResolvedInclude;
 
 pub use shaderc;
@@ -48,9 +49,11 @@ impl<'a> ShaderCompiler<'a> {
     }
 
     pub fn compile(self) -> anyhow::Result<()> {
+        let _ = fs::remove_dir(&self.output_directory);
         let _ = fs::create_dir(&self.output_directory);
         for directory in self.input_directories {
-            let entries = std::fs::read_dir(directory)?;
+            let entries = std::fs::read_dir(&directory)
+                .context(format!("Could not open directory {:?}", directory))?;
             for entry in entries {
                 let entry = entry?;
 
@@ -63,7 +66,8 @@ impl<'a> ShaderCompiler<'a> {
                 let name = entry.file_name();
                 let name = name.to_string_lossy();
 
-                let content = std::fs::read_to_string(&path)?;
+                let content = std::fs::read_to_string(&path)
+                    .context(format!("While reading include file {:?}", path))?;
                 let extension = path
                     .extension()
                     .expect("No file extension for file")
@@ -88,7 +92,8 @@ impl<'a> ShaderCompiler<'a> {
 
                 let output_filename = format!("{}.spv", name);
                 let output_path = self.output_directory.join(output_filename);
-                std::fs::write(output_path, bytemuck::cast_slice(spirv.as_binary()))?;
+                std::fs::write(&output_path, bytemuck::cast_slice(spirv.as_binary()))
+                    .context(format!("Could not find output folder {:?}", output_path))?;
             }
         }
         Ok(())

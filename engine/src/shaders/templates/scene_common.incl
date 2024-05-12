@@ -6,6 +6,12 @@ struct VertexOutput {
 
 struct MaterialAttributes {
     vec4 diffuse_color;
+    vec3 emissive;
+    float emissive_strength;
+    vec3 normal;
+    float metallic;
+    float roughness;
+    float ambient_occlusion;
 };
 
 #define DEFINE_USER_TEXTURE(TYPE, NAME, BINDING) \

@@ -3,9 +3,9 @@ use glam::Mat4;
 use mgpu::{
     AttachmentStoreOp, Binding, BindingSet, BindingSetDescription, BindingSetElement,
     BindingSetLayout, BlitParams, Buffer, BufferDescription, BufferUsageFlags, BufferWriteParams,
-    DepthStencilTarget, DepthStencilTargetLoadOp, Device, Extents3D, Graphics, Image,
-    ImageDescription, ImageUsageFlags, ImageView, ImageViewDescription, Offset2D, Rect2D,
-    RenderPassDescription, RenderTarget, RenderTargetLoadOp, ShaderStageFlags,
+    DepthStencilTarget, DepthStencilTargetLoadOp, Device, Extents2D, Extents3D, Graphics, Image,
+    ImageDescription, ImageFormat, ImageUsageFlags, ImageView, ImageViewDescription, Offset2D,
+    Rect2D, RenderPassDescription, RenderTarget, RenderTargetLoadOp, ShaderStageFlags,
 };
 
 use crate::{
@@ -23,15 +23,23 @@ pub struct SceneRenderer {
 }
 
 #[derive(Clone)]
+struct RenderImage {
+    image: Image,
+    view: ImageView,
+}
+
+#[derive(Clone)]
 struct FrameData {
     point_of_view_buffer: Buffer,
     frame_binding_set: BindingSet,
 
-    depth_stencil_image: Image,
-    depth_stencil_image_view: ImageView,
+    depth: RenderImage,
+    diffuse: RenderImage,
+    emissive_ao: RenderImage,
+    normal: RenderImage,
+    metallic_roughness: RenderImage,
 
-    final_render_image: Image,
-    final_render_image_view: ImageView,
+    final_image: RenderImage,
 }
 
 pub enum ProjectionMode {
@@ -105,57 +113,6 @@ impl SceneRenderer {
                 size: std::mem::size_of::<GPUGlobalFrameData>(),
                 memory_domain: mgpu::MemoryDomain::Gpu,
             })?;
-            let final_render_image = device.create_image(&ImageDescription {
-                label: Some(&format!("Final render image for frame {}", i)),
-                usage_flags: ImageUsageFlags::TRANSFER_SRC
-                    | ImageUsageFlags::SAMPLED
-                    | ImageUsageFlags::COLOR_ATTACHMENT,
-                extents: Extents3D {
-                    width: 1920,
-                    height: 1080,
-                    depth: 1,
-                },
-                dimension: mgpu::ImageDimension::D2,
-                mips: 1.try_into().unwrap(),
-                array_layers: 1.try_into().unwrap(),
-                samples: mgpu::SampleCount::One,
-                format: mgpu::ImageFormat::Rgba8,
-                memory_domain: mgpu::MemoryDomain::Gpu,
-            })?;
-            let final_render_image_view = device.create_image_view(&ImageViewDescription {
-                label: Some(&format!("Final render image view for frame {}", i)),
-                image: final_render_image,
-                format: mgpu::ImageFormat::Rgba8,
-                dimension: mgpu::ImageDimension::D2,
-                aspect: mgpu::ImageAspect::Color,
-                image_subresource: final_render_image.whole_subresource(),
-            })?;
-
-            let depth_stencil_image = device.create_image(&ImageDescription {
-                label: Some(&format!("Depth/Stencil image for frame {}", i)),
-                usage_flags: ImageUsageFlags::TRANSFER_SRC
-                    | ImageUsageFlags::SAMPLED
-                    | ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                extents: Extents3D {
-                    width: 1920,
-                    height: 1080,
-                    depth: 1,
-                },
-                dimension: mgpu::ImageDimension::D2,
-                mips: 1.try_into().unwrap(),
-                array_layers: 1.try_into().unwrap(),
-                samples: mgpu::SampleCount::One,
-                format: mgpu::ImageFormat::Depth32,
-                memory_domain: mgpu::MemoryDomain::Gpu,
-            })?;
-            let depth_stencil_image_view = device.create_image_view(&ImageViewDescription {
-                label: Some(&format!("Depth/Stencil image view for frame {}", i)),
-                image: depth_stencil_image,
-                format: mgpu::ImageFormat::Depth32,
-                dimension: mgpu::ImageDimension::D2,
-                aspect: mgpu::ImageAspect::Depth,
-                image_subresource: depth_stencil_image.whole_subresource(),
-            })?;
 
             let frame_binding_set = device.create_binding_set(
                 &BindingSetDescription {
@@ -169,13 +126,49 @@ impl SceneRenderer {
                 &Self::scene_data_binding_set_layout(),
             )?;
 
+            let extents = Extents2D {
+                width: 1920,
+                height: 1080,
+            };
             let current_frame_data = FrameData {
                 point_of_view_buffer,
                 frame_binding_set,
-                depth_stencil_image,
-                depth_stencil_image_view,
-                final_render_image,
-                final_render_image_view,
+                depth: RenderImage::new(device, ImageFormat::Depth32, extents, "Depth Buffer", i)?,
+                diffuse: RenderImage::new(
+                    device,
+                    ImageFormat::Rgba32f,
+                    extents,
+                    "GBuffer diffuse",
+                    i,
+                )?,
+                emissive_ao: RenderImage::new(
+                    device,
+                    ImageFormat::Rgba32f,
+                    extents,
+                    "GBuffer emissive",
+                    i,
+                )?,
+                normal: RenderImage::new(
+                    device,
+                    ImageFormat::Rgba32f,
+                    extents,
+                    "GBuffer emissive",
+                    i,
+                )?,
+                metallic_roughness: RenderImage::new(
+                    device,
+                    ImageFormat::Rgba32f,
+                    extents,
+                    "GBuffer emissive",
+                    i,
+                )?,
+                final_image: RenderImage::new(
+                    device,
+                    ImageFormat::Rgba32f,
+                    extents,
+                    "Final render image",
+                    i,
+                )?,
             };
             frame_data.push(current_frame_data)
         }
@@ -189,28 +182,48 @@ impl SceneRenderer {
     pub fn render(&mut self, params: SceneRenderingParams) -> anyhow::Result<()> {
         let device = params.device;
         let current_frame = &self.frames[self.current_frame];
-        self.update_buffers(params.device, current_frame, &params.pov)?;
+        self.update_buffers(params.device, current_frame, params.pov)?;
         let mut command_recorder = device.create_command_recorder::<Graphics>();
 
         {
             let mut scene_output_pass =
                 command_recorder.begin_render_pass(&RenderPassDescription {
                     label: Some("Scene Rendering"),
-                    render_targets: &[RenderTarget {
-                        view: current_frame.final_render_image_view,
-                        sample_count: mgpu::SampleCount::One,
-                        load_op: RenderTargetLoadOp::Clear(self.clear_color.data),
-                        store_op: AttachmentStoreOp::Store,
-                    }],
+                    render_targets: &[
+                        RenderTarget {
+                            view: current_frame.diffuse.view,
+                            sample_count: mgpu::SampleCount::One,
+                            load_op: RenderTargetLoadOp::Clear(self.clear_color.data),
+                            store_op: AttachmentStoreOp::Store,
+                        },
+                        RenderTarget {
+                            view: current_frame.emissive_ao.view,
+                            sample_count: mgpu::SampleCount::One,
+                            load_op: RenderTargetLoadOp::Clear([0.0; 4]),
+                            store_op: AttachmentStoreOp::Store,
+                        },
+                        RenderTarget {
+                            view: current_frame.normal.view,
+                            sample_count: mgpu::SampleCount::One,
+                            load_op: RenderTargetLoadOp::Clear([0.0; 4]),
+                            store_op: AttachmentStoreOp::Store,
+                        },
+                        RenderTarget {
+                            view: current_frame.metallic_roughness.view,
+                            sample_count: mgpu::SampleCount::One,
+                            load_op: RenderTargetLoadOp::Clear([0.0; 4]),
+                            store_op: AttachmentStoreOp::Store,
+                        },
+                    ],
                     depth_stencil_attachment: Some(&DepthStencilTarget {
-                        view: current_frame.depth_stencil_image_view,
+                        view: current_frame.depth.view,
                         sample_count: mgpu::SampleCount::One,
                         load_op: DepthStencilTargetLoadOp::Clear(1.0, 0),
                         store_op: AttachmentStoreOp::Store,
                     }),
                     render_area: Rect2D {
                         offset: Offset2D::default(),
-                        extents: current_frame.final_render_image.extents().to_2d(),
+                        extents: current_frame.diffuse.image.extents().to_2d(),
                     },
                 })?;
             for item in params.scene.iter() {
@@ -244,9 +257,10 @@ impl SceneRenderer {
                 }
             }
         }
+
         command_recorder.blit(&BlitParams {
-            src_image: current_frame.final_render_image,
-            src_region: current_frame.final_render_image.whole_region(),
+            src_image: current_frame.diffuse.image,
+            src_region: current_frame.diffuse.image.whole_region(),
             dst_image: params.output_image.owner(),
             dst_region: params.output_image.owner().whole_region(),
             filter: mgpu::FilterMode::Linear,
@@ -325,5 +339,46 @@ impl PointOfView {
                 aspect_ratio,
             } => Mat4::perspective_rh(fov_y_radians, aspect_ratio, self.near_plane, self.far_plane),
         }
+    }
+}
+
+impl RenderImage {
+    pub fn new(
+        device: &Device,
+        format: ImageFormat,
+        extents: Extents2D,
+        label: &str,
+        frame: usize,
+    ) -> anyhow::Result<Self> {
+        let attachment_flag = match format.aspect() {
+            mgpu::ImageAspect::Color => ImageUsageFlags::COLOR_ATTACHMENT,
+            mgpu::ImageAspect::Depth => ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+        };
+        let image = device.create_image(&ImageDescription {
+            label: Some(&format!("{}/{}", label, frame)),
+            creation_flags: Default::default(),
+            usage_flags: ImageUsageFlags::TRANSFER_SRC | ImageUsageFlags::SAMPLED | attachment_flag,
+            extents: Extents3D {
+                width: extents.width,
+                height: extents.height,
+                depth: 1,
+            },
+            dimension: mgpu::ImageDimension::D2,
+            mips: 1.try_into().unwrap(),
+            array_layers: 1.try_into().unwrap(),
+            samples: mgpu::SampleCount::One,
+            format,
+            memory_domain: mgpu::MemoryDomain::Gpu,
+        })?;
+        let view = device.create_image_view(&ImageViewDescription {
+            label: Some(&format!("{}/{} View", label, frame)),
+            image,
+            dimension: mgpu::ImageDimension::D2,
+            aspect: format.aspect(),
+            image_subresource: image.whole_subresource(),
+            format,
+        })?;
+
+        Ok(Self { image, view })
     }
 }

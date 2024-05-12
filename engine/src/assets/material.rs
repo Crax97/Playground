@@ -194,10 +194,24 @@ impl Material {
             fragment_stage: Some(&FragmentStageInfo {
                 shader: &fragment_shader,
                 entry_point: "main",
-                render_targets: &[RenderTargetInfo {
-                    format: ImageFormat::Rgba8,
-                    blend: None,
-                }],
+                render_targets: &[
+                    RenderTargetInfo {
+                        format: ImageFormat::Rgba32f,
+                        blend: None,
+                    },
+                    RenderTargetInfo {
+                        format: ImageFormat::Rgba32f,
+                        blend: None,
+                    },
+                    RenderTargetInfo {
+                        format: ImageFormat::Rgba32f,
+                        blend: None,
+                    },
+                    RenderTargetInfo {
+                        format: ImageFormat::Rgba8,
+                        blend: None,
+                    },
+                ],
                 depth_stencil_target: Some(&DepthStencilTargetInfo {
                     format: ImageFormat::Depth32,
                 }),

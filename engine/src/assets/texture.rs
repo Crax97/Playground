@@ -79,7 +79,7 @@ impl Texture {
     pub fn new(
         device: &Device,
         description: &TextureDescription,
-        sampler_allocator: &mut SamplerAllocator,
+        sampler_allocator: &SamplerAllocator,
     ) -> anyhow::Result<Texture> {
         let (extents, dimension, array_layers) = match description.ty {
             TextureType::D1(s) => (
@@ -109,6 +109,7 @@ impl Texture {
                 "Texture Image for {}",
                 description.label.unwrap_or("Unknown")
             )),
+            creation_flags: Default::default(),
             usage_flags: description.image_usage_flags(),
             extents,
             dimension,
@@ -153,5 +154,16 @@ impl Texture {
             sampler_configuration: description.sampler_configuration,
             sampler,
         })
+    }
+
+    pub fn compute_num_mips(width: u32, height: u32) -> u32 {
+        let mips = if width % 2 == 0 && height % 2 == 0 {
+            let min_dim = width.min(height);
+
+            (min_dim as f64).log2() as u32
+        } else {
+            1
+        };
+        mips
     }
 }

@@ -47,13 +47,7 @@ impl AssetLoader for FsTextureLoader {
         let image = image::load_from_memory(&content)?;
         let image_rgba_bytes = image.to_rgba8();
 
-        let mips = if image.width() % 2 == 0 && image.height() % 2 == 0 {
-            let min_dim = image.width().min(image.height());
-
-            (min_dim as f64).log2() as u32
-        } else {
-            1
-        };
+        let mips = Texture::compute_num_mips(image.width(), image.height());
 
         Texture::new(
             &self.device,
