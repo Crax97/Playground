@@ -1,9 +1,6 @@
 [workspace]
-resolver="2"
-members = [
-    "engine", "engine_build_utils",
-    "mgpu",
-]
+resolver = "2"
+members = ["engine", "engine_build_utils", "gltf_viewer", "mgpu"]
 
 [profile.release]
 debug = true
