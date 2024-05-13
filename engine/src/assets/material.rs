@@ -145,7 +145,7 @@ impl Material {
         user_bindings.sort_unstable_by_key(|b| b.binding);
 
         let user_binding_layout = BindingSetLayout {
-            binding_set_elements: user_bindings,
+            binding_set_elements: &user_bindings,
         };
 
         let pipeline = device.create_graphics_pipeline(&GraphicsPipelineDescription {
@@ -234,7 +234,7 @@ impl Material {
                 },
                 BindingSetLayoutInfo {
                     set: 1,
-                    layout: user_binding_layout.clone(),
+                    layout: &user_binding_layout,
                 },
             ],
             push_constant_info: Some(PushConstantInfo {

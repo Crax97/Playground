@@ -2,22 +2,34 @@ use bytemuck::{Pod, Zeroable};
 use glam::Mat4;
 use mgpu::{
     AttachmentStoreOp, Binding, BindingSet, BindingSetDescription, BindingSetElement,
-    BindingSetLayout, BlitParams, Buffer, BufferDescription, BufferUsageFlags, BufferWriteParams,
-    DepthStencilTarget, DepthStencilTargetLoadOp, Device, Extents2D, Extents3D, Graphics, Image,
-    ImageDescription, ImageFormat, ImageUsageFlags, ImageView, ImageViewDescription, Offset2D,
-    Rect2D, RenderPassDescription, RenderTarget, RenderTargetLoadOp, ShaderStageFlags,
+    BindingSetLayout, BindingSetLayoutInfo, BlitParams, Buffer, BufferDescription,
+    BufferUsageFlags, BufferWriteParams, DepthStencilState, DepthStencilTarget,
+    DepthStencilTargetLoadOp, Device, Extents2D, Extents3D, FragmentStageInfo, Graphics,
+    GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageFormat,
+    ImageUsageFlags, ImageView, ImageViewDescription, Offset2D, Rect2D, RenderPassDescription,
+    RenderPassFlags, RenderTarget, RenderTargetInfo, RenderTargetLoadOp, Sampler,
+    SamplerDescription, ShaderModule, ShaderModuleDescription, ShaderStageFlags, VertexStageInfo,
 };
 
 use crate::{
     assert_size_does_not_exceed,
     asset_map::AssetMap,
+    include_spirv,
     math::{color::LinearColor, constants::UP, Transform},
     scene::Scene,
 };
 
+const QUAD_VERTEX: &[u8] = include_spirv!("../spirv/quad_vertex.vert.spv");
+const SCENE_LIGHTNING_FRAGMENT: &[u8] = include_spirv!("../spirv/scene_lightning.frag.spv");
+
 pub struct SceneRenderer {
     frames: Vec<FrameData>,
     clear_color: LinearColor,
+
+    quad_vertex_shader: ShaderModule,
+    scene_lightning_fragment: ShaderModule,
+
+    scene_lightning_pipeline: GraphicsPipeline,
 
     current_frame: usize,
 }
@@ -29,16 +41,22 @@ struct RenderImage {
 }
 
 #[derive(Clone)]
-struct FrameData {
-    point_of_view_buffer: Buffer,
-    frame_binding_set: BindingSet,
-
+pub struct SceneImages {
     depth: RenderImage,
     diffuse: RenderImage,
     emissive_ao: RenderImage,
     normal: RenderImage,
     metallic_roughness: RenderImage,
 
+    binding_set: BindingSet,
+}
+
+#[derive(Clone)]
+struct FrameData {
+    point_of_view_buffer: Buffer,
+    frame_binding_set: BindingSet,
+    scene_images_sampler: Sampler,
+    scene_images: SceneImages,
     final_image: RenderImage,
 }
 
@@ -88,22 +106,42 @@ assert_size_does_not_exceed!(
 );
 
 impl SceneRenderer {
-    pub fn scene_data_binding_set_layout() -> BindingSetLayout {
-        BindingSetLayout {
-            binding_set_elements: vec![BindingSetElement {
+    pub fn scene_data_binding_set_layout() -> &'static BindingSetLayout<'static> {
+        const LAYOUT: BindingSetLayout = BindingSetLayout {
+            binding_set_elements: &[BindingSetElement {
                 binding: 0,
                 array_length: 1,
                 ty: mgpu::BindingSetElementKind::Buffer {
                     ty: mgpu::BufferType::Uniform,
                     access_mode: mgpu::StorageAccessMode::Read,
                 },
-                shader_stage_flags: ShaderStageFlags::VERTEX | ShaderStageFlags::FRAGMENT,
+                shader_stage_flags: ShaderStageFlags::from_bits_retain(
+                    ShaderStageFlags::VERTEX.bits() | ShaderStageFlags::FRAGMENT.bits(),
+                ),
             }],
-        }
+        };
+        &LAYOUT
     }
     pub fn new(device: &Device) -> anyhow::Result<Self> {
         let mut frame_data = vec![];
         let device_info = device.get_info();
+
+        let scene_images_sampler = device.create_sampler(&SamplerDescription {
+            label: Some("GBuffer sampler"),
+            mag_filter: mgpu::FilterMode::Linear,
+            min_filter: mgpu::FilterMode::Linear,
+            mipmap_mode: mgpu::MipmapMode::Linear,
+            address_mode_u: mgpu::AddressMode::ClampToEdge,
+            address_mode_v: mgpu::AddressMode::ClampToEdge,
+            address_mode_w: mgpu::AddressMode::ClampToEdge,
+            lod_bias: 0.0,
+            compare_op: None,
+            min_lod: 0.0,
+            max_lod: 0.0,
+            border_color: mgpu::BorderColor::White,
+            unnormalized_coordinates: false,
+        })?;
+
         for i in 0..device_info.frames_in_flight {
             let point_of_view_buffer = device.create_buffer(&BufferDescription {
                 label: Some(&format!("POV buffer for frame {}", i)),
@@ -123,7 +161,7 @@ impl SceneRenderer {
                         visibility: ShaderStageFlags::ALL_GRAPHICS,
                     }],
                 },
-                &Self::scene_data_binding_set_layout(),
+                Self::scene_data_binding_set_layout(),
             )?;
 
             let extents = Extents2D {
@@ -133,35 +171,7 @@ impl SceneRenderer {
             let current_frame_data = FrameData {
                 point_of_view_buffer,
                 frame_binding_set,
-                depth: RenderImage::new(device, ImageFormat::Depth32, extents, "Depth Buffer", i)?,
-                diffuse: RenderImage::new(
-                    device,
-                    ImageFormat::Rgba32f,
-                    extents,
-                    "GBuffer diffuse",
-                    i,
-                )?,
-                emissive_ao: RenderImage::new(
-                    device,
-                    ImageFormat::Rgba32f,
-                    extents,
-                    "GBuffer emissive",
-                    i,
-                )?,
-                normal: RenderImage::new(
-                    device,
-                    ImageFormat::Rgba32f,
-                    extents,
-                    "GBuffer emissive",
-                    i,
-                )?,
-                metallic_roughness: RenderImage::new(
-                    device,
-                    ImageFormat::Rgba32f,
-                    extents,
-                    "GBuffer emissive",
-                    i,
-                )?,
+                scene_images: SceneImages::new(device, extents, scene_images_sampler, i)?,
                 final_image: RenderImage::new(
                     device,
                     ImageFormat::Rgba32f,
@@ -169,13 +179,60 @@ impl SceneRenderer {
                     "Final render image",
                     i,
                 )?,
+                scene_images_sampler,
             };
             frame_data.push(current_frame_data)
         }
 
+        let quad_vertex_shader = device.create_shader_module(&ShaderModuleDescription {
+            label: Some("Quad VS"),
+            source: bytemuck::cast_slice(QUAD_VERTEX),
+        })?;
+
+        let scene_lightning_fragment = device.create_shader_module(&ShaderModuleDescription {
+            label: Some("SceneLightning FS"),
+            source: bytemuck::cast_slice(SCENE_LIGHTNING_FRAGMENT),
+        })?;
+
+        let scene_lightning_pipeline =
+            device.create_graphics_pipeline(&GraphicsPipelineDescription {
+                label: Some("SceneLightning Pipeline"),
+                vertex_stage: &VertexStageInfo {
+                    shader: &quad_vertex_shader,
+                    entry_point: "main",
+                    vertex_inputs: &[],
+                },
+                fragment_stage: Some(&FragmentStageInfo {
+                    shader: &scene_lightning_fragment,
+                    entry_point: "main",
+                    render_targets: &[RenderTargetInfo {
+                        format: ImageFormat::Rgba8,
+                        blend: None,
+                    }],
+                    depth_stencil_target: None,
+                }),
+                primitive_restart_enabled: false,
+                primitive_topology: mgpu::PrimitiveTopology::TriangleList,
+                polygon_mode: mgpu::PolygonMode::Filled,
+                cull_mode: mgpu::CullMode::None,
+                front_face: mgpu::FrontFace::ClockWise,
+                multisample_state: None,
+                depth_stencil_state: DepthStencilState::default(),
+                binding_set_layouts: &[BindingSetLayoutInfo {
+                    set: 0,
+                    layout: SceneImages::binding_set_layout(),
+                }],
+                push_constant_info: None,
+            })?;
+
         Ok(Self {
             frames: frame_data,
             clear_color: LinearColor::VIOLET,
+
+            quad_vertex_shader,
+            scene_lightning_fragment,
+            scene_lightning_pipeline,
+
             current_frame: 0,
         })
     }
@@ -189,41 +246,42 @@ impl SceneRenderer {
             let mut scene_output_pass =
                 command_recorder.begin_render_pass(&RenderPassDescription {
                     label: Some("Scene Rendering"),
+                    flags: Default::default(),
                     render_targets: &[
                         RenderTarget {
-                            view: current_frame.diffuse.view,
+                            view: current_frame.scene_images.diffuse.view,
                             sample_count: mgpu::SampleCount::One,
                             load_op: RenderTargetLoadOp::Clear(self.clear_color.data),
                             store_op: AttachmentStoreOp::Store,
                         },
                         RenderTarget {
-                            view: current_frame.emissive_ao.view,
+                            view: current_frame.scene_images.emissive_ao.view,
                             sample_count: mgpu::SampleCount::One,
                             load_op: RenderTargetLoadOp::Clear([0.0; 4]),
                             store_op: AttachmentStoreOp::Store,
                         },
                         RenderTarget {
-                            view: current_frame.normal.view,
+                            view: current_frame.scene_images.normal.view,
                             sample_count: mgpu::SampleCount::One,
                             load_op: RenderTargetLoadOp::Clear([0.0; 4]),
                             store_op: AttachmentStoreOp::Store,
                         },
                         RenderTarget {
-                            view: current_frame.metallic_roughness.view,
+                            view: current_frame.scene_images.metallic_roughness.view,
                             sample_count: mgpu::SampleCount::One,
                             load_op: RenderTargetLoadOp::Clear([0.0; 4]),
                             store_op: AttachmentStoreOp::Store,
                         },
                     ],
                     depth_stencil_attachment: Some(&DepthStencilTarget {
-                        view: current_frame.depth.view,
+                        view: current_frame.scene_images.depth.view,
                         sample_count: mgpu::SampleCount::One,
                         load_op: DepthStencilTargetLoadOp::Clear(1.0, 0),
                         store_op: AttachmentStoreOp::Store,
                     }),
                     render_area: Rect2D {
                         offset: Offset2D::default(),
-                        extents: current_frame.diffuse.image.extents().to_2d(),
+                        extents: current_frame.scene_images.diffuse.image.extents().to_2d(),
                     },
                 })?;
             for item in params.scene.iter() {
@@ -258,9 +316,30 @@ impl SceneRenderer {
             }
         }
 
+        {
+            let mut scene_lightning_pass =
+                command_recorder.begin_render_pass(&RenderPassDescription {
+                    label: Some("Scene lightning"),
+                    flags: RenderPassFlags::DONT_FLIP_VIEWPORT,
+                    render_targets: &[RenderTarget {
+                        view: current_frame.final_image.view,
+                        sample_count: mgpu::SampleCount::One,
+                        load_op: RenderTargetLoadOp::DontCare,
+                        store_op: AttachmentStoreOp::Store,
+                    }],
+                    depth_stencil_attachment: None,
+                    render_area: Rect2D {
+                        offset: Default::default(),
+                        extents: current_frame.final_image.image.extents().to_2d(),
+                    },
+                })?;
+            scene_lightning_pass.set_pipeline(self.scene_lightning_pipeline);
+            scene_lightning_pass.set_binding_sets(&[&current_frame.scene_images.binding_set]);
+            scene_lightning_pass.draw(6, 1, 0, 0)?;
+        }
         command_recorder.blit(&BlitParams {
-            src_image: current_frame.diffuse.image,
-            src_region: current_frame.diffuse.image.whole_region(),
+            src_image: current_frame.final_image.image,
+            src_region: current_frame.final_image.image.whole_region(),
             dst_image: params.output_image.owner(),
             dst_region: params.output_image.owner().whole_region(),
             filter: mgpu::FilterMode::Linear,
@@ -380,5 +459,133 @@ impl RenderImage {
         })?;
 
         Ok(Self { image, view })
+    }
+}
+
+impl SceneImages {
+    pub fn new(
+        device: &Device,
+        extents: Extents2D,
+        scene_images_samplers: Sampler,
+        frame: usize,
+    ) -> anyhow::Result<Self> {
+        let diffuse = RenderImage::new(
+            device,
+            ImageFormat::Rgba32f,
+            extents,
+            "GBuffer diffuse",
+            frame,
+        )?;
+        let emissive_ao = RenderImage::new(
+            device,
+            ImageFormat::Rgba32f,
+            extents,
+            "GBuffer emissive",
+            frame,
+        )?;
+        let normal = RenderImage::new(
+            device,
+            ImageFormat::Rgba32f,
+            extents,
+            "GBuffer emissive",
+            frame,
+        )?;
+        let metallic_roughness = RenderImage::new(
+            device,
+            ImageFormat::Rgba32f,
+            extents,
+            "GBuffer emissive",
+            frame,
+        )?;
+        let binding_set = device.create_binding_set(
+            &BindingSetDescription {
+                label: Some(&format!("SceneImages BindingSet {}", frame)),
+                bindings: &[
+                    Binding {
+                        binding: 0,
+                        ty: mgpu::BindingType::Sampler(scene_images_samplers),
+                        visibility: ShaderStageFlags::ALL_GRAPHICS,
+                    },
+                    Binding {
+                        binding: 1,
+                        ty: mgpu::BindingType::SampledImage { view: diffuse.view },
+                        visibility: ShaderStageFlags::ALL_GRAPHICS,
+                    },
+                    Binding {
+                        binding: 2,
+                        ty: mgpu::BindingType::SampledImage {
+                            view: emissive_ao.view,
+                        },
+                        visibility: ShaderStageFlags::ALL_GRAPHICS,
+                    },
+                    Binding {
+                        binding: 3,
+                        ty: mgpu::BindingType::SampledImage { view: normal.view },
+                        visibility: ShaderStageFlags::ALL_GRAPHICS,
+                    },
+                    Binding {
+                        binding: 4,
+                        ty: mgpu::BindingType::SampledImage {
+                            view: metallic_roughness.view,
+                        },
+                        visibility: ShaderStageFlags::ALL_GRAPHICS,
+                    },
+                ],
+            },
+            Self::binding_set_layout(),
+        )?;
+
+        Ok(Self {
+            depth: RenderImage::new(
+                device,
+                ImageFormat::Depth32,
+                extents,
+                "GBuffer depth",
+                frame,
+            )?,
+            diffuse,
+            emissive_ao,
+            normal,
+            metallic_roughness,
+            binding_set,
+        })
+    }
+
+    pub fn binding_set_layout() -> &'static BindingSetLayout<'static> {
+        const BINDING_SET_LAYOUT: BindingSetLayout = BindingSetLayout {
+            binding_set_elements: &[
+                BindingSetElement {
+                    binding: 0,
+                    array_length: 1,
+                    ty: mgpu::BindingSetElementKind::Sampler,
+                    shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
+                },
+                BindingSetElement {
+                    binding: 1,
+                    array_length: 1,
+                    ty: mgpu::BindingSetElementKind::SampledImage,
+                    shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
+                },
+                BindingSetElement {
+                    binding: 2,
+                    array_length: 1,
+                    ty: mgpu::BindingSetElementKind::SampledImage,
+                    shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
+                },
+                BindingSetElement {
+                    binding: 3,
+                    array_length: 1,
+                    ty: mgpu::BindingSetElementKind::SampledImage,
+                    shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
+                },
+                BindingSetElement {
+                    binding: 4,
+                    array_length: 1,
+                    ty: mgpu::BindingSetElementKind::SampledImage,
+                    shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
+                },
+            ],
+        };
+        &BINDING_SET_LAYOUT
     }
 }
