@@ -975,7 +975,7 @@ impl Device {
                 .flat_map(|fl| fl.binding_sets.iter()),
         );
         for binding_set_layout_info in graphics_pipeline_description.binding_set_layouts {
-            for bs_element in &binding_set_layout_info.layout.binding_set_elements {
+            for bs_element in binding_set_layout_info.layout.binding_set_elements {
                 let matching_element = all_shader_binding_entries
                     .clone()
                     .filter(|entry| entry.set == binding_set_layout_info.set)
@@ -1031,7 +1031,7 @@ impl Device {
             .get_shader_module_layout(compute_pipeline_description.shader)?;
         let all_shader_binding_entries = shader_layout.binding_sets.iter();
         for binding_set_layout_info in compute_pipeline_description.binding_set_layouts {
-            for bs_element in &binding_set_layout_info.layout.binding_set_elements {
+            for bs_element in binding_set_layout_info.layout.binding_set_elements {
                 let matching_element = all_shader_binding_entries
                     .clone()
                     .filter(|entry| entry.set == binding_set_layout_info.set)
@@ -1078,7 +1078,7 @@ impl Device {
         layout: &BindingSetLayout,
     ) {
         // TODO: Ensure that bindings in description are present in layout
-        for layout_binding in &layout.binding_set_elements {
+        for layout_binding in layout.binding_set_elements {
             let description_binding = description
                 .bindings
                 .iter()

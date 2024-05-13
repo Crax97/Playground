@@ -438,14 +438,14 @@ impl<'c> RenderPass<'c> {
             .hal
             .get_graphics_pipeline_layout(pipeline)?;
 
+        let pipeline_label = pipeline_layout.label.as_deref().unwrap_or("Unknown");
         for input in &pipeline_layout.vertex_stage.vertex_inputs {
             let vertex_buffer = self.vertex_buffers.get(input.location);
             check!(
                 vertex_buffer.is_some(),
                 &format!(
                     "Pipeline '{}' expects a vertex buffer at location {}, but none was bound",
-                    pipeline_layout.label.as_deref().unwrap_or("Unknown"),
-                    input.location
+                    pipeline_label, input.location
                 )
             );
             let vertex_buffer = vertex_buffer.unwrap();
@@ -460,22 +460,52 @@ impl<'c> RenderPass<'c> {
             );
         }
 
+        check!(
+            self.command_recorder.binding_sets.len() == pipeline_layout.binding_sets_infos.len(),
+            "The pipeline '{}' expects {} binding sets, but {} were bound",
+            pipeline_label,
+            pipeline_layout.binding_sets_infos.len(),
+            self.command_recorder.binding_sets.len()
+        );
+
         for set in &pipeline_layout.binding_sets_infos {
             let bound_set = self.command_recorder.binding_sets.get(set.set);
             check!(
                 bound_set.is_some(),
                 &format!(
                     "Pipeline '{}' expects a binding set at location {}, but none was bound",
-                    pipeline_layout.label.as_deref().unwrap_or("Unknown"),
-                    set.set
+                    pipeline_label, set.set
                 )
             );
+            let binding_set = bound_set.unwrap();
+            for binding in &binding_set.bindings {
+                let matching_set_binding = set
+                    .layout
+                    .binding_set_elements
+                    .iter()
+                    .find(|b| b.binding == binding.binding);
+                check!(matching_set_binding.is_some(), "Pipeline expects a binding in set {} binding {}, but none was provided in the set bound", binding.binding, set.set);
+                let matching_set_binding = matching_set_binding.unwrap();
+                check!(matching_set_binding.ty == binding.ty.binding_type(), "Pipeline expects a binding of type {:?} at set {} binding {}, but a {:?} was provided instead", binding.ty.binding_type(), binding.binding, set.set, matching_set_binding.ty);
+            }
         }
 
-        if let Some(push_constant) = &self.command_recorder.push_constants {
+        if pipeline_layout.push_constant_range.is_some() {
+            check!(
+                self.command_recorder.push_constants.is_some(),
+                "Pipeline '{}' expects a push constant, but none was provided",
+                pipeline_label
+            );
+            let push_constant = self.command_recorder.push_constants.as_ref().unwrap();
             validate_push_constant_visibility(
                 push_constant.visibility,
                 ShaderStageFlags::ALL_GRAPHICS,
+            );
+        } else {
+            check!(
+                self.command_recorder.push_constants.is_none(),
+                "Pipeline '{}' does not expect a push constant, but one was provided",
+                pipeline_label
             );
         }
 
@@ -567,7 +597,10 @@ impl<'c> Drop for RenderPass<'c> {
         }
         self.command_recorder.new_nodes.push(Node::RenderPass {
             info: std::mem::take(&mut self.info),
-        })
+        });
+
+        self.command_recorder.binding_sets.clear();
+        self.command_recorder.push_constants.take();
     }
 }
 
@@ -578,7 +611,10 @@ impl<'c, C: ComputeCommandRecorder> Drop for ComputePass<'c, C> {
         }
         self.command_recorder.new_nodes.push(Node::ComputePass {
             info: std::mem::take(&mut self.info),
-        })
+        });
+
+        self.command_recorder.binding_sets.clear();
+        self.command_recorder.push_constants.take();
     }
 }
 

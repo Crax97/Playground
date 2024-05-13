@@ -425,7 +425,7 @@ fn main() {
         .unwrap();
 
     let binding_set_layout = BindingSetLayout {
-        binding_set_elements: vec![
+        binding_set_elements: &[
             BindingSetElement {
                 binding: 0,
                 array_length: 1,
@@ -478,7 +478,7 @@ fn main() {
                 }),
             })
             .binding_set_layouts(&[BindingSetLayoutInfo {
-                layout: binding_set_layout.clone(),
+                layout: &binding_set_layout,
                 set: 0,
             }])
             .depth_stencil_state(DepthStencilState {

@@ -12,9 +12,9 @@ use crate::{
     ComputePipelineDescription, CullMode, Extents2D, Extents3D, FilterMode, FrontFace,
     GraphicsPipeline, GraphicsPipelineDescription, Image, ImageAspect, ImageCreationFlags,
     ImageDimension, ImageFormat, ImageSubresource, ImageUsageFlags, ImageView, MipmapMode,
-    Offset2D, Offset3D, PolygonMode, PresentMode, PrimitiveTopology, PushConstantInfo, Rect2D,
-    SampleCount, Sampler, ShaderModule, ShaderModuleLayout, ShaderStageFlags, Swapchain,
-    VertexAttributeFormat, VertexInputFrequency,
+    Offset2D, Offset3D, OwnedBindingSetLayoutInfo, PolygonMode, PresentMode, PrimitiveTopology,
+    PushConstantInfo, Rect2D, SampleCount, Sampler, ShaderModule, ShaderModuleLayout,
+    ShaderStageFlags, Swapchain, VertexAttributeFormat, VertexInputFrequency,
 };
 
 #[cfg(feature = "swapchain")]
@@ -806,7 +806,7 @@ impl VulkanImage {
 impl<'a> GraphicsPipelineDescription<'a> {
     pub(super) fn to_vk_owned(
         self,
-        binding_sets_infos: Vec<BindingSetLayoutInfo>,
+        binding_sets_infos: Vec<OwnedBindingSetLayoutInfo>,
     ) -> GraphicsPipelineLayout {
         GraphicsPipelineLayout {
             label: self.label.map(ToOwned::to_owned),
@@ -837,7 +837,7 @@ impl<'a> GraphicsPipelineDescription<'a> {
 impl<'a> ComputePipelineDescription<'a> {
     pub(super) fn to_vk_owned(
         self,
-        binding_sets_infos: Vec<BindingSetLayoutInfo>,
+        binding_sets_infos: Vec<OwnedBindingSetLayoutInfo>,
     ) -> ComputePipelineLayout {
         ComputePipelineLayout {
             label: self.label.map(ToOwned::to_owned),

@@ -17,10 +17,10 @@ use crate::{
     ComputePipeline, ComputePipelineDescription, DeviceConfiguration, DeviceFeatures,
     DevicePreference, FilterMode, Framebuffer, GraphicsPipeline, GraphicsPipelineDescription,
     GraphicsPipelineLayout, Image, ImageDescription, ImageDimension, ImageFormat, ImageRegion,
-    ImageSubresource, MemoryDomain, MgpuError, MgpuResult, PresentMode, PushConstantInfo,
-    RenderPassInfo, Sampler, SamplerDescription, ShaderAttribute, ShaderModule, ShaderModuleLayout,
-    ShaderStageFlags, ShaderVariable, StorageAccessMode, SwapchainCreationInfo, VariableType,
-    VertexAttributeFormat,
+    ImageSubresource, MemoryDomain, MgpuError, MgpuResult, OwnedBindingSetLayout,
+    OwnedBindingSetLayoutInfo, PresentMode, PushConstantInfo, RenderPassInfo, Sampler,
+    SamplerDescription, ShaderAttribute, ShaderModule, ShaderModuleLayout, ShaderStageFlags,
+    ShaderVariable, StorageAccessMode, SwapchainCreationInfo, VariableType, VertexAttributeFormat,
 };
 #[cfg(debug_assertions)]
 use std::collections::HashSet;
@@ -684,7 +684,11 @@ impl Hal for VulkanHal {
         #[cfg(debug_assertions)]
         self.validate_graphics_pipeline_shader_layouts(graphics_pipeline_description);
 
-        let bind_set_layouts = graphics_pipeline_description.binding_set_layouts.to_vec();
+        let bind_set_layouts = graphics_pipeline_description
+            .binding_set_layouts
+            .iter()
+            .map(Into::into)
+            .collect();
 
         let owned_info = graphics_pipeline_description.to_vk_owned(bind_set_layouts);
 
@@ -717,7 +721,11 @@ impl Hal for VulkanHal {
     ) -> MgpuResult<ComputePipeline> {
         #[cfg(debug_assertions)]
         self.validate_compute_pipeline_shader_layouts(compute_pipeline_description);
-        let bind_set_layouts = compute_pipeline_description.binding_set_layouts.to_vec();
+        let bind_set_layouts = compute_pipeline_description
+            .binding_set_layouts
+            .iter()
+            .map(Into::into)
+            .collect();
 
         let owned_info = compute_pipeline_description.to_vk_owned(bind_set_layouts);
 
@@ -1133,6 +1141,9 @@ impl Hal for VulkanHal {
         command_recorder: CommandRecorder,
         vertex_buffers: &[Buffer],
     ) -> MgpuResult<()> {
+        if vertex_buffers.is_empty() {
+            return Ok(());
+        }
         let map = self.resolver.get::<VulkanBuffer>();
         let mut vulkan_buffers = vec![];
         for &buffer in vertex_buffers {
@@ -2026,7 +2037,7 @@ impl Hal for VulkanHal {
     ) -> MgpuResult<BindingSet> {
         let descriptor_set_layout = {
             let mut ds_layouts = self.descriptor_set_layouts.write().unwrap();
-            self.get_descriptor_set_layout_for_binding_layout(layout, &mut ds_layouts)
+            self.get_descriptor_set_layout_for_binding_layout(&layout.into(), &mut ds_layouts)
         }?;
         let allocation = self.allocate_descriptor_set(layout, descriptor_set_layout)?;
 
@@ -3226,7 +3237,7 @@ impl VulkanHal {
     fn get_pipeline_layout(
         &self,
         label: Option<&str>,
-        binding_sets_infos: &[BindingSetLayoutInfo],
+        binding_sets_infos: &[OwnedBindingSetLayoutInfo],
         push_constant_ranges: Option<&PushConstantInfo>,
     ) -> MgpuResult<vk::PipelineLayout> {
         let descriptor_layouts = self.get_descriptor_set_layouts(binding_sets_infos)?;
@@ -3479,9 +3490,9 @@ impl VulkanHal {
                     })
                     .collect();
 
-                BindingSetLayoutInfo {
+                OwnedBindingSetLayoutInfo {
                     set: set_idx as _,
-                    layout: BindingSetLayout {
+                    layout: OwnedBindingSetLayout {
                         binding_set_elements: elements,
                     },
                 }
@@ -3499,7 +3510,7 @@ impl VulkanHal {
 
     fn get_descriptor_set_layouts(
         &self,
-        binding_sets_infos: &[BindingSetLayoutInfo],
+        binding_sets_infos: &[OwnedBindingSetLayoutInfo],
     ) -> MgpuResult<Vec<vk::DescriptorSetLayout>> {
         let mut cached_layouts = self
             .descriptor_set_layouts
@@ -3520,7 +3531,7 @@ impl VulkanHal {
 
     fn get_descriptor_set_layout_for_binding_layout(
         &self,
-        set_layout: &BindingSetLayout,
+        set_layout: &OwnedBindingSetLayout,
         cached_layouts: &mut HashMap<u64, vk::DescriptorSetLayout>,
     ) -> Result<vk::DescriptorSetLayout, MgpuError> {
         let hash = hash_type(set_layout);
@@ -3634,7 +3645,7 @@ impl VulkanHal {
         let make_ds_pool = || {
             let mut descriptor_counts_map: HashMap<vk::DescriptorType, u32> = HashMap::new();
 
-            for binding in &binding_set_layout.binding_set_elements {
+            for binding in binding_set_layout.binding_set_elements {
                 let ty = binding.ty.to_vk();
                 *descriptor_counts_map.entry(ty).or_default() += 1;
             }

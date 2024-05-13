@@ -593,7 +593,7 @@ pub struct GraphicsPipelineDescription<'a> {
     pub front_face: FrontFace,
     pub multisample_state: Option<MultisampleState>,
     pub depth_stencil_state: DepthStencilState,
-    pub binding_set_layouts: &'a [BindingSetLayoutInfo],
+    pub binding_set_layouts: &'a [BindingSetLayoutInfo<'a>],
     pub push_constant_info: Option<PushConstantInfo>,
 }
 
@@ -602,7 +602,7 @@ pub struct ComputePipelineDescription<'a> {
     pub label: Option<&'a str>,
     pub shader: ShaderModule,
     pub entry_point: &'a str,
-    pub binding_set_layouts: &'a [BindingSetLayoutInfo],
+    pub binding_set_layouts: &'a [BindingSetLayoutInfo<'a>],
     pub push_constant_info: Option<PushConstantInfo>,
 }
 
@@ -656,15 +656,43 @@ pub struct BindingSetElement {
     pub shader_stage_flags: ShaderStageFlags,
 }
 
-#[derive(Clone, Default, Debug, Hash)]
-pub struct BindingSetLayout {
-    pub binding_set_elements: Vec<BindingSetElement>,
+#[derive(Default, Debug, Hash)]
+pub struct BindingSetLayout<'a> {
+    pub binding_set_elements: &'a [BindingSetElement],
 }
 
 #[derive(Clone, Default, Debug, Hash)]
-pub struct BindingSetLayoutInfo {
+pub struct OwnedBindingSetLayout {
+    pub binding_set_elements: Vec<BindingSetElement>,
+}
+
+#[derive(Debug, Hash)]
+pub struct BindingSetLayoutInfo<'a> {
     pub set: usize,
-    pub layout: BindingSetLayout,
+    pub layout: &'a BindingSetLayout<'a>,
+}
+
+#[derive(Clone, Default, Debug, Hash)]
+pub struct OwnedBindingSetLayoutInfo {
+    pub set: usize,
+    pub layout: OwnedBindingSetLayout,
+}
+
+impl<'a> From<&BindingSetLayout<'a>> for OwnedBindingSetLayout {
+    fn from(value: &BindingSetLayout<'a>) -> Self {
+        OwnedBindingSetLayout {
+            binding_set_elements: value.binding_set_elements.to_vec(),
+        }
+    }
+}
+
+impl<'a> From<&BindingSetLayoutInfo<'a>> for OwnedBindingSetLayoutInfo {
+    fn from(value: &BindingSetLayoutInfo<'a>) -> OwnedBindingSetLayoutInfo {
+        OwnedBindingSetLayoutInfo {
+            set: value.set,
+            layout: value.layout.into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Hash)]
@@ -749,7 +777,7 @@ pub struct ShaderModuleLayout {
     pub entry_points: Vec<String>,
     pub inputs: Vec<ShaderAttribute>,
     pub outputs: Vec<ShaderAttribute>,
-    pub binding_sets: Vec<BindingSetLayoutInfo>,
+    pub binding_sets: Vec<OwnedBindingSetLayoutInfo>,
     pub variables: Vec<ShaderVariable>,
     pub push_constant: Option<ShaderStageFlags>,
 }

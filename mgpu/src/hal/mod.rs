@@ -3,10 +3,10 @@ use crate::{
     BufferDescription, BufferWriteParams, ComputePipeline, ComputePipelineDescription, CullMode,
     DepthStencilState, DepthStencilTargetInfo, DeviceConfiguration, DeviceInfo, FilterMode,
     FrontFace, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageRegion,
-    ImageSubresource, ImageView, ImageViewDescription, MgpuResult, MultisampleState, PolygonMode,
-    PrimitiveTopology, PushConstantInfo, RenderPassInfo, RenderTargetInfo, Sampler,
-    SamplerDescription, ShaderModule, ShaderModuleDescription, ShaderModuleLayout,
-    ShaderStageFlags, VertexInputDescription,
+    ImageSubresource, ImageView, ImageViewDescription, MgpuResult, MultisampleState,
+    OwnedBindingSetLayoutInfo, PolygonMode, PrimitiveTopology, PushConstantInfo, RenderPassInfo,
+    RenderTargetInfo, Sampler, SamplerDescription, ShaderModule, ShaderModuleDescription,
+    ShaderModuleLayout, ShaderStageFlags, VertexInputDescription,
 };
 use std::sync::Arc;
 
@@ -34,7 +34,7 @@ pub struct OwnedFragmentStageInfo {
 #[derive(Clone, Hash)]
 pub struct GraphicsPipelineLayout {
     pub label: Option<String>,
-    pub binding_sets_infos: Vec<BindingSetLayoutInfo>,
+    pub binding_sets_infos: Vec<OwnedBindingSetLayoutInfo>,
     pub vertex_stage: OwnedVertexStageInfo,
     pub fragment_stage: Option<OwnedFragmentStageInfo>,
     pub primitive_restart_enabled: bool,
@@ -50,7 +50,7 @@ pub struct GraphicsPipelineLayout {
 #[derive(Clone, Hash)]
 pub struct ComputePipelineLayout {
     pub label: Option<String>,
-    pub binding_sets_infos: Vec<BindingSetLayoutInfo>,
+    pub binding_sets_infos: Vec<OwnedBindingSetLayoutInfo>,
     pub shader: ShaderModule,
     pub entry_point: String,
     pub push_constant_range: Option<PushConstantInfo>,
