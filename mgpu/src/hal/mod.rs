@@ -4,9 +4,9 @@ use crate::{
     DepthStencilState, DepthStencilTargetInfo, DeviceConfiguration, DeviceInfo, FilterMode,
     FrontFace, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageRegion,
     ImageSubresource, ImageView, ImageViewDescription, MgpuResult, MultisampleState,
-    OwnedBindingSetLayoutInfo, PolygonMode, PrimitiveTopology, PushConstantInfo, RenderPassInfo,
-    RenderTargetInfo, Sampler, SamplerDescription, ShaderModule, ShaderModuleDescription,
-    ShaderModuleLayout, ShaderStageFlags, VertexInputDescription,
+    OwnedBindingSetLayoutInfo, PolygonMode, PrimitiveTopology, PushConstantInfo, RenderPassFlags,
+    RenderPassInfo, RenderTargetInfo, Sampler, SamplerDescription, ShaderModule,
+    ShaderModuleDescription, ShaderModuleLayout, ShaderStageFlags, VertexInputDescription,
 };
 use std::sync::Arc;
 

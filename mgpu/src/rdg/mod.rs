@@ -1133,6 +1133,7 @@ mod tests {
         rdg.add_graphics_pass(Node::RenderPass {
             info: crate::RenderPassInfo {
                 label: None,
+                flags: Default::default(),
                 framebuffer: Default::default(),
                 render_area: Default::default(),
                 steps: vec![RenderStep {
@@ -1260,6 +1261,7 @@ mod tests {
         rdg.add_graphics_pass(Node::RenderPass {
             info: crate::RenderPassInfo {
                 label: None,
+                flags: Default::default(),
                 framebuffer: crate::Framebuffer {
                     render_targets: vec![RenderTarget {
                         view: view_p,
@@ -1422,6 +1424,7 @@ mod tests {
         rdg.add_graphics_pass(Node::RenderPass {
             info: crate::RenderPassInfo {
                 label: None,
+                flags: Default::default(),
                 framebuffer: crate::Framebuffer {
                     render_targets: vec![RenderTarget {
                         view: view_p1,
@@ -1473,6 +1476,7 @@ mod tests {
         rdg.add_graphics_pass(Node::RenderPass {
             info: crate::RenderPassInfo {
                 label: None,
+                flags: Default::default(),
                 framebuffer: crate::Framebuffer {
                     render_targets: vec![RenderTarget {
                         view: view_p2,
@@ -1517,6 +1521,7 @@ mod tests {
         rdg.add_graphics_pass(Node::RenderPass {
             info: crate::RenderPassInfo {
                 label: None,
+                flags: Default::default(),
                 framebuffer: crate::Framebuffer {
                     render_targets: vec![RenderTarget {
                         view: view_p1,

@@ -193,6 +193,7 @@ fn main() {
                         let mut render_pass = command_recorder
                             .begin_render_pass(&RenderPassDescription {
                                 label: Some("Triangle rendering"),
+                                flags: Default::default(),
                                 render_targets: &[RenderTarget {
                                     view: swapchain_image.view,
                                     sample_count: SampleCount::One,

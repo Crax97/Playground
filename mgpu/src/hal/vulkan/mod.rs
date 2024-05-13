@@ -18,9 +18,10 @@ use crate::{
     DevicePreference, FilterMode, Framebuffer, GraphicsPipeline, GraphicsPipelineDescription,
     GraphicsPipelineLayout, Image, ImageDescription, ImageDimension, ImageFormat, ImageRegion,
     ImageSubresource, MemoryDomain, MgpuError, MgpuResult, OwnedBindingSetLayout,
-    OwnedBindingSetLayoutInfo, PresentMode, PushConstantInfo, RenderPassInfo, Sampler,
-    SamplerDescription, ShaderAttribute, ShaderModule, ShaderModuleLayout, ShaderStageFlags,
-    ShaderVariable, StorageAccessMode, SwapchainCreationInfo, VariableType, VertexAttributeFormat,
+    OwnedBindingSetLayoutInfo, PresentMode, PushConstantInfo, RenderPassFlags, RenderPassInfo,
+    Sampler, SamplerDescription, ShaderAttribute, ShaderModule, ShaderModuleLayout,
+    ShaderStageFlags, ShaderVariable, StorageAccessMode, SwapchainCreationInfo, VariableType,
+    VertexAttributeFormat,
 };
 #[cfg(debug_assertions)]
 use std::collections::HashSet;
@@ -54,8 +55,6 @@ use self::util::{
 };
 
 use super::{ComputePipelineLayout, RenderState, ResourceTransition, SubmitInfo};
-
-pub(crate) const FLIP_VIEWPORT: bool = true;
 
 pub struct VulkanHal {
     entry: Entry,
@@ -1001,7 +1000,11 @@ impl Hal for VulkanHal {
                 vk::SubpassContents::INLINE,
             );
 
-            let viewport = if FLIP_VIEWPORT {
+            let flip_viewport = !render_pass_info
+                .flags
+                .contains(RenderPassFlags::DONT_FLIP_VIEWPORT);
+
+            let viewport = if flip_viewport {
                 vk::Viewport::default()
                     .width(render_pass_info.render_area.extents.width as f32)
                     .height(-(render_pass_info.render_area.extents.height as f32))

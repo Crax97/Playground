@@ -3,7 +3,8 @@ use std::marker::PhantomData;
 use crate::{
     hal::QueueType, rdg::Node, AttachmentStoreOp, BindingSet, BlitParams, Buffer,
     ComputePassDescription, ComputePipeline, DepthStencilTarget, Device, Extents2D,
-    GraphicsPipeline, MgpuResult, Rect2D, RenderPassDescription, RenderTarget, ShaderStageFlags,
+    GraphicsPipeline, MgpuResult, Rect2D, RenderPassDescription, RenderPassFlags, RenderTarget,
+    ShaderStageFlags,
 };
 #[cfg(debug_assertions)]
 use crate::{util::check, BufferUsageFlags, ImageUsageFlags};
@@ -116,6 +117,7 @@ pub struct Framebuffer {
 #[derive(Default, Debug, Hash)]
 pub struct RenderPassInfo {
     pub(crate) label: Option<String>,
+    pub(crate) flags: RenderPassFlags,
     pub(crate) framebuffer: Framebuffer,
     pub(crate) render_area: Rect2D,
     pub(crate) steps: Vec<RenderStep>,
@@ -300,6 +302,7 @@ impl CommandRecorder<Graphics> {
             command_recorder: self,
             info: RenderPassInfo {
                 label,
+                flags: render_pass_description.flags,
                 framebuffer: Framebuffer {
                     render_targets: render_pass_description.render_targets.to_vec(),
                     depth_stencil_target: render_pass_description

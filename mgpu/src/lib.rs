@@ -115,6 +115,15 @@ bitflags! {
     }
 }
 
+bitflags! {
+    #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash, Default)]
+    #[cfg_attr(feature="serde", derive(Serialize, Deserialize))]
+    pub struct RenderPassFlags : u32 {
+        #[doc = "Don't flip the viewport, only valid when using Vulkan"]
+        const DONT_FLIP_VIEWPORT = 0b1;
+    }
+}
+
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ImageFormat {
@@ -312,6 +321,7 @@ pub struct DepthStencilTarget {
 
 pub struct RenderPassDescription<'a> {
     pub label: Option<&'a str>,
+    pub flags: RenderPassFlags,
     pub render_targets: &'a [RenderTarget],
     pub depth_stencil_attachment: Option<&'a DepthStencilTarget>,
     pub render_area: Rect2D,
