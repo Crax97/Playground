@@ -49,15 +49,15 @@ impl Transform {
     }
 
     pub fn left(&self) -> Vec3 {
-        self.matrix().col(0).xyz().normalize()
+        self.matrix().row(0).xyz().normalize()
     }
 
     pub fn up(&self) -> Vec3 {
-        self.matrix().col(1).xyz().normalize()
+        self.matrix().row(1).xyz().normalize()
     }
 
     pub fn forward(&self) -> Vec3 {
-        self.matrix().col(2).xyz().normalize()
+        self.matrix().row(2).xyz().normalize()
     }
 
     // The input angles must be in degrees

@@ -1,5 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 use mgpu::{
     AttachmentStoreOp, Binding, BindingSet, BindingSetDescription, BindingSetElement,
     BindingSetLayout, BindingSetLayoutInfo, BlitParams, Buffer, BufferDescription,
@@ -17,6 +17,7 @@ use crate::{
     include_spirv,
     math::{color::LinearColor, constants::UP, Transform},
     scene::Scene,
+    shader_parameter_writer::ScalarParameterWriter,
 };
 
 const QUAD_VERTEX: &[u8] = include_spirv!("../spirv/quad_vertex.vert.spv");
@@ -32,6 +33,14 @@ pub struct SceneRenderer {
     scene_lightning_pipeline: GraphicsPipeline,
 
     current_frame: usize,
+    scene_lightning_parameters_writer: ScalarParameterWriter,
+    scene_setup: SceneSetup,
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct SceneSetup {
+    pub ambient_color: LinearColor,
+    pub ambient_intensity: f32,
 }
 
 #[derive(Clone)]
@@ -46,18 +55,20 @@ pub struct SceneImages {
     diffuse: RenderImage,
     emissive_ao: RenderImage,
     normal: RenderImage,
+    position: RenderImage,
     metallic_roughness: RenderImage,
 
     binding_set: BindingSet,
 }
 
-#[derive(Clone)]
 struct FrameData {
     point_of_view_buffer: Buffer,
     frame_binding_set: BindingSet,
     scene_images_sampler: Sampler,
     scene_images: SceneImages,
     final_image: RenderImage,
+    scene_params_binding_set: BindingSet,
+    scene_lightning_parameter_buffer: Buffer,
 }
 
 pub enum ProjectionMode {
@@ -78,12 +89,24 @@ pub struct PointOfView {
     far_plane: f32,
 }
 
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum SceneOutput {
+    #[default]
+    FinalImage,
+    BaseColor,
+    Normal,
+    WorldPosition,
+    EmissiveAO,
+    MetallicRoughness,
+}
+
 pub struct SceneRenderingParams<'a> {
     pub device: &'a Device,
     pub output_image: ImageView,
     pub scene: &'a Scene,
     pub pov: &'a PointOfView,
     pub asset_map: &'a mut AssetMap,
+    pub output: SceneOutput,
 }
 
 #[repr(C)]
@@ -106,7 +129,7 @@ assert_size_does_not_exceed!(
 );
 
 impl SceneRenderer {
-    pub fn scene_data_binding_set_layout() -> &'static BindingSetLayout<'static> {
+    pub fn per_object_scene_binding_set_layout() -> &'static BindingSetLayout<'static> {
         const LAYOUT: BindingSetLayout = BindingSetLayout {
             binding_set_elements: &[BindingSetElement {
                 binding: 0,
@@ -122,9 +145,49 @@ impl SceneRenderer {
         };
         &LAYOUT
     }
+
+    pub fn scene_lightning_binding_set_layout() -> &'static BindingSetLayout<'static> {
+        const LAYOUT: BindingSetLayout = BindingSetLayout {
+            binding_set_elements: &[
+                BindingSetElement {
+                    binding: 0,
+                    array_length: 1,
+                    ty: mgpu::BindingSetElementKind::Buffer {
+                        ty: mgpu::BufferType::Uniform,
+                        access_mode: mgpu::StorageAccessMode::Read,
+                    },
+                    shader_stage_flags: ShaderStageFlags::from_bits_retain(
+                        ShaderStageFlags::VERTEX.bits() | ShaderStageFlags::FRAGMENT.bits(),
+                    ),
+                },
+                BindingSetElement {
+                    binding: 1,
+                    array_length: 1,
+                    ty: mgpu::BindingSetElementKind::Buffer {
+                        ty: mgpu::BufferType::Uniform,
+                        access_mode: mgpu::StorageAccessMode::Read,
+                    },
+                    shader_stage_flags: ShaderStageFlags::from_bits_retain(
+                        ShaderStageFlags::VERTEX.bits() | ShaderStageFlags::FRAGMENT.bits(),
+                    ),
+                },
+            ],
+        };
+        &LAYOUT
+    }
     pub fn new(device: &Device) -> anyhow::Result<Self> {
         let mut frame_data = vec![];
         let device_info = device.get_info();
+
+        let quad_vertex_shader = device.create_shader_module(&ShaderModuleDescription {
+            label: Some("Quad VS"),
+            source: bytemuck::cast_slice(QUAD_VERTEX),
+        })?;
+
+        let scene_lightning_fragment = device.create_shader_module(&ShaderModuleDescription {
+            label: Some("SceneLightning FS"),
+            source: bytemuck::cast_slice(SCENE_LIGHTNING_FRAGMENT),
+        })?;
 
         let scene_images_sampler = device.create_sampler(&SamplerDescription {
             label: Some("GBuffer sampler"),
@@ -142,6 +205,12 @@ impl SceneRenderer {
             unnormalized_coordinates: false,
         })?;
 
+        let scene_lightning_parameters_writer = ScalarParameterWriter::new(
+            device,
+            &[&device.get_shader_module_layout(scene_lightning_fragment)?],
+            1,
+            1,
+        )?;
         for i in 0..device_info.frames_in_flight {
             let point_of_view_buffer = device.create_buffer(&BufferDescription {
                 label: Some(&format!("POV buffer for frame {}", i)),
@@ -149,6 +218,13 @@ impl SceneRenderer {
                     | BufferUsageFlags::UNIFORM_BUFFER
                     | BufferUsageFlags::STORAGE_BUFFER,
                 size: std::mem::size_of::<GPUGlobalFrameData>(),
+                memory_domain: mgpu::MemoryDomain::Gpu,
+            })?;
+
+            let scene_lightning_parameter_buffer = device.create_buffer(&BufferDescription {
+                label: Some("Material user buffer"),
+                usage_flags: BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM_BUFFER,
+                size: scene_lightning_parameters_writer.binary_blob.len(),
                 memory_domain: mgpu::MemoryDomain::Gpu,
             })?;
 
@@ -161,7 +237,26 @@ impl SceneRenderer {
                         visibility: ShaderStageFlags::ALL_GRAPHICS,
                     }],
                 },
-                Self::scene_data_binding_set_layout(),
+                Self::per_object_scene_binding_set_layout(),
+            )?;
+
+            let scene_params_binding_set = device.create_binding_set(
+                &BindingSetDescription {
+                    label: Some("Scene parameters binding set"),
+                    bindings: &[
+                        Binding {
+                            binding: 0,
+                            ty: point_of_view_buffer.bind_whole_range_uniform_buffer(),
+                            visibility: ShaderStageFlags::ALL_GRAPHICS,
+                        },
+                        Binding {
+                            binding: 1,
+                            ty: scene_lightning_parameter_buffer.bind_whole_range_uniform_buffer(),
+                            visibility: ShaderStageFlags::ALL_GRAPHICS,
+                        },
+                    ],
+                },
+                Self::scene_lightning_binding_set_layout(),
             )?;
 
             let extents = Extents2D {
@@ -180,19 +275,11 @@ impl SceneRenderer {
                     i,
                 )?,
                 scene_images_sampler,
+                scene_lightning_parameter_buffer,
+                scene_params_binding_set,
             };
             frame_data.push(current_frame_data)
         }
-
-        let quad_vertex_shader = device.create_shader_module(&ShaderModuleDescription {
-            label: Some("Quad VS"),
-            source: bytemuck::cast_slice(QUAD_VERTEX),
-        })?;
-
-        let scene_lightning_fragment = device.create_shader_module(&ShaderModuleDescription {
-            label: Some("SceneLightning FS"),
-            source: bytemuck::cast_slice(SCENE_LIGHTNING_FRAGMENT),
-        })?;
 
         let scene_lightning_pipeline =
             device.create_graphics_pipeline(&GraphicsPipelineDescription {
@@ -218,10 +305,16 @@ impl SceneRenderer {
                 front_face: mgpu::FrontFace::ClockWise,
                 multisample_state: None,
                 depth_stencil_state: DepthStencilState::default(),
-                binding_set_layouts: &[BindingSetLayoutInfo {
-                    set: 0,
-                    layout: SceneImages::binding_set_layout(),
-                }],
+                binding_set_layouts: &[
+                    BindingSetLayoutInfo {
+                        set: 0,
+                        layout: SceneImages::binding_set_layout(),
+                    },
+                    BindingSetLayoutInfo {
+                        set: 1,
+                        layout: SceneRenderer::scene_lightning_binding_set_layout(),
+                    },
+                ],
                 push_constant_info: None,
             })?;
 
@@ -233,13 +326,21 @@ impl SceneRenderer {
             scene_lightning_fragment,
             scene_lightning_pipeline,
 
+            scene_lightning_parameters_writer,
+            scene_setup: SceneSetup {
+                ambient_color: LinearColor::new(0.3, 0.3, 0.3, 1.0),
+                ambient_intensity: 1.0,
+            },
+
             current_frame: 0,
         })
     }
     pub fn render(&mut self, params: SceneRenderingParams) -> anyhow::Result<()> {
         let device = params.device;
+        self.update_buffers(params.device, params.pov)?;
+
         let current_frame = &self.frames[self.current_frame];
-        self.update_buffers(params.device, current_frame, params.pov)?;
+
         let mut command_recorder = device.create_command_recorder::<Graphics>();
 
         {
@@ -256,6 +357,12 @@ impl SceneRenderer {
                         },
                         RenderTarget {
                             view: current_frame.scene_images.emissive_ao.view,
+                            sample_count: mgpu::SampleCount::One,
+                            load_op: RenderTargetLoadOp::Clear([0.0, 0.0, 0.0, 1.0]),
+                            store_op: AttachmentStoreOp::Store,
+                        },
+                        RenderTarget {
+                            view: current_frame.scene_images.position.view,
                             sample_count: mgpu::SampleCount::One,
                             load_op: RenderTargetLoadOp::Clear([0.0; 4]),
                             store_op: AttachmentStoreOp::Store,
@@ -334,12 +441,25 @@ impl SceneRenderer {
                     },
                 })?;
             scene_lightning_pass.set_pipeline(self.scene_lightning_pipeline);
-            scene_lightning_pass.set_binding_sets(&[&current_frame.scene_images.binding_set]);
+            scene_lightning_pass.set_binding_sets(&[
+                &current_frame.scene_images.binding_set,
+                &current_frame.scene_params_binding_set,
+            ]);
             scene_lightning_pass.draw(6, 1, 0, 0)?;
         }
+
+        let final_image = match params.output {
+            SceneOutput::FinalImage => &current_frame.final_image,
+            SceneOutput::BaseColor => &current_frame.scene_images.diffuse,
+            SceneOutput::Normal => &current_frame.scene_images.normal,
+            SceneOutput::EmissiveAO => &current_frame.scene_images.emissive_ao,
+            SceneOutput::MetallicRoughness => &current_frame.scene_images.metallic_roughness,
+            SceneOutput::WorldPosition => &current_frame.scene_images.position,
+        };
+
         command_recorder.blit(&BlitParams {
-            src_image: current_frame.final_image.image,
-            src_region: current_frame.final_image.image.whole_region(),
+            src_image: final_image.image,
+            src_region: final_image.image.whole_region(),
             dst_image: params.output_image.owner(),
             dst_region: params.output_image.owner().whole_region(),
             filter: mgpu::FilterMode::Linear,
@@ -351,12 +471,8 @@ impl SceneRenderer {
         Ok(())
     }
 
-    fn update_buffers(
-        &self,
-        device: &Device,
-        current_frame: &FrameData,
-        pov: &PointOfView,
-    ) -> anyhow::Result<()> {
+    fn update_buffers(&mut self, device: &Device, pov: &PointOfView) -> anyhow::Result<()> {
+        let current_frame = &self.frames[self.current_frame];
         let pov_projection_matrix = pov.projection_matrix();
         let pov_view_matrix = pov.view_matrix();
         let gpu_global_data = GPUGlobalFrameData {
@@ -373,6 +489,21 @@ impl SceneRenderer {
                 size: std::mem::size_of::<GPUGlobalFrameData>(),
             },
         )?;
+
+        self.scene_lightning_parameters_writer.write(
+            "ambient_color",
+            [
+                self.scene_setup.ambient_color.r(),
+                self.scene_setup.ambient_color.g(),
+                self.scene_setup.ambient_color.g(),
+            ],
+        );
+        self.scene_lightning_parameters_writer
+            .write("ambient_intensity", self.scene_setup.ambient_intensity);
+        self.scene_lightning_parameters_writer
+            .write("eye_location", pov.transform.location.to_array());
+        self.scene_lightning_parameters_writer
+            .update_buffer(device, current_frame.scene_lightning_parameter_buffer)?;
         Ok(())
     }
 }
@@ -480,21 +611,28 @@ impl SceneImages {
             device,
             ImageFormat::Rgba32f,
             extents,
-            "GBuffer emissive",
+            "GBuffer emissive/ao",
+            frame,
+        )?;
+        let position = RenderImage::new(
+            device,
+            ImageFormat::Rgba32f,
+            extents,
+            "GBuffer position",
             frame,
         )?;
         let normal = RenderImage::new(
             device,
             ImageFormat::Rgba32f,
             extents,
-            "GBuffer emissive",
+            "GBuffer normal",
             frame,
         )?;
         let metallic_roughness = RenderImage::new(
             device,
             ImageFormat::Rgba32f,
             extents,
-            "GBuffer emissive",
+            "GBuffer metallic/roughness",
             frame,
         )?;
         let binding_set = device.create_binding_set(
@@ -520,11 +658,18 @@ impl SceneImages {
                     },
                     Binding {
                         binding: 3,
-                        ty: mgpu::BindingType::SampledImage { view: normal.view },
+                        ty: mgpu::BindingType::SampledImage {
+                            view: position.view,
+                        },
                         visibility: ShaderStageFlags::ALL_GRAPHICS,
                     },
                     Binding {
                         binding: 4,
+                        ty: mgpu::BindingType::SampledImage { view: normal.view },
+                        visibility: ShaderStageFlags::ALL_GRAPHICS,
+                    },
+                    Binding {
+                        binding: 5,
                         ty: mgpu::BindingType::SampledImage {
                             view: metallic_roughness.view,
                         },
@@ -546,6 +691,7 @@ impl SceneImages {
             diffuse,
             emissive_ao,
             normal,
+            position,
             metallic_roughness,
             binding_set,
         })
@@ -580,6 +726,12 @@ impl SceneImages {
                 },
                 BindingSetElement {
                     binding: 4,
+                    array_length: 1,
+                    ty: mgpu::BindingSetElementKind::SampledImage,
+                    shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
+                },
+                BindingSetElement {
+                    binding: 5,
                     array_length: 1,
                     ty: mgpu::BindingSetElementKind::SampledImage,
                     shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,

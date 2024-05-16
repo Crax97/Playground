@@ -15,7 +15,9 @@ struct MaterialAttributes {
 };
 
 #define DEFINE_USER_TEXTURE(TYPE, NAME, BINDING) \
-    layout(set = 1, binding = (BINDING + 1) * 2) uniform TYPE NAME; \
-    layout(set = 1, binding = (BINDING + 1) * 2 + 1) uniform sampler NAME##_sampler; \
+    layout(set = 1, binding = BINDING  * 2 + 1) uniform TYPE NAME; \
+    layout(set = 1, binding = BINDING  * 2 + 2) uniform sampler NAME##_sampler; \
 
 #define SAMPLE_USER_TEXTURE_2D(NAME, UV) texture(sampler2D(NAME, NAME##_sampler), UV)
+
+#define USER_PARAMS layout(set = 1, binding = 0, std140) uniform 

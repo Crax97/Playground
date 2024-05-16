@@ -51,8 +51,22 @@ pub trait App {
         Ok(())
     }
 
-    fn handle_window_event(&mut self, event: &WindowEvent) -> anyhow::Result<()>;
-    fn handle_device_event(&mut self, event: &DeviceEvent) -> anyhow::Result<()>;
+    fn handle_window_event(
+        &mut self,
+        event: &WindowEvent,
+        context: &AppContext,
+    ) -> anyhow::Result<()> {
+        let _ = (event, context);
+        Ok(())
+    }
+    fn handle_device_event(
+        &mut self,
+        event: &DeviceEvent,
+        context: &AppContext,
+    ) -> anyhow::Result<()> {
+        let _ = (event, context);
+        Ok(())
+    }
     fn update(&mut self, context: &AppContext) -> anyhow::Result<()>;
     fn render(&mut self, context: &AppContext, render_context: RenderContext)
         -> anyhow::Result<()>;
@@ -151,7 +165,7 @@ fn handle_window_event<A: App>(
     target: &ActiveEventLoop,
     description: &AppDescription,
 ) -> anyhow::Result<()> {
-    app.handle_window_event(&event)?;
+    app.handle_window_event(&event, app_context)?;
     app_context.input.update(&event);
 
     match event {

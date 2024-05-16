@@ -10,49 +10,81 @@ pub use shaderc;
 
 const ENGINE_SHADERS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../engine/src/shaders/");
 
-pub struct ShaderCompiler<'a> {
+pub struct ShaderCompiler {
     compiler: shaderc::Compiler,
-    options: shaderc::CompileOptions<'a>,
 
-    input_directories: Vec<PathBuf>,
+    input_directories: Vec<SourceDirectory>,
+}
+
+#[derive(Default)]
+pub struct SourceDirectoryOptions {
+    defines: Vec<String>,
+}
+
+struct SourceDirectory {
+    path: PathBuf,
+    options: SourceDirectoryOptions,
     output_directory: PathBuf,
 }
 
-impl<'a> ShaderCompiler<'a> {
-    pub fn new(output_directory: impl Into<PathBuf>) -> Self {
-        let compiler = shaderc::Compiler::new().expect("Could not create compiler");
-        let mut options = shaderc::CompileOptions::new().unwrap();
-        options.set_include_callback(|path, _, _, _| {
-            let path = Path::new(ENGINE_SHADERS_PATH).join(path);
-            let content = fs::read_to_string(&path)
-                .inspect_err(|_| eprintln!("In file {path:?}"))
-                .unwrap();
+impl SourceDirectoryOptions {
+    pub fn define(mut self, define: impl Into<String>) -> Self {
+        self.defines.push(define.into());
+        self
+    }
+}
 
-            Ok(ResolvedInclude {
-                resolved_name: path.file_name().unwrap().to_string_lossy().into_owned(),
-                content,
-            })
-        });
+impl ShaderCompiler {
+    pub fn new() -> Self {
+        let compiler = shaderc::Compiler::new().expect("Could not create compiler");
 
         Self {
             compiler,
-            options,
             input_directories: vec![],
-            output_directory: output_directory.into(),
         }
     }
 
-    pub fn add_source_directory(mut self, directory: impl AsRef<Path>) -> Self {
-        self.input_directories
-            .push(directory.as_ref().to_path_buf());
+    pub fn add_source_directory(
+        mut self,
+        directory: impl AsRef<Path>,
+        output_directory: impl AsRef<Path>,
+        options: SourceDirectoryOptions,
+    ) -> Self {
+        self.input_directories.push(SourceDirectory {
+            path: directory.as_ref().to_path_buf(),
+            options,
+            output_directory: output_directory.as_ref().to_path_buf(),
+        });
         self
     }
 
     pub fn compile(self) -> anyhow::Result<()> {
-        let _ = fs::remove_dir(&self.output_directory);
-        let _ = fs::create_dir(&self.output_directory);
-        for directory in self.input_directories {
-            let entries = std::fs::read_dir(&directory)
+        for SourceDirectory {
+            path: directory,
+            options,
+            output_directory,
+        } in &self.input_directories
+        {
+            let _ = fs::create_dir_all(output_directory);
+            let mut compiler_options = shaderc::CompileOptions::new().unwrap();
+            compiler_options.set_warnings_as_errors();
+            compiler_options.set_include_callback(|path, _, _, _| {
+                let path = Path::new(ENGINE_SHADERS_PATH).join(path);
+                let content = fs::read_to_string(&path)
+                    .inspect_err(|_| eprintln!("In file {path:?}"))
+                    .unwrap();
+
+                Ok(ResolvedInclude {
+                    resolved_name: path.file_name().unwrap().to_string_lossy().into_owned(),
+                    content,
+                })
+            });
+
+            for define in &options.defines {
+                compiler_options.add_macro_definition(define, Some("1"));
+            }
+
+            let entries = std::fs::read_dir(directory)
                 .context(format!("Could not open directory {:?}", directory))?;
             for entry in entries {
                 let entry = entry?;
@@ -87,15 +119,21 @@ impl<'a> ShaderCompiler<'a> {
                     shader_kind,
                     &name,
                     "main",
-                    Some(&self.options),
+                    Some(&compiler_options),
                 )?;
 
                 let output_filename = format!("{}.spv", name);
-                let output_path = self.output_directory.join(output_filename);
+                let output_path = output_directory.join(output_filename);
                 std::fs::write(&output_path, bytemuck::cast_slice(spirv.as_binary()))
                     .context(format!("Could not find output folder {:?}", output_path))?;
             }
         }
         Ok(())
+    }
+}
+
+impl Default for ShaderCompiler {
+    fn default() -> Self {
+        Self::new()
     }
 }

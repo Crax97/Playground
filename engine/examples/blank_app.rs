@@ -1,4 +1,4 @@
-use engine::app::{bootstrap, App, AppDescription};
+use engine::app::{bootstrap, App, AppContext, AppDescription};
 
 struct BlankApp;
 
@@ -10,10 +10,18 @@ impl App for BlankApp {
         Ok(Self)
     }
 
-    fn handle_window_event(&mut self, _event: &winit::event::WindowEvent) -> anyhow::Result<()> {
+    fn handle_window_event(
+        &mut self,
+        _event: &winit::event::WindowEvent,
+        _context: &AppContext,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
-    fn handle_device_event(&mut self, _event: &winit::event::DeviceEvent) -> anyhow::Result<()> {
+    fn handle_device_event(
+        &mut self,
+        _event: &winit::event::DeviceEvent,
+        _context: &AppContext,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 

@@ -1,14 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use glam::{Vec2, Vec3, Vec4};
+use crate::{shader_parameter_writer::ScalarParameterWriter, utils::shader_parameter_writer::*};
+
 use mgpu::{
     Binding, BindingSet, BindingSetDescription, BindingSetElement, BindingSetElementKind,
-    BindingSetLayout, BindingSetLayoutInfo, BindingType, Buffer, BufferDescription,
-    BufferUsageFlags, CompareOp, CullMode, DepthStencilState, DepthStencilTargetInfo, Device,
-    FragmentStageInfo, FrontFace, GraphicsPipeline, GraphicsPipelineDescription, ImageFormat,
-    PolygonMode, PrimitiveTopology, PushConstantInfo, RenderTargetInfo, ShaderModule,
-    ShaderStageFlags, StorageAccessMode, VariableType, VertexAttributeFormat,
-    VertexInputDescription, VertexInputFrequency, VertexStageInfo,
+    BindingSetLayout, BindingSetLayoutInfo, BindingType, BufferDescription, BufferUsageFlags,
+    CompareOp, CullMode, DepthStencilState, DepthStencilTargetInfo, Device, FragmentStageInfo,
+    FrontFace, GraphicsPipeline, GraphicsPipelineDescription, ImageFormat, PolygonMode,
+    PrimitiveTopology, PushConstantInfo, RenderTargetInfo, ShaderStageFlags, StorageAccessMode,
+    VertexAttributeFormat, VertexInputDescription, VertexInputFrequency, VertexStageInfo,
 };
 use serde::{Deserialize, Serialize};
 
@@ -24,15 +24,15 @@ use super::texture::Texture;
 pub struct Material {
     pub properties: MaterialProperties,
 
-    pub scalar_parameters_infos: Vec<ScalarParameterInfo>,
     pub texture_parameter_infos: Vec<TextureParameterInfo>,
     pub parameters: MaterialParameters,
 
     pub(crate) pipeline: GraphicsPipeline,
     // All the bindings in binding set 1 are user-settable parameters
     pub(crate) binding_set: BindingSet,
-    // The stuff in binding (0,0) should be a struct
-    pub(crate) scalar_parameter_buffer: Option<Buffer>,
+    // The stuff in set(1) binding (0) should be a struct
+    pub(crate) scalar_parameter_writer: ScalarParameterWriter,
+    user_buffer: Option<mgpu::Buffer>,
 }
 
 pub struct MaterialDescription<'a> {
@@ -42,32 +42,12 @@ pub struct MaterialDescription<'a> {
     pub parameters: MaterialParameters,
     pub properties: MaterialProperties,
 }
-
-pub struct ScalarParameterInfo {
-    pub name: String,
-    pub offset: usize,
-    pub ty: VertexAttributeFormat,
-}
-
+#[derive(Debug)]
 pub struct TextureParameterInfo {
     pub name: String,
     pub binding: usize,
     pub is_storage: bool,
     pub access_mode: StorageAccessMode,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub enum ScalarParameterType {
-    Scalar(f32),
-    Vec2(Vec2),
-    Vec3(Vec3),
-    Vec4(Vec4),
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct ScalarMaterialParameter {
-    pub name: String,
-    pub texture: ScalarParameterType,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -208,6 +188,10 @@ impl Material {
                         blend: None,
                     },
                     RenderTargetInfo {
+                        format: ImageFormat::Rgba32f,
+                        blend: None,
+                    },
+                    RenderTargetInfo {
                         format: ImageFormat::Rgba8,
                         blend: None,
                     },
@@ -230,7 +214,7 @@ impl Material {
             binding_set_layouts: &[
                 BindingSetLayoutInfo {
                     set: 0,
-                    layout: SceneRenderer::scene_data_binding_set_layout(),
+                    layout: SceneRenderer::per_object_scene_binding_set_layout(),
                 },
                 BindingSetLayoutInfo {
                     set: 1,
@@ -243,50 +227,8 @@ impl Material {
             }),
         })?;
 
-        let mut user_scalars = vec![];
         let mut user_textures = vec![];
-        for variable in vertex_shader_layout
-            .variables
-            .iter()
-            .filter(|var| var.binding_index == 0 && var.binding_set == 1)
-        {
-            match variable.ty {
-                VariableType::Field { format, offset } => {
-                    user_scalars.push(ScalarParameterInfo {
-                        name: variable
-                            .name
-                            .clone()
-                            .expect("A shader variable doesn't have a name"),
-                        ty: format,
-                        offset,
-                    });
-                }
-                _ => panic!(
-                    "A user variable (binding set 1, binding 0) can only be composed of fileds"
-                ),
-            };
-        }
-        for variable in fragment_shader_layout
-            .variables
-            .iter()
-            .filter(|var| var.binding_index == 0 && var.binding_set == 0)
-        {
-            match variable.ty {
-                VariableType::Field { format, offset } => {
-                    user_scalars.push(ScalarParameterInfo {
-                        name: variable
-                            .name
-                            .clone()
-                            .expect("A shader variable doesn't have a name"),
-                        ty: format,
-                        offset,
-                    });
-                }
-                _ => panic!(
-                    "A user variable (binding set 1, binding 0) can only be composed of fileds"
-                ),
-            };
-        }
+
         let mut texture_iterator = user_binding_layout
             .binding_set_elements
             .iter()
@@ -351,36 +293,19 @@ impl Material {
             );
         }
 
-        let user_buffer = if !user_scalars.is_empty() {
-            let mut size = 0;
-            for scalar in &user_scalars {
-                let field_size = match &scalar.ty {
-                    VertexAttributeFormat::Int => 4,
-                    VertexAttributeFormat::Int2 => 8,
-                    VertexAttributeFormat::Int3 => 12,
-                    VertexAttributeFormat::Int4 => 16,
-                    VertexAttributeFormat::Uint => 4,
-                    VertexAttributeFormat::Uint2 => 8,
-                    VertexAttributeFormat::Uint3 => 12,
-                    VertexAttributeFormat::Uint4 => 16,
-                    VertexAttributeFormat::Float => 4,
-                    VertexAttributeFormat::Float2 => 8,
-                    VertexAttributeFormat::Float3 => 12,
-                    VertexAttributeFormat::Float4 => 16,
-                    VertexAttributeFormat::Mat2x2 => 8 * 8,
-                    VertexAttributeFormat::Mat3x3 => 12 * 12,
-                    VertexAttributeFormat::Mat4x4 => 16 * 16,
-                };
-
-                size += field_size;
-            }
-            let buffer = device.create_buffer(&BufferDescription {
+        let mut scalar_parameter_writer = ScalarParameterWriter::new(
+            device,
+            &[&vertex_shader_layout, &fragment_shader_layout],
+            1,
+            0,
+        )?;
+        let user_buffer = if !scalar_parameter_writer.parameters_infos.is_empty() {
+            Some(device.create_buffer(&BufferDescription {
                 label: Some("Material user buffer"),
                 usage_flags: BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM_BUFFER,
-                size,
+                size: scalar_parameter_writer.binary_blob.len(),
                 memory_domain: mgpu::MemoryDomain::Gpu,
-            })?;
-            Some(buffer)
+            })?)
         } else {
             None
         };
@@ -436,14 +361,21 @@ impl Material {
             &user_binding_layout,
         )?;
 
+        for parameter in &description.parameters.scalars {
+            scalar_parameter_writer.write(&parameter.name, parameter.value);
+        }
+        if let Some(buffer) = &user_buffer {
+            scalar_parameter_writer.update_buffer(device, *buffer)?;
+        }
+
         Ok(Material {
             parameters: description.parameters.clone(),
             properties: description.properties,
             pipeline,
             binding_set,
-            scalar_parameter_buffer: user_buffer,
-            scalar_parameters_infos: user_scalars,
             texture_parameter_infos: user_textures,
+            scalar_parameter_writer,
+            user_buffer,
         })
     }
 
@@ -461,11 +393,11 @@ impl MaterialParameters {
     pub fn scalar_parameter(
         mut self,
         name: impl Into<String>,
-        parameter: ScalarParameterType,
+        parameter: impl Into<ScalarParameterType>,
     ) -> Self {
         self.scalars.push(ScalarMaterialParameter {
             name: name.into(),
-            texture: parameter,
+            value: parameter.into(),
         });
         self
     }

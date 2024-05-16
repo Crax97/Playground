@@ -66,7 +66,7 @@ impl InputState {
                 let mouse_position = position.cast::<u32>();
                 self.current_cursor_position = PhysicalPosition {
                     x: mouse_position.x,
-                    y: self.window_size.height - mouse_position.y,
+                    y: self.window_size.height.saturating_sub(mouse_position.y),
                 };
             }
             winit::event::WindowEvent::MouseWheel { delta, .. } => {
@@ -111,7 +111,7 @@ impl InputState {
                         let mouse_position = location.cast::<u32>();
                         self.current_cursor_position = PhysicalPosition {
                             x: mouse_position.x,
-                            y: self.window_size.height - mouse_position.y,
+                            y: self.window_size.height.saturating_sub(mouse_position.y),
                         };
                     }
                     winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled => {

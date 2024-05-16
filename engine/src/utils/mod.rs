@@ -4,6 +4,7 @@ pub mod fps_limiter;
 pub mod immutable_string;
 pub mod sampler_allocator;
 pub mod shader_cache;
+pub mod shader_parameter_writer;
 mod tick;
 
 use std::{fs, path::Path};

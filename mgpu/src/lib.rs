@@ -1058,6 +1058,28 @@ impl<'a> GraphicsPipelineDescription<'a> {
     }
 }
 
+impl VertexAttributeFormat {
+    pub fn size_bytes(&self) -> usize {
+        match self {
+            VertexAttributeFormat::Int => 4,
+            VertexAttributeFormat::Int2 => 8,
+            VertexAttributeFormat::Int3 => 12,
+            VertexAttributeFormat::Int4 => 16,
+            VertexAttributeFormat::Uint => 4,
+            VertexAttributeFormat::Uint2 => 8,
+            VertexAttributeFormat::Uint3 => 12,
+            VertexAttributeFormat::Uint4 => 16,
+            VertexAttributeFormat::Float => 4,
+            VertexAttributeFormat::Float2 => 8,
+            VertexAttributeFormat::Float3 => 12,
+            VertexAttributeFormat::Float4 => 16,
+            VertexAttributeFormat::Mat2x2 => 8 * 8,
+            VertexAttributeFormat::Mat3x3 => 12 * 12,
+            VertexAttributeFormat::Mat4x4 => 16 * 16,
+        }
+    }
+}
+
 impl<'a> BufferWriteParams<'a> {
     pub fn total_bytes(&self) -> usize {
         self.size

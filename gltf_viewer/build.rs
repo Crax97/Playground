@@ -1,9 +1,18 @@
-use engine_build_utils::ShaderCompiler;
+use engine_build_utils::{ShaderCompiler, SourceDirectoryOptions};
 
 fn main() -> anyhow::Result<()> {
-    println!("cargo::rerun-if-changed=gltf_viewer/assets");
+    println!("cargo::rerun-if-changed=shaders");
 
-    ShaderCompiler::new("spirv/")
-        .add_source_directory("shaders/materials")
+    ShaderCompiler::new()
+        .add_source_directory(
+            "shaders/materials",
+            "spirv/base_pass",
+            SourceDirectoryOptions::default(),
+        )
+        .add_source_directory(
+            "shaders/materials",
+            "spirv/depth_only",
+            SourceDirectoryOptions::default().define("DEPTH_ONLY_PASS"),
+        )
         .compile()
 }

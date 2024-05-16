@@ -11,6 +11,7 @@ use engine::{
         texture::{Texture, TextureDescription, TextureSamplerConfiguration, TextureUsageFlags},
     },
     glam::{vec2, vec3, Mat4},
+    immutable_string::ImmutableString,
     include_spirv,
     math::Transform,
     sampler_allocator::SamplerAllocator,
@@ -21,8 +22,13 @@ use engine::{
 use gltf::image::Data;
 use mgpu::{Device, Extents2D, FilterMode, ShaderModuleDescription};
 
-const VERTEX_SHADER: &[u8] = include_spirv!("../spirv/pbr_vertex.vert.spv");
-const FRAGMENT_SHADER: &[u8] = include_spirv!("../spirv/pbr_fragment.frag.spv");
+const VERTEX_SHADER: &[u8] = include_spirv!("../spirv/base_pass/pbr_vertex.vert.spv");
+const FRAGMENT_SHADER: &[u8] = include_spirv!("../spirv/base_pass/pbr_fragment.frag.spv");
+
+const WHITE_TEXTURE_HANDLE: AssetHandle<Texture> =
+    AssetHandle::new_const(ImmutableString::new("gltf.textures.white"));
+const BLACK_TEXTURE_HANDLE: AssetHandle<Texture> =
+    AssetHandle::new_const(ImmutableString::new("gltf.textures.black"));
 
 pub fn load(
     device: &Device,
@@ -96,6 +102,28 @@ fn create_materials(
         let pbr_info = material.pbr_metallic_roughness();
         let base_color_texture = pbr_info.base_color_texture().unwrap();
         let base_color_texture = textures[base_color_texture.texture().index()].clone();
+        let metallic_roughness_texture = pbr_info
+            .metallic_roughness_texture()
+            .map(|info| &textures[info.texture().index()])
+            .unwrap_or(&WHITE_TEXTURE_HANDLE)
+            .clone();
+
+        let normal_texture = material
+            .normal_texture()
+            .map(|info| &textures[info.texture().index()])
+            .unwrap_or(&WHITE_TEXTURE_HANDLE)
+            .clone();
+        let occlusion_texture = material
+            .occlusion_texture()
+            .map(|info| &textures[info.texture().index()])
+            .unwrap_or(&WHITE_TEXTURE_HANDLE)
+            .clone();
+        let emissive_texture = material
+            .emissive_texture()
+            .map(|info| &textures[info.texture().index()])
+            .unwrap_or(&WHITE_TEXTURE_HANDLE)
+            .clone();
+
         let identifier = format!("gltf.materials.{}", idx);
         let material = Material::new(
             device,
@@ -104,7 +132,14 @@ fn create_materials(
                 vertex_shader: "pbr_vertex".into(),
                 fragment_shader: "pbr_fragment".into(),
                 parameters: MaterialParameters::default()
-                    .texture_parameter("tex", base_color_texture),
+                    .texture_parameter("base_color", base_color_texture)
+                    .texture_parameter("normal", normal_texture)
+                    .texture_parameter("occlusion", occlusion_texture)
+                    .texture_parameter("emissive", emissive_texture)
+                    .texture_parameter("metallic_roughness", metallic_roughness_texture)
+                    .scalar_parameter("base_color_factor", pbr_info.base_color_factor())
+                    .scalar_parameter("metallic_factor", pbr_info.metallic_factor())
+                    .scalar_parameter("roughness_factor", pbr_info.roughness_factor()),
                 properties: MaterialProperties {
                     domain: MaterialDomain::Surface,
                 },
@@ -206,13 +241,67 @@ fn create_textures(
     image_data: Vec<Data>,
     device: &Device,
 ) -> anyhow::Result<Vec<AssetHandle<Texture>>> {
+    if asset_map
+        .get(&AssetHandle::<Texture>::new(
+            WHITE_TEXTURE_HANDLE.identifier().clone(),
+        ))
+        .is_none()
+    {
+        let texture = Texture::new(
+            device,
+            &TextureDescription {
+                label: Some("gltf white texture"),
+                data: &[&[255, 255, 255, 255]],
+                ty: engine::assets::texture::TextureType::D2(Extents2D {
+                    width: 1,
+                    height: 1,
+                }),
+                format: mgpu::ImageFormat::Rgba8,
+                usage_flags: TextureUsageFlags::default(),
+                num_mips: 1.try_into().unwrap(),
+                auto_generate_mips: false,
+                sampler_configuration: TextureSamplerConfiguration::default(),
+            },
+            sampler_allocator,
+        )?;
+
+        asset_map.add(texture, WHITE_TEXTURE_HANDLE.identifier().clone());
+    }
+
+    if asset_map
+        .get(&AssetHandle::<Texture>::new(
+            BLACK_TEXTURE_HANDLE.identifier().clone(),
+        ))
+        .is_none()
+    {
+        let texture = Texture::new(
+            device,
+            &TextureDescription {
+                label: Some("gltf black texture"),
+                data: &[&[0, 0, 0, 255]],
+                ty: engine::assets::texture::TextureType::D2(Extents2D {
+                    width: 1,
+                    height: 1,
+                }),
+                format: mgpu::ImageFormat::Rgba8,
+                usage_flags: TextureUsageFlags::default(),
+                num_mips: 1.try_into().unwrap(),
+                auto_generate_mips: false,
+                sampler_configuration: TextureSamplerConfiguration::default(),
+            },
+            sampler_allocator,
+        )?;
+
+        asset_map.add(texture, BLACK_TEXTURE_HANDLE.identifier().clone());
+    }
+
     let mut textures = vec![];
-    for texture in document.textures() {
+    for (idx, texture) in document.textures().enumerate() {
         let texture_image = texture.source();
         let image_data = &image_data[texture_image.index()];
         let sampler_info = texture.sampler();
         let sampler_configuration = get_sampler_configuration(sampler_info);
-        let identifier = format!("gltf.texture.{}", texture.index());
+        let identifier = format!("gltf.texture.{}", idx);
 
         let mut data_ausiliary = vec![];
         let mut data_ref = image_data.pixels.as_slice();

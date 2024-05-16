@@ -15,7 +15,9 @@ use engine::{
     math::Transform,
     sampler_allocator::SamplerAllocator,
     scene::{Scene, SceneMesh, SceneNode, SceneNodeId},
-    scene_renderer::{PointOfView, ProjectionMode, SceneRenderer, SceneRenderingParams},
+    scene_renderer::{
+        PointOfView, ProjectionMode, SceneOutput, SceneRenderer, SceneRenderingParams,
+    },
     shader_cache::ShaderCache,
 };
 use glam::{vec2, vec3};
@@ -133,11 +135,19 @@ impl App for CubesSceneApplication {
         })
     }
 
-    fn handle_window_event(&mut self, _event: &winit::event::WindowEvent) -> anyhow::Result<()> {
+    fn handle_window_event(
+        &mut self,
+        _event: &winit::event::WindowEvent,
+        _context: &AppContext,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 
-    fn handle_device_event(&mut self, _event: &winit::event::DeviceEvent) -> anyhow::Result<()> {
+    fn handle_device_event(
+        &mut self,
+        _event: &winit::event::DeviceEvent,
+        _context: &AppContext,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -176,6 +186,7 @@ impl App for CubesSceneApplication {
             pov: &self.pov,
             asset_map: &mut self.asset_map,
             output_image: render_context.swapchain_image.view,
+            output: SceneOutput::FinalImage,
         })?;
         Ok(())
     }

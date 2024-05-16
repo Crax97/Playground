@@ -1077,6 +1077,8 @@ impl Device {
         description: &BindingSetDescription,
         layout: &BindingSetLayout,
     ) {
+        check!(layout.binding_set_elements.len() == description.bindings.len(), "Layout expects {} elements, but {} were provided: they must match exactly",
+            layout.binding_set_elements.len(), description.bindings.len());
         // TODO: Ensure that bindings in description are present in layout
         for layout_binding in layout.binding_set_elements {
             let description_binding = description

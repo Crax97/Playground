@@ -263,6 +263,17 @@ impl<A: Asset> AssetHandle<A> {
             identifier: identifier.into(),
         }
     }
+
+    pub const fn new_const(identifier: ImmutableString) -> Self {
+        Self {
+            _phantom_data: PhantomData,
+            identifier,
+        }
+    }
+
+    pub fn identifier(&self) -> &ImmutableString {
+        &self.identifier
+    }
 }
 #[cfg(test)]
 mod tests {
