@@ -1458,6 +1458,7 @@ dependencies = [
  "engine",
  "engine_build_utils",
  "gltf",
+ "image 0.25.1",
  "mgpu",
 ]
 

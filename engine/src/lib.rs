@@ -16,6 +16,13 @@ pub use utils::*;
 pub use glam;
 pub use winit;
 
+pub mod constants {
+    use crate::{asset_map::AssetHandle, assets::mesh::Mesh, immutable_string::ImmutableString};
+
+    pub const CUBE_MESH_HANDLE: AssetHandle<Mesh> =
+        AssetHandle::new_const(ImmutableString::new("mesh.cube"));
+}
+
 /*
  * Conventions used
  * Coordinates: +Y is up, +Z is forward, -X is right (same as glTF)

@@ -6,7 +6,7 @@ layout(location = 2) in vec3 vertex_tangent;
 layout(location = 3) in vec3 vertex_color;
 layout(location = 4) in vec2 vertex_uv;
 
-layout(location = 0) out vec4 clip_position;
+layout(location = 0) out vec3 fs_vertex_position;
 layout(location = 1) out vec3 world_position;
 layout(location = 2) out vec2 uv;
 layout(location = 3) out vec3 normal;
@@ -40,12 +40,12 @@ VertexOutput vertex();
 void main() {
     VertexOutput vertex_output = vertex();
 
-    clip_position = vertex_output.clip_position;
     world_position = vertex_output.world_position;
     uv = vertex_output.uv;
     tangent = vertex_tangent;
     normal = vertex_normal;
     TBN = get_tbn();
+    fs_vertex_position = vertex_position;
 
     gl_Position = vertex_output.clip_position;
 }

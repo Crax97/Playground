@@ -11,10 +11,10 @@ use crate::{
     BorderColor, Buffer, BufferUsageFlags, ColorWriteMask, CompareOp, ComputePipeline,
     ComputePipelineDescription, CullMode, Extents2D, Extents3D, FilterMode, FrontFace,
     GraphicsPipeline, GraphicsPipelineDescription, Image, ImageAspect, ImageCreationFlags,
-    ImageDimension, ImageFormat, ImageSubresource, ImageUsageFlags, ImageView, MipmapMode,
-    Offset2D, Offset3D, OwnedBindingSetLayoutInfo, PolygonMode, PresentMode, PrimitiveTopology,
-    PushConstantInfo, Rect2D, SampleCount, Sampler, ShaderModule, ShaderModuleLayout,
-    ShaderStageFlags, Swapchain, VertexAttributeFormat, VertexInputFrequency,
+    ImageDimension, ImageFormat, ImageSubresource, ImageUsageFlags, ImageView, ImageViewType,
+    MipmapMode, Offset2D, Offset3D, OwnedBindingSetLayoutInfo, PolygonMode, PresentMode,
+    PrimitiveTopology, PushConstantInfo, Rect2D, SampleCount, Sampler, ShaderModule,
+    ShaderModuleLayout, ShaderStageFlags, Swapchain, VertexAttributeFormat, VertexInputFrequency,
 };
 
 #[cfg(feature = "swapchain")]
@@ -258,6 +258,22 @@ impl FromVk for vk::ImageType {
             vk::ImageType::TYPE_2D => ImageDimension::D2,
             vk::ImageType::TYPE_3D => ImageDimension::D3,
             _ => unreachable!(),
+        }
+    }
+}
+
+impl ToVk for ImageViewType {
+    type Target = vk::ImageViewType;
+
+    fn to_vk(self) -> Self::Target {
+        match self {
+            ImageViewType::D1 => vk::ImageViewType::TYPE_1D,
+            ImageViewType::D2 => vk::ImageViewType::TYPE_2D,
+            ImageViewType::D3 => vk::ImageViewType::TYPE_3D,
+            ImageViewType::Cube => vk::ImageViewType::CUBE,
+            ImageViewType::Array1D => vk::ImageViewType::TYPE_1D_ARRAY,
+            ImageViewType::Array2D => vk::ImageViewType::TYPE_2D_ARRAY,
+            ImageViewType::CubeArray => vk::ImageViewType::CUBE_ARRAY,
         }
     }
 }

@@ -127,7 +127,11 @@ impl Texture {
             )),
             image,
             format: description.format,
-            dimension,
+            view_ty: match dimension {
+                ImageDimension::D1 => mgpu::ImageViewType::D1,
+                ImageDimension::D2 => mgpu::ImageViewType::D2,
+                ImageDimension::D3 => mgpu::ImageViewType::D3,
+            },
             aspect: description.format.aspect(),
             image_subresource: image.whole_subresource(),
         })?;

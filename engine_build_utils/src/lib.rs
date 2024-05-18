@@ -112,6 +112,9 @@ impl ShaderCompiler {
                     "vert" => shaderc::ShaderKind::Vertex,
                     "frag" => shaderc::ShaderKind::Fragment,
                     "comp" => shaderc::ShaderKind::Compute,
+                    "glsl" | "incl" => {
+                        continue;
+                    }
                     _ => anyhow::bail!("Unrecognized extension {}", extension),
                 };
                 let spirv = self.compiler.compile_into_spirv(

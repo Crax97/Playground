@@ -25,7 +25,6 @@ pub struct AssetHandle<A: Asset> {
     pub(crate) identifier: ImmutableString,
 }
 
-#[derive(Default)]
 pub struct AssetMap {
     arenas: HashMap<TypeId, ErasedArena>,
     loaded_assets: HashMap<ImmutableString, Index>,
@@ -38,8 +37,12 @@ struct LoadedAsset<A: Asset> {
 }
 
 impl AssetMap {
-    pub fn new() -> Self {
-        Self::default()
+    pub(crate) fn new() -> Self {
+        Self {
+            arenas: Default::default(),
+            loaded_assets: Default::default(),
+            loaders: Default::default(),
+        }
     }
     pub fn add_loader<L: AssetLoader>(&mut self, loader: L) {
         let unsafe_loader: Box<dyn UnsafeAssetLoader> = Box::new(loader);
@@ -71,7 +74,12 @@ impl AssetMap {
             asset,
             ref_count: 1,
         });
-        self.loaded_assets.insert(identifier.clone(), index);
+        let old = self.loaded_assets.insert(identifier.clone(), index);
+        debug_assert!(
+            old.is_none(),
+            "Another asset with identifier '{}' was already defined! identifiers must be unique!",
+            &identifier
+        );
         AssetHandle {
             _phantom_data: PhantomData,
             identifier,

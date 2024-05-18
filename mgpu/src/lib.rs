@@ -233,6 +233,18 @@ pub enum ImageDimension {
 
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ImageViewType {
+    D1,
+    D2,
+    D3,
+    Cube,
+    Array1D,
+    Array2D,
+    CubeArray,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SampleCount {
     One,
 }
@@ -383,7 +395,7 @@ pub struct ImageViewDescription<'a> {
     pub label: Option<&'a str>,
     pub image: Image,
     pub format: ImageFormat,
-    pub dimension: ImageDimension,
+    pub view_ty: ImageViewType,
     pub aspect: ImageAspect,
     pub image_subresource: ImageSubresource,
 }
@@ -874,7 +886,7 @@ impl Image {
         }
     }
 
-    pub fn subresource(&self, mip: u32, layer: u32) -> ImageSubresource {
+    pub fn layer(&self, mip: u32, layer: u32) -> ImageSubresource {
         check!(
             mip < self.num_mips.get(),
             "Requested mip {} but only {} are available",
@@ -891,7 +903,7 @@ impl Image {
             mip,
             num_mips: self.num_mips,
             base_array_layer: layer,
-            num_layers: self.array_layers,
+            num_layers: 1.try_into().unwrap(),
         }
     }
 

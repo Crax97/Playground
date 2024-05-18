@@ -11,6 +11,7 @@ gltf = "1.4.0"
 bytemuck = { version = "1.13.1", features = ["derive"] }
 anyhow = { version = "1.0.*", features = ["backtrace"] }
 clap = { version = "4.5.4", features = ["derive"] }
+image = "0.25.1"
 
 [build-dependencies]
 engine_build_utils = { path = "../engine_build_utils" }

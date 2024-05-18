@@ -1,0 +1,26 @@
+
+/*
+Gets the Van der Corput representation of x, which is 
+a decimal number with x's binary representation mirrored as the decimal part.
+
+e.g x = 154 = 0b10011010, so VdC(152) = 0.01011001
+The formula is
+
+VdC(x) = a_0 / 2 + ... + a_i / 2^i + ... + a_r / 2^r+1
+where a_i are factors in the binary representation of x
+*/
+float van_der_corput_representation(uint x) {
+    x = (x << 16u) | (x >> 16u);
+    x = ((x & 0x55555555u) << 1u) | ((x & 0xAAAAAAAAu) >> 1u);
+    x = ((x & 0x33333333u) << 2u) | ((x & 0xCCCCCCCCu) >> 2u);
+    x = ((x & 0x0F0F0F0Fu) << 4u) | ((x & 0xF0F0F0F0u) >> 4u);
+    x = ((x & 0x00FF00FFu) << 8u) | ((x & 0xFF00FF00u) >> 8u);
+    return float(x) * 2.3283064365386963e-10; // / 0x100000000
+}
+ 
+// Returns vec2(x / num_samples, VdC(x)), useful to e.g
+// This can be useful to e.g do "randomized" sampling on an hemisphere, since the
+// returned numbers are in the [0, 1) range (and can be thus converted to hemispherical coords)
+vec2 hammersley(uint x, uint num_samples) {
+    return vec2(x / num_samples, van_der_corput_representation(x)); 
+}

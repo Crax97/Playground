@@ -9,5 +9,6 @@ MaterialAttributes fragment() {
 
     MaterialAttributes result;
     result.diffuse_color = diffuse_color;
+    result.roughness = 1.0;
     return result;
 }

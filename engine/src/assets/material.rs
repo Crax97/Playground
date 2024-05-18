@@ -64,6 +64,7 @@ pub enum MaterialDomain {
 #[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct MaterialProperties {
     pub domain: MaterialDomain,
+    pub double_sided: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -133,43 +134,7 @@ impl Material {
             vertex_stage: &VertexStageInfo {
                 shader: &vertex_shader,
                 entry_point: "main",
-                vertex_inputs: &[
-                    VertexInputDescription {
-                        location: 0,
-                        stride: std::mem::size_of::<[f32; 3]>(),
-                        offset: 0,
-                        format: VertexAttributeFormat::Float3,
-                        frequency: VertexInputFrequency::PerVertex,
-                    },
-                    VertexInputDescription {
-                        location: 1,
-                        stride: std::mem::size_of::<[f32; 3]>(),
-                        offset: 0,
-                        format: VertexAttributeFormat::Float3,
-                        frequency: VertexInputFrequency::PerVertex,
-                    },
-                    VertexInputDescription {
-                        location: 2,
-                        stride: std::mem::size_of::<[f32; 3]>(),
-                        offset: 0,
-                        format: VertexAttributeFormat::Float3,
-                        frequency: VertexInputFrequency::PerVertex,
-                    },
-                    VertexInputDescription {
-                        location: 3,
-                        stride: std::mem::size_of::<[f32; 3]>(),
-                        offset: 0,
-                        format: VertexAttributeFormat::Float3,
-                        frequency: VertexInputFrequency::PerVertex,
-                    },
-                    VertexInputDescription {
-                        location: 4,
-                        stride: std::mem::size_of::<[f32; 2]>(),
-                        offset: 0,
-                        format: VertexAttributeFormat::Float2,
-                        frequency: VertexInputFrequency::PerVertex,
-                    },
-                ],
+                vertex_inputs: mesh_vertex_inputs(),
             },
             fragment_stage: Some(&FragmentStageInfo {
                 shader: &fragment_shader,
@@ -203,7 +168,11 @@ impl Material {
             primitive_restart_enabled: false,
             primitive_topology: PrimitiveTopology::TriangleList,
             polygon_mode: PolygonMode::Filled,
-            cull_mode: CullMode::Back,
+            cull_mode: if description.properties.double_sided {
+                CullMode::None
+            } else {
+                CullMode::Back
+            },
             front_face: FrontFace::CounterClockWise,
             multisample_state: None,
             depth_stencil_state: DepthStencilState {
@@ -387,6 +356,47 @@ impl Material {
 
         result.into_iter().collect()
     }
+}
+
+pub(crate) fn mesh_vertex_inputs() -> &'static [VertexInputDescription] {
+    const VERTEX_INPUTS: &[VertexInputDescription] = &[
+        VertexInputDescription {
+            location: 0,
+            stride: std::mem::size_of::<[f32; 3]>(),
+            offset: 0,
+            format: VertexAttributeFormat::Float3,
+            frequency: VertexInputFrequency::PerVertex,
+        },
+        VertexInputDescription {
+            location: 1,
+            stride: std::mem::size_of::<[f32; 3]>(),
+            offset: 0,
+            format: VertexAttributeFormat::Float3,
+            frequency: VertexInputFrequency::PerVertex,
+        },
+        VertexInputDescription {
+            location: 2,
+            stride: std::mem::size_of::<[f32; 3]>(),
+            offset: 0,
+            format: VertexAttributeFormat::Float3,
+            frequency: VertexInputFrequency::PerVertex,
+        },
+        VertexInputDescription {
+            location: 3,
+            stride: std::mem::size_of::<[f32; 3]>(),
+            offset: 0,
+            format: VertexAttributeFormat::Float3,
+            frequency: VertexInputFrequency::PerVertex,
+        },
+        VertexInputDescription {
+            location: 4,
+            stride: std::mem::size_of::<[f32; 2]>(),
+            offset: 0,
+            format: VertexAttributeFormat::Float2,
+            frequency: VertexInputFrequency::PerVertex,
+        },
+    ];
+    &VERTEX_INPUTS
 }
 
 impl MaterialParameters {

@@ -25,6 +25,8 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 #[cfg(feature = "swapchain")]
 use crate::swapchain::*;
 
+static DUMP_RDG: AtomicBool = AtomicBool::new(false);
+
 bitflags! {
     #[derive(Default, Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
     pub struct DeviceFeatures : u32 {
@@ -79,7 +81,7 @@ struct DeviceCleanupContext {
 }
 
 impl Device {
-    const MB_128: usize = 1024 * 1024 * 128;
+    const STAGING_BUFFER_SIZE: usize = 1024 * 1024 * 64;
     pub fn new(configuration: DeviceConfiguration) -> MgpuResult<Self> {
         let hal = hal::create(&configuration)?;
         let device_info = hal.device_info();
@@ -87,7 +89,7 @@ impl Device {
         let staging_buffer = hal.create_buffer(&BufferDescription {
             label: Some("Staging buffer"),
             usage_flags: BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::TRANSFER_SRC,
-            size: Self::MB_128,
+            size: Self::STAGING_BUFFER_SIZE,
             memory_domain: MemoryDomain::Cpu,
         })?;
         let staging_buffer_allocator =
@@ -110,19 +112,25 @@ impl Device {
         })
     }
 
+    pub fn dump_rdg(&self) {
+        DUMP_RDG.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub fn submit(&self) -> MgpuResult<()> {
+        
+        let mut staging_buffer = self.staging_buffer_allocator.lock().unwrap();
+        staging_buffer.flush(self.hal.as_ref())?;
+
         let mut rdg = self.write_rdg();
         let compiled = rdg.compile()?;
         rdg.clear();
-        static DUMP: AtomicBool = AtomicBool::new(false);
-        if DUMP.load(std::sync::atomic::Ordering::Relaxed) {
-            println!("{}", compiled.dump_dot());
+        if DUMP_RDG.load(std::sync::atomic::Ordering::Relaxed) {
             compiled.save_to_svg(&format!(
                 "rdg_graph_{}.svg",
                 std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH)
                 .unwrap().as_millis()
             ));
-            DUMP.store(false, std::sync::atomic::Ordering::Relaxed);
+            DUMP_RDG.store(false, std::sync::atomic::Ordering::Relaxed);
         }
 
         let queues = unsafe { self.hal.begin_rendering()? };
@@ -497,9 +505,7 @@ impl Device {
 
         unsafe { self.hal.end_rendering()? };
 
-        self.staging_buffer_allocator
-            .lock()
-            .expect("Failed to lock staging buffer")
+        staging_buffer
             .end_frame();
 
         unsafe { self.hal.prepare_next_frame()? };
@@ -593,26 +599,8 @@ impl Device {
             .staging_buffer_allocator
             .lock()
             .expect("Failed to lock staging buffer allocator");
-        let allocation = allocator.allocate_staging_buffer_region(params.size)?;
-        unsafe {
-            self.hal.write_host_visible_buffer(
-                allocation.buffer,
-                &BufferWriteParams {
-                    data: params.data,
-                    offset: allocation.offset,
-                    size: params.size,
-                },
-            )
-        }?;
+        allocator.write_buffer(self.hal.as_ref(), buffer, params.data, params.offset, params.size)?;
 
-        self.write_rdg()
-            .add_async_copy_node(Node::CopyBufferToBuffer {
-                source: allocation.buffer,
-                dest: buffer,
-                source_offset: allocation.offset,
-                dest_offset: params.offset,
-                size: params.size,
-            });
         Ok(())
     }
 
@@ -629,31 +617,47 @@ impl Device {
     pub fn write_image_data(&self, image: Image, params: &ImageWriteParams) -> MgpuResult<()> {
         #[cfg(debug_assertions)]
         self.validate_image_write_params(image, params);
-
-        let size = params.region.extents.area() as usize * image.format.byte_size();
         let mut allocator = self
             .staging_buffer_allocator
             .lock()
             .expect("Failed to lock staging buffer allocator");
-        let allocation = allocator.allocate_staging_buffer_region(size)?;
-        unsafe {
-            self.hal.write_host_visible_buffer(
-                allocation.buffer,
-                &BufferWriteParams {
-                    data: params.data,
-                    offset: allocation.offset,
-                    size,
-                },
-            )
-        }?;
 
-        self.write_rdg()
-            .add_async_copy_node(Node::CopyBufferToImage {
-                source: allocation.buffer,
-                dest: image,
-                source_offset: allocation.offset,
-                dest_region: params.region,
-            });
+        let total_size_to_write = params.region.extents.area() as usize * image.format.byte_size();
+
+        if total_size_to_write > allocator.staging_buffer.size {
+            let mut num_written = 0;
+            let ausiliary_buffer = self.create_buffer(&BufferDescription {
+                label: None,
+                usage_flags: BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::TRANSFER_SRC,
+                size: total_size_to_write,
+                memory_domain: MemoryDomain::Gpu,
+            })?;
+
+            while num_written < total_size_to_write {
+                let to_write_this_iteration = if total_size_to_write - num_written > allocator.staging_buffer.size {
+                    allocator.staging_buffer.size
+                } else {
+                    total_size_to_write - num_written
+                };
+                allocator.write_buffer(self.hal.as_ref(), ausiliary_buffer, &params.data[num_written..num_written + to_write_this_iteration], num_written, to_write_this_iteration)?;
+                num_written += to_write_this_iteration;
+            }
+
+            allocator.flush(self.hal.as_ref())?;
+
+            let one_submit_cmd_buffer = unsafe {self.hal.request_oneshot_command_recorder(QueueType::Graphics)? };
+            unsafe { self.hal.cmd_copy_buffer_to_image(one_submit_cmd_buffer, ausiliary_buffer, image, 0, params.region)?;
+            
+                self.hal.finalize_command_recorder(one_submit_cmd_buffer)?;
+                self.hal.submit_command_recorder_immediate(one_submit_cmd_buffer)?;
+                self.hal.device_wait_queue(QueueType::Graphics)?;
+            
+            };
+
+
+        } else {
+            allocator.write_image(self.hal.as_ref(), image, params.data, params.region)?;
+        }
 
         Ok(())
     }
@@ -804,7 +808,12 @@ impl Device {
         );
 
         if image_description.creation_flags.contains(ImageCreationFlags::CUBE_COMPATIBLE) {
+            check!(image_description.dimension == ImageDimension::D2, "If an image is CUBE_COMPATIBLE, it must be 2D");
             check!(image_description.array_layers.get() == 6, "If an image is CUBE_COMPATIBLE, it must have exactly six layers");
+        }
+
+        if image_description.dimension == ImageDimension::D3 {
+            check!(image_description.array_layers.get() == 1, "A 3D image can only have one layer");
         }
 
         let total_texels = image_description.extents.width
@@ -827,10 +836,15 @@ impl Device {
 
     #[cfg(debug_assertions)]
     fn validate_image_view_description(image_view_description: &ImageViewDescription) {
-        use crate::ImageCreationFlags;
+        use crate::{ImageCreationFlags, ImageViewType};
 
         if !image_view_description.image.creation_flags.contains(ImageCreationFlags::MUTABLE_FORMAT) {
             check!(image_view_description.format == image_view_description.image.format, "If an image was not created with the MUTABLE_FORMAT flag, creating a view whose format is different from the image's format is not allowed.");
+        }
+
+        if image_view_description.view_ty == ImageViewType::D2 {
+            check!(image_view_description.image_subresource.num_layers.get() == 1, "When creating a 2D image view only one layer can be used");
+            check!(image_view_description.image.dimension == ImageDimension::D2, "If an image view is 2D then the image must be 2D too");
         }
     }
 
@@ -989,7 +1003,7 @@ impl Device {
 
                 check!(
                     matching_element.is_some(),
-                    "No matching element at set {} binding {} of type {:#?} found in any shader",
+                    "Pipeline defines an input at set {} binding {} of type {:#?}, but none was found in any shader",
                     binding_set_layout_info.set,
                     bs_element.binding,
                     bs_element

@@ -1,7 +1,7 @@
 mod utils;
 
 use engine::{
-    app::{bootstrap, App, AppContext, AppDescription},
+    app::{self, bootstrap, App, AppContext, AppDescription},
     asset_map::{AssetHandle, AssetMap},
     assets::{
         loaders::FsTextureLoader,
@@ -11,6 +11,7 @@ use engine::{
         mesh::{Mesh, MeshDescription},
         texture::Texture,
     },
+    constants::CUBE_MESH_HANDLE,
     include_spirv,
     math::Transform,
     sampler_allocator::SamplerAllocator,
@@ -52,7 +53,7 @@ impl App for CubesSceneApplication {
                 source: bytemuck::cast_slice(FRAGMENT_SHADER),
             })
             .unwrap();
-        let mut asset_map = AssetMap::new();
+        let mut asset_map = app::asset_map_with_defaults(&context.device)?;
         let mut shader_cache = ShaderCache::new();
 
         shader_cache.add_shader("simple_vertex_shader", vertex_shader_module);
@@ -65,8 +66,6 @@ impl App for CubesSceneApplication {
         let david_texture = AssetHandle::<Texture>::new("assets/images/david.jpg");
         asset_map.load::<Texture>(&david_texture)?;
         let mut scene = Scene::default();
-        let cube_mesh = Self::create_cube_mesh(&context.device)?;
-        let cube_handle = asset_map.add(cube_mesh, "meshes.cube");
         let material = Material::new(
             &context.device,
             &MaterialDescription {
@@ -76,6 +75,7 @@ impl App for CubesSceneApplication {
                 parameters: MaterialParameters::default().texture_parameter("tex", david_texture),
                 properties: MaterialProperties {
                     domain: MaterialDomain::Surface,
+                    double_sided: false,
                 },
             },
             &mut asset_map,
@@ -87,7 +87,7 @@ impl App for CubesSceneApplication {
             SceneNode::default()
                 .label("First Cube")
                 .primitive(engine::scene::ScenePrimitive::Mesh(SceneMesh {
-                    handle: cube_handle.clone(),
+                    handle: CUBE_MESH_HANDLE.clone(),
                     material: material_handle.clone(),
                 }))
                 .transform(Transform {
@@ -99,7 +99,7 @@ impl App for CubesSceneApplication {
             SceneNode::default()
                 .label("Second Cube")
                 .primitive(engine::scene::ScenePrimitive::Mesh(SceneMesh {
-                    handle: cube_handle.clone(),
+                    handle: CUBE_MESH_HANDLE.clone(),
                     material: material_handle.clone(),
                 }))
                 .transform(Transform {
@@ -111,7 +111,7 @@ impl App for CubesSceneApplication {
             SceneNode::default()
                 .label("Third Cube")
                 .primitive(engine::scene::ScenePrimitive::Mesh(SceneMesh {
-                    handle: cube_handle,
+                    handle: CUBE_MESH_HANDLE.clone(),
                     material: material_handle,
                 }))
                 .transform(Transform {
@@ -186,7 +186,7 @@ impl App for CubesSceneApplication {
             pov: &self.pov,
             asset_map: &mut self.asset_map,
             output_image: render_context.swapchain_image.view,
-            output: SceneOutput::FinalImage,
+            output: SceneOutput::BaseColor,
         })?;
         Ok(())
     }
@@ -210,146 +210,7 @@ impl App for CubesSceneApplication {
     }
 }
 
-impl CubesSceneApplication {
-    fn create_cube_mesh(device: &mgpu::Device) -> anyhow::Result<Mesh> {
-        let mesh_description = MeshDescription {
-            label: Some("Cube mesh"),
-            indices: &[
-                0, 1, 2, 3, 1, 0, //Bottom
-                6, 5, 4, 4, 5, 7, // Front
-                10, 9, 8, 8, 9, 11, // Left
-                12, 13, 14, 15, 13, 12, // Right
-                16, 17, 18, 19, 17, 16, // Up
-                22, 21, 20, 20, 21, 23, // Down
-            ],
-            positions: &[
-                // Back
-                vec3(-1.0, -1.0, 1.0),
-                vec3(1.0, 1.0, 1.0),
-                vec3(-1.0, 1.0, 1.0),
-                vec3(1.0, -1.0, 1.0),
-                // Front
-                vec3(-1.0, -1.0, -1.0),
-                vec3(1.0, 1.0, -1.0),
-                vec3(-1.0, 1.0, -1.0),
-                vec3(1.0, -1.0, -1.0),
-                // Left
-                vec3(1.0, -1.0, -1.0),
-                vec3(1.0, 1.0, 1.0),
-                vec3(1.0, 1.0, -1.0),
-                vec3(1.0, -1.0, 1.0),
-                // Right
-                vec3(-1.0, -1.0, -1.0),
-                vec3(-1.0, 1.0, 1.0),
-                vec3(-1.0, 1.0, -1.0),
-                vec3(-1.0, -1.0, 1.0),
-                // Up
-                vec3(-1.0, 1.0, -1.0),
-                vec3(1.0, 1.0, 1.0),
-                vec3(1.0, 1.0, -1.0),
-                vec3(-1.0, 1.0, 1.0),
-                // Down
-                vec3(-1.0, -1.0, -1.0),
-                vec3(1.0, -1.0, 1.0),
-                vec3(1.0, -1.0, -1.0),
-                vec3(-1.0, -1.0, 1.0),
-            ],
-            colors: &[vec3(1.0, 0.0, 0.0)],
-            normals: &[
-                // Back
-                vec3(0.0, 0.0, 1.0),
-                vec3(0.0, 0.0, 1.0),
-                vec3(0.0, 0.0, 1.0),
-                vec3(0.0, 0.0, 1.0),
-                // Front
-                vec3(0.0, 0.0, -1.0),
-                vec3(0.0, 0.0, -1.0),
-                vec3(0.0, 0.0, -1.0),
-                vec3(0.0, 0.0, -1.0),
-                // Left
-                vec3(1.0, 0.0, 0.0),
-                vec3(1.0, 0.0, 0.0),
-                vec3(1.0, 0.0, 0.0),
-                vec3(1.0, 0.0, 0.0),
-                // Right
-                vec3(-1.0, 0.0, 0.0),
-                vec3(-1.0, 0.0, 0.0),
-                vec3(-1.0, 0.0, 0.0),
-                vec3(-1.0, 0.0, 0.0),
-                // Up
-                vec3(0.0, 1.0, 0.0),
-                vec3(0.0, 1.0, 0.0),
-                vec3(0.0, 1.0, 0.0),
-                vec3(0.0, 1.0, 0.0),
-                // Down
-                vec3(0.0, -1.0, 0.0),
-                vec3(0.0, -1.0, 0.0),
-                vec3(0.0, -1.0, 0.0),
-                vec3(0.0, -1.0, 0.0),
-            ],
-            tangents: &[
-                // Back
-                vec3(0.0, 0.0, 1.0),
-                vec3(0.0, 0.0, 1.0),
-                vec3(0.0, 0.0, 1.0),
-                vec3(0.0, 0.0, 1.0),
-                // Front
-                vec3(0.0, 0.0, -1.0),
-                vec3(0.0, 0.0, -1.0),
-                vec3(0.0, 0.0, -1.0),
-                vec3(0.0, 0.0, -1.0),
-                // Left
-                vec3(1.0, 0.0, 0.0),
-                vec3(1.0, 0.0, 0.0),
-                vec3(1.0, 0.0, 0.0),
-                vec3(1.0, 0.0, 0.0),
-                // Right
-                vec3(-1.0, 0.0, 0.0),
-                vec3(-1.0, 0.0, 0.0),
-                vec3(-1.0, 0.0, 0.0),
-                vec3(-1.0, 0.0, 0.0),
-                // Up
-                vec3(0.0, 1.0, 0.0),
-                vec3(0.0, 1.0, 0.0),
-                vec3(0.0, 1.0, 0.0),
-                vec3(0.0, 1.0, 0.0),
-                // Down
-                vec3(0.0, -1.0, 0.0),
-                vec3(0.0, -1.0, 0.0),
-                vec3(0.0, -1.0, 0.0),
-                vec3(0.0, -1.0, 0.0),
-            ],
-            uvs: &[
-                vec2(0.0, 0.0),
-                vec2(1.0, 1.0),
-                vec2(0.0, 1.0),
-                vec2(1.0, 0.0),
-                vec2(0.0, 0.0),
-                vec2(1.0, 1.0),
-                vec2(0.0, 1.0),
-                vec2(1.0, 0.0),
-                vec2(0.0, 0.0),
-                vec2(1.0, 1.0),
-                vec2(0.0, 1.0),
-                vec2(1.0, 0.0),
-                vec2(0.0, 0.0),
-                vec2(1.0, 1.0),
-                vec2(0.0, 1.0),
-                vec2(1.0, 0.0),
-                vec2(0.0, 0.0),
-                vec2(1.0, 1.0),
-                vec2(0.0, 1.0),
-                vec2(1.0, 0.0),
-                vec2(0.0, 0.0),
-                vec2(1.0, 1.0),
-                vec2(0.0, 1.0),
-                vec2(1.0, 0.0),
-            ],
-        };
-        let cube_mesh = Mesh::new(device, &mesh_description)?;
-        Ok(cube_mesh)
-    }
-}
+impl CubesSceneApplication {}
 
 fn main() -> anyhow::Result<()> {
     bootstrap::<CubesSceneApplication>(AppDescription {

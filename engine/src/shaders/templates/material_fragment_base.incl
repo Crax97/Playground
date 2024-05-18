@@ -1,7 +1,7 @@
 #include "templates/scene_common.incl"
 
 
-layout(location = 0) in vec4 clip_position;
+layout(location = 0) in vec3 vertex_position;
 layout(location = 1) in vec3 world_position;
 layout(location = 2) in vec2 uv;
 layout(location = 3) in vec3 vertex_normal;

@@ -4,10 +4,6 @@
 
 #define F0 0.04
 
-#ifndef USE_GLTF_G
-    #define USE_GLTF_G 1
-#endif
-
 layout(set = 0, binding = 0) uniform sampler gbuffer_sampler;
 layout(set = 0, binding = 1) uniform texture2D diffuse;
 layout(set = 0, binding = 2) uniform texture2D emissive_ao;
@@ -26,6 +22,7 @@ layout(set = 1, binding = 1, std140) uniform SceneParameters {
     vec3 ambient_color;
     float ambient_intensity;
 };
+// layout(set = 1, binding = 2) uniform textureCube env_map;
 
 layout(location = 0) in vec2 uv;
 
@@ -71,7 +68,6 @@ float trowbridge_reitz_ggx(float aa, vec3 half_view_vector, vec3 surf_normal) {
     return top / (PI * bottom * bottom);
 }
 
-#if USE_GLTF_G
 float visibility_smith_mask_shadowing(float a, vec3 half_view_vector, vec3 light, vec3 view_vector, vec3 normal) {
     float aa = a * a;
     float dot_normal_light = dot(normal, light);
@@ -86,12 +82,7 @@ float visibility_smith_mask_shadowing(float a, vec3 half_view_vector, vec3 light
     float g = (top_1 / bottom_1) * (top_2 / bottom_2);
     return g / (4 * abs_dot_normal_light * abs_dot_normal_view);
 }
-#else
-float visibility_smith_mask_shadowing(float a, vec3 half_view_vector, vec3 light, vec3 view_vector, vec3 normal) {
-    float k = (a + 1) * (a + 1) / 8;
-    return (dot(normal, light) / (dot(normal, light) * (1 - k) + k)) * (dot(normal, view_vector) / (dot(normal, view_vector) * (1 - k) + k));
-}
-#endif
+
 
 vec3 fresnel(vec3 view_direction, vec3 half_view_vector, vec3 f0) {
     return f0 + (1 - f0) * pow(1 - abs(dot(view_direction, half_view_vector)), 5);
@@ -117,8 +108,8 @@ void main() {
     vec3 eye_direction = normalize(eye_location - data.world_position); 
     vec3 half_view_vector = normalize(light + eye_direction);
 
-    vec3 light_0 = light_contribute(eye_direction, light, half_view_vector, data);
-    color.rgb =  light_0 * data.ao; 
+    vec3 light_0 = light_contribute(eye_direction, light, half_view_vector, data) ;
+    color.rgb =  light_0 * data.ao + data.emissive; 
     color.a = 1.0;
 }
 

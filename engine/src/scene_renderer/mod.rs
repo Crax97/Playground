@@ -13,7 +13,8 @@ use mgpu::{
 
 use crate::{
     assert_size_does_not_exceed,
-    asset_map::AssetMap,
+    asset_map::{AssetHandle, AssetMap},
+    assets::texture::Texture,
     include_spirv,
     math::{color::LinearColor, constants::UP, Transform},
     scene::Scene,
@@ -171,11 +172,21 @@ impl SceneRenderer {
                         ShaderStageFlags::VERTEX.bits() | ShaderStageFlags::FRAGMENT.bits(),
                     ),
                 },
+                // BindingSetElement {
+                //     binding: 2,
+                //     array_length: 1,
+                //     ty: mgpu::BindingSetElementKind::SampledImage,
+                //     shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
+                // },
             ],
         };
         &LAYOUT
     }
-    pub fn new(device: &Device) -> anyhow::Result<Self> {
+    pub fn new(
+        device: &Device,
+        // env_map: AssetHandle<Texture>,
+        // asset_map: &AssetMap,
+    ) -> anyhow::Result<Self> {
         let mut frame_data = vec![];
         let device_info = device.get_info();
 
@@ -254,6 +265,13 @@ impl SceneRenderer {
                             ty: scene_lightning_parameter_buffer.bind_whole_range_uniform_buffer(),
                             visibility: ShaderStageFlags::ALL_GRAPHICS,
                         },
+                        // Binding {
+                        //     binding: 2,
+                        //     ty: mgpu::BindingType::SampledImage {
+                        //         view: asset_map.get(&env_map).unwrap().view,
+                        //     },
+                        //     visibility: ShaderStageFlags::ALL_GRAPHICS,
+                        // },
                     ],
                 },
                 Self::scene_lightning_binding_set_layout(),
@@ -583,7 +601,7 @@ impl RenderImage {
         let view = device.create_image_view(&ImageViewDescription {
             label: Some(&format!("{}/{} View", label, frame)),
             image,
-            dimension: mgpu::ImageDimension::D2,
+            view_ty: mgpu::ImageViewType::D2,
             aspect: format.aspect(),
             image_subresource: image.whole_subresource(),
             format,

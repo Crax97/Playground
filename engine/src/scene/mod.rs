@@ -130,6 +130,14 @@ impl Scene {
         }
     }
 
+    pub fn set_node_world_location(&mut self, node: SceneNodeId, location: Vec3) {
+        let Some(transf) = self.get_node_world_transform(node) else {
+            return;
+        };
+
+        self.set_node_world_transform(node, Transform { location, ..transf })
+    }
+
     pub fn get_node_world_transform(&mut self, node: SceneNodeId) -> Option<Transform> {
         self.nodes.get_mut(node.0).map(|node| node.transform)
     }

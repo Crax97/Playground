@@ -11,9 +11,9 @@ use mgpu::{
     DepthStencilTargetLoadOp, Device, DeviceConfiguration, DeviceFeatures, DevicePreference,
     Extents2D, Extents3D, FilterMode, FragmentStageInfo, Graphics, GraphicsPipeline,
     GraphicsPipelineDescription, Image, ImageCreationFlags, ImageDescription, ImageDimension,
-    ImageFormat, ImageUsageFlags, ImageView, ImageViewDescription, ImageWriteParams, MemoryDomain,
-    MipmapMode, PushConstantInfo, Rect2D, RenderPassDescription, RenderTarget, RenderTargetInfo,
-    RenderTargetLoadOp, SampleCount, Sampler, SamplerDescription, ShaderModule,
+    ImageFormat, ImageUsageFlags, ImageView, ImageViewDescription, ImageViewType, ImageWriteParams,
+    MemoryDomain, MipmapMode, PushConstantInfo, Rect2D, RenderPassDescription, RenderTarget,
+    RenderTargetInfo, RenderTargetLoadOp, SampleCount, Sampler, SamplerDescription, ShaderModule,
     ShaderModuleDescription, ShaderStageFlags, Swapchain, SwapchainCreationInfo,
     VertexInputDescription, VertexInputFrequency, VertexStageInfo,
 };
@@ -188,7 +188,7 @@ fn main() {
                             aspect: mgpu::ImageAspect::Depth,
                             image: self.depth_image,
                             image_subresource: self.depth_image.whole_subresource(),
-                            dimension: ImageDimension::D2,
+                            view_ty: ImageViewType::D2,
                         })
                         .unwrap();
                 }
@@ -325,7 +325,7 @@ fn main() {
             aspect: mgpu::ImageAspect::Depth,
             image: depth_image,
             image_subresource: depth_image.whole_subresource(),
-            dimension: ImageDimension::D2,
+            view_ty: ImageViewType::D2,
         })
         .unwrap();
     let texture_image = device
@@ -374,7 +374,7 @@ fn main() {
             aspect: mgpu::ImageAspect::Color,
             image: texture_image,
             image_subresource: texture_image.whole_subresource(),
-            dimension: ImageDimension::D2,
+            view_ty: ImageViewType::D2,
         })
         .unwrap();
 

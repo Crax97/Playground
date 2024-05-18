@@ -1,5 +1,6 @@
 use std::mem::MaybeUninit;
 
+use glam::{vec2, vec3};
 use mgpu::{
     Device, DeviceConfiguration, DeviceFeatures, Extents2D, MgpuResult, Swapchain,
     SwapchainCreationInfo, SwapchainImage,
@@ -13,7 +14,14 @@ use winit::{
     window::{Window, WindowAttributes},
 };
 
-use crate::{core::Time, fps_limiter::FpsLimiter, input::InputState};
+use crate::{
+    asset_map::AssetMap,
+    assets::mesh::{Mesh, MeshDescription},
+    constants::CUBE_MESH_HANDLE,
+    core::Time,
+    fps_limiter::FpsLimiter,
+    input::InputState,
+};
 
 pub struct AppRunner {}
 
@@ -234,4 +242,152 @@ impl Default for AppDescription {
             app_identifier: "EngineApp",
         }
     }
+}
+
+pub fn asset_map_with_defaults(device: &Device) -> anyhow::Result<AssetMap> {
+    let mut map = AssetMap::new();
+    map.add(
+        create_cube_mesh(device)?,
+        CUBE_MESH_HANDLE.identifier().clone(),
+    );
+    Ok(map)
+}
+
+fn create_cube_mesh(device: &mgpu::Device) -> anyhow::Result<Mesh> {
+    let mesh_description = MeshDescription {
+        label: Some("Cube mesh"),
+        indices: &[
+            0, 1, 2, 3, 1, 0, //Bottom
+            6, 5, 4, 4, 5, 7, // Front
+            10, 9, 8, 8, 9, 11, // Left
+            12, 13, 14, 15, 13, 12, // Right
+            16, 17, 18, 19, 17, 16, // Up
+            22, 21, 20, 20, 21, 23, // Down
+        ],
+        positions: &[
+            // Back
+            vec3(-1.0, -1.0, 1.0),
+            vec3(1.0, 1.0, 1.0),
+            vec3(-1.0, 1.0, 1.0),
+            vec3(1.0, -1.0, 1.0),
+            // Front
+            vec3(-1.0, -1.0, -1.0),
+            vec3(1.0, 1.0, -1.0),
+            vec3(-1.0, 1.0, -1.0),
+            vec3(1.0, -1.0, -1.0),
+            // Left
+            vec3(1.0, -1.0, -1.0),
+            vec3(1.0, 1.0, 1.0),
+            vec3(1.0, 1.0, -1.0),
+            vec3(1.0, -1.0, 1.0),
+            // Right
+            vec3(-1.0, -1.0, -1.0),
+            vec3(-1.0, 1.0, 1.0),
+            vec3(-1.0, 1.0, -1.0),
+            vec3(-1.0, -1.0, 1.0),
+            // Up
+            vec3(-1.0, 1.0, -1.0),
+            vec3(1.0, 1.0, 1.0),
+            vec3(1.0, 1.0, -1.0),
+            vec3(-1.0, 1.0, 1.0),
+            // Down
+            vec3(-1.0, -1.0, -1.0),
+            vec3(1.0, -1.0, 1.0),
+            vec3(1.0, -1.0, -1.0),
+            vec3(-1.0, -1.0, 1.0),
+        ],
+        colors: &[vec3(1.0, 0.0, 0.0)],
+        normals: &[
+            // Back
+            vec3(0.0, 0.0, 1.0),
+            vec3(0.0, 0.0, 1.0),
+            vec3(0.0, 0.0, 1.0),
+            vec3(0.0, 0.0, 1.0),
+            // Front
+            vec3(0.0, 0.0, -1.0),
+            vec3(0.0, 0.0, -1.0),
+            vec3(0.0, 0.0, -1.0),
+            vec3(0.0, 0.0, -1.0),
+            // Left
+            vec3(1.0, 0.0, 0.0),
+            vec3(1.0, 0.0, 0.0),
+            vec3(1.0, 0.0, 0.0),
+            vec3(1.0, 0.0, 0.0),
+            // Right
+            vec3(-1.0, 0.0, 0.0),
+            vec3(-1.0, 0.0, 0.0),
+            vec3(-1.0, 0.0, 0.0),
+            vec3(-1.0, 0.0, 0.0),
+            // Up
+            vec3(0.0, 1.0, 0.0),
+            vec3(0.0, 1.0, 0.0),
+            vec3(0.0, 1.0, 0.0),
+            vec3(0.0, 1.0, 0.0),
+            // Down
+            vec3(0.0, -1.0, 0.0),
+            vec3(0.0, -1.0, 0.0),
+            vec3(0.0, -1.0, 0.0),
+            vec3(0.0, -1.0, 0.0),
+        ],
+        tangents: &[
+            // Back
+            vec3(0.0, 0.0, 1.0),
+            vec3(0.0, 0.0, 1.0),
+            vec3(0.0, 0.0, 1.0),
+            vec3(0.0, 0.0, 1.0),
+            // Front
+            vec3(0.0, 0.0, -1.0),
+            vec3(0.0, 0.0, -1.0),
+            vec3(0.0, 0.0, -1.0),
+            vec3(0.0, 0.0, -1.0),
+            // Left
+            vec3(1.0, 0.0, 0.0),
+            vec3(1.0, 0.0, 0.0),
+            vec3(1.0, 0.0, 0.0),
+            vec3(1.0, 0.0, 0.0),
+            // Right
+            vec3(-1.0, 0.0, 0.0),
+            vec3(-1.0, 0.0, 0.0),
+            vec3(-1.0, 0.0, 0.0),
+            vec3(-1.0, 0.0, 0.0),
+            // Up
+            vec3(0.0, 1.0, 0.0),
+            vec3(0.0, 1.0, 0.0),
+            vec3(0.0, 1.0, 0.0),
+            vec3(0.0, 1.0, 0.0),
+            // Down
+            vec3(0.0, -1.0, 0.0),
+            vec3(0.0, -1.0, 0.0),
+            vec3(0.0, -1.0, 0.0),
+            vec3(0.0, -1.0, 0.0),
+        ],
+        uvs: &[
+            vec2(0.0, 0.0),
+            vec2(1.0, 1.0),
+            vec2(0.0, 1.0),
+            vec2(1.0, 0.0),
+            vec2(0.0, 0.0),
+            vec2(1.0, 1.0),
+            vec2(0.0, 1.0),
+            vec2(1.0, 0.0),
+            vec2(0.0, 0.0),
+            vec2(1.0, 1.0),
+            vec2(0.0, 1.0),
+            vec2(1.0, 0.0),
+            vec2(0.0, 0.0),
+            vec2(1.0, 1.0),
+            vec2(0.0, 1.0),
+            vec2(1.0, 0.0),
+            vec2(0.0, 0.0),
+            vec2(1.0, 1.0),
+            vec2(0.0, 1.0),
+            vec2(1.0, 0.0),
+            vec2(0.0, 0.0),
+            vec2(1.0, 1.0),
+            vec2(0.0, 1.0),
+            vec2(1.0, 0.0),
+        ],
+    };
+    let cube_mesh = Mesh::new(device, &mesh_description)?;
+    Ok(cube_mesh)
 }

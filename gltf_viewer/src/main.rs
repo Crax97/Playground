@@ -1,12 +1,22 @@
 mod gltf_to_scene_loader;
 
+use std::fs::File;
+use std::io::BufReader;
+
 use clap::Parser;
+use engine::assets::material::{
+    Material, MaterialDescription, MaterialParameters, MaterialProperties,
+};
+use engine::assets::texture::{Texture, TextureDescription, TextureUsageFlags};
+use engine::constants::CUBE_MESH_HANDLE;
 use engine::glam::{vec3, EulerRot, Mat4, Vec4Swizzles};
 use engine::glam::{Quat, Vec3};
-use engine::math::constants;
+use engine::math::{constants, Transform};
+use engine::scene::{SceneMesh, SceneNode, SceneNodeId};
 use engine::scene_renderer::SceneOutput;
 use engine::winit::dpi::PhysicalPosition;
 use engine::winit::event::{DeviceEvent, MouseButton, WindowEvent};
+use engine::{app, include_spirv};
 use engine::{app::AppContext, scene_renderer::PointOfView};
 use engine::{
     app::{bootstrap, App, AppDescription},
@@ -16,10 +26,12 @@ use engine::{
     scene_renderer::{ProjectionMode, SceneRenderer, SceneRenderingParams},
     shader_cache::ShaderCache,
 };
-use mgpu::Extents2D;
+use mgpu::{Extents2D, ImageFormat, ShaderModuleDescription};
 
 const MOVEMENT_SPEED: f64 = 50.0;
 const ROTATION_DEGREES: f64 = 320.0;
+const VIEW_CUBEMAP_VERT: &[u8] = include_spirv!("../spirv/base_pass/view_cubemap.vert.spv");
+const VIEW_CUBEMAP_FRAG: &[u8] = include_spirv!("../spirv/base_pass/view_cubemap.frag.spv");
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -46,6 +58,7 @@ pub struct GltfViewerApplication {
     orbit_distance: f32,
     camera_mode: CameraMode,
     is_mouse_captured: bool,
+    cubemap_handle: SceneNodeId,
 }
 
 impl App for GltfViewerApplication {
@@ -55,14 +68,29 @@ impl App for GltfViewerApplication {
     {
         let args = GltfViewerArgs::parse();
 
-        let mut asset_map = AssetMap::new();
+        let view_cubemap_frag = context
+            .device
+            .create_shader_module(&ShaderModuleDescription {
+                label: Some("View cubemap"),
+                source: bytemuck::cast_slice(VIEW_CUBEMAP_FRAG),
+            })?;
+
+        let view_cubemap_vert = context
+            .device
+            .create_shader_module(&ShaderModuleDescription {
+                label: Some("View cubemap vertex"),
+                source: bytemuck::cast_slice(VIEW_CUBEMAP_VERT),
+            })?;
+
+        let mut asset_map = app::asset_map_with_defaults(&context.device)?;
         let mut shader_cache = ShaderCache::new();
+        shader_cache.add_shader("view_cubemap_vert", view_cubemap_vert);
+        shader_cache.add_shader("view_cubemap_frag", view_cubemap_frag);
         let sampler_allocator = SamplerAllocator::default();
-        let scene_renderer = SceneRenderer::new(&context.device)?;
         let mut pov = PointOfView::new_perspective(0.01, 1000.0, 75.0, 1920.0 / 1080.0);
         pov.transform.location = vec3(0.0, 0.0, -2.0);
 
-        let scene = gltf_to_scene_loader::load(
+        let mut scene = gltf_to_scene_loader::load(
             &context.device,
             &args.file,
             &sampler_allocator,
@@ -70,6 +98,81 @@ impl App for GltfViewerApplication {
             &mut asset_map,
         )?;
 
+        let hdr_pisa = image::load(
+            BufReader::new(File::open("assets/images/pisa.hdr")?),
+            image::ImageFormat::Hdr,
+        )?;
+        let bytes = hdr_pisa.to_rgba32f();
+        let bytes = bytes.into_vec();
+        let texture = Texture::new(
+            &context.device,
+            &TextureDescription {
+                label: Some("Source image for cubemap"),
+                data: &[bytemuck::cast_slice(&bytes)],
+                ty: engine::assets::texture::TextureType::D2(Extents2D {
+                    width: hdr_pisa.width(),
+                    height: hdr_pisa.height(),
+                }),
+                format: mgpu::ImageFormat::Rgba32f,
+                usage_flags: TextureUsageFlags::default(),
+                num_mips: 1.try_into().unwrap(),
+                auto_generate_mips: false,
+                sampler_configuration: Default::default(),
+            },
+            &sampler_allocator,
+        )?;
+
+        let cube_hdr = engine::cubemap_utils::convert_texture_to_cubemap(
+            &context.device,
+            &engine::cubemap_utils::CreateCubemapParams {
+                label: { Some("Pisa env") },
+                input_texture: &texture,
+                extents: Extents2D {
+                    width: 512,
+                    height: 512,
+                },
+                mips: 1.try_into().unwrap(),
+                format: ImageFormat::Rgba32f,
+                samples: mgpu::SampleCount::One,
+            },
+            asset_map.get(&CUBE_MESH_HANDLE).unwrap(),
+            &sampler_allocator,
+        )?;
+        let env_map = asset_map.add(cube_hdr, "textures.hdr.pisa");
+
+        let cube_material = Material::new(
+            &context.device,
+            &MaterialDescription {
+                label: Some("Cubemap material"),
+                vertex_shader: "view_cubemap_vert".into(),
+                fragment_shader: "view_cubemap_frag".into(),
+                parameters: MaterialParameters::default().texture_parameter("base_color", env_map),
+                properties: MaterialProperties {
+                    domain: engine::assets::material::MaterialDomain::Surface,
+                    double_sided: true,
+                },
+            },
+            &mut asset_map,
+            &mut shader_cache,
+        )?;
+        let material = asset_map.add(cube_material, "materials.cubemap");
+
+        let cubemap_handle = scene.add_node(
+            SceneNode::default()
+                .label("Cubemap")
+                .primitive(engine::scene::ScenePrimitive::Mesh(SceneMesh {
+                    handle: CUBE_MESH_HANDLE.clone(),
+                    material,
+                }))
+                .transform(Transform {
+                    location: Default::default(),
+                    rotation: Default::default(),
+                    scale: vec3(10.0, 10.0, 10.0),
+                }),
+        );
+
+        // let scene_renderer = SceneRenderer::new(&context.device, env_map, &asset_map)?;
+        let scene_renderer = SceneRenderer::new(&context.device)?;
         Ok(Self {
             asset_map,
             scene,
@@ -83,6 +186,7 @@ impl App for GltfViewerApplication {
             output: SceneOutput::FinalImage,
             camera_mode: CameraMode::Orbit,
             is_mouse_captured: true,
+            cubemap_handle,
         })
     }
 
@@ -144,6 +248,9 @@ impl App for GltfViewerApplication {
             CameraMode::Orbit => self.update_orbit_camera(context),
             CameraMode::Free => self.update_fps_camera(context),
         }
+
+        self.scene
+            .set_node_world_location(self.cubemap_handle, self.pov.transform.location);
 
         Ok(())
     }

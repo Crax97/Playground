@@ -10,8 +10,8 @@ VertexOutput vertex() {
     vec4 clip_position = vp * world_vertex;
 
     VertexOutput result;
-    result.clip_position = clip_position;
     result.world_position = world_vertex.xyz;
+    result.clip_position = clip_position;
     result.uv = vertex_uv;
     return result;
 }

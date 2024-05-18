@@ -142,6 +142,7 @@ fn create_materials(
                     .scalar_parameter("roughness_factor", pbr_info.roughness_factor()),
                 properties: MaterialProperties {
                     domain: MaterialDomain::Surface,
+                    double_sided: material.double_sided(),
                 },
             },
             asset_map,

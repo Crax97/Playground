@@ -1,24 +1,33 @@
-use crate::{Buffer, MgpuResult};
+use crate::{
+    hal::{Hal, QueueType},
+    Buffer, Image, ImageRegion, ImageSubresource, MgpuResult,
+};
 #[cfg(debug_assertions)]
 use crate::{BufferUsageFlags, MemoryDomain};
 
 pub(crate) struct StagingBufferAllocator {
-    staging_buffer: Buffer,
-    allocated_regions: Vec<StagingBufferAllocatedRegion>,
-    current_frame: usize,
+    pub(crate) staging_buffer: Buffer,
+    operations: Vec<StagingBufferOperation>,
     head: usize,
-    tail: usize,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub(crate) enum OperationType {
+    WriteBuffer {
+        dest: Buffer,
+        dest_offset: usize,
+        size: usize,
+    },
+    WriteImage {
+        dest: Image,
+        region: ImageRegion,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct StagingBufferAllocation {
-    pub buffer: Buffer,
-    pub offset: usize,
-}
-
-#[derive(Default, Clone, Copy)]
-struct StagingBufferAllocatedRegion {
-    pub tip: usize,
+pub(crate) struct StagingBufferOperation {
+    pub source_offset: usize,
+    pub op_type: OperationType,
 }
 
 impl StagingBufferAllocator {
@@ -31,96 +40,167 @@ impl StagingBufferAllocator {
                 && staging_buffer.memory_domain == MemoryDomain::Cpu,
             "Invalid staging buffer"
         );
-        let allocated_regions = std::iter::repeat(StagingBufferAllocatedRegion::default())
-            .take(frames_in_flight)
-            .collect::<Vec<_>>();
-
         Ok(Self {
             staging_buffer,
-            allocated_regions,
-            current_frame: 0,
+            operations: vec![],
             head: 0,
-            tail: 0,
         })
     }
 
-    // Returns a suitable, host-visible, buffer big enough to write 'size' bytes to it
-    pub(crate) fn allocate_staging_buffer_region(
+    pub(crate) fn write_buffer(
         &mut self,
+        hal: &dyn Hal,
+        buffer: Buffer,
+        data: &[u8],
+        offset: usize,
         size: usize,
-    ) -> MgpuResult<StagingBufferAllocation> {
-        self.allocate_inner(size, false)
+    ) -> MgpuResult<()> {
+        self.write_buffer_inner(hal, data, buffer, offset, size, false)
     }
 
-    fn allocate_inner(
+    pub(crate) fn write_image(
         &mut self,
+        hal: &dyn Hal,
+        image: Image,
+        data: &[u8],
+        region: ImageRegion,
+    ) -> MgpuResult<()> {
+        self.write_image_inner(hal, data, image, region, false)
+    }
+
+    pub(crate) fn flush(&mut self, hal: &dyn Hal) -> MgpuResult<()> {
+        if self.operations.is_empty() {
+            return Ok(());
+        }
+        let command_recorder =
+            unsafe { hal.request_oneshot_command_recorder(crate::hal::QueueType::Graphics)? };
+
+        for op in std::mem::take(&mut self.operations) {
+            unsafe {
+                match op.op_type {
+                    OperationType::WriteBuffer {
+                        dest,
+                        dest_offset,
+                        size,
+                    } => {
+                        hal.cmd_copy_buffer_to_buffer(
+                            command_recorder,
+                            self.staging_buffer,
+                            dest,
+                            op.source_offset,
+                            dest_offset,
+                            size,
+                        )?;
+                    }
+                    OperationType::WriteImage { dest, region } => {
+                        hal.cmd_copy_buffer_to_image(
+                            command_recorder,
+                            self.staging_buffer,
+                            dest,
+                            op.source_offset,
+                            region,
+                        )?;
+                    }
+                }
+            }
+        }
+
+        unsafe {
+            hal.finalize_command_recorder(command_recorder)?;
+            hal.submit_command_recorder_immediate(command_recorder)?;
+            hal.device_wait_queue(QueueType::Graphics)?;
+        }
+        Ok(())
+    }
+
+    fn write_buffer_inner(
+        &mut self,
+        hal: &dyn Hal,
+        data: &[u8],
+        dest: Buffer,
+        offset: usize,
         size: usize,
         recursed: bool,
-    ) -> Result<StagingBufferAllocation, crate::MgpuError> {
-        if self.head < self.tail {
-            if self.head + size > self.tail {
-                panic!("Staging buffer ran out of space");
-            } else {
-                let allocation = StagingBufferAllocation {
-                    buffer: self.staging_buffer,
-                    offset: self.head,
-                };
-                self.head += size;
-                Ok(allocation)
-            }
-        } else if self.head + size > self.staging_buffer.size {
-            self.head = 0;
+    ) -> MgpuResult<()> {
+        debug_assert!(size <= self.staging_buffer.size);
+        if self.head + size > self.staging_buffer.size {
             if recursed {
-                panic!("Bug! Recursed twice in allocate_inner")
+                panic!("Recursed twice in update loop");
             }
-            return self.allocate_inner(size, true);
+            self.flush(hal)?;
+            self.head = 0;
+            self.write_buffer_inner(hal, data, dest, offset, size, true)?;
         } else {
-            let allocation = StagingBufferAllocation {
-                buffer: self.staging_buffer,
-                offset: self.head,
+            let operation_type = OperationType::WriteBuffer {
+                dest,
+                size,
+                dest_offset: offset,
             };
+            unsafe {
+                hal.write_host_visible_buffer(
+                    self.staging_buffer,
+                    &crate::BufferWriteParams {
+                        data,
+                        offset: self.head,
+                        size,
+                    },
+                )?
+            };
+
+            self.operations.push(StagingBufferOperation {
+                source_offset: self.head,
+                op_type: operation_type,
+            });
+
             self.head += size;
-            return Ok(allocation);
         }
+        Ok(())
     }
 
-    pub fn end_frame(&mut self) {
-        self.allocated_regions[self.current_frame] =
-            StagingBufferAllocatedRegion { tip: self.head };
-        self.current_frame = (self.current_frame + 1) % self.allocated_regions.len();
-        self.tail = self.allocated_regions[self.current_frame].tip;
-        self.allocated_regions[self.current_frame] = Default::default();
+    fn write_image_inner(
+        &mut self,
+        hal: &dyn Hal,
+        data: &[u8],
+        dest: Image,
+        region: ImageRegion,
+        recursed: bool,
+    ) -> MgpuResult<()> {
+        let size = region.extents.area() as usize * dest.format.byte_size();
+        debug_assert!(size <= self.staging_buffer.size);
+        if self.head + size > self.staging_buffer.size {
+            if recursed {
+                panic!("Recursed twice in update loop");
+            }
+            self.flush(hal)?;
+            self.head = 0;
+            self.write_image_inner(hal, data, dest, region, recursed)?;
+        } else {
+            let operation_type = OperationType::WriteImage { dest, region };
+            unsafe {
+                hal.write_host_visible_buffer(
+                    self.staging_buffer,
+                    &crate::BufferWriteParams {
+                        data,
+                        offset: self.head,
+                        size,
+                    },
+                )?
+            };
+
+            self.operations.push(StagingBufferOperation {
+                source_offset: self.head,
+                op_type: operation_type,
+            });
+
+            self.head += size;
+        }
+        Ok(())
     }
+    pub fn end_frame(&mut self) {}
 }
 
 impl Drop for StagingBufferAllocator {
     fn drop(&mut self) {
         // self.hal.destroy_buffer(self.staging_buffer).unwrap();
-    }
-}
-#[cfg(test)]
-mod tests {
-
-    use crate::BufferUsageFlags;
-
-    use super::StagingBufferAllocator;
-
-    #[test]
-    fn test_staging_buffer_looping() {
-        let mut staging_buffer = StagingBufferAllocator::new(
-            crate::Buffer {
-                id: 0,
-                usage_flags: BufferUsageFlags::TRANSFER_SRC,
-                size: 32,
-                memory_domain: crate::MemoryDomain::Cpu,
-            },
-            4,
-        )
-        .unwrap();
-        for _ in 0..10 {
-            let alloc = staging_buffer.allocate_staging_buffer_region(5).unwrap();
-            println!("{alloc:?}");
-            staging_buffer.end_frame();
-        }
     }
 }

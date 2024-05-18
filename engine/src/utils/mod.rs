@@ -1,4 +1,5 @@
 pub mod arena;
+pub mod cubemap_utils;
 pub mod erased_arena;
 pub mod fps_limiter;
 pub mod immutable_string;

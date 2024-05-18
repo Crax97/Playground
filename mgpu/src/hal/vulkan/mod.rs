@@ -28,7 +28,10 @@ use std::collections::HashSet;
 
 #[cfg(feature = "swapchain")]
 use crate::SwapchainInfo;
-use ash::vk::{ComponentMapping, Handle as AshHandle, ImageLayout, QueueFlags};
+use ash::vk::{
+    CommandBufferAllocateInfo, CommandBufferLevel, CommandBufferUsageFlags, ComponentMapping,
+    Handle as AshHandle, ImageLayout, QueueFlags,
+};
 use ash::{vk, Entry, Instance};
 use gpu_allocator::vulkan::{
     AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc,
@@ -789,6 +792,69 @@ impl Hal for VulkanHal {
         self.resolver.remove(graphics_pipeline)
     }
 
+    unsafe fn request_oneshot_command_recorder(
+        &self,
+        queue_type: QueueType,
+    ) -> MgpuResult<CommandRecorder> {
+        let mut current_frame = self.frames_in_flight.lock().unwrap();
+        let current_frame = current_frame.current_mut();
+        let command_pool = match queue_type {
+            QueueType::Graphics => current_frame.graphics_command_pool,
+            QueueType::AsyncCompute => current_frame.compute_command_pool,
+            QueueType::AsyncTransfer => current_frame.transfer_command_pool,
+        };
+
+        let command_buffer = unsafe {
+            self.logical_device.handle.allocate_command_buffers(
+                &CommandBufferAllocateInfo::default()
+                    .command_buffer_count(1)
+                    .command_pool(command_pool)
+                    .level(CommandBufferLevel::PRIMARY),
+            )?[0]
+        };
+
+        let state = VulkanCommandBufferState::default();
+        let mut states = self
+            .command_buffer_states
+            .write()
+            .expect("Failed to lock command recorder states");
+        let old_state = states.insert(command_buffer, state);
+
+        assert!(old_state.is_none());
+
+        unsafe {
+            self.logical_device.handle.begin_command_buffer(
+                command_buffer,
+                &vk::CommandBufferBeginInfo::default()
+                    .flags(CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+            )?;
+        }
+        Ok(CommandRecorder {
+            id: command_buffer.as_raw(),
+            queue_type,
+        })
+    }
+
+    unsafe fn submit_command_recorder_immediate(
+        &self,
+        command_recorder: CommandRecorder,
+    ) -> MgpuResult<()> {
+        let command_buffer = vk::CommandBuffer::from_raw(command_recorder.id);
+
+        let cb = [command_buffer];
+        let submit_info = vk::SubmitInfo::default().command_buffers(&cb);
+
+        let queue = match command_recorder.queue_type {
+            QueueType::Graphics => self.logical_device.graphics_queue.handle,
+            QueueType::AsyncCompute => self.logical_device.compute_queue.handle,
+            QueueType::AsyncTransfer => self.logical_device.transfer_queue.handle,
+        };
+        self.logical_device
+            .handle
+            .queue_submit(queue, &[submit_info], vk::Fence::null())?;
+        Ok(())
+    }
+
     unsafe fn request_command_recorder(
         &self,
         allocator: super::CommandRecorderAllocator,
@@ -1423,6 +1489,15 @@ impl Hal for VulkanHal {
         }
         Ok(())
     }
+    fn device_wait_queue(&self, queue: QueueType) -> MgpuResult<()> {
+        let queue = match queue {
+            QueueType::Graphics => self.logical_device.graphics_queue.handle,
+            QueueType::AsyncCompute => self.logical_device.compute_queue.handle,
+            QueueType::AsyncTransfer => self.logical_device.transfer_queue.handle,
+        };
+        unsafe { self.logical_device.handle.queue_wait_idle(queue)? };
+        Ok(())
+    }
     fn device_wait_idle(&self) -> MgpuResult<()> {
         unsafe { self.logical_device.handle.device_wait_idle() }?;
         Ok(())
@@ -1537,31 +1612,43 @@ impl Hal for VulkanHal {
             device.cmd_copy_buffer_to_image(vk_command_buffer, buffer, image, copy_layout, &[copy]);
         }
 
-        if !valid_transfer_layouts.contains(&layout.image_layout) {
-            // transition the image to old_layout
-            let image_barrier = vk::ImageMemoryBarrier2::default()
-                .image(image)
-                .dst_access_mask(layout.access_mask)
-                .dst_stage_mask(layout.stage_mask)
-                .new_layout(layout.image_layout)
-                .src_access_mask(ResourceAccessMode::TransferDst.access_mask())
-                .src_stage_mask(ResourceAccessMode::TransferDst.pipeline_flags())
-                .old_layout(ResourceAccessMode::TransferDst.image_layout())
-                .subresource_range(
-                    vk::ImageSubresourceRange::default()
-                        .aspect_mask(dest.format.aspect_mask())
-                        .base_array_layer(dest_region.base_array_layer)
-                        .base_mip_level(dest_region.mip)
-                        .layer_count(dest_region.num_layers.get())
-                        .level_count(dest_region.num_mips.get()),
-                );
-            device.cmd_pipeline_barrier2(
-                vk_command_buffer,
-                &vk::DependencyInfo::default()
-                    .image_memory_barriers(&[image_barrier])
-                    .dependency_flags(vk::DependencyFlags::BY_REGION),
+        self.resolver.apply_mut(dest, |image| {
+            image.set_subresource_layout(
+                dest_region.to_image_subresource(),
+                LayoutInfo {
+                    image_layout: copy_layout,
+                    access_mask: ResourceAccessMode::TransferDst.access_mask(),
+                    stage_mask: ResourceAccessMode::TransferDst.pipeline_flags(),
+                },
             );
-        }
+            Ok(())
+        })?;
+
+        // if !valid_transfer_layouts.contains(&layout.image_layout) {
+        // // transition the image to old_layout
+        // let image_barrier = vk::ImageMemoryBarrier2::default()
+        //     .image(image)
+        //     .dst_access_mask(layout.access_mask)
+        //     .dst_stage_mask(layout.stage_mask)
+        //     .new_layout(layout.image_layout)
+        //     .src_access_mask(ResourceAccessMode::TransferDst.access_mask())
+        //     .src_stage_mask(ResourceAccessMode::TransferDst.pipeline_flags())
+        //     .old_layout(ResourceAccessMode::TransferDst.image_layout())
+        //     .subresource_range(
+        //         vk::ImageSubresourceRange::default()
+        //             .aspect_mask(dest.format.aspect_mask())
+        //             .base_array_layer(dest_region.base_array_layer)
+        //             .base_mip_level(dest_region.mip)
+        //             .layer_count(dest_region.num_layers.get())
+        //             .level_count(dest_region.num_mips.get()),
+        //     );
+        // device.cmd_pipeline_barrier2(
+        //     vk_command_buffer,
+        //     &vk::DependencyInfo::default()
+        //         .image_memory_barriers(&[image_barrier])
+        //         .dependency_flags(vk::DependencyFlags::BY_REGION),
+        // );
+        // }
         Ok(())
     }
 
@@ -2082,7 +2169,7 @@ impl Hal for VulkanHal {
                     .ok_or(MgpuError::InvalidHandle)?,
             )
             .format(image_view_description.format.to_vk())
-            .view_type(image_view_description.dimension.image_view_type())
+            .view_type(image_view_description.view_ty.to_vk())
             .subresource_range(
                 vk::ImageSubresourceRange::default()
                     .aspect_mask(image_view_description.format.aspect_mask())
@@ -4122,7 +4209,7 @@ unsafe extern "system" fn vulkan_debug_callback(
         ffi::CStr::from_ptr(callback_data.p_message).to_string_lossy()
     };
 
-    println!(
+    panic!(
         "{message_severity:?}:\n{message_type:?} [{message_id_name} ({message_id_number})] : {message}\n",
     );
 
