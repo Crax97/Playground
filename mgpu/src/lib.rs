@@ -732,6 +732,12 @@ pub enum BindingType {
         offset: usize,
         range: usize,
     },
+    StorageBuffer {
+        buffer: Buffer,
+        offset: usize,
+        range: usize,
+        access_mode: StorageAccessMode,
+    },
 }
 impl BindingType {
     fn binding_type(&self) -> BindingSetElementKind {
@@ -741,6 +747,15 @@ impl BindingType {
             BindingType::UniformBuffer { .. } => BindingSetElementKind::Buffer {
                 ty: BufferType::Uniform,
                 access_mode: StorageAccessMode::Read,
+            },
+            BindingType::StorageBuffer {
+                buffer,
+                offset,
+                range,
+                access_mode,
+            } => BindingSetElementKind::Buffer {
+                ty: BufferType::Storage,
+                access_mode: *access_mode,
             },
             BindingType::StorageImage { view, access_mode } => {
                 BindingSetElementKind::StorageImage {
@@ -845,6 +860,15 @@ impl Buffer {
             buffer: *self,
             offset: 0,
             range: self.size,
+        }
+    }
+
+    pub fn bind_whole_range_storage_buffer(&self, access_mode: StorageAccessMode) -> BindingType {
+        BindingType::StorageBuffer {
+            buffer: *self,
+            offset: 0,
+            range: self.size,
+            access_mode,
         }
     }
 

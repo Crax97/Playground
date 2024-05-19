@@ -3566,6 +3566,10 @@ impl VulkanHal {
                                 }
                             }
                             spirq::ty::DescriptorType::StorageBuffer(access) => {
+                                if let Some(struc) = ty.as_struct() {
+                                    variables
+                                        .extend(get_struct_variables(struc, set_idx, bind_idx));
+                                }
                                 BindingSetElementKind::Buffer {
                                     access_mode: access_mode(Some(access)),
                                     ty: crate::BufferType::Storage,
@@ -3836,6 +3840,23 @@ impl VulkanHal {
                     buffer,
                     offset,
                     range,
+                } => buffer_ops.push((
+                    binding.binding,
+                    binding.ty.binding_type().to_vk(),
+                    vk::DescriptorBufferInfo::default()
+                        .buffer(
+                            self.resolver
+                                .resolve_vulkan(buffer)
+                                .ok_or(MgpuError::InvalidHandle)?,
+                        )
+                        .offset(offset as _)
+                        .range(range as _),
+                )),
+                crate::BindingType::StorageBuffer {
+                    buffer,
+                    offset,
+                    range,
+                    ..
                 } => buffer_ops.push((
                     binding.binding,
                     binding.ty.binding_type().to_vk(),

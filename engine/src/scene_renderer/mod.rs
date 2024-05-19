@@ -274,7 +274,7 @@ impl SceneRenderer {
                     binding: 1,
                     array_length: 1,
                     ty: mgpu::BindingSetElementKind::Buffer {
-                        ty: mgpu::BufferType::Uniform,
+                        ty: mgpu::BufferType::Storage,
                         access_mode: mgpu::StorageAccessMode::Read,
                     },
                     shader_stage_flags: ShaderStageFlags::from_bits_retain(
@@ -339,7 +339,9 @@ impl SceneRenderer {
 
             let scene_lightning_parameter_buffer = device.create_buffer(&BufferDescription {
                 label: Some("Material user buffer"),
-                usage_flags: BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM_BUFFER,
+                usage_flags: BufferUsageFlags::TRANSFER_DST
+                    | BufferUsageFlags::UNIFORM_BUFFER
+                    | BufferUsageFlags::STORAGE_BUFFER,
                 size: 2048,
                 memory_domain: mgpu::MemoryDomain::Gpu,
             })?;
@@ -367,7 +369,8 @@ impl SceneRenderer {
                         },
                         Binding {
                             binding: 1,
-                            ty: scene_lightning_parameter_buffer.bind_whole_range_uniform_buffer(),
+                            ty: scene_lightning_parameter_buffer
+                                .bind_whole_range_storage_buffer(mgpu::StorageAccessMode::Read),
                             visibility: ShaderStageFlags::ALL_GRAPHICS,
                         },
                     ],

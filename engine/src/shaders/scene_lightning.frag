@@ -24,7 +24,7 @@ struct LightInfo {
     uvec4 type;
 };
 
-layout(set = 1, binding = 1, std140) uniform SceneParameters {
+layout(set = 1, binding = 1, std140) readonly buffer SceneParameters {
     vec3 eye_location;
     vec3 eye_forward;
     vec3 ambient_color;
@@ -123,20 +123,22 @@ vec3 light_contribute(vec3 eye_direction, vec3 light_direction, vec3 half_view_v
 void main() {
     GBufferData data = extract_gbuffer();
 
+
     vec3 light_0 = vec3(0.0);
-    vec3 light_pos = vec3(-1.0, 1.0, -1.0);
-    float light_radius = 10.0;
-
     if (data.lit > 0.0) {
-        vec4 diffuse_ambient = textureLod(samplerCube(diffuse_env_map, diffuse_env_map_sampler), data.normal, (1.0 - data.roughness) * 9.0);
-        vec3 light = normalize(data.world_position - light_pos);
-        vec3 eye_direction = normalize(eye_location - data.world_position); 
-        vec3 half_view_vector = normalize(light + eye_direction);
-        
-        float dist = distance(light_pos, data.world_position);
-        float light_falloff = pow(saturate(1.0 - pow(dist / light_radius, 4)), 2) / (dist * dist + 1.0);
+        for (uint i = 0; i < light_count; i ++) {
+            vec3 light_pos = lights[i].pos_radius.xyz;
+            float light_radius = lights[i].pos_radius.w;
+            vec4 diffuse_ambient = textureLod(samplerCube(diffuse_env_map, diffuse_env_map_sampler), data.normal, (1.0 - data.roughness) * 9.0);
+            vec3 light = normalize(data.world_position - light_pos);
+            vec3 eye_direction = normalize(eye_location - data.world_position); 
+            vec3 half_view_vector = normalize(light + eye_direction);
+            
+            float dist = distance(light_pos, data.world_position);
+            float light_falloff = pow(saturate(1.0 - pow(dist / light_radius, 4)), 2) / (dist * dist + 1.0);
 
-        light_0 = light_contribute(eye_direction, light, half_view_vector, diffuse_ambient.xyz, data) * light_falloff;
+            light_0 += light_contribute(eye_direction, light, half_view_vector, diffuse_ambient.xyz, data) * light_falloff;
+        }
     }
     color.rgb =  light_0  + data.emissive; 
     color.a = 1.0;

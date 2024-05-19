@@ -506,6 +506,27 @@ impl Node {
                             set.bindings.iter().filter_map(|b| match b.ty {
                                 crate::BindingType::Sampler(_) => None,
                                 crate::BindingType::UniformBuffer { .. } => None,
+                                crate::BindingType::StorageBuffer {
+                                    buffer,
+                                    offset,
+                                    range,
+                                    access_mode,
+                                } => {
+                                    if access_mode != StorageAccessMode::Read {
+                                        Some(ResourceInfo {
+                                            resource: Resource::Buffer {
+                                                buffer,
+                                                offset,
+                                                size: range,
+                                            },
+                                            access_mode: ResourceAccessMode::ShaderWrite(
+                                                b.visibility,
+                                            ),
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                }
                                 crate::BindingType::SampledImage { .. } => None,
                                 crate::BindingType::StorageImage { view, access_mode } => {
                                     if access_mode != StorageAccessMode::Read {
@@ -543,6 +564,28 @@ impl Node {
                                         size: range,
                                     },
                                 }),
+
+                                crate::BindingType::StorageBuffer {
+                                    buffer,
+                                    offset,
+                                    range,
+                                    access_mode,
+                                } => {
+                                    if access_mode == StorageAccessMode::Read {
+                                        Some(ResourceInfo {
+                                            resource: Resource::Buffer {
+                                                buffer,
+                                                offset,
+                                                size: range,
+                                            },
+                                            access_mode: ResourceAccessMode::ShaderRead(
+                                                b.visibility,
+                                            ),
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                }
                                 crate::BindingType::SampledImage { view, .. } => {
                                     Some(ResourceInfo {
                                         access_mode: ResourceAccessMode::ShaderRead(b.visibility),
@@ -731,6 +774,27 @@ impl Node {
                             set.bindings.iter().filter_map(|b| match b.ty {
                                 crate::BindingType::Sampler(_) => None,
                                 crate::BindingType::UniformBuffer { .. } => None,
+                                crate::BindingType::StorageBuffer {
+                                    buffer,
+                                    offset,
+                                    range,
+                                    access_mode,
+                                } => {
+                                    if access_mode != StorageAccessMode::Read {
+                                        Some(ResourceInfo {
+                                            resource: Resource::Buffer {
+                                                buffer,
+                                                offset,
+                                                size: range,
+                                            },
+                                            access_mode: ResourceAccessMode::ShaderWrite(
+                                                b.visibility,
+                                            ),
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                }
                                 crate::BindingType::SampledImage { .. } => None,
                                 crate::BindingType::StorageImage { view, access_mode } => {
                                     if access_mode != StorageAccessMode::Read {
@@ -768,6 +832,28 @@ impl Node {
                                         size: range,
                                     },
                                 }),
+                                crate::BindingType::StorageBuffer {
+                                    buffer,
+                                    offset,
+                                    range,
+                                    access_mode,
+                                } => {
+                                    if access_mode == StorageAccessMode::Read {
+                                        Some(ResourceInfo {
+                                            resource: Resource::Buffer {
+                                                buffer,
+                                                offset,
+                                                size: range,
+                                            },
+                                            access_mode: ResourceAccessMode::ShaderRead(
+                                                b.visibility,
+                                            ),
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                }
+
                                 crate::BindingType::SampledImage { view, .. } => {
                                     Some(ResourceInfo {
                                         access_mode: ResourceAccessMode::ShaderRead(b.visibility),
