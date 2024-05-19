@@ -7,6 +7,7 @@ use engine::{
         loaders::FsTextureLoader,
         material::{
             Material, MaterialDescription, MaterialDomain, MaterialParameters, MaterialProperties,
+            MaterialType,
         },
         mesh::{Mesh, MeshDescription},
         texture::Texture,
@@ -53,13 +54,14 @@ impl App for CubesSceneApplication {
                 source: bytemuck::cast_slice(FRAGMENT_SHADER),
             })
             .unwrap();
-        let mut asset_map = app::asset_map_with_defaults(&context.device)?;
+
+        let sampler_allocator = SamplerAllocator::default();
+        let mut asset_map = app::asset_map_with_defaults(&context.device, &sampler_allocator)?;
         let mut shader_cache = ShaderCache::new();
 
         shader_cache.add_shader("simple_vertex_shader", vertex_shader_module);
         shader_cache.add_shader("simple_fragment_shader", fragment_shader_module);
 
-        let sampler_allocator = SamplerAllocator::default();
         let texture_loader =
             FsTextureLoader::new(context.device.clone(), sampler_allocator.clone());
         asset_map.add_loader(texture_loader);
@@ -75,6 +77,7 @@ impl App for CubesSceneApplication {
                 parameters: MaterialParameters::default().texture_parameter("tex", david_texture),
                 properties: MaterialProperties {
                     domain: MaterialDomain::Surface,
+                    ty: MaterialType::Lit,
                     double_sided: false,
                 },
             },
@@ -121,7 +124,7 @@ impl App for CubesSceneApplication {
         );
         scene.add_child(first_node_handle, second_cube);
         scene.add_child(first_node_handle, third_cube);
-        let scene_renderer = SceneRenderer::new(&context.device)?;
+        let scene_renderer = SceneRenderer::new(&context.device, &asset_map)?;
         let mut pov = PointOfView::new_perspective(0.01, 1000.0, 75.0, 1920.0 / 1080.0);
         pov.transform.location = vec3(0.0, 10.0, -5.0);
 

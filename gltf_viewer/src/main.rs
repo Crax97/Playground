@@ -5,7 +5,7 @@ use std::io::BufReader;
 
 use clap::Parser;
 use engine::assets::material::{
-    Material, MaterialDescription, MaterialParameters, MaterialProperties,
+    Material, MaterialDescription, MaterialParameters, MaterialProperties, MaterialType,
 };
 use engine::assets::texture::{Texture, TextureDescription, TextureUsageFlags};
 use engine::constants::CUBE_MESH_HANDLE;
@@ -82,11 +82,11 @@ impl App for GltfViewerApplication {
                 source: bytemuck::cast_slice(VIEW_CUBEMAP_VERT),
             })?;
 
-        let mut asset_map = app::asset_map_with_defaults(&context.device)?;
+        let sampler_allocator = SamplerAllocator::default();
+        let mut asset_map = app::asset_map_with_defaults(&context.device, &sampler_allocator)?;
         let mut shader_cache = ShaderCache::new();
         shader_cache.add_shader("view_cubemap_vert", view_cubemap_vert);
         shader_cache.add_shader("view_cubemap_frag", view_cubemap_frag);
-        let sampler_allocator = SamplerAllocator::default();
         let mut pov = PointOfView::new_perspective(0.01, 1000.0, 75.0, 1920.0 / 1080.0);
         pov.transform.location = vec3(0.0, 0.0, -2.0);
 
@@ -122,7 +122,7 @@ impl App for GltfViewerApplication {
             &sampler_allocator,
         )?;
 
-        let cube_hdr = engine::cubemap_utils::convert_texture_to_cubemap(
+        let (cube_hdr, env_diffuse) = engine::cubemap_utils::read_cubemap_from_hdr(
             &context.device,
             &engine::cubemap_utils::CreateCubemapParams {
                 label: { Some("Pisa env") },
@@ -139,6 +139,7 @@ impl App for GltfViewerApplication {
             &sampler_allocator,
         )?;
         let env_map = asset_map.add(cube_hdr, "textures.hdr.pisa");
+        let env_diffuse = asset_map.add(env_diffuse, "textures.hdr.pisa-diffuse");
 
         let cube_material = Material::new(
             &context.device,
@@ -146,9 +147,11 @@ impl App for GltfViewerApplication {
                 label: Some("Cubemap material"),
                 vertex_shader: "view_cubemap_vert".into(),
                 fragment_shader: "view_cubemap_frag".into(),
-                parameters: MaterialParameters::default().texture_parameter("base_color", env_map),
+                parameters: MaterialParameters::default()
+                    .texture_parameter("base_color", env_map.clone()),
                 properties: MaterialProperties {
                     domain: engine::assets::material::MaterialDomain::Surface,
+                    ty: MaterialType::Unlit,
                     double_sided: true,
                 },
             },
@@ -171,8 +174,10 @@ impl App for GltfViewerApplication {
                 }),
         );
 
-        // let scene_renderer = SceneRenderer::new(&context.device, env_map, &asset_map)?;
-        let scene_renderer = SceneRenderer::new(&context.device)?;
+        let mut scene_renderer = SceneRenderer::new(&context.device, &asset_map)?;
+        scene_renderer
+            .get_scene_setup_mut()
+            .set_diffuse_env_map(env_diffuse);
         Ok(Self {
             asset_map,
             scene,

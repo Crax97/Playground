@@ -8,6 +8,11 @@ layout(location = 3) in vec3 vertex_normal;
 layout(location = 4) in vec3 vertex_tangent;
 layout(location = 5) in mat3 TBN;
 
+layout(push_constant, std140) uniform ObjectData {
+    mat4 _model;
+    uint material_id;
+};
+
 #if DEPTH_ONLY_PASS
 
 void main() { }
@@ -34,6 +39,8 @@ void main() {
     
     _fs_metallic_roughness.x = attributes.metallic;
     _fs_metallic_roughness.y = attributes.roughness;
+    _fs_metallic_roughness.w = attributes.lit;
+    
 }
 
 #endif

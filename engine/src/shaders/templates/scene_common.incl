@@ -12,6 +12,7 @@ struct MaterialAttributes {
     float metallic;
     float roughness;
     float ambient_occlusion;
+    float lit;
 };
 
 #define DEFINE_USER_TEXTURE(TYPE, NAME, BINDING) \

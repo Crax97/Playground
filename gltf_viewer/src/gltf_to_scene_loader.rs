@@ -6,6 +6,7 @@ use engine::{
     assets::{
         material::{
             Material, MaterialDescription, MaterialDomain, MaterialParameters, MaterialProperties,
+            MaterialType,
         },
         mesh::{Mesh, MeshDescription},
         texture::{Texture, TextureDescription, TextureSamplerConfiguration, TextureUsageFlags},
@@ -142,6 +143,7 @@ fn create_materials(
                     .scalar_parameter("roughness_factor", pbr_info.roughness_factor()),
                 properties: MaterialProperties {
                     domain: MaterialDomain::Surface,
+                    ty: MaterialType::Lit,
                     double_sided: material.double_sided(),
                 },
             },

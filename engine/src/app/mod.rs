@@ -16,11 +16,15 @@ use winit::{
 
 use crate::{
     asset_map::AssetMap,
-    assets::mesh::{Mesh, MeshDescription},
-    constants::CUBE_MESH_HANDLE,
+    assets::{
+        mesh::{Mesh, MeshDescription},
+        texture::{Texture, TextureDescription, TextureSamplerConfiguration, TextureUsageFlags},
+    },
+    constants::{CUBE_MESH_HANDLE, DEFAULT_ENV_WHITE_HANDLE},
     core::Time,
     fps_limiter::FpsLimiter,
     input::InputState,
+    sampler_allocator::{self, SamplerAllocator},
 };
 
 pub struct AppRunner {}
@@ -244,11 +248,18 @@ impl Default for AppDescription {
     }
 }
 
-pub fn asset_map_with_defaults(device: &Device) -> anyhow::Result<AssetMap> {
+pub fn asset_map_with_defaults(
+    device: &Device,
+    sampler_allocator: &SamplerAllocator,
+) -> anyhow::Result<AssetMap> {
     let mut map = AssetMap::new();
     map.add(
         create_cube_mesh(device)?,
         CUBE_MESH_HANDLE.identifier().clone(),
+    );
+    map.add(
+        create_default_env(device, sampler_allocator)?,
+        DEFAULT_ENV_WHITE_HANDLE.identifier().clone(),
     );
     Ok(map)
 }
@@ -390,4 +401,28 @@ fn create_cube_mesh(device: &mgpu::Device) -> anyhow::Result<Mesh> {
     };
     let cube_mesh = Mesh::new(device, &mesh_description)?;
     Ok(cube_mesh)
+}
+
+fn create_default_env(
+    device: &mgpu::Device,
+    sampler_allocator: &SamplerAllocator,
+) -> anyhow::Result<Texture> {
+    let texture = Texture::new(
+        device,
+        &TextureDescription {
+            label: Some("Default env texture"),
+            data: &[&[255; 4 * 6]],
+            ty: crate::assets::texture::TextureType::Cubemap(Extents2D {
+                width: 1,
+                height: 1,
+            }),
+            format: mgpu::ImageFormat::Rgba8,
+            usage_flags: TextureUsageFlags::default(),
+            num_mips: 1.try_into().unwrap(),
+            auto_generate_mips: false,
+            sampler_configuration: TextureSamplerConfiguration::default(),
+        },
+        sampler_allocator,
+    )?;
+    Ok(texture)
 }

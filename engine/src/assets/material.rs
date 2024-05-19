@@ -57,6 +57,12 @@ pub struct TextureMaterialParameter {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]
+pub enum MaterialType {
+    Lit,
+    Unlit,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy)]
 pub enum MaterialDomain {
     Surface,
 }
@@ -64,6 +70,7 @@ pub enum MaterialDomain {
 #[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct MaterialProperties {
     pub domain: MaterialDomain,
+    pub ty: MaterialType,
     pub double_sided: bool,
 }
 

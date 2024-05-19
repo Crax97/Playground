@@ -22,5 +22,5 @@ float van_der_corput_representation(uint x) {
 // This can be useful to e.g do "randomized" sampling on an hemisphere, since the
 // returned numbers are in the [0, 1) range (and can be thus converted to hemispherical coords)
 vec2 hammersley(uint x, uint num_samples) {
-    return vec2(x / num_samples, van_der_corput_representation(x)); 
+    return vec2(float(x) / float(num_samples), van_der_corput_representation(x)); 
 }

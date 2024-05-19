@@ -17,8 +17,8 @@ MaterialAttributes fragment() {
     result.diffuse_color = vec4(0.0);
     result.emissive_strength = 1.0;
     result.emissive = diffuse_color.rgb;
-
     result.roughness = 1.0;
+    result.lit = 0.0;
 
     return result;
 }

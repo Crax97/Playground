@@ -846,6 +846,11 @@ impl Device {
             check!(image_view_description.image_subresource.num_layers.get() == 1, "When creating a 2D image view only one layer can be used");
             check!(image_view_description.image.dimension == ImageDimension::D2, "If an image view is 2D then the image must be 2D too");
         }
+        
+        if image_view_description.view_ty == ImageViewType::Cube {
+            check!(image_view_description.image.creation_flags.contains(ImageCreationFlags::CUBE_COMPATIBLE), "Cannot create an image view of an image which is not CUBE_COMPATIBLE");
+            check!(image_view_description.image_subresource.num_layers.get() == 6, "When creating a Cubemap the image view subresource must have 6 layers");
+        }
     }
 
     #[cfg(debug_assertions)]

@@ -7,14 +7,14 @@ use crate::{
         OwnedVertexStageInfo, ResourceAccessMode,
     },
     util::{define_resource_resolver, Handle},
-    AddressMode, BindingSet, BindingSetElementKind, BindingSetLayoutInfo, BlendFactor, BlendOp,
-    BorderColor, Buffer, BufferUsageFlags, ColorWriteMask, CompareOp, ComputePipeline,
-    ComputePipelineDescription, CullMode, Extents2D, Extents3D, FilterMode, FrontFace,
-    GraphicsPipeline, GraphicsPipelineDescription, Image, ImageAspect, ImageCreationFlags,
-    ImageDimension, ImageFormat, ImageSubresource, ImageUsageFlags, ImageView, ImageViewType,
-    MipmapMode, Offset2D, Offset3D, OwnedBindingSetLayoutInfo, PolygonMode, PresentMode,
-    PrimitiveTopology, PushConstantInfo, Rect2D, SampleCount, Sampler, ShaderModule,
-    ShaderModuleLayout, ShaderStageFlags, Swapchain, VertexAttributeFormat, VertexInputFrequency,
+    AddressMode, BindingSet, BindingSetElementKind, BlendFactor, BlendOp, BorderColor, Buffer,
+    BufferUsageFlags, ColorWriteMask, CompareOp, ComputePipeline, ComputePipelineDescription,
+    CullMode, Extents2D, Extents3D, FilterMode, FrontFace, GraphicsPipeline,
+    GraphicsPipelineDescription, Image, ImageAspect, ImageCreationFlags, ImageDimension,
+    ImageFormat, ImageSubresource, ImageUsageFlags, ImageView, ImageViewType, MipmapMode, Offset2D,
+    Offset3D, OwnedBindingSetLayoutInfo, PolygonMode, PresentMode, PrimitiveTopology,
+    PushConstantInfo, Rect2D, SampleCount, Sampler, ShaderModule, ShaderModuleLayout,
+    ShaderStageFlags, Swapchain, VertexAttributeFormat, VertexInputFrequency,
 };
 
 #[cfg(feature = "swapchain")]

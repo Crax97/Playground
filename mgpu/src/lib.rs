@@ -901,7 +901,7 @@ impl Image {
         );
         ImageSubresource {
             mip,
-            num_mips: self.num_mips,
+            num_mips: 1.try_into().unwrap(),
             base_array_layer: layer,
             num_layers: 1.try_into().unwrap(),
         }
@@ -909,6 +909,10 @@ impl Image {
 
     pub fn extents(&self) -> Extents3D {
         self.extents
+    }
+
+    pub fn mips(&self) -> u32 {
+        self.num_mips.get()
     }
 }
 

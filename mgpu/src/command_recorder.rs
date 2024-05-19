@@ -188,6 +188,11 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
                     rt.view.owner.extents
                 );
             check!(
+                rt.view.subresource.num_layers.get() == 1
+                    && rt.view.subresource.num_mips.get() == 1,
+                "Cannot render to more than a mip/layer at once"
+            );
+            check!(
                 rt.view
                     .owner
                     .usage_flags
@@ -213,6 +218,12 @@ impl<T: CommandRecorderType> CommandRecorder<T> {
                     framebuffer_size,
                     rt.view.owner.extents
                 );
+
+            check!(
+                rt.view.subresource.num_layers.get() == 1
+                    && rt.view.subresource.num_mips.get() == 1,
+                "Cannot render to more than a mip/layer at once"
+            );
             check!(
                 rt.view
                     .owner
@@ -285,18 +296,13 @@ impl CommandRecorder<Graphics> {
             commands: vec![],
         };
         let framebuffer_size = if let Some(rt) = render_pass_description.render_targets.first() {
-            rt.view.owner.extents
+            rt.view.extents_2d()
         } else {
             render_pass_description
                 .depth_stencil_attachment
                 .unwrap()
                 .view
-                .owner
-                .extents
-        };
-        let framebuffer_size = Extents2D {
-            width: framebuffer_size.width,
-            height: framebuffer_size.height,
+                .extents_2d()
         };
         Ok(RenderPass {
             command_recorder: self,

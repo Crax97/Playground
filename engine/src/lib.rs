@@ -17,10 +17,17 @@ pub use glam;
 pub use winit;
 
 pub mod constants {
-    use crate::{asset_map::AssetHandle, assets::mesh::Mesh, immutable_string::ImmutableString};
+    use crate::{
+        asset_map::AssetHandle,
+        assets::{mesh::Mesh, texture::Texture},
+        immutable_string::ImmutableString,
+    };
 
     pub const CUBE_MESH_HANDLE: AssetHandle<Mesh> =
         AssetHandle::new_const(ImmutableString::new("mesh.cube"));
+
+    pub const DEFAULT_ENV_WHITE_HANDLE: AssetHandle<Texture> =
+        AssetHandle::new_const(ImmutableString::new("textures.default-env"));
 }
 
 /*

@@ -14,11 +14,13 @@ use mgpu::{
 use crate::{
     assert_size_does_not_exceed,
     asset_map::{AssetHandle, AssetMap},
-    assets::texture::Texture,
+    assets::{shader::Shader, texture::Texture},
+    constants::DEFAULT_ENV_WHITE_HANDLE,
     include_spirv,
     math::{color::LinearColor, constants::UP, Transform},
     scene::Scene,
     shader_parameter_writer::ScalarParameterWriter,
+    Tick,
 };
 
 const QUAD_VERTEX: &[u8] = include_spirv!("../spirv/quad_vertex.vert.spv");
@@ -38,10 +40,108 @@ pub struct SceneRenderer {
     scene_setup: SceneSetup,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone)]
 pub struct SceneSetup {
     pub ambient_color: LinearColor,
     pub ambient_intensity: f32,
+
+    pub diffuse_environment_map: AssetHandle<Texture>,
+
+    pub binding_set: BindingSet,
+
+    pub needs_new_binding_set: bool,
+}
+impl SceneSetup {
+    pub fn layout() -> &'static BindingSetLayout<'static> {
+        const BSL: BindingSetLayout = BindingSetLayout {
+            binding_set_elements: &[
+                BindingSetElement {
+                    binding: 0,
+                    array_length: 1,
+                    ty: mgpu::BindingSetElementKind::SampledImage,
+                    shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
+                },
+                BindingSetElement {
+                    binding: 1,
+                    array_length: 1,
+                    ty: mgpu::BindingSetElementKind::Sampler,
+                    shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
+                },
+            ],
+        };
+
+        &BSL
+    }
+
+    fn new(device: &Device, asset_map: &AssetMap) -> anyhow::Result<Self> {
+        let default_env = asset_map.get(&DEFAULT_ENV_WHITE_HANDLE).unwrap();
+        let binding_set = device.create_binding_set(
+            &BindingSetDescription {
+                label: Some("Scene binding set"),
+                bindings: &[
+                    Binding {
+                        binding: 0,
+                        ty: mgpu::BindingType::SampledImage {
+                            view: default_env.view,
+                        },
+                        visibility: ShaderStageFlags::ALL_GRAPHICS,
+                    },
+                    Binding {
+                        binding: 1,
+                        ty: mgpu::BindingType::Sampler(default_env.sampler),
+                        visibility: ShaderStageFlags::ALL_GRAPHICS,
+                    },
+                ],
+            },
+            Self::layout(),
+        )?;
+
+        Ok(Self {
+            ambient_color: LinearColor::new(0.3, 0.3, 0.3, 1.0),
+            ambient_intensity: 1.0,
+            diffuse_environment_map: DEFAULT_ENV_WHITE_HANDLE.clone(),
+            binding_set,
+            needs_new_binding_set: false,
+        })
+    }
+
+    pub fn set_diffuse_env_map(&mut self, new_env_map: AssetHandle<Texture>) {
+        self.diffuse_environment_map = new_env_map;
+        self.needs_new_binding_set = true;
+    }
+
+    pub fn update(&mut self, device: &Device, asset_map: &AssetMap) -> anyhow::Result<()> {
+        if self.needs_new_binding_set {
+            self.needs_new_binding_set = false;
+            let diffuse_env_map = asset_map
+                .get(&self.diffuse_environment_map)
+                .expect("Invalid handle");
+            let new_binding_set = device.create_binding_set(
+                &BindingSetDescription {
+                    label: Some("Scene binding set"),
+                    bindings: &[
+                        Binding {
+                            binding: 0,
+                            ty: mgpu::BindingType::SampledImage {
+                                view: diffuse_env_map.view,
+                            },
+                            visibility: ShaderStageFlags::ALL_GRAPHICS,
+                        },
+                        Binding {
+                            binding: 1,
+                            ty: mgpu::BindingType::Sampler(diffuse_env_map.sampler),
+                            visibility: ShaderStageFlags::ALL_GRAPHICS,
+                        },
+                    ],
+                },
+                Self::layout(),
+            )?;
+
+            let old_binding_set = std::mem::replace(&mut self.binding_set, new_binding_set);
+            device.destroy_binding_set(old_binding_set)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
@@ -122,6 +222,7 @@ struct GPUGlobalFrameData {
 #[derive(Clone, Copy, Debug, Zeroable, Pod)]
 pub(crate) struct GPUPerObjectDrawData {
     pub model_matrix: Mat4,
+    pub material_ty: [u32; 4],
 }
 
 assert_size_does_not_exceed!(
@@ -182,11 +283,7 @@ impl SceneRenderer {
         };
         &LAYOUT
     }
-    pub fn new(
-        device: &Device,
-        // env_map: AssetHandle<Texture>,
-        // asset_map: &AssetMap,
-    ) -> anyhow::Result<Self> {
+    pub fn new(device: &Device, asset_map: &AssetMap) -> anyhow::Result<Self> {
         let mut frame_data = vec![];
         let device_info = device.get_info();
 
@@ -265,13 +362,6 @@ impl SceneRenderer {
                             ty: scene_lightning_parameter_buffer.bind_whole_range_uniform_buffer(),
                             visibility: ShaderStageFlags::ALL_GRAPHICS,
                         },
-                        // Binding {
-                        //     binding: 2,
-                        //     ty: mgpu::BindingType::SampledImage {
-                        //         view: asset_map.get(&env_map).unwrap().view,
-                        //     },
-                        //     visibility: ShaderStageFlags::ALL_GRAPHICS,
-                        // },
                     ],
                 },
                 Self::scene_lightning_binding_set_layout(),
@@ -332,6 +422,10 @@ impl SceneRenderer {
                         set: 1,
                         layout: SceneRenderer::scene_lightning_binding_set_layout(),
                     },
+                    BindingSetLayoutInfo {
+                        set: 2,
+                        layout: SceneSetup::layout(),
+                    },
                 ],
                 push_constant_info: None,
             })?;
@@ -345,16 +439,15 @@ impl SceneRenderer {
             scene_lightning_pipeline,
 
             scene_lightning_parameters_writer,
-            scene_setup: SceneSetup {
-                ambient_color: LinearColor::new(0.3, 0.3, 0.3, 1.0),
-                ambient_intensity: 1.0,
-            },
+            scene_setup: SceneSetup::new(device, asset_map)?,
 
             current_frame: 0,
         })
     }
     pub fn render(&mut self, params: SceneRenderingParams) -> anyhow::Result<()> {
         let device = params.device;
+
+        self.scene_setup.update(device, params.asset_map)?;
         self.update_buffers(params.device, params.pov)?;
 
         let current_frame = &self.frames[self.current_frame];
@@ -415,7 +508,10 @@ impl SceneRenderer {
                     crate::scene::ScenePrimitive::Mesh(info) => {
                         let mesh = params.asset_map.get(&info.handle).expect("No mesh");
                         let material = params.asset_map.get(&info.material).expect("No material");
-                        let model_matrix = item.transform.matrix();
+                        let model_matrix = GPUPerObjectDrawData {
+                            model_matrix: item.transform.matrix(),
+                            material_ty: [material.properties.ty as usize as u32; 4],
+                        };
 
                         scene_output_pass.set_pipeline(material.pipeline);
                         scene_output_pass.set_push_constant(
@@ -462,6 +558,7 @@ impl SceneRenderer {
             scene_lightning_pass.set_binding_sets(&[
                 &current_frame.scene_images.binding_set,
                 &current_frame.scene_params_binding_set,
+                &self.scene_setup.binding_set,
             ]);
             scene_lightning_pass.draw(6, 1, 0, 0)?;
         }
@@ -487,6 +584,10 @@ impl SceneRenderer {
         self.current_frame = (self.current_frame + 1) % params.device.get_info().frames_in_flight;
 
         Ok(())
+    }
+
+    pub fn get_scene_setup_mut(&mut self) -> &mut SceneSetup {
+        &mut self.scene_setup
     }
 
     fn update_buffers(&mut self, device: &Device, pov: &PointOfView) -> anyhow::Result<()> {
@@ -518,6 +619,8 @@ impl SceneRenderer {
         );
         self.scene_lightning_parameters_writer
             .write("ambient_intensity", self.scene_setup.ambient_intensity);
+        self.scene_lightning_parameters_writer
+            .write("eye_forward", pov.transform.forward().to_array());
         self.scene_lightning_parameters_writer
             .write("eye_location", pov.transform.location.to_array());
         self.scene_lightning_parameters_writer

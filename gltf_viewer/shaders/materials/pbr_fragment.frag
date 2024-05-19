@@ -30,6 +30,7 @@ MaterialAttributes fragment() {
     result.metallic = metallic_roughness_sample.x * metallic_factor;
     result.roughness = metallic_roughness_sample.y * roughness_factor;
     result.ambient_occlusion = occlusion_sample.x;
+    result.lit = 1.0;
 
     return result;
 }

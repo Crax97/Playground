@@ -2,9 +2,9 @@ use std::num::NonZeroU32;
 
 use bitflags::bitflags;
 use mgpu::{
-    AddressMode, Device, Extents2D, Extents3D, FilterMode, Image, ImageDescription, ImageDimension,
-    ImageFormat, ImageUsageFlags, ImageView, ImageViewDescription, ImageWriteParams, MipmapMode,
-    Sampler,
+    AddressMode, Device, Extents2D, Extents3D, FilterMode, Image, ImageCreationFlags,
+    ImageDescription, ImageDimension, ImageFormat, ImageUsageFlags, ImageView,
+    ImageViewDescription, ImageViewType, ImageWriteParams, MipmapMode, Sampler,
 };
 use serde::{Deserialize, Serialize};
 
@@ -81,7 +81,7 @@ impl Texture {
         description: &TextureDescription,
         sampler_allocator: &SamplerAllocator,
     ) -> anyhow::Result<Texture> {
-        let (extents, dimension, array_layers) = match description.ty {
+        let (extents, dimension, array_layers, view_ty) = match description.ty {
             TextureType::D1(s) => (
                 Extents3D {
                     width: s as u32,
@@ -90,6 +90,7 @@ impl Texture {
                 },
                 ImageDimension::D1,
                 1,
+                ImageViewType::D1,
             ),
             TextureType::D2(e) => (
                 Extents3D {
@@ -99,9 +100,19 @@ impl Texture {
                 },
                 ImageDimension::D2,
                 1,
+                ImageViewType::D2,
             ),
-            TextureType::D3(e) => (e, ImageDimension::D3, 1),
-            TextureType::Cubemap(e) => todo!(),
+            TextureType::D3(e) => (e, ImageDimension::D3, 1, ImageViewType::D3),
+            TextureType::Cubemap(e) => (
+                Extents3D {
+                    width: e.width,
+                    height: e.height,
+                    depth: 1,
+                },
+                ImageDimension::D2,
+                6,
+                ImageViewType::Cube,
+            ),
         };
 
         let image = device.create_image(&ImageDescription {
@@ -109,7 +120,11 @@ impl Texture {
                 "Texture Image for {}",
                 description.label.unwrap_or("Unknown")
             )),
-            creation_flags: Default::default(),
+            creation_flags: if let TextureType::Cubemap(_) = description.ty {
+                ImageCreationFlags::CUBE_COMPATIBLE
+            } else {
+                Default::default()
+            },
             usage_flags: description.image_usage_flags(),
             extents,
             dimension,
@@ -127,11 +142,7 @@ impl Texture {
             )),
             image,
             format: description.format,
-            view_ty: match dimension {
-                ImageDimension::D1 => mgpu::ImageViewType::D1,
-                ImageDimension::D2 => mgpu::ImageViewType::D2,
-                ImageDimension::D3 => mgpu::ImageViewType::D3,
-            },
+            view_ty,
             aspect: description.format.aspect(),
             image_subresource: image.whole_subresource(),
         })?;

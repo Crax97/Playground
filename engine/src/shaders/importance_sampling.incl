@@ -20,7 +20,7 @@ vec3 importance_sample_ggx(vec2 uv, float roughness, vec3 N) {
     vec3 tangent_x = normalize(cross(up_vector, N));
     vec3 tangent_y = normalize(cross(N, tangent_x));
 
-    return tangent_x * H.x + tangent_x * H.y + N * H.z;
+    return tangent_x * H.x + tangent_y * H.y + N * H.z;
 }
 
 #endif
