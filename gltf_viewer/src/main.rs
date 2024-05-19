@@ -170,7 +170,7 @@ impl App for GltfViewerApplication {
                 .transform(Transform {
                     location: Default::default(),
                     rotation: Default::default(),
-                    scale: vec3(10.0, 10.0, 10.0),
+                    scale: vec3(100.0, 100.0, 100.0),
                 }),
         );
 

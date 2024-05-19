@@ -3532,6 +3532,7 @@ impl VulkanHal {
                                     binding_set: set_idx as _,
                                     binding_index: bind_idx as _,
                                     ty: VariableType::Texture(StorageAccessMode::Read),
+                                    offset: 0,
                                 });
 
                                 BindingSetElementKind::SampledImage
@@ -3544,6 +3545,7 @@ impl VulkanHal {
                                     binding_set: set_idx as _,
                                     binding_index: bind_idx as _,
                                     ty: VariableType::Texture(access_mode),
+                                    offset: 0,
                                 });
                                 BindingSetElementKind::StorageImage {
                                     format: format(storage_image.fmt),
@@ -3954,6 +3956,27 @@ fn entry_point_shader_stage(entry: &spirq::prelude::EntryPoint) -> ShaderStageFl
     }
 }
 
+fn ty_to_shader_variable(ty: &Type, set_idx: u32, bind_idx: u32) -> VariableType {
+    match ty {
+        Type::Scalar(_) | Type::Vector(_) | Type::Matrix(_) => {
+            let attrib = ty_to_vertex_attribute_format(ty);
+            VariableType::Field { format: attrib }
+        }
+        Type::Array(arr) => {
+            let layout = ty_to_shader_variable(&arr.element_ty, set_idx, bind_idx);
+            VariableType::Array {
+                members_layout: Box::new(layout),
+                length: arr.nelement.map(|n| n as usize),
+            }
+        }
+        Type::Struct(s) => {
+            let variables = get_struct_variables(s, set_idx, bind_idx);
+            VariableType::Compound(variables)
+        }
+        _ => todo!(),
+    }
+}
+
 fn get_struct_variables(
     struc: &spirq::ty::StructType,
     set_idx: u32,
@@ -3965,18 +3988,23 @@ fn get_struct_variables(
             name: member.name.clone(),
             binding_set: set_idx as _,
             binding_index: bind_idx as _,
+            offset: member.offset.unwrap(),
             ty: match &member.ty {
-                Type::Scalar(_) | Type::Vector(_) | Type::Matrix(_) | Type::Array(_) => {
-                    VariableType::Field {
-                        offset: member.offset.unwrap(),
-                        format: ty_to_vertex_attribute_format(&member.ty),
+                Type::Scalar(_) | Type::Vector(_) | Type::Matrix(_) => VariableType::Field {
+                    format: ty_to_vertex_attribute_format(&member.ty),
+                },
+                Type::Array(arr) => {
+                    let layout = ty_to_shader_variable(&arr.element_ty, set_idx, bind_idx);
+                    VariableType::Array {
+                        members_layout: Box::new(layout),
+                        length: arr.nelement.map(|n| n as usize),
                     }
                 }
                 Type::Struct(struc) => {
                     let variables = get_struct_variables(struc, set_idx, bind_idx);
                     VariableType::Compound(variables)
                 }
-                _ => todo!(),
+                _ => todo!("get_struct_variables {:#?}", &member.ty),
             },
         });
     }

@@ -781,9 +781,27 @@ pub enum VariableType {
     Compound(Vec<ShaderVariable>),
     Field {
         format: VertexAttributeFormat,
-        offset: usize,
+    },
+    Array {
+        members_layout: Box<VariableType>,
+        length: Option<usize>,
     },
     Texture(StorageAccessMode),
+}
+impl VariableType {
+    pub fn size(&self) -> usize {
+        match self {
+            VariableType::Compound(mems) => mems.iter().map(|m| m.ty.size()).sum(),
+            VariableType::Field { format } => format.size_bytes(),
+            VariableType::Array {
+                members_layout,
+                length,
+            } => members_layout.size(),
+            VariableType::Texture(_) => {
+                todo!("Look up what's the size of a texture")
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -791,6 +809,7 @@ pub struct ShaderVariable {
     pub name: Option<String>,
     pub binding_set: usize,
     pub binding_index: usize,
+    pub offset: usize,
     pub ty: VariableType,
 }
 
@@ -1092,6 +1111,7 @@ impl VertexAttributeFormat {
             VertexAttributeFormat::Mat2x2 => 8 * 8,
             VertexAttributeFormat::Mat3x3 => 12 * 12,
             VertexAttributeFormat::Mat4x4 => 16 * 16,
+            _ => todo!(),
         }
     }
 }

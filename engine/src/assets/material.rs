@@ -275,7 +275,7 @@ impl Material {
             1,
             0,
         )?;
-        let user_buffer = if !scalar_parameter_writer.parameters_infos.is_empty() {
+        let user_buffer = if !scalar_parameter_writer.scalar_infos.is_empty() {
             Some(device.create_buffer(&BufferDescription {
                 label: Some("Material user buffer"),
                 usage_flags: BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM_BUFFER,

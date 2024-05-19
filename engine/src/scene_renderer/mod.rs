@@ -1,5 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec3};
+use glam::{vec4, Mat4, Vec3, Vec4};
 use mgpu::{
     AttachmentStoreOp, Binding, BindingSet, BindingSetDescription, BindingSetElement,
     BindingSetLayout, BindingSetLayoutInfo, BlitParams, Buffer, BufferDescription,
@@ -19,7 +19,7 @@ use crate::{
     include_spirv,
     math::{color::LinearColor, constants::UP, Transform},
     scene::Scene,
-    shader_parameter_writer::ScalarParameterWriter,
+    shader_parameter_writer::{ScalarParameterType, ScalarParameterWriter},
     Tick,
 };
 
@@ -225,6 +225,14 @@ pub(crate) struct GPUPerObjectDrawData {
     pub material_ty: [u32; 4],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Zeroable, Pod)]
+pub(crate) struct GPULightInfo {
+    pos_radius: Vec4,
+    light_params: Vec4,
+    ty: [u32; 4],
+}
+
 assert_size_does_not_exceed!(
     GPUPerObjectDrawData,
     mgpu::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES
@@ -332,7 +340,7 @@ impl SceneRenderer {
             let scene_lightning_parameter_buffer = device.create_buffer(&BufferDescription {
                 label: Some("Material user buffer"),
                 usage_flags: BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM_BUFFER,
-                size: scene_lightning_parameters_writer.binary_blob.len(),
+                size: 2048,
                 memory_domain: mgpu::MemoryDomain::Gpu,
             })?;
 
@@ -623,6 +631,16 @@ impl SceneRenderer {
             .write("eye_forward", pov.transform.forward().to_array());
         self.scene_lightning_parameters_writer
             .write("eye_location", pov.transform.location.to_array());
+        self.scene_lightning_parameters_writer
+            .write("light_count", ScalarParameterType::ScalarU32(1));
+        self.scene_lightning_parameters_writer.write_array(
+            "lights",
+            bytemuck::cast_slice(&[GPULightInfo {
+                pos_radius: vec4(-1.0, 1.0, 1.0, 10.0),
+                light_params: vec4(1.0, 0.0, 0.0, 0.0),
+                ty: [0; 4],
+            }]),
+        );
         self.scene_lightning_parameters_writer
             .update_buffer(device, current_frame.scene_lightning_parameter_buffer)?;
         Ok(())
