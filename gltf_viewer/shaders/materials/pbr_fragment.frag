@@ -26,7 +26,7 @@ MaterialAttributes fragment() {
     result.emissive = emissive_sample.xyz;
     result.emissive_strength = 1.0;
 
-    result.normal = TBN * normal_sample.xyz;
+    result.normal = get_tbn() * normal_sample.xyz;
     result.metallic = metallic_roughness_sample.x * metallic_factor;
     result.roughness = metallic_roughness_sample.y * roughness_factor;
     result.ambient_occlusion = occlusion_sample.x;

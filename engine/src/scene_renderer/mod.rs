@@ -229,7 +229,7 @@ pub(crate) struct GPUPerObjectDrawData {
 #[derive(Clone, Copy, Debug, Zeroable, Pod)]
 pub(crate) struct GPULightInfo {
     pos_radius: Vec4,
-    light_params: Vec4,
+    color_strength: Vec4,
     ty: [u32; 4],
 }
 
@@ -628,22 +628,37 @@ impl SceneRenderer {
                 self.scene_setup.ambient_color.g(),
             ],
         );
+
+        let lights = [
+            GPULightInfo {
+                pos_radius: vec4(-1.0, 1.0, 1.0, 10.0),
+                color_strength: vec4(1.0, 1.0, 1.0, 1.0),
+                ty: [0; 4],
+            },
+            GPULightInfo {
+                pos_radius: vec4(1.0, 1.0, 1.0, 10.0),
+                color_strength: vec4(0.0, 1.0, 0.0, 1.0),
+                ty: [0; 4],
+            },
+            GPULightInfo {
+                pos_radius: vec4(0.0, 0.0, 1.0, 10.0),
+                color_strength: vec4(0.0, 0.0, 1.0, 1.0),
+                ty: [0; 4],
+            },
+        ];
+
         self.scene_lightning_parameters_writer
             .write("ambient_intensity", self.scene_setup.ambient_intensity);
         self.scene_lightning_parameters_writer
             .write("eye_forward", pov.transform.forward().to_array());
         self.scene_lightning_parameters_writer
             .write("eye_location", pov.transform.location.to_array());
-        self.scene_lightning_parameters_writer
-            .write("light_count", ScalarParameterType::ScalarU32(1));
-        self.scene_lightning_parameters_writer.write_array(
-            "lights",
-            bytemuck::cast_slice(&[GPULightInfo {
-                pos_radius: vec4(-1.0, 1.0, 1.0, 10.0),
-                light_params: vec4(1.0, 0.0, 0.0, 0.0),
-                ty: [0; 4],
-            }]),
+        self.scene_lightning_parameters_writer.write(
+            "light_count",
+            ScalarParameterType::ScalarU32(lights.len() as _),
         );
+        self.scene_lightning_parameters_writer
+            .write_array("lights", bytemuck::cast_slice(&lights));
         self.scene_lightning_parameters_writer
             .update_buffer(device, current_frame.scene_lightning_parameter_buffer)?;
         Ok(())

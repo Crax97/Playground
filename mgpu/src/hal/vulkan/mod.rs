@@ -368,17 +368,6 @@ impl Hal for VulkanHal {
             ([].as_slice(), [].as_slice())
         };
 
-        let mut present_timeline_submit_info =
-            vk::TimelineSemaphoreSubmitInfo::default().wait_semaphore_values(values);
-        let work_done = [current_frame.work_ended_semaphore];
-        graphics_queue_submit.push(
-            vk::SubmitInfo::default()
-                .wait_dst_stage_mask(&all_stages[0..1])
-                .wait_semaphores(wait_semaphores)
-                .signal_semaphores(&work_done)
-                .push_next(&mut present_timeline_submit_info),
-        );
-
         {
             unsafe {
                 device.queue_submit(
@@ -896,6 +885,18 @@ impl Hal for VulkanHal {
     unsafe fn present_image(&self, swapchain_id: u64, image: Image) -> MgpuResult<()> {
         let mut current_frame = self.frames_in_flight.lock().unwrap();
         let current_frame = current_frame.current_mut();
+
+        // Wait for all work on the graphics queue to be over
+        // TODO: Wait for compute/async copy queues too?
+        let work_done = [current_frame.work_ended_semaphore];
+        let submits = [vk::SubmitInfo::default().signal_semaphores(&work_done)];
+        unsafe {
+            self.logical_device.handle.queue_submit(
+                self.logical_device.graphics_queue.handle,
+                &submits,
+                vk::Fence::null(),
+            )?;
+        }
         let swapchain = unsafe { Handle::from_u64(swapchain_id) };
         let mut images = self.resolver.get_mut::<VulkanImage>();
         let mut swapchains = self.resolver.get_mut::<VulkanSwapchain>();

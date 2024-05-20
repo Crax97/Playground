@@ -46,6 +46,9 @@ pub fn read_cubemap_from_hdr(
         mvp: Mat4,
         v_roughness: [f32; 4],
     }
+
+    let mut all_image_views = vec![];
+
     let cubemap = device.create_image(&ImageDescription {
         label: params.label,
         usage_flags: ImageUsageFlags::COLOR_ATTACHMENT | ImageUsageFlags::SAMPLED,
@@ -71,6 +74,7 @@ pub fn read_cubemap_from_hdr(
         aspect: mgpu::ImageAspect::Color,
         image_subresource: cubemap.whole_subresource(),
     })?;
+
     let mips = Texture::compute_num_mips(params.extents.width, params.extents.height);
     let cubemap_diffuse = device.create_image(&ImageDescription {
         label: params.label,
@@ -112,6 +116,8 @@ pub fn read_cubemap_from_hdr(
             })
         })
         .collect::<MgpuResult<Vec<_>>>()?;
+
+    all_image_views.extend(image_slices_views_cubemap.iter().cloned());
 
     let vertex_shader = device.create_shader_module(&ShaderModuleDescription {
         label: None,
@@ -341,6 +347,8 @@ pub fn read_cubemap_from_hdr(
                 })
             })
             .collect::<MgpuResult<Vec<_>>>()?;
+
+        all_image_views.extend(image_slices_views_cubemap_diffuse.iter().cloned());
         for i in 0..6 {
             let target = image_slices_views_cubemap_diffuse[i];
             let mut render_pass = command_recorder.begin_render_pass(&RenderPassDescription {
@@ -394,17 +402,20 @@ pub fn read_cubemap_from_hdr(
         }
     }
     command_recorder.submit()?;
+    device.submit()?;
     // device.generate_mip_chain(cubemap_diffuse, mgpu::FilterMode::Linear)?;
 
-    // device.destroy_graphics_pipeline(pipeline)?;
-    // device.destroy_binding_set(bs)?;
-    // device.destroy_sampler(sampler)?;
-    // device.destroy_shader_module(fragment_shader)?;
-    // device.destroy_shader_module(vertex_shader)?;
+    device.destroy_graphics_pipeline(pipeline_cubegen)?;
+    device.destroy_graphics_pipeline(pipeline_prefilter)?;
+    device.destroy_binding_set(bs_cubegen)?;
+    device.destroy_binding_set(bs_prefilter)?;
+    device.destroy_sampler(sampler)?;
+    device.destroy_shader_module(fragment_shader)?;
+    device.destroy_shader_module(vertex_shader)?;
 
-    // for image_slice in image_slices_views {
-    //     device.destroy_image_view(image_slice)?;
-    // }
+    for image_slice in all_image_views {
+        device.destroy_image_view(image_slice)?;
+    }
 
     Ok((
         Texture {

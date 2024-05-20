@@ -179,7 +179,7 @@ impl ScalarParameterWriter {
                     debug_assert!(value.len() >= layout_size * length);
                 }
 
-                let num_bytes = length.unwrap_or(1) * layout_size;
+                let num_bytes = length.unwrap_or(value.len() / layout_size) * layout_size;
                 let final_write_offset = parameter.offset + num_bytes;
                 if self.binary_blob.len() < final_write_offset {
                     self.binary_blob.resize(final_write_offset, 0);

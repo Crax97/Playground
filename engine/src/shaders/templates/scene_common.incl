@@ -15,6 +15,15 @@ struct MaterialAttributes {
     float lit;
 };
 
+layout(push_constant, std140) uniform ObjectData {
+    mat4 _model;
+    uint material_id;
+};
+
+mat4 get_model_matrix() {
+    return _model;
+}
+
 #define DEFINE_USER_TEXTURE(TYPE, NAME, BINDING) \
     layout(set = 1, binding = BINDING  * 2 + 1) uniform TYPE NAME; \
     layout(set = 1, binding = BINDING  * 2 + 2) uniform sampler NAME##_sampler; \
