@@ -760,6 +760,10 @@ impl Device {
         self.hal.destroy_graphics_pipeline(graphics_pipeline)
     }
 
+    pub fn destroy_compute_pipeline(&self, pipeline: ComputePipeline) -> MgpuResult<()> {
+        self.hal.destroy_compute_pipeline(pipeline)
+    }
+
     pub fn destroy_shader_module(&self, shader_module: ShaderModule) -> MgpuResult<()> {
         self.hal.destroy_shader_module(shader_module)
     }

@@ -138,6 +138,7 @@ impl App for GltfViewerApplication {
             asset_map.get(&CUBE_MESH_HANDLE).unwrap(),
             &sampler_allocator,
         )?;
+
         let env_map = asset_map.add(cube_hdr, "textures.hdr.pisa");
         let env_diffuse = asset_map.add(env_diffuse, "textures.hdr.pisa-diffuse");
 
@@ -177,7 +178,7 @@ impl App for GltfViewerApplication {
         let mut scene_renderer = SceneRenderer::new(&context.device, &asset_map)?;
         scene_renderer
             .get_scene_setup_mut()
-            .set_diffuse_env_map(env_diffuse);
+            .set_diffuse_env_map(env_diffuse, env_map);
         Ok(Self {
             asset_map,
             scene,

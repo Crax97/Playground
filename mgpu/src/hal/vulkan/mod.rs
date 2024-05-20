@@ -781,6 +781,9 @@ impl Hal for VulkanHal {
         self.resolver.remove(graphics_pipeline)
     }
 
+    fn destroy_compute_pipeline(&self, pipeline: ComputePipeline) -> MgpuResult<()> {
+        self.resolver.remove(pipeline)
+    }
     unsafe fn request_oneshot_command_recorder(
         &self,
         queue_type: QueueType,
@@ -3446,15 +3449,15 @@ impl VulkanHal {
         };
         let format = |fmt: SpirqImageFormat| match fmt {
             SpirqImageFormat::Unknown => unreachable!(),
-            SpirqImageFormat::Rgba32f => todo!(),
-            SpirqImageFormat::Rgba16f => todo!(),
-            SpirqImageFormat::R32f => todo!(),
+            SpirqImageFormat::Rgba32f => ImageFormat::Rgba32f,
+            SpirqImageFormat::Rgba16f => ImageFormat::Rgba16f,
+            SpirqImageFormat::R32f => ImageFormat::R32f,
             SpirqImageFormat::Rgba8 => ImageFormat::Rgba8,
             SpirqImageFormat::Rgba8Snorm => todo!(),
-            SpirqImageFormat::Rg32f => todo!(),
-            SpirqImageFormat::Rg16f => todo!(),
+            SpirqImageFormat::Rg32f => ImageFormat::Rg32f,
+            SpirqImageFormat::Rg16f => ImageFormat::Rg16f,
             SpirqImageFormat::R11fG11fB10f => todo!(),
-            SpirqImageFormat::R16f => todo!(),
+            SpirqImageFormat::R16f => ImageFormat::R16f,
             SpirqImageFormat::Rgba16 => todo!(),
             SpirqImageFormat::Rgb10A2 => todo!(),
             SpirqImageFormat::Rg16 => todo!(),

@@ -4,11 +4,12 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 use mgpu::{
     Binding, BindingSetDescription, BindingSetElement, BindingSetLayout, BindingSetLayoutInfo,
-    DepthStencilState, Device, Extents2D, Extents3D, FragmentStageInfo, Graphics,
-    GraphicsPipelineDescription, ImageCreationFlags, ImageDescription, ImageFormat,
-    ImageUsageFlags, ImageViewDescription, MgpuResult, PushConstantInfo, Rect2D,
-    RenderPassDescription, RenderPassFlags, RenderTarget, RenderTargetInfo, SampleCount,
-    SamplerDescription, ShaderModuleDescription, ShaderStageFlags, VertexStageInfo,
+    ComputePassDescription, ComputePipelineDescription, DepthStencilState, Device, Extents2D,
+    Extents3D, FragmentStageInfo, Graphics, GraphicsPipelineDescription, ImageCreationFlags,
+    ImageDescription, ImageFormat, ImageUsageFlags, ImageViewDescription, MgpuResult,
+    PushConstantInfo, Rect2D, RenderPassDescription, RenderPassFlags, RenderTarget,
+    RenderTargetInfo, SampleCount, SamplerDescription, ShaderModuleDescription, ShaderStageFlags,
+    VertexStageInfo,
 };
 
 use crate::{
@@ -24,6 +25,7 @@ use crate::{
 const SIMPLE_VS: &[u8] = include_spirv!("../spirv/simple.vert.spv");
 const GEN_CUBEMAP_FS: &[u8] = include_spirv!("../spirv/generate_cubemap.frag.spv");
 const PREFILTER_ENV_FS: &[u8] = include_spirv!("../spirv/prefilter_env_map.frag.spv");
+const LUT_SHADER_SOURCE: &[u8] = include_spirv!("../spirv/gen_ibl_env_lut.comp.spv");
 
 pub struct CreateCubemapParams<'a> {
     pub label: Option<&'a str>,
@@ -431,4 +433,105 @@ pub fn read_cubemap_from_hdr(
             sampler: sampler_allocator.get(device, &TextureSamplerConfiguration::default()),
         },
     ))
+}
+
+pub fn generate_ibl_lut(
+    device: &Device,
+    sampler_allocator: &SamplerAllocator,
+) -> anyhow::Result<Texture> {
+    let image = device.create_image(&ImageDescription {
+        label: Some("BRDF Env LUT"),
+        usage_flags: ImageUsageFlags::SAMPLED | ImageUsageFlags::STORAGE,
+        creation_flags: ImageCreationFlags::default(),
+        extents: Extents3D {
+            width: 128,
+            height: 128,
+            depth: 1,
+        },
+        dimension: mgpu::ImageDimension::D2,
+        mips: 1.try_into().unwrap(),
+        array_layers: 1.try_into().unwrap(),
+        samples: SampleCount::One,
+        format: ImageFormat::Rg16f,
+        memory_domain: mgpu::MemoryDomain::Gpu,
+    })?;
+    let view = device.create_image_view(&ImageViewDescription {
+        label: Some("BRDF Env LUT View"),
+        image,
+        format: image.format(),
+        view_ty: mgpu::ImageViewType::D2,
+        aspect: mgpu::ImageAspect::Color,
+        image_subresource: image.whole_subresource(),
+    })?;
+
+    let layout = BindingSetLayout {
+        binding_set_elements: &[BindingSetElement {
+            binding: 0,
+            array_length: 1,
+            ty: mgpu::BindingSetElementKind::StorageImage {
+                format: image.format(),
+                access_mode: mgpu::StorageAccessMode::ReadWrite,
+            },
+            shader_stage_flags: ShaderStageFlags::COMPUTE,
+        }],
+    };
+
+    let binding_set = device.create_binding_set(
+        &BindingSetDescription {
+            label: Some("LUT Gen BS"),
+            bindings: &[Binding {
+                binding: 0,
+                ty: mgpu::BindingType::StorageImage {
+                    view,
+                    access_mode: mgpu::StorageAccessMode::ReadWrite,
+                },
+                visibility: ShaderStageFlags::COMPUTE,
+            }],
+        },
+        &layout,
+    )?;
+
+    let lut_shader = device.create_shader_module(&ShaderModuleDescription {
+        label: Some("LUT shader"),
+        source: bytemuck::cast_slice(LUT_SHADER_SOURCE),
+    })?;
+
+    let pipeline = device.create_compute_pipeline(&ComputePipelineDescription {
+        label: Some("Gen LUT"),
+        shader: lut_shader,
+        entry_point: "main",
+        binding_set_layouts: &[BindingSetLayoutInfo {
+            set: 0,
+            layout: &layout,
+        }],
+        push_constant_info: None,
+    })?;
+
+    let mut command_recorder = device.create_command_recorder::<Graphics>();
+    {
+        let mut pass = command_recorder.begin_compute_pass(&ComputePassDescription {
+            label: Some("Generate LUT"),
+        });
+
+        let dispatch_x = image.extents().width / 16;
+        let dispatch_y = image.extents().height / 8;
+
+        pass.set_binding_sets(&[&binding_set]);
+        pass.set_pipeline(pipeline);
+        pass.dispatch(dispatch_x, dispatch_y, 1)?;
+    }
+
+    command_recorder.submit()?;
+
+    device.submit()?;
+
+    device.destroy_compute_pipeline(pipeline)?;
+    device.destroy_shader_module(lut_shader)?;
+    device.destroy_binding_set(binding_set)?;
+    Ok(Texture {
+        view,
+        image,
+        sampler_configuration: TextureSamplerConfiguration::default(),
+        sampler: sampler_allocator.get(device, &TextureSamplerConfiguration::default()),
+    })
 }

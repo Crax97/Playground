@@ -1,0 +1,33 @@
+#ifndef PBR_INCL
+#define PBR_INCL
+
+#include "commons.incl"
+
+float chi(float x) {
+    return x > 0 ? 1.0 : 0.0;
+}
+
+float trowbridge_reitz_ggx(float aa, float dot_n_h) {
+    // gltf uses top = aa * chi(dot_n_h)
+    // epic uses top = aa
+    float top = aa;
+    float bottom = (dot_n_h * dot_n_h * (aa - 1.0) + 1.0);
+    return top / (PI * bottom * bottom);
+}
+
+// k = (a + 1) ^ 2 / 8 if direct, a^2 / 2 if IBL
+float ggx_smith(float k, float n_dot_l, float n_dot_v) {
+    float GGX1 = n_dot_v / max(n_dot_v * (1.0 - k) + k, 0.01);
+    float GGX2 = n_dot_l / max(n_dot_l * (1.0 - k) + k, 0.01);
+    float GGX = GGX1 * GGX2;
+    
+    return GGX;
+
+}
+
+
+vec3 fresnel(float cos_theta, vec3 f0, float roughness) {
+    return f0 + (1.0 - f0) * pow(1.0 - cos_theta, 5.0);
+}
+
+#endif

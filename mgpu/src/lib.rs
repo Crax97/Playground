@@ -138,6 +138,9 @@ pub enum ImageFormat {
     R8Signed,
     Rg8Signed,
     Rgba8Signed,
+    R16f,
+    Rg16f,
+    Rgba16f,
     Bgra8,
     Depth32,
 }
@@ -146,6 +149,9 @@ impl ImageFormat {
         use ImageFormat::*;
         match self {
             Unknown => 0,
+            R16f => 2,
+            Rg16f => 4,
+            Rgba16f => 8,
             R32f => 4,
             Rg32f => 8,
             Rgba32f => 16,
@@ -828,7 +834,7 @@ pub struct ShaderVariable {
     pub ty: VariableType,
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 pub struct ShaderModuleLayout {
     pub entry_points: Vec<String>,
     pub inputs: Vec<ShaderAttribute>,
@@ -956,6 +962,10 @@ impl Image {
 
     pub fn mips(&self) -> u32 {
         self.num_mips.get()
+    }
+
+    pub fn format(&self) -> ImageFormat {
+        self.format
     }
 }
 

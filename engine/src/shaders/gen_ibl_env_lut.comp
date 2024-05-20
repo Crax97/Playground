@@ -1,0 +1,55 @@
+#version 460
+
+#include "commons.incl"
+#include "hammersley.incl"
+#include "importance_sampling.incl"
+#include "pbr.incl"
+
+layout(set = 0, binding = 0, rg16f) uniform image2D lut_target; 
+
+// Karis 2014
+vec2 integrate_brtf(float r, float n_dot_v) {
+    const vec3 N = vec3(0.0, 0.0, 1.0);
+
+    vec3 V;
+    V.x = sqrt(1.0 - n_dot_v * n_dot_v);
+    V.y = 0.0;
+    V.z = n_dot_v;
+
+    float A = 0.0;
+    float B = 0.0;
+    const uint samples = 1024;
+    for (uint i = 0u; i < samples; i ++) {
+        vec2 Xi = hammersley(i, samples);
+        vec3 H = importance_sample_ggx(Xi, r, N);
+        vec3 L = -reflect(V, H);
+        
+        float n_dot_l = saturate(L.z);
+        float n_dot_h = saturate(H.z);
+        float v_dot_h = saturate(dot(V, H));
+        
+        if (n_dot_l > 0.) {
+            float k = (r * r) / 2.0;
+            float G = ggx_smith(k, n_dot_v, n_dot_l);
+            float G_vis = G * v_dot_h / (n_dot_h * n_dot_v);
+            float Fc = pow(1. - v_dot_h, 5.);
+            A += (1 - Fc) * G_vis;
+            B += Fc * G_vis;
+        }
+    }
+    
+    return vec2(A, B) / float(samples);
+}
+
+layout(local_size_x = 16, local_size_y = 8, local_size_z = 1) in;
+void main() {
+    uvec2 invocation_id = gl_GlobalInvocationID.xy;    
+    uvec2 tex_size = imageSize(lut_target);
+    if (invocation_id.x >= tex_size.x || invocation_id.y >= tex_size.y) {
+        return;
+    }
+    
+    vec2 uv = vec2(invocation_id + 1) / vec2(tex_size);
+    vec2 result = integrate_brtf(uv.x, uv.y);
+    imageStore(lut_target, ivec2(invocation_id), vec4(result, 0.0, 0.0));
+}

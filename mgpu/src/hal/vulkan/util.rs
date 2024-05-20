@@ -51,6 +51,9 @@ impl ToVk for ImageFormat {
             ImageFormat::R8Signed => vk::Format::R8_SNORM,
             ImageFormat::Rg8Signed => vk::Format::R8G8_SNORM,
             ImageFormat::Rgba8Signed => vk::Format::R8G8B8A8_SNORM,
+            ImageFormat::R16f => vk::Format::R16_SFLOAT,
+            ImageFormat::Rg16f => vk::Format::R16G16_SFLOAT,
+            ImageFormat::Rgba16f => vk::Format::R16G16B16A16_SFLOAT,
         }
     }
 }
@@ -71,6 +74,9 @@ impl FromVk for vk::Format {
             vk::Format::R8_SNORM => ImageFormat::R8Signed,
             vk::Format::R8G8_SNORM => ImageFormat::Rg8Signed,
             vk::Format::R8G8B8A8_SNORM => ImageFormat::Rgba8Signed,
+            vk::Format::R16_SFLOAT => ImageFormat::R16f,
+            vk::Format::R16G16_SFLOAT => ImageFormat::Rg16f,
+            vk::Format::R16G16B16A16_SFLOAT => ImageFormat::Rgba16f,
             _ => unreachable!("Format not known {:?}", self),
         }
     }

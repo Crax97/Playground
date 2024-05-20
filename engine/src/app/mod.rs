@@ -20,8 +20,9 @@ use crate::{
         mesh::{Mesh, MeshDescription},
         texture::{Texture, TextureDescription, TextureSamplerConfiguration, TextureUsageFlags},
     },
-    constants::{CUBE_MESH_HANDLE, DEFAULT_ENV_WHITE_HANDLE},
+    constants::{BRDF_LUT_HANDLE, CUBE_MESH_HANDLE, DEFAULT_ENV_WHITE_HANDLE},
     core::Time,
+    cubemap_utils,
     fps_limiter::FpsLimiter,
     input::InputState,
     sampler_allocator::{self, SamplerAllocator},
@@ -260,6 +261,10 @@ pub fn asset_map_with_defaults(
     map.add(
         create_default_env(device, sampler_allocator)?,
         DEFAULT_ENV_WHITE_HANDLE.identifier().clone(),
+    );
+    map.add(
+        cubemap_utils::generate_ibl_lut(device, sampler_allocator)?,
+        BRDF_LUT_HANDLE.identifier().clone(),
     );
     Ok(map)
 }

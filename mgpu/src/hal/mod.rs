@@ -362,6 +362,7 @@ pub(crate) trait Hal: Send + Sync {
         compute_pipeline: ComputePipeline,
     ) -> MgpuResult<ComputePipelineLayout>;
     fn destroy_graphics_pipeline(&self, graphics_pipeline: GraphicsPipeline) -> MgpuResult<()>;
+    fn destroy_compute_pipeline(&self, pipeline: ComputePipeline) -> MgpuResult<()>;
 
     fn create_shader_module(
         &self,

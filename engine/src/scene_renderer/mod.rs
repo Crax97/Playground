@@ -15,9 +15,10 @@ use crate::{
     assert_size_does_not_exceed,
     asset_map::{AssetHandle, AssetMap},
     assets::{shader::Shader, texture::Texture},
-    constants::DEFAULT_ENV_WHITE_HANDLE,
-    include_spirv,
+    constants::{BRDF_LUT_HANDLE, DEFAULT_ENV_WHITE_HANDLE},
+    cubemap_utils, include_spirv,
     math::{color::LinearColor, constants::UP, Transform},
+    sampler_allocator::SamplerAllocator,
     scene::Scene,
     shader_parameter_writer::{ScalarParameterType, ScalarParameterWriter},
     Tick,
@@ -29,7 +30,6 @@ const SCENE_LIGHTNING_FRAGMENT: &[u8] = include_spirv!("../spirv/scene_lightning
 pub struct SceneRenderer {
     frames: Vec<FrameData>,
     clear_color: LinearColor,
-
     quad_vertex_shader: ShaderModule,
     scene_lightning_fragment: ShaderModule,
 
@@ -46,6 +46,8 @@ pub struct SceneSetup {
     pub ambient_intensity: f32,
 
     pub diffuse_environment_map: AssetHandle<Texture>,
+    pub environment_map: AssetHandle<Texture>,
+    pub brdf_lut: AssetHandle<Texture>,
 
     pub binding_set: BindingSet,
 
@@ -67,6 +69,30 @@ impl SceneSetup {
                     ty: mgpu::BindingSetElementKind::Sampler,
                     shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
                 },
+                BindingSetElement {
+                    binding: 2,
+                    array_length: 1,
+                    ty: mgpu::BindingSetElementKind::SampledImage,
+                    shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
+                },
+                BindingSetElement {
+                    binding: 3,
+                    array_length: 1,
+                    ty: mgpu::BindingSetElementKind::Sampler,
+                    shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
+                },
+                BindingSetElement {
+                    binding: 4,
+                    array_length: 1,
+                    ty: mgpu::BindingSetElementKind::SampledImage,
+                    shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
+                },
+                BindingSetElement {
+                    binding: 5,
+                    array_length: 1,
+                    ty: mgpu::BindingSetElementKind::Sampler,
+                    shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
+                },
             ],
         };
 
@@ -75,6 +101,7 @@ impl SceneSetup {
 
     fn new(device: &Device, asset_map: &AssetMap) -> anyhow::Result<Self> {
         let default_env = asset_map.get(&DEFAULT_ENV_WHITE_HANDLE).unwrap();
+        let brdf_lut = asset_map.get(&BRDF_LUT_HANDLE).unwrap();
         let binding_set = device.create_binding_set(
             &BindingSetDescription {
                 label: Some("Scene binding set"),
@@ -91,6 +118,30 @@ impl SceneSetup {
                         ty: mgpu::BindingType::Sampler(default_env.sampler),
                         visibility: ShaderStageFlags::ALL_GRAPHICS,
                     },
+                    Binding {
+                        binding: 2,
+                        ty: mgpu::BindingType::SampledImage {
+                            view: default_env.view,
+                        },
+                        visibility: ShaderStageFlags::ALL_GRAPHICS,
+                    },
+                    Binding {
+                        binding: 3,
+                        ty: mgpu::BindingType::Sampler(default_env.sampler),
+                        visibility: ShaderStageFlags::ALL_GRAPHICS,
+                    },
+                    Binding {
+                        binding: 4,
+                        ty: mgpu::BindingType::SampledImage {
+                            view: brdf_lut.view,
+                        },
+                        visibility: ShaderStageFlags::ALL_GRAPHICS,
+                    },
+                    Binding {
+                        binding: 5,
+                        ty: mgpu::BindingType::Sampler(brdf_lut.sampler),
+                        visibility: ShaderStageFlags::ALL_GRAPHICS,
+                    },
                 ],
             },
             Self::layout(),
@@ -100,13 +151,20 @@ impl SceneSetup {
             ambient_color: LinearColor::new(0.3, 0.3, 0.3, 1.0),
             ambient_intensity: 1.0,
             diffuse_environment_map: DEFAULT_ENV_WHITE_HANDLE.clone(),
+            environment_map: DEFAULT_ENV_WHITE_HANDLE.clone(),
+            brdf_lut: BRDF_LUT_HANDLE.clone(),
             binding_set,
             needs_new_binding_set: false,
         })
     }
 
-    pub fn set_diffuse_env_map(&mut self, new_env_map: AssetHandle<Texture>) {
-        self.diffuse_environment_map = new_env_map;
+    pub fn set_diffuse_env_map(
+        &mut self,
+        new_diffuse_env_map: AssetHandle<Texture>,
+        new_env_map: AssetHandle<Texture>,
+    ) {
+        self.diffuse_environment_map = new_diffuse_env_map;
+        self.environment_map = new_env_map;
         self.needs_new_binding_set = true;
     }
 
@@ -116,6 +174,10 @@ impl SceneSetup {
             let diffuse_env_map = asset_map
                 .get(&self.diffuse_environment_map)
                 .expect("Invalid handle");
+            let env_map = asset_map
+                .get(&self.environment_map)
+                .expect("Invalid handle");
+            let brdf_lut = asset_map.get(&BRDF_LUT_HANDLE).unwrap();
             let new_binding_set = device.create_binding_set(
                 &BindingSetDescription {
                     label: Some("Scene binding set"),
@@ -130,6 +192,28 @@ impl SceneSetup {
                         Binding {
                             binding: 1,
                             ty: mgpu::BindingType::Sampler(diffuse_env_map.sampler),
+                            visibility: ShaderStageFlags::ALL_GRAPHICS,
+                        },
+                        Binding {
+                            binding: 2,
+                            ty: mgpu::BindingType::SampledImage { view: env_map.view },
+                            visibility: ShaderStageFlags::ALL_GRAPHICS,
+                        },
+                        Binding {
+                            binding: 3,
+                            ty: mgpu::BindingType::Sampler(env_map.sampler),
+                            visibility: ShaderStageFlags::ALL_GRAPHICS,
+                        },
+                        Binding {
+                            binding: 4,
+                            ty: mgpu::BindingType::SampledImage {
+                                view: brdf_lut.view,
+                            },
+                            visibility: ShaderStageFlags::ALL_GRAPHICS,
+                        },
+                        Binding {
+                            binding: 5,
+                            ty: mgpu::BindingType::Sampler(brdf_lut.sampler),
                             visibility: ShaderStageFlags::ALL_GRAPHICS,
                         },
                     ],
@@ -441,6 +525,7 @@ impl SceneRenderer {
                 push_constant_info: None,
             })?;
 
+        let scene_setup = SceneSetup::new(device, asset_map);
         Ok(Self {
             frames: frame_data,
             clear_color: LinearColor::VIOLET,
@@ -448,9 +533,8 @@ impl SceneRenderer {
             quad_vertex_shader,
             scene_lightning_fragment,
             scene_lightning_pipeline,
-
             scene_lightning_parameters_writer,
-            scene_setup: SceneSetup::new(device, asset_map)?,
+            scene_setup: scene_setup?,
 
             current_frame: 0,
         })

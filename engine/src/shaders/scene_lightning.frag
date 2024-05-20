@@ -1,6 +1,7 @@
 #version 460
 
 #include "commons.incl"
+#include "pbr.incl"
 
 #define F0 0.04
 
@@ -33,9 +34,12 @@ layout(set = 1, binding = 1, std140) readonly buffer SceneParameters {
     LightInfo lights[];
     
 };
- layout(set = 2, binding = 0) uniform textureCube diffuse_env_map;
- layout(set = 2, binding = 1) uniform sampler diffuse_env_map_sampler;
-
+layout(set = 2, binding = 0) uniform textureCube diffuse_env_map;
+layout(set = 2, binding = 1) uniform sampler diffuse_env_map_sampler;
+layout(set = 2, binding = 2) uniform textureCube env_map;
+layout(set = 2, binding = 3) uniform sampler env_map_sampler;
+layout(set = 2, binding = 4) uniform texture2D brdf_lut;
+layout(set = 2, binding = 5) uniform sampler brdf_lut_sampler;
 layout(location = 0) in vec2 uv;
 
 layout(location = 0) out vec4 color;
@@ -70,38 +74,12 @@ GBufferData extract_gbuffer() {
     return data;
 }
 
-float chi(float x) {
-    return x > 0 ? 1.0 : 0.0;
-}
 
-float trowbridge_reitz_ggx(float aa, float dot_n_h) {
-    // gltf uses top = aa * chi(dot_n_h)
-    // epic uses top = aa
-    float top = aa;
-    float bottom = (dot_n_h * dot_n_h * (aa - 1.0) + 1.0);
-    return top / (PI * bottom * bottom);
-}
-
-// k = (a + 1) ^ 2 / 8 if direct, a^2 / 2 if IBL
-float visibility_smith_mask_shadowing(float k, float n_dot_l, float n_dot_v) {
-    float GGX1 = n_dot_v / max(n_dot_v * (1.0 - k) + k, 0.01);
-    float GGX2 = n_dot_l / max(n_dot_l * (1.0 - k) + k, 0.01);
-    float GGX = GGX1 * GGX2;
-    
-    return GGX;
-
-}
-
-
-vec3 fresnel(float cos_theta, vec3 f0, float roughness) {
-    return f0 + (1.0 - f0) * pow(1.0 - cos_theta, 5.0);
-}
 
 // Implements the glTF brdf described in https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#appendix-b-brdf-implementation
-vec3 light_contribute(vec3 eye_direction, vec3 light_direction, vec3 half_view_vector, GBufferData data) {
+vec3 light_contribute(vec3 eye_direction, vec3 light_direction, vec3 half_view_vector, vec3 f0, GBufferData data) {
 
     vec3 c_diff = mix(data.color.rgb, vec3(0.0), data.metallic);
-    vec3 f0 = mix(vec3(F0), data.color.rgb, data.metallic);
     float aa = data.roughness * data.roughness;
     
     float n_dot_h = saturate(dot(data.normal, half_view_vector));
@@ -114,17 +92,26 @@ vec3 light_contribute(vec3 eye_direction, vec3 light_direction, vec3 half_view_v
     vec3 D = (vec3(1.0) - F) * data.metallic;
     vec3 v_diffuse = D * c_diff / PI; // * diffuse_ambient * data.ao;
     vec3 v_specular = F * trowbridge_reitz_ggx(aa, n_dot_h)
-    * visibility_smith_mask_shadowing(k, n_dot_l, n_dot_v) * vis_factor;
-    // vec3 v_specular = F * trowbridge_reitz_ggx(aa, n_dot_h)
-    // * visibility_smith_mask_shadowing(k, n_dot_l, n_dot_v) * vis_factor;
+    * ggx_smith(k, n_dot_l, n_dot_v) * vis_factor;
     
     return (v_diffuse + v_specular) * n_dot_l;
 }
 
 void main() {
     GBufferData data = extract_gbuffer();
+
+    vec3 view_dir = normalize(eye_location - data.world_position); 
+    vec3 f0 = mix(vec3(F0), data.color.rgb, data.metallic);
+    vec3 F = fresnel(saturate(dot(data.normal, view_dir)), f0, data.roughness);
+    vec3 d_fact = (1.0 - F) * data.metallic;
+    vec3 R = reflect(-view_dir, data.normal);
+
     vec3 diffuse_sample_dir = vec3(1, -1, 1) * data.normal;
-    vec4 diffuse_ambient = textureLod(samplerCube(diffuse_env_map, diffuse_env_map_sampler), diffuse_sample_dir,  data.roughness * 9.0);
+    vec3 diffuse_irradiance = textureLod(samplerCube(diffuse_env_map, diffuse_env_map_sampler), diffuse_sample_dir,  data.roughness * 9.0).rgb;
+    vec3 prefiltered = texture(samplerCube(env_map, env_map_sampler), R).rgb;
+    vec2 env_brdf = texture(sampler2D(brdf_lut, brdf_lut_sampler), vec2(saturate(dot(data.normal, view_dir)), data.roughness)).xy;
+    vec3 ibl_spec = prefiltered * (F * env_brdf.x + env_brdf.y);
+    vec3 diffuse_ambient = (d_fact * diffuse_irradiance * data.color.rgb + ibl_spec) * data.ao;
 
     vec3 light_0 = vec3(0.0);
     if (data.lit > 0.0) {
@@ -135,13 +122,12 @@ void main() {
             float light_strength = lights[i].color_strength.w;
 
             vec3 light_dir = normalize(light_pos - data.world_position);
-            vec3 view_dir = normalize(eye_location - data.world_position); 
             vec3 half_view_vector = normalize(light_dir + view_dir);
             
             float dist = distance(light_pos, data.world_position);
             float light_falloff = pow(saturate(1.0 - pow(dist / light_radius, 4)), 2) / (dist * dist + 1.0);
 
-            light_0 += light_contribute(view_dir, light_dir,  half_view_vector, data)
+            light_0 += light_contribute(view_dir, light_dir,  half_view_vector, f0, data)
                 * light_color * light_falloff;
         }
     }

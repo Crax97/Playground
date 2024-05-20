@@ -28,6 +28,9 @@ pub mod constants {
 
     pub const DEFAULT_ENV_WHITE_HANDLE: AssetHandle<Texture> =
         AssetHandle::new_const(ImmutableString::new("textures.default-env"));
+
+    pub const BRDF_LUT_HANDLE: AssetHandle<Texture> =
+        AssetHandle::new_const(ImmutableString::new("textures.brdf-lut"));
 }
 
 /*
