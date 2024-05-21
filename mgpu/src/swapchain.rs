@@ -5,6 +5,7 @@ use crate::{Device, Extents2D, Image, ImageFormat, ImageView, MgpuResult, Presen
 pub struct SwapchainCreationInfo<'a> {
     pub display_handle: DisplayHandle<'a>,
     pub window_handle: WindowHandle<'a>,
+    pub swapchain_extents: Extents2D,
     pub preferred_format: Option<ImageFormat>,
     pub preferred_present_mode: Option<PresentMode>,
 }

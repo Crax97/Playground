@@ -15,7 +15,7 @@ use crate::{
         },
         Hal,
     },
-    ImageFormat, MgpuResult, PresentMode, SwapchainCreationInfo, SwapchainImage,
+    Extents2D, ImageFormat, MgpuResult, PresentMode, SwapchainCreationInfo, SwapchainImage,
 };
 
 use super::{FramesInFlight, VulkanHal, VulkanHalResult};
@@ -33,6 +33,7 @@ pub struct VulkanSwapchain {
     pub(crate) frames_in_flight: Arc<Mutex<FramesInFlight>>,
     pub(crate) acquire_fence: vk::Fence,
     pub(crate) current_image_index: Option<u32>,
+    pub(crate) extents: Extents2D,
 }
 
 // Access is synchronized through RwLock
@@ -60,6 +61,7 @@ struct SwapchainRecreateParams<'a> {
     preferred_format: Option<ImageFormat>,
     preferred_present_mode: PresentMode,
     old_swapchain: vk::SwapchainKHR,
+    extents: Extents2D,
 }
 
 #[derive(Debug)]
@@ -88,6 +90,7 @@ impl VulkanSwapchain {
                 .preferred_present_mode
                 .unwrap_or(PresentMode::Immediate),
             old_swapchain: vk::SwapchainKHR::null(),
+            extents: swapchain_info.swapchain_extents,
         };
 
         let (handle, swapchain_data) = Self::recreate(swapchain_create_info)?;
@@ -108,6 +111,7 @@ impl VulkanSwapchain {
             frames_in_flight: hal.frames_in_flight.clone(),
             acquire_fence,
             current_image_index: None,
+            extents: swapchain_info.swapchain_extents,
         })
     }
 
@@ -134,11 +138,13 @@ impl VulkanSwapchain {
             preferred_format: swapchain_info.preferred_format,
             preferred_present_mode: PresentMode::Immediate,
             old_swapchain: vk::SwapchainKHR::null(),
+            extents: swapchain_info.swapchain_extents,
         };
         let (handle, swapchain_data) = Self::recreate(swapchain_create_info)?;
 
         self.handle = handle;
         self.data = swapchain_data;
+        self.extents = swapchain_info.swapchain_extents;
 
         Ok(())
     }
@@ -155,6 +161,7 @@ impl VulkanSwapchain {
             preferred_format,
             preferred_present_mode,
             old_swapchain,
+            extents,
         } = swapchain_data_create_info;
         let surface = unsafe {
             ash_window::create_surface(
@@ -218,15 +225,16 @@ impl VulkanSwapchain {
             vk::PresentModeKHR::IMMEDIATE
         };
         let image_count = surface_capabilities
-            .max_image_count
-            .min(hal.configuration.frames_in_flight.try_into().unwrap());
+            .min_image_count
+            .max(hal.configuration.frames_in_flight.try_into().unwrap());
+
         let image_usage_flags = vk::ImageUsageFlags::COLOR_ATTACHMENT
             | vk::ImageUsageFlags::TRANSFER_DST
             | vk::ImageUsageFlags::TRANSFER_SRC;
         let swapchain_create_info = vk::SwapchainCreateInfoKHR::default()
             .surface(surface)
             .min_image_count(image_count)
-            .image_extent(surface_capabilities.current_extent)
+            .image_extent(extents.to_vk())
             .image_format(image_format.format)
             .image_color_space(image_format.color_space)
             .present_mode(present_mode)
@@ -273,8 +281,8 @@ impl VulkanSwapchain {
                         label: Some("Swapchain Image"),
                         usage_flags: image_usage_flags.to_mgpu(),
                         extents: crate::Extents3D {
-                            width: surface_capabilities.current_extent.width,
-                            height: surface_capabilities.current_extent.height,
+                            width: extents.width,
+                            height: extents.height,
                             depth: 1,
                         },
                         creation_flags: Default::default(),
@@ -302,7 +310,7 @@ impl VulkanSwapchain {
             swapchain_images.push(SwapchainImage {
                 image,
                 view,
-                extents: surface_capabilities.current_extent.to_mgpu(),
+                extents,
             })
         }
         info!(

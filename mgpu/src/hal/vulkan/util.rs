@@ -54,6 +54,7 @@ impl ToVk for ImageFormat {
             ImageFormat::R16f => vk::Format::R16_SFLOAT,
             ImageFormat::Rg16f => vk::Format::R16G16_SFLOAT,
             ImageFormat::Rgba16f => vk::Format::R16G16B16A16_SFLOAT,
+            ImageFormat::A2B10G10R10 => vk::Format::A2B10G10R10_UNORM_PACK32,
         }
     }
 }
@@ -77,6 +78,7 @@ impl FromVk for vk::Format {
             vk::Format::R16_SFLOAT => ImageFormat::R16f,
             vk::Format::R16G16_SFLOAT => ImageFormat::Rg16f,
             vk::Format::R16G16B16A16_SFLOAT => ImageFormat::Rgba16f,
+            vk::Format::A2B10G10R10_UNORM_PACK32 => ImageFormat::A2B10G10R10,
             _ => unreachable!("Format not known {:?}", self),
         }
     }

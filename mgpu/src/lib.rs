@@ -143,6 +143,7 @@ pub enum ImageFormat {
     Rgba16f,
     Bgra8,
     Depth32,
+    A2B10G10R10,
 }
 impl ImageFormat {
     pub fn byte_size(&self) -> usize {
@@ -160,6 +161,7 @@ impl ImageFormat {
             Rgba8 | Rgba8Signed => 4,
             Bgra8 => 4,
             Depth32 => 4,
+            A2B10G10R10 => 4,
         }
     }
 }

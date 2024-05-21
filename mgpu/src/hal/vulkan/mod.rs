@@ -423,6 +423,7 @@ impl Hal for VulkanHal {
                         window_handle,
                         preferred_format: Some(swapchain.data.current_format.format.to_mgpu()),
                         preferred_present_mode: Some(swapchain.data.current_present_mode.to_mgpu()),
+                        swapchain_extents: new_size,
                     },
                 )
             },
@@ -997,6 +998,7 @@ impl Hal for VulkanHal {
                         DisplayHandle::borrow_raw(swapchain.raw_display_handle)
                     },
                     window_handle: unsafe { WindowHandle::borrow_raw(swapchain.raw_window_handle) },
+                    swapchain_extents: image.extents.to_2d(),
                 },
             )?;
         }
@@ -2267,6 +2269,7 @@ impl Hal for VulkanHal {
                             window_handle: unsafe {
                                 WindowHandle::borrow_raw(swapchain.raw_window_handle)
                             },
+                            swapchain_extents: swapchain.extents,
                         },
                     )?;
                     Ok(present_mode)
@@ -2282,6 +2285,7 @@ impl Hal for VulkanHal {
                             window_handle: unsafe {
                                 WindowHandle::borrow_raw(swapchain.raw_window_handle)
                             },
+                            swapchain_extents: swapchain.extents,
                         },
                     )?;
                     Ok(PresentMode::Immediate)

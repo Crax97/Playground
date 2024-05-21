@@ -25,7 +25,7 @@ use crate::{
     cubemap_utils,
     fps_limiter::FpsLimiter,
     input::InputState,
-    sampler_allocator::{SamplerAllocator},
+    sampler_allocator::SamplerAllocator,
 };
 
 pub struct AppRunner {}
@@ -129,6 +129,10 @@ pub fn bootstrap<A: App>(description: AppDescription) -> anyhow::Result<()> {
                     window_handle: window.window_handle().unwrap(),
                     preferred_format: None,
                     preferred_present_mode: None,
+                    swapchain_extents: Extents2D {
+                        width: window.inner_size().width,
+                        height: window.inner_size().height,
+                    },
                 })
                 .expect("Failed to create swapchain");
 
