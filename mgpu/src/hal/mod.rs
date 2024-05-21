@@ -1,10 +1,10 @@
 use crate::{
-    BindingSet, BindingSetDescription, BindingSetLayout, BindingSetLayoutInfo, Buffer,
+    BindingSet, BindingSetDescription, BindingSetLayout, Buffer,
     BufferDescription, BufferWriteParams, ComputePipeline, ComputePipelineDescription, CullMode,
     DepthStencilState, DepthStencilTargetInfo, DeviceConfiguration, DeviceInfo, FilterMode,
     FrontFace, GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageRegion,
     ImageSubresource, ImageView, ImageViewDescription, MgpuResult, MultisampleState,
-    OwnedBindingSetLayoutInfo, PolygonMode, PrimitiveTopology, PushConstantInfo, RenderPassFlags,
+    OwnedBindingSetLayoutInfo, PolygonMode, PrimitiveTopology, PushConstantInfo,
     RenderPassInfo, RenderTargetInfo, Sampler, SamplerDescription, ShaderModule,
     ShaderModuleDescription, ShaderModuleLayout, ShaderStageFlags, VertexInputDescription,
 };

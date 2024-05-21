@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 
 use bitflags::bitflags;
 use mgpu::{
-    AddressMode, Device, Extents2D, Extents3D, FilterMode, Image, ImageCreationFlags,
+    Device, Extents2D, Extents3D, FilterMode, Image, ImageCreationFlags,
     ImageDescription, ImageDimension, ImageFormat, ImageUsageFlags, ImageView,
     ImageViewDescription, ImageViewType, ImageWriteParams, MipmapMode, Sampler,
 };

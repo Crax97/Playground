@@ -755,9 +755,9 @@ impl BindingType {
                 access_mode: StorageAccessMode::Read,
             },
             BindingType::StorageBuffer {
-                buffer,
-                offset,
-                range,
+                buffer: _,
+                offset: _,
+                range: _,
                 access_mode,
             } => BindingSetElementKind::Buffer {
                 ty: BufferType::Storage,
@@ -816,7 +816,7 @@ impl VariableType {
             VariableType::Field { format } => format.size_bytes(),
             VariableType::Array {
                 members_layout,
-                length,
+                length: _,
             } => members_layout.size(),
             VariableType::Texture(_) => {
                 todo!("Look up what's the size of a texture")
@@ -1145,7 +1145,6 @@ impl VertexAttributeFormat {
             VertexAttributeFormat::Mat2x2 => 8 * 8,
             VertexAttributeFormat::Mat3x3 => 12 * 12,
             VertexAttributeFormat::Mat4x4 => 16 * 16,
-            _ => todo!(),
         }
     }
 }

@@ -1,6 +1,6 @@
 use crate::{
     hal::{Hal, QueueType},
-    Buffer, Image, ImageRegion, ImageSubresource, MgpuResult,
+    Buffer, Image, ImageRegion, MgpuResult,
 };
 #[cfg(debug_assertions)]
 use crate::{BufferUsageFlags, MemoryDomain};
@@ -31,7 +31,7 @@ pub(crate) struct StagingBufferOperation {
 }
 
 impl StagingBufferAllocator {
-    pub fn new(staging_buffer: Buffer, frames_in_flight: usize) -> MgpuResult<Self> {
+    pub fn new(staging_buffer: Buffer, _frames_in_flight: usize) -> MgpuResult<Self> {
         #[cfg(debug_assertions)]
         check!(
             staging_buffer

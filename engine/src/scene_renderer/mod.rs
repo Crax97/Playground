@@ -1,5 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use glam::{vec4, Mat4, Vec3, Vec4};
+use glam::{vec4, Mat4, Vec4};
 use mgpu::{
     AttachmentStoreOp, Binding, BindingSet, BindingSetDescription, BindingSetElement,
     BindingSetLayout, BindingSetLayoutInfo, BlitParams, Buffer, BufferDescription,
@@ -14,14 +14,12 @@ use mgpu::{
 use crate::{
     assert_size_does_not_exceed,
     asset_map::{AssetHandle, AssetMap},
-    assets::{shader::Shader, texture::Texture},
+    assets::texture::Texture,
     constants::{BRDF_LUT_HANDLE, DEFAULT_ENV_WHITE_HANDLE},
-    cubemap_utils, include_spirv,
+    include_spirv,
     math::{color::LinearColor, constants::UP, Transform},
-    sampler_allocator::SamplerAllocator,
     scene::Scene,
     shader_parameter_writer::{ScalarParameterType, ScalarParameterWriter},
-    Tick,
 };
 
 const QUAD_VERTEX: &[u8] = include_spirv!("../spirv/quad_vertex.vert.spv");
@@ -45,8 +43,8 @@ pub struct SceneSetup {
     pub ambient_color: LinearColor,
     pub ambient_intensity: f32,
 
-    pub diffuse_environment_map: AssetHandle<Texture>,
-    pub environment_map: AssetHandle<Texture>,
+    pub irradiance_map: AssetHandle<Texture>,
+    pub prefiltered_map: AssetHandle<Texture>,
     pub brdf_lut: AssetHandle<Texture>,
 
     pub binding_set: BindingSet,
@@ -150,32 +148,30 @@ impl SceneSetup {
         Ok(Self {
             ambient_color: LinearColor::new(0.3, 0.3, 0.3, 1.0),
             ambient_intensity: 1.0,
-            diffuse_environment_map: DEFAULT_ENV_WHITE_HANDLE.clone(),
-            environment_map: DEFAULT_ENV_WHITE_HANDLE.clone(),
+            irradiance_map: DEFAULT_ENV_WHITE_HANDLE.clone(),
+            prefiltered_map: DEFAULT_ENV_WHITE_HANDLE.clone(),
             brdf_lut: BRDF_LUT_HANDLE.clone(),
             binding_set,
             needs_new_binding_set: false,
         })
     }
 
-    pub fn set_diffuse_env_map(
+    pub fn set_environment_map(
         &mut self,
-        new_diffuse_env_map: AssetHandle<Texture>,
-        new_env_map: AssetHandle<Texture>,
+        irradiance_map: AssetHandle<Texture>,
+        prefiltered_map: AssetHandle<Texture>,
     ) {
-        self.diffuse_environment_map = new_diffuse_env_map;
-        self.environment_map = new_env_map;
+        self.irradiance_map = irradiance_map;
+        self.prefiltered_map = prefiltered_map;
         self.needs_new_binding_set = true;
     }
 
     pub fn update(&mut self, device: &Device, asset_map: &AssetMap) -> anyhow::Result<()> {
         if self.needs_new_binding_set {
             self.needs_new_binding_set = false;
-            let diffuse_env_map = asset_map
-                .get(&self.diffuse_environment_map)
-                .expect("Invalid handle");
+            let diffuse_env_map = asset_map.get(&self.irradiance_map).expect("Invalid handle");
             let env_map = asset_map
-                .get(&self.environment_map)
+                .get(&self.prefiltered_map)
                 .expect("Invalid handle");
             let brdf_lut = asset_map.get(&BRDF_LUT_HANDLE).unwrap();
             let new_binding_set = device.create_binding_set(
@@ -737,10 +733,8 @@ impl SceneRenderer {
             .write("eye_forward", pov.transform.forward().to_array());
         self.scene_lightning_parameters_writer
             .write("eye_location", pov.transform.location.to_array());
-        self.scene_lightning_parameters_writer.write(
-            "light_count",
-            ScalarParameterType::ScalarU32(lights.len() as _),
-        );
+        self.scene_lightning_parameters_writer
+            .write("light_count", ScalarParameterType::ScalarU32(0));
         self.scene_lightning_parameters_writer
             .write_array("lights", bytemuck::cast_slice(&lights));
         self.scene_lightning_parameters_writer

@@ -1,13 +1,13 @@
 use std::{
     any::{type_name, TypeId},
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     marker::PhantomData,
 };
 
 use log::warn;
 use serde::{Deserialize, Serialize};
 
-use crate::{assets::texture::Texture, immutable_string::ImmutableString};
+use crate::immutable_string::ImmutableString;
 
 use crate::utils::erased_arena::{ErasedArena, Index};
 
@@ -223,7 +223,7 @@ impl<A: Asset> Ord for AssetHandle<A> {
 
 impl<A: Asset> PartialOrd for AssetHandle<A> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.identifier.partial_cmp(&other.identifier)
+        Some(self.cmp(other))
     }
 }
 

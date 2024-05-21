@@ -64,7 +64,7 @@ impl AssetLoader for FsTextureLoader {
                 auto_generate_mips: true,
                 sampler_configuration: TextureSamplerConfiguration::default(),
             },
-            &mut self.sampler_allocator,
+            &self.sampler_allocator,
         )
     }
 }

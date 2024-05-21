@@ -1,7 +1,7 @@
 use glam::{Vec2, Vec3, Vec4};
 use log::warn;
 use mgpu::{
-    Buffer, BufferDescription, BufferUsageFlags, BufferWriteParams, Device, ShaderModuleLayout,
+    Buffer, BufferWriteParams, Device, ShaderModuleLayout,
     VariableType, VertexAttributeFormat,
 };
 use serde::{Deserialize, Serialize};
@@ -44,7 +44,7 @@ pub struct ScalarParameterWriter {
 
 impl ScalarParameterWriter {
     pub fn new(
-        device: &Device,
+        _device: &Device,
         layouts: &[&ShaderModuleLayout],
         set: usize,
         binding: usize,

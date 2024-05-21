@@ -9,7 +9,6 @@ use engine::{
             Material, MaterialDescription, MaterialDomain, MaterialParameters, MaterialProperties,
             MaterialType,
         },
-        mesh::{Mesh, MeshDescription},
         texture::Texture,
     },
     constants::CUBE_MESH_HANDLE,
@@ -22,7 +21,7 @@ use engine::{
     },
     shader_cache::ShaderCache,
 };
-use glam::{vec2, vec3};
+use glam::vec3;
 use mgpu::{Extents2D, ShaderModuleDescription};
 
 const VERTEX_SHADER: &[u8] = include_spirv!("spirv/simple_vertex.vert.spv");

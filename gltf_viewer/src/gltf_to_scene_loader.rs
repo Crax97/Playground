@@ -101,8 +101,11 @@ fn create_materials(
 
     for (idx, material) in document.materials().enumerate() {
         let pbr_info = material.pbr_metallic_roughness();
-        let base_color_texture = pbr_info.base_color_texture().unwrap();
-        let base_color_texture = textures[base_color_texture.texture().index()].clone();
+        let base_color_texture = if let Some(info) = pbr_info.base_color_texture() {
+            textures[info.texture().index()].clone()
+        } else {
+            WHITE_TEXTURE_HANDLE.clone()
+        };
         let metallic_roughness_texture = pbr_info
             .metallic_roughness_texture()
             .map(|info| &textures[info.texture().index()])
@@ -122,7 +125,7 @@ fn create_materials(
         let emissive_texture = material
             .emissive_texture()
             .map(|info| &textures[info.texture().index()])
-            .unwrap_or(&WHITE_TEXTURE_HANDLE)
+            .unwrap_or(&BLACK_TEXTURE_HANDLE)
             .clone();
 
         let identifier = format!("gltf.materials.{}", idx);

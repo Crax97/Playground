@@ -1,5 +1,5 @@
 use glam::{Vec2, Vec3};
-use mgpu::{Buffer, BufferDescription, BufferUsageFlags, BufferWriteParams, Device, MgpuResult};
+use mgpu::{Buffer, BufferDescription, BufferUsageFlags, BufferWriteParams, Device};
 
 pub struct Mesh {
     pub(crate) index_buffer: Buffer,

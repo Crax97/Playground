@@ -34,10 +34,10 @@ layout(set = 1, binding = 1, std140) readonly buffer SceneParameters {
     LightInfo lights[];
     
 };
-layout(set = 2, binding = 0) uniform textureCube diffuse_env_map;
-layout(set = 2, binding = 1) uniform sampler diffuse_env_map_sampler;
-layout(set = 2, binding = 2) uniform textureCube env_map;
-layout(set = 2, binding = 3) uniform sampler env_map_sampler;
+layout(set = 2, binding = 0) uniform textureCube irradiance_map;
+layout(set = 2, binding = 1) uniform sampler irriadiance_map_sampler;
+layout(set = 2, binding = 2) uniform textureCube prefiltered_map;
+layout(set = 2, binding = 3) uniform sampler prefiltered_map_sampler;
 layout(set = 2, binding = 4) uniform texture2D brdf_lut;
 layout(set = 2, binding = 5) uniform sampler brdf_lut_sampler;
 layout(location = 0) in vec2 uv;
@@ -79,9 +79,9 @@ GBufferData extract_gbuffer() {
 // Implements the glTF brdf described in https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#appendix-b-brdf-implementation
 vec3 light_contribute(vec3 eye_direction, vec3 light_direction, vec3 half_view_vector, vec3 f0, GBufferData data) {
 
-    vec3 c_diff = mix(data.color.rgb, vec3(0.0), data.metallic);
     float aa = data.roughness * data.roughness;
-    
+    vec3 c_diff = mix(data.color.rgb, vec3(0.0), data.metallic);
+
     float n_dot_h = saturate(dot(data.normal, half_view_vector));
     float n_dot_v = saturate(dot(data.normal, eye_direction));
     float n_dot_l = saturate(dot(data.normal, light_direction));
@@ -97,21 +97,31 @@ vec3 light_contribute(vec3 eye_direction, vec3 light_direction, vec3 half_view_v
     return (v_diffuse + v_specular) * n_dot_l;
 }
 
-void main() {
-    GBufferData data = extract_gbuffer();
-
-    vec3 view_dir = normalize(eye_location - data.world_position); 
-    vec3 f0 = mix(vec3(F0), data.color.rgb, data.metallic);
+// Karis 2014
+vec3 ibl_diffuse_ambient(GBufferData data, vec3 view_dir, vec3 f0) {
     vec3 F = fresnel(saturate(dot(data.normal, view_dir)), f0, data.roughness);
-    vec3 d_fact = (1.0 - F) * data.metallic;
+    vec3 d_fact = (1.0 - F) * (1.0 - data.metallic);
     vec3 R = reflect(-view_dir, data.normal);
+    
 
-    vec3 diffuse_sample_dir = vec3(1, -1, 1) * data.normal;
-    vec3 diffuse_irradiance = textureLod(samplerCube(diffuse_env_map, diffuse_env_map_sampler), diffuse_sample_dir,  data.roughness * 9.0).rgb;
-    vec3 prefiltered = texture(samplerCube(env_map, env_map_sampler), R).rgb;
+    // Approximate IBL using Karis's split sum approximation
+    int prefiltered_lods = textureQueryLevels(samplerCube(prefiltered_map, prefiltered_map_sampler));
+    vec3 diffuse_sample_dir = data.normal;
+    vec3 diffuse_irradiance = texture(samplerCube(irradiance_map, irriadiance_map_sampler), diffuse_sample_dir).rgb;
+    
+    vec3 prefiltered = textureLod(samplerCube(prefiltered_map, prefiltered_map_sampler), R, data.roughness * prefiltered_lods).rgb;
     vec2 env_brdf = texture(sampler2D(brdf_lut, brdf_lut_sampler), vec2(saturate(dot(data.normal, view_dir)), data.roughness)).xy;
     vec3 ibl_spec = prefiltered * (F * env_brdf.x + env_brdf.y);
     vec3 diffuse_ambient = (d_fact * diffuse_irradiance * data.color.rgb + ibl_spec) * data.ao;
+    return diffuse_ambient;
+}
+
+void main() {
+    GBufferData data = extract_gbuffer();
+    vec3 view_dir = normalize(eye_location - data.world_position); 
+    vec3 f0 = mix(vec3(F0), data.color.rgb, data.metallic);
+    
+    vec3 diffuse_ambient = ibl_diffuse_ambient(data, view_dir, f0);
 
     vec3 light_0 = vec3(0.0);
     if (data.lit > 0.0) {
@@ -131,7 +141,7 @@ void main() {
                 * light_color * light_falloff;
         }
     }
-    color.rgb =  light_0 + data.color.rgb * diffuse_ambient.rgb * ambient_intensity * data.ao + data.emissive; 
+    color.rgb = light_0 + data.color.rgb * diffuse_ambient.rgb * ambient_intensity * data.ao + data.emissive; 
     
     // Perform tonemapping + gamma correction
     color.rgb = color.rgb / (color.rgb + vec3(1.0));

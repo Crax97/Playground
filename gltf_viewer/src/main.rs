@@ -122,7 +122,7 @@ impl App for GltfViewerApplication {
             &sampler_allocator,
         )?;
 
-        let (cube_hdr, env_diffuse) = engine::cubemap_utils::read_cubemap_from_hdr(
+        let (cube_hdr, irradiance_map, env_diffuse) = engine::cubemap_utils::read_cubemap_from_hdr(
             &context.device,
             &engine::cubemap_utils::CreateCubemapParams {
                 label: { Some("Pisa env") },
@@ -140,7 +140,8 @@ impl App for GltfViewerApplication {
         )?;
 
         let env_map = asset_map.add(cube_hdr, "textures.hdr.pisa");
-        let env_diffuse = asset_map.add(env_diffuse, "textures.hdr.pisa-diffuse");
+        let irradiance_map = asset_map.add(irradiance_map, "textures.hdr.pisa-irradiance");
+        let prefiltered_map = asset_map.add(env_diffuse, "textures.hdr.pisa-spec_prefiltered");
 
         let cube_material = Material::new(
             &context.device,
@@ -178,7 +179,7 @@ impl App for GltfViewerApplication {
         let mut scene_renderer = SceneRenderer::new(&context.device, &asset_map)?;
         scene_renderer
             .get_scene_setup_mut()
-            .set_diffuse_env_map(env_diffuse, env_map);
+            .set_environment_map(irradiance_map, prefiltered_map);
         Ok(Self {
             asset_map,
             scene,
@@ -400,7 +401,7 @@ fn main() -> anyhow::Result<()> {
             width: 1920,
             height: 1080,
         },
-        initial_title: Some("Cube Scene"),
-        app_identifier: "CubeSceneApp",
+        initial_title: Some("GLTF Viewer"),
+        app_identifier: "GLTFViewerApp",
     })
 }

@@ -25,7 +25,7 @@ use crate::{
     cubemap_utils,
     fps_limiter::FpsLimiter,
     input::InputState,
-    sampler_allocator::{self, SamplerAllocator},
+    sampler_allocator::{SamplerAllocator},
 };
 
 pub struct AppRunner {}

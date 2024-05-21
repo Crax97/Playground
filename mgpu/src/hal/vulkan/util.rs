@@ -964,16 +964,6 @@ impl ResourceAccessMode {
     }
 }
 
-impl ImageDimension {
-    pub(super) fn image_view_type(self) -> vk::ImageViewType {
-        match self {
-            ImageDimension::D1 => vk::ImageViewType::TYPE_1D,
-            ImageDimension::D2 => vk::ImageViewType::TYPE_2D,
-            ImageDimension::D3 => vk::ImageViewType::TYPE_3D,
-        }
-    }
-}
-
 define_resource_resolver!(
     VulkanHal,
     (VulkanSwapchain, |hal, swapchain| {

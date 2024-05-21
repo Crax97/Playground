@@ -359,7 +359,7 @@ impl Hal for VulkanHal {
         }
 
         let values = &[current_semaphore_value];
-        let (wait_semaphores, values) = if let Some(info) = graphics_queue_submit.last() {
+        let (_wait_semaphores, _values) = if let Some(info) = graphics_queue_submit.last() {
             (
                 unsafe { std::slice::from_raw_parts(info.p_signal_semaphores, 1) },
                 values.as_slice(),
@@ -4262,7 +4262,7 @@ unsafe extern "system" fn vulkan_debug_callback(
         ffi::CStr::from_ptr(callback_data.p_message).to_string_lossy()
     };
 
-    panic!(
+    eprintln!(
         "{message_severity:?}:\n{message_type:?} [{message_id_name} ({message_id_number})] : {message}\n",
     );
 
