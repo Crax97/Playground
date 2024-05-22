@@ -32,6 +32,10 @@ impl<T: 'static> Arena<T> {
         self.arena.iter()
     }
 
+    pub fn iter_with_index(&self) -> impl Iterator<Item = (Index, &T)> {
+        self.arena.iter_with_index().map(|(i, t)| (Index(i), t))
+    }
+
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
         self.arena.iter_mut()
     }

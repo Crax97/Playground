@@ -94,6 +94,23 @@ impl ErasedArena {
         })
     }
 
+    pub fn iter_with_index<T: 'static>(&self) -> impl Iterator<Item = (Index, &T)> {
+        debug_assert!(DebugOnlyTypeId::of::<T>() == self.stored_type_id);
+        (0..self.capacity).flat_map(|index| {
+            let entry = self.entry_ptr_at(index);
+            let entry_ref = unsafe { entry.as_ref().unwrap() };
+            entry_ref.payload.as_ref().map(|e| {
+                (
+                    Index {
+                        index: index as u32,
+                        generation: entry_ref.generation,
+                    },
+                    e,
+                )
+            })
+        })
+    }
+
     pub fn iter_mut<T: 'static>(&mut self) -> impl Iterator<Item = &mut T> {
         debug_assert!(DebugOnlyTypeId::of::<T>() == self.stored_type_id);
         (0..self.capacity).flat_map(|index| {

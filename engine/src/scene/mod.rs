@@ -31,6 +31,7 @@ pub enum ScenePrimitive {
 #[derive(Default, Serialize, Deserialize, Clone)]
 pub struct SceneNode {
     pub label: Option<String>,
+    pub tags: Vec<String>,
     pub enabled: bool,
     pub transform: Transform,
     pub primitive_type: ScenePrimitive,
@@ -159,6 +160,20 @@ impl Scene {
     pub fn iter(&self) -> impl Iterator<Item = &SceneNode> {
         self.nodes.iter()
     }
+
+    pub fn children_of(
+        &self,
+        scene_node_id: SceneNodeId,
+    ) -> Option<impl Iterator<Item = SceneNodeId> + '_> {
+        self.children.get(&scene_node_id).map(|c| c.iter().copied())
+    }
+
+    pub fn find_with_tag(&self, tag: impl AsRef<str>) -> Option<SceneNodeId> {
+        self.nodes
+            .iter_with_index()
+            .find(|(_, node)| node.tags.iter().any(|s| s.as_str() == tag.as_ref()))
+            .map(|(i, _)| SceneNodeId(i))
+    }
 }
 
 impl Default for Scene {
@@ -180,6 +195,11 @@ impl SceneNode {
 
     pub fn transform(mut self, transform: Transform) -> Self {
         self.transform = transform;
+        self
+    }
+
+    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
+        self.tags.push(tag.into());
         self
     }
 }
