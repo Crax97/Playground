@@ -13,7 +13,11 @@ pub struct SamplerAllocator {
 }
 
 impl SamplerAllocator {
-    pub fn get(&self, device: &Device, sampler_configuration: &TextureSamplerConfiguration) -> Sampler {
+    pub fn get(
+        &self,
+        device: &Device,
+        sampler_configuration: &TextureSamplerConfiguration,
+    ) -> Sampler {
         let mut samplers = self.samplers.lock().unwrap();
         let hash = hash_type(sampler_configuration);
         let sampler = *samplers.entry(hash).or_insert_with(|| {
@@ -22,9 +26,9 @@ impl SamplerAllocator {
                 mag_filter: sampler_configuration.minmag_filter,
                 min_filter: sampler_configuration.minmag_filter,
                 mipmap_mode: sampler_configuration.mipmap_mode,
-                address_mode_u: mgpu::AddressMode::ClampToEdge,
-                address_mode_v: mgpu::AddressMode::ClampToEdge,
-                address_mode_w: mgpu::AddressMode::ClampToEdge,
+                address_mode_u: sampler_configuration.wrap_u,
+                address_mode_v: sampler_configuration.wrap_v,
+                address_mode_w: sampler_configuration.wrap_w,
                 lod_bias: 0.0,
                 compare_op: None,
                 min_lod: 0.0,

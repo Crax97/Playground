@@ -11,7 +11,7 @@ use engine::{
         mesh::{Mesh, MeshDescription},
         texture::{Texture, TextureDescription, TextureSamplerConfiguration, TextureUsageFlags},
     },
-    glam::{vec2, vec3, Mat4},
+    glam::{vec2, vec3, Mat4, Vec2},
     immutable_string::ImmutableString,
     include_spirv,
     math::Transform,
@@ -371,5 +371,17 @@ fn get_sampler_configuration(sampler_info: gltf::texture::Sampler) -> TextureSam
     TextureSamplerConfiguration {
         minmag_filter,
         mipmap_mode: Default::default(),
+        wrap_u: match sampler_info.wrap_s() {
+            gltf::texture::WrappingMode::ClampToEdge => mgpu::AddressMode::ClampToEdge,
+            gltf::texture::WrappingMode::MirroredRepeat => mgpu::AddressMode::MirroredRepeat,
+            gltf::texture::WrappingMode::Repeat => mgpu::AddressMode::Repeat,
+        },
+        wrap_v: match sampler_info.wrap_t() {
+            gltf::texture::WrappingMode::ClampToEdge => mgpu::AddressMode::ClampToEdge,
+            gltf::texture::WrappingMode::MirroredRepeat => mgpu::AddressMode::MirroredRepeat,
+            gltf::texture::WrappingMode::Repeat => mgpu::AddressMode::Repeat,
+        },
+        // unused in glTF
+        wrap_w: Default::default(),
     }
 }

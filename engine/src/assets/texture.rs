@@ -2,7 +2,7 @@ use std::num::NonZeroU32;
 
 use bitflags::bitflags;
 use mgpu::{
-    Device, Extents2D, Extents3D, FilterMode, Image, ImageCreationFlags,
+    AddressMode, Device, Extents2D, Extents3D, FilterMode, Image, ImageCreationFlags,
     ImageDescription, ImageDimension, ImageFormat, ImageUsageFlags, ImageView,
     ImageViewDescription, ImageViewType, ImageWriteParams, MipmapMode, Sampler,
 };
@@ -16,6 +16,9 @@ use crate::sampler_allocator::SamplerAllocator;
 pub struct TextureSamplerConfiguration {
     pub minmag_filter: FilterMode,
     pub mipmap_mode: MipmapMode,
+    pub wrap_u: AddressMode,
+    pub wrap_v: AddressMode,
+    pub wrap_w: AddressMode,
 }
 
 pub struct Texture {

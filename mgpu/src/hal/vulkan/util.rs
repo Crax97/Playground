@@ -510,7 +510,7 @@ impl ToVk for AddressMode {
             AddressMode::Repeat => vk::SamplerAddressMode::REPEAT,
             AddressMode::MirroredRepeat => vk::SamplerAddressMode::MIRRORED_REPEAT,
             AddressMode::ClampToEdge => vk::SamplerAddressMode::CLAMP_TO_EDGE,
-            AddressMode::ClampToBorder(_) => vk::SamplerAddressMode::CLAMP_TO_BORDER,
+            AddressMode::ClampToBorder => vk::SamplerAddressMode::CLAMP_TO_BORDER,
         }
     }
 }

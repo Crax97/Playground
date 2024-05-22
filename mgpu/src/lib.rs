@@ -281,14 +281,14 @@ pub enum MipmapMode {
     Nearest,
 }
 
-#[derive(Default, Copy, Clone, PartialEq, PartialOrd, Debug)]
+#[derive(Default, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AddressMode {
     #[default]
     Repeat,
     MirroredRepeat,
     ClampToEdge,
-    ClampToBorder([f32; 4]),
+    ClampToBorder,
 }
 
 pub struct ShaderModuleDescription<'a> {
