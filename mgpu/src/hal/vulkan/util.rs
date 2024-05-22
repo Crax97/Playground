@@ -41,6 +41,7 @@ impl ToVk for ImageFormat {
         match self {
             ImageFormat::Unknown => vk::Format::UNDEFINED,
             ImageFormat::Bgra8 => vk::Format::B8G8R8A8_UNORM,
+            ImageFormat::Bgra8_sRGB => vk::Format::B8G8R8A8_SRGB,
             ImageFormat::Depth32 => vk::Format::D32_SFLOAT,
             ImageFormat::R32f => vk::Format::R32_SFLOAT,
             ImageFormat::Rg32f => vk::Format::R32G32_SFLOAT,
@@ -65,6 +66,7 @@ impl FromVk for vk::Format {
         match self {
             vk::Format::UNDEFINED => ImageFormat::Unknown,
             vk::Format::B8G8R8A8_UNORM => ImageFormat::Bgra8,
+            vk::Format::B8G8R8A8_SRGB => ImageFormat::Bgra8_sRGB,
             vk::Format::D32_SFLOAT => ImageFormat::Depth32,
             vk::Format::R32_SFLOAT => ImageFormat::R32f,
             vk::Format::R32G32_SFLOAT => ImageFormat::Rg32f,
