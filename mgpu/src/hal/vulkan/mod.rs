@@ -423,7 +423,7 @@ impl Hal for VulkanHal {
                         window_handle,
                         preferred_format: Some(swapchain.data.current_format.format.to_mgpu()),
                         preferred_present_mode: Some(swapchain.data.current_present_mode.to_mgpu()),
-                        swapchain_extents: new_size,
+                        extents: new_size,
                     },
                 )
             },
@@ -998,7 +998,7 @@ impl Hal for VulkanHal {
                         DisplayHandle::borrow_raw(swapchain.raw_display_handle)
                     },
                     window_handle: unsafe { WindowHandle::borrow_raw(swapchain.raw_window_handle) },
-                    swapchain_extents: image.extents.to_2d(),
+                    extents: image.extents.to_2d(),
                 },
             )?;
         }
@@ -2269,7 +2269,7 @@ impl Hal for VulkanHal {
                             window_handle: unsafe {
                                 WindowHandle::borrow_raw(swapchain.raw_window_handle)
                             },
-                            swapchain_extents: swapchain.extents,
+                            extents: swapchain.data.extents,
                         },
                     )?;
                     Ok(present_mode)
@@ -2285,7 +2285,7 @@ impl Hal for VulkanHal {
                             window_handle: unsafe {
                                 WindowHandle::borrow_raw(swapchain.raw_window_handle)
                             },
-                            swapchain_extents: swapchain.extents,
+                            extents: swapchain.data.extents,
                         },
                     )?;
                     Ok(PresentMode::Immediate)
@@ -4266,7 +4266,7 @@ unsafe extern "system" fn vulkan_debug_callback(
         ffi::CStr::from_ptr(callback_data.p_message).to_string_lossy()
     };
 
-    eprintln!(
+    panic!(
         "{message_severity:?}:\n{message_type:?} [{message_id_name} ({message_id_number})] : {message}\n",
     );
 

@@ -129,7 +129,7 @@ pub fn bootstrap<A: App>(description: AppDescription) -> anyhow::Result<()> {
                     window_handle: window.window_handle().unwrap(),
                     preferred_format: None,
                     preferred_present_mode: None,
-                    swapchain_extents: Extents2D {
+                    extents: Extents2D {
                         width: window.inner_size().width,
                         height: window.inner_size().height,
                     },

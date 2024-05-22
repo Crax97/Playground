@@ -33,7 +33,6 @@ pub struct VulkanSwapchain {
     pub(crate) frames_in_flight: Arc<Mutex<FramesInFlight>>,
     pub(crate) acquire_fence: vk::Fence,
     pub(crate) current_image_index: Option<u32>,
-    pub(crate) extents: Extents2D,
 }
 
 // Access is synchronized through RwLock
@@ -50,6 +49,7 @@ pub(crate) struct SwapchainData {
     pub(crate) images: Vec<SwapchainImage>,
     pub(crate) current_swapchain_image: AtomicUsize,
     pub(crate) surface: vk::SurfaceKHR,
+    pub(crate) extents: Extents2D,
 }
 
 struct SwapchainRecreateParams<'a> {
@@ -90,7 +90,7 @@ impl VulkanSwapchain {
                 .preferred_present_mode
                 .unwrap_or(PresentMode::Immediate),
             old_swapchain: vk::SwapchainKHR::null(),
-            extents: swapchain_info.swapchain_extents,
+            extents: swapchain_info.extents,
         };
 
         let (handle, swapchain_data) = Self::recreate(swapchain_create_info)?;
@@ -111,7 +111,6 @@ impl VulkanSwapchain {
             frames_in_flight: hal.frames_in_flight.clone(),
             acquire_fence,
             current_image_index: None,
-            extents: swapchain_info.swapchain_extents,
         })
     }
 
@@ -138,13 +137,12 @@ impl VulkanSwapchain {
             preferred_format: swapchain_info.preferred_format,
             preferred_present_mode: PresentMode::Immediate,
             old_swapchain: vk::SwapchainKHR::null(),
-            extents: swapchain_info.swapchain_extents,
+            extents: swapchain_info.extents,
         };
         let (handle, swapchain_data) = Self::recreate(swapchain_create_info)?;
 
         self.handle = handle;
         self.data = swapchain_data;
-        self.extents = swapchain_info.swapchain_extents;
 
         Ok(())
     }
@@ -224,6 +222,18 @@ impl VulkanSwapchain {
         } else {
             vk::PresentModeKHR::IMMEDIATE
         };
+
+        let extents = Extents2D {
+            width: extents.width.clamp(
+                surface_capabilities.min_image_extent.width,
+                surface_capabilities.max_image_extent.width,
+            ),
+            height: extents.height.clamp(
+                surface_capabilities.min_image_extent.height,
+                surface_capabilities.max_image_extent.height,
+            ),
+        };
+
         let image_count = surface_capabilities
             .min_image_count
             .max(hal.configuration.frames_in_flight.try_into().unwrap());
@@ -314,11 +324,8 @@ impl VulkanSwapchain {
             })
         }
         info!(
-            "Recreated swapchaion swapchain {}x{} format {:?} presentation mode {:?}",
-            surface_capabilities.current_extent.width,
-            surface_capabilities.current_extent.height,
-            image_format,
-            present_mode
+            "Recreated swapchain with extents {}x{} format {:?} presentation mode {:?}",
+            extents.width, extents.height, image_format, present_mode
         );
         let swapchain_data = SwapchainData {
             capabilities: surface_capabilities,
@@ -329,6 +336,7 @@ impl VulkanSwapchain {
             surface,
             images: swapchain_images,
             current_swapchain_image: AtomicUsize::new(0),
+            extents,
         };
         Ok((swapchain, swapchain_data))
     }
