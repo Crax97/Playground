@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 pub mod key;
 
-use glam::{UVec2, Vec2};
+use glam::{vec2, UVec2, Vec2};
 
 use std::collections::HashMap;
 
@@ -21,6 +21,7 @@ pub struct InputState {
     current_pointer_pressure: f32,
     window_size: PhysicalSize<u32>,
     current_wheel_delta: f32,
+    current_delta_mouse: Vec2,
 
     pointer_button_state: HashMap<MouseButton, ElementState>,
     last_button_state: HashMap<MouseButton, ElementState>,
@@ -45,6 +46,7 @@ impl InputState {
             last_key_states: [false; Key::COUNT],
             current_modifiers: ModifierSet::default(),
             last_modifiers: ModifierSet::default(),
+            current_delta_mouse: Vec2::default(),
         }
     }
 
@@ -126,6 +128,23 @@ impl InputState {
         };
     }
 
+    pub fn device_event(&mut self, event: winit::event::DeviceEvent) {
+        match event {
+            winit::event::DeviceEvent::MouseMotion { delta } => {
+                self.current_delta_mouse = vec2(
+                    delta.0 as f32 / (self.window_size.width as f32 * 0.5),
+                    -1.0 * delta.1 as f32 / (self.window_size.height as f32 * 0.5),
+                )
+            }
+            winit::event::DeviceEvent::MouseWheel {
+                delta: winit::event::MouseScrollDelta::PixelDelta(px),
+            } => {
+                self.current_wheel_delta = px.y as f32;
+            }
+            _ => {}
+        }
+    }
+
     pub fn iter_all_just_pressed_keys(&self) -> impl Iterator<Item = Key> + '_ {
         self.key_states
             .iter()
@@ -164,6 +183,7 @@ impl InputState {
         self.last_key_states = self.key_states;
         self.last_modifiers = self.current_modifiers;
         self.current_wheel_delta = 0.0;
+        self.current_delta_mouse = vec2(0.0, 0.0);
         self.last_update_cursor_position = self.current_cursor_position;
     }
 
@@ -200,14 +220,11 @@ impl InputState {
     }
     #[allow(dead_code)]
     pub fn mouse_delta(&self) -> Vec2 {
-        Vec2::new(
-            (self.current_cursor_position.x - self.last_update_cursor_position.x) as f32,
-            (self.current_cursor_position.y - self.last_update_cursor_position.y) as f32,
-        )
+        self.current_delta_mouse
     }
     #[allow(dead_code)]
     pub fn normalized_mouse_delta(&self) -> Vec2 {
-        self.normalized_mouse_position() - self.normalized_last_mouse_position()
+        self.current_delta_mouse.normalize()
     }
 
     pub fn is_mouse_button_just_pressed(&self, button: MouseButton) -> bool {

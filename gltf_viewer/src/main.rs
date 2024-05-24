@@ -14,7 +14,6 @@ use engine::glam::{Quat, Vec3};
 use engine::math::{constants, Transform};
 use engine::scene::{SceneMesh, SceneNode, SceneNodeId};
 use engine::scene_renderer::SceneOutput;
-use engine::winit::dpi::PhysicalPosition;
 use engine::winit::event::{DeviceEvent, MouseButton, WindowEvent};
 use engine::{app, include_spirv};
 use engine::{app::AppContext, scene_renderer::PointOfView};
@@ -29,7 +28,7 @@ use engine::{
 use mgpu::{Extents2D, ImageFormat, ShaderModuleDescription};
 
 const MOVEMENT_SPEED: f64 = 50.0;
-const ROTATION_DEGREES: f64 = 320.0;
+const ROTATION_DEGREES: f64 = 3200.0;
 const VIEW_CUBEMAP_VERT: &[u8] = include_spirv!("../spirv/base_pass/view_cubemap.vert.spv");
 const VIEW_CUBEMAP_FRAG: &[u8] = include_spirv!("../spirv/base_pass/view_cubemap.frag.spv");
 
@@ -192,7 +191,7 @@ impl App for GltfViewerApplication {
             pov,
             output: SceneOutput::FinalImage,
             camera_mode: CameraMode::Orbit,
-            is_mouse_captured: true,
+            is_mouse_captured: false,
             cubemap_handle,
         })
     }
@@ -327,7 +326,7 @@ impl GltfViewerApplication {
 
         camera_input *= (MOVEMENT_SPEED * context.time.delta_seconds()) as f32;
 
-        let mouse_delta = context.input.normalized_mouse_position();
+        let mouse_delta = context.input.mouse_delta();
 
         self.cam_roll += mouse_delta.x * (ROTATION_DEGREES * context.time.delta_seconds()) as f32;
         self.cam_pitch -= mouse_delta.y * (ROTATION_DEGREES * context.time.delta_seconds()) as f32;
@@ -342,19 +341,10 @@ impl GltfViewerApplication {
                 * Quat::from_euler(EulerRot::XYZ, 0.0, self.cam_roll.to_radians(), 0.0);
 
         self.orbit_distance = self.pov.transform.location.distance(Vec3::ZERO);
-
-        let cursor_position = context.window().inner_size();
-        context
-            .window()
-            .set_cursor_position(PhysicalPosition::new(
-                cursor_position.width / 2,
-                cursor_position.height / 2,
-            ))
-            .unwrap();
     }
 
     fn update_orbit_camera(&mut self, context: &AppContext) {
-        let mouse_delta = context.input.normalized_last_mouse_position();
+        let mouse_delta = context.input.mouse_delta();
         if context.input.is_mouse_button_pressed(MouseButton::Left) {
             self.cam_roll +=
                 mouse_delta.x * (ROTATION_DEGREES * context.time.delta_seconds()) as f32;
@@ -380,20 +370,19 @@ impl GltfViewerApplication {
         let rotation = Quat::from_mat4(&Mat4::look_at_rh(-location, Vec3::ZERO, constants::UP));
         self.pov.transform.rotation = rotation;
         self.pov.transform.location = location;
-
-        let cursor_position = context.window().inner_size();
-        context
-            .window()
-            .set_cursor_position(PhysicalPosition::new(
-                cursor_position.width / 2,
-                cursor_position.height / 2,
-            ))
-            .unwrap();
     }
 
     fn set_cursor_captured(&mut self, captured: bool, context: &AppContext) {
         self.is_mouse_captured = captured;
         context.window().set_cursor_visible(!captured);
+        context
+            .window()
+            .set_cursor_grab(if captured {
+                engine::winit::window::CursorGrabMode::Locked
+            } else {
+                engine::winit::window::CursorGrabMode::None
+            })
+            .unwrap();
     }
 }
 

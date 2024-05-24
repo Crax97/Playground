@@ -1,6 +1,5 @@
 use engine::{app::AppContext, scene_renderer::PointOfView};
 use glam::{Quat, Vec3};
-use winit::dpi::PhysicalPosition;
 
 pub fn update_fps_camera(context: &AppContext, pov: &mut PointOfView) {
     const MOVEMENT_SPEED: f64 = 100.0;
@@ -27,7 +26,7 @@ pub fn update_fps_camera(context: &AppContext, pov: &mut PointOfView) {
 
     camera_input *= (MOVEMENT_SPEED * context.time.delta_seconds()) as f32;
 
-    let mouse_delta = context.input.normalized_mouse_position();
+    let mouse_delta = context.input.mouse_delta();
     let pov_transform = pov.transform;
 
     let (cam_pitch, cam_roll, _) = pov_transform.rotation.to_euler(glam::EulerRot::XYZ);
@@ -48,13 +47,4 @@ pub fn update_fps_camera(context: &AppContext, pov: &mut PointOfView) {
         cam_roll.to_radians(),
         0.0,
     );
-
-    let cursor_position = context.window().inner_size();
-    context
-        .window()
-        .set_cursor_position(PhysicalPosition::new(
-            cursor_position.width / 2,
-            cursor_position.height / 2,
-        ))
-        .unwrap();
 }

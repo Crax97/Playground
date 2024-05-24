@@ -142,6 +142,7 @@ pub enum ImageFormat {
     Rg16f,
     Rgba16f,
     Bgra8,
+    Bgra8_sRGB,
     Depth32,
     A2B10G10R10,
 }
@@ -160,6 +161,7 @@ impl ImageFormat {
             Rg8 | Rg8Signed => 2,
             Rgba8 | Rgba8Signed => 4,
             Bgra8 => 4,
+            Bgra8_sRGB => 4,
             Depth32 => 4,
             A2B10G10R10 => 4,
         }

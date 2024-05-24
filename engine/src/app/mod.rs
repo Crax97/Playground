@@ -142,6 +142,15 @@ pub fn bootstrap<A: App>(description: AppDescription) -> anyhow::Result<()> {
             self.app.on_window_created(&self.context).unwrap();
         }
 
+        fn device_event(
+            &mut self,
+            _event_loop: &winit::event_loop::ActiveEventLoop,
+            _device_id: winit::event::DeviceId,
+            event: winit::event::DeviceEvent,
+        ) {
+            self.context.input.device_event(event);
+        }
+
         fn window_event(
             &mut self,
             event_loop: &winit::event_loop::ActiveEventLoop,

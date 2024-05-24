@@ -11,7 +11,7 @@ use engine::{
         mesh::{Mesh, MeshDescription},
         texture::{Texture, TextureDescription, TextureSamplerConfiguration, TextureUsageFlags},
     },
-    glam::{vec2, vec3, Mat4, Vec2},
+    glam::{vec2, vec3, Mat4},
     immutable_string::ImmutableString,
     include_spirv,
     math::Transform,
