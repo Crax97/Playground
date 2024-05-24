@@ -157,6 +157,11 @@ pub fn bootstrap<A: App>(description: AppDescription) -> anyhow::Result<()> {
             )
             .expect("Failed to handle window event");
         }
+
+        fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+            self.context.device.wait_idle().unwrap();
+            self.app.shutdown(&self.context).unwrap();
+        }
     }
 
     let app = A::create(&context)?;
@@ -257,7 +262,7 @@ pub fn asset_map_with_defaults(
     device: &Device,
     sampler_allocator: &SamplerAllocator,
 ) -> anyhow::Result<AssetMap> {
-    let mut map = AssetMap::new();
+    let mut map = AssetMap::new(device.clone());
     map.add(
         create_cube_mesh(device)?,
         CUBE_MESH_HANDLE.identifier().clone(),

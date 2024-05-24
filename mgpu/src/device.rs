@@ -112,9 +112,42 @@ impl Device {
         })
     }
 
+    pub fn dummy() -> Self {
+        use crate::hal::dummy::DummyHal;
+
+        let hal = Arc::new(DummyHal::default());
+        let device_info = hal.device_info();
+
+        let staging_buffer = hal.create_buffer(&BufferDescription {
+            label: Some("Staging buffer"),
+            usage_flags: BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::TRANSFER_SRC,
+            size: Self::STAGING_BUFFER_SIZE,
+            memory_domain: MemoryDomain::Cpu,
+        }).unwrap();
+        let staging_buffer_allocator =
+            StagingBufferAllocator::new(staging_buffer, 3).unwrap();
+
+        let cleanup_context = DeviceCleanupContext {
+            hal: hal.clone(),
+            staging_buffer,
+        };
+        unsafe { hal.prepare_next_frame() }.unwrap();
+        Self {
+            hal,
+            device_info,
+            cleanup_context: Arc::new(cleanup_context),
+            rdg: Default::default(),
+            staging_buffer_allocator: Arc::new(Mutex::new(staging_buffer_allocator)),
+
+            #[cfg(feature = "swapchain")]
+            presentation_requests: Default::default(),
+        }
+    }
+
     pub fn dump_rdg(&self) {
         DUMP_RDG.store(true, std::sync::atomic::Ordering::Relaxed);
     }
+    
 
     pub fn submit(&self) -> MgpuResult<()> {
         
@@ -511,6 +544,10 @@ impl Device {
         unsafe { self.hal.prepare_next_frame()? };
 
         Ok(())
+    }
+    
+    pub fn wait_idle(&self) -> MgpuResult<()> {
+        self.hal.device_wait_idle()
     }
 
     fn execute_compute_pass(

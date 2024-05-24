@@ -3,6 +3,7 @@ pub mod serializable_scene;
 use std::collections::{HashMap, HashSet};
 
 use glam::Vec3;
+use log::warn;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -55,20 +56,47 @@ impl Scene {
     pub fn preload(&self, asset_map: &mut AssetMap) -> anyhow::Result<()> {
         for node in self.nodes.iter() {
             match &node.primitive_type {
-                ScenePrimitive::Group => todo!(),
+                ScenePrimitive::Group => {}
                 ScenePrimitive::Mesh(SceneMesh { handle, material }) => {
-                    asset_map.load(handle)?;
-                    asset_map.load(material)?;
+                    asset_map.increment_reference(handle)?;
+                    asset_map.increment_reference(material)?;
 
                     let material = asset_map.get(material).unwrap();
                     let textures = material.get_used_textures();
                     for tex in textures {
-                        asset_map.load(&tex)?;
+                        asset_map.increment_reference(&tex)?;
                     }
                 }
             }
         }
         Ok(())
+    }
+
+    pub fn release_assets(&self, asset_map: &mut AssetMap) {
+        for node in self.nodes.iter() {
+            match &node.primitive_type {
+                ScenePrimitive::Group => {}
+                ScenePrimitive::Mesh(SceneMesh {
+                    handle,
+                    material: material_handle,
+                }) => {
+                    let Some(material) = asset_map.get(material_handle) else {
+                        warn!(
+                            "Material {:?} was already released",
+                            material_handle.identifier()
+                        );
+                        continue;
+                    };
+                    let textures = material.get_used_textures();
+                    for tex in textures {
+                        asset_map.decrement_reference(tex);
+                    }
+
+                    asset_map.decrement_reference(material_handle.clone());
+                    asset_map.decrement_reference(handle.clone());
+                }
+            }
+        }
     }
 
     pub fn add_node(&mut self, node: SceneNode) -> SceneNodeId {

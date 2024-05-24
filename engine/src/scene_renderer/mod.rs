@@ -251,6 +251,18 @@ struct FrameData {
     scene_params_binding_set: BindingSet,
     scene_lightning_parameter_buffer: Buffer,
 }
+impl FrameData {
+    fn release_resources(&self, device: &Device) -> anyhow::Result<()> {
+        device.destroy_binding_set(self.frame_binding_set.clone())?;
+        device.destroy_binding_set(self.scene_params_binding_set.clone())?;
+        device.destroy_buffer(self.point_of_view_buffer)?;
+        device.destroy_buffer(self.scene_lightning_parameter_buffer)?;
+        // The sampler is shared between all frames
+        self.final_image.release(device)?;
+        self.scene_images.release(device)?;
+        Ok(())
+    }
+}
 
 pub enum ProjectionMode {
     Orthographic {
@@ -677,6 +689,18 @@ impl SceneRenderer {
         Ok(())
     }
 
+    pub fn release_resources(&self, device: &Device) -> anyhow::Result<()> {
+        device.destroy_sampler(self.frames[0].scene_images_sampler)?;
+        for frame in &self.frames {
+            frame.release_resources(device)?;
+        }
+
+        device.destroy_graphics_pipeline(self.scene_lightning_pipeline)?;
+        device.destroy_shader_module(self.quad_vertex_shader)?;
+        device.destroy_shader_module(self.scene_lightning_fragment)?;
+        Ok(())
+    }
+
     pub fn get_scene_setup_mut(&mut self) -> &mut SceneSetup {
         &mut self.scene_setup
     }
@@ -826,6 +850,12 @@ impl RenderImage {
 
         Ok(Self { image, view })
     }
+
+    fn release(&self, device: &Device) -> anyhow::Result<()> {
+        device.destroy_image_view(self.view)?;
+        device.destroy_image(self.image)?;
+        Ok(())
+    }
 }
 
 impl SceneImages {
@@ -974,5 +1004,16 @@ impl SceneImages {
             ],
         };
         &BINDING_SET_LAYOUT
+    }
+
+    fn release(&self, device: &Device) -> anyhow::Result<()> {
+        device.destroy_binding_set(self.binding_set.clone())?;
+        self.depth.release(device)?;
+        self.diffuse.release(device)?;
+        self.position.release(device)?;
+        self.normal.release(device)?;
+        self.metallic_roughness.release(device)?;
+        self.emissive_ao.release(device)?;
+        Ok(())
     }
 }

@@ -291,7 +291,9 @@ impl App for GltfViewerApplication {
         Ok(())
     }
 
-    fn shutdown(&mut self, _context: &engine::app::AppContext) -> anyhow::Result<()> {
+    fn shutdown(&mut self, context: &engine::app::AppContext) -> anyhow::Result<()> {
+        self.scene.release_assets(&mut self.asset_map);
+        self.scene_renderer.release_resources(&context.device)?;
         Ok(())
     }
 

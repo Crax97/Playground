@@ -1,8 +1,7 @@
 use glam::{Vec2, Vec3, Vec4};
 use log::warn;
 use mgpu::{
-    Buffer, BufferWriteParams, Device, ShaderModuleLayout,
-    VariableType, VertexAttributeFormat,
+    Buffer, BufferWriteParams, Device, ShaderModuleLayout, VariableType, VertexAttributeFormat,
 };
 use serde::{Deserialize, Serialize};
 

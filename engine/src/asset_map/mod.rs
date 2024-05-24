@@ -1,17 +1,23 @@
 use std::{
     any::{type_name, TypeId},
     collections::HashMap,
+    fmt::Write,
     marker::PhantomData,
 };
 
-use log::warn;
+use log::{info, warn};
+use mgpu::Device;
 use serde::{Deserialize, Serialize};
 
 use crate::immutable_string::ImmutableString;
 
 use crate::utils::erased_arena::{ErasedArena, Index};
 
-pub trait Asset: 'static {}
+pub trait Asset: 'static {
+    fn release(&mut self, device: &Device) {
+        let _ = device;
+    }
+}
 
 pub trait AssetLoader: 'static {
     type LoadedAsset: Asset;
@@ -19,13 +25,13 @@ pub trait AssetLoader: 'static {
     fn accepts_identifier(&self, identifier: &str) -> bool;
     fn load(&mut self, identifier: &str) -> anyhow::Result<Self::LoadedAsset>;
 }
-#[derive(Debug)]
 pub struct AssetHandle<A: Asset> {
     _phantom_data: PhantomData<A>,
     pub(crate) identifier: ImmutableString,
 }
 
 pub struct AssetMap {
+    device: Device,
     arenas: HashMap<TypeId, ErasedArena>,
     loaded_assets: HashMap<ImmutableString, Index>,
     loaders: HashMap<TypeId, Box<dyn UnsafeAssetLoader>>,
@@ -37,8 +43,9 @@ struct LoadedAsset<A: Asset> {
 }
 
 impl AssetMap {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(device: Device) -> Self {
         Self {
+            device,
             arenas: Default::default(),
             loaded_assets: Default::default(),
             loaders: Default::default(),
@@ -86,7 +93,10 @@ impl AssetMap {
         }
     }
 
-    pub fn load<A: Asset>(&mut self, identifier: &AssetHandle<A>) -> anyhow::Result<()> {
+    pub fn increment_reference<A: Asset>(
+        &mut self,
+        identifier: &AssetHandle<A>,
+    ) -> anyhow::Result<()> {
         let asset_ty = TypeId::of::<A>();
         let identifier = &identifier.identifier;
         let map = self
@@ -152,7 +162,9 @@ impl AssetMap {
         entry.ref_count -= 1;
 
         if entry.ref_count == 0 {
-            arena.remove::<LoadedAsset<A>>(index);
+            let mut removed_asset = arena.remove::<LoadedAsset<A>>(index).unwrap();
+            info!("Released asset {handle:?}");
+            removed_asset.asset.release(&self.device);
         }
     }
 
@@ -207,6 +219,16 @@ unsafe impl<L: AssetLoader> UnsafeAssetLoader for L {
         <Self as AssetLoader>::accepts_identifier(self, identifier)
     }
 }
+impl<A: Asset> std::fmt::Debug for AssetHandle<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "AssetHandle<{}>(\"{}\")",
+            type_name::<A>(),
+            &self.identifier
+        ))
+    }
+}
+
 impl<A: Asset> Eq for AssetHandle<A> {}
 
 impl<A: Asset> PartialEq for AssetHandle<A> {
@@ -286,6 +308,8 @@ impl<A: Asset> AssetHandle<A> {
 #[cfg(test)]
 mod tests {
 
+    use mgpu::Device;
+
     use crate::asset_map::{Asset, AssetHandle, AssetLoader, AssetMap};
 
     #[test]
@@ -294,7 +318,11 @@ mod tests {
             content: String,
         }
 
-        impl Asset for StringAsset {}
+        impl Asset for StringAsset {
+            fn release(&mut self, _device: &mgpu::Device) {
+                println!("Destroyed string asset {}", self.content)
+            }
+        }
 
         struct StringAssetLoader;
         impl AssetLoader for StringAssetLoader {
@@ -311,12 +339,16 @@ mod tests {
             }
         }
 
-        let mut asset_map = AssetMap::new();
+        let mut asset_map = AssetMap::new(Device::dummy());
         let string_one = AssetHandle::<StringAsset>::new("Hello");
         let string_two = AssetHandle::<StringAsset>::new("World");
         asset_map.add_loader(StringAssetLoader);
-        asset_map.load::<StringAsset>(&string_one).unwrap();
-        asset_map.load::<StringAsset>(&string_two).unwrap();
+        asset_map
+            .increment_reference::<StringAsset>(&string_one)
+            .unwrap();
+        asset_map
+            .increment_reference::<StringAsset>(&string_two)
+            .unwrap();
         assert_eq!(
             asset_map
                 .get::<StringAsset>(&string_one)

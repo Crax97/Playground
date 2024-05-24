@@ -65,7 +65,7 @@ impl App for CubesSceneApplication {
             FsTextureLoader::new(context.device.clone(), sampler_allocator.clone());
         asset_map.add_loader(texture_loader);
         let david_texture = AssetHandle::<Texture>::new("assets/images/david.jpg");
-        asset_map.load::<Texture>(&david_texture)?;
+        asset_map.increment_reference::<Texture>(&david_texture)?;
         let mut scene = Scene::default();
         let material = Material::new(
             &context.device,
