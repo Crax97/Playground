@@ -208,6 +208,14 @@ impl App for CubesSceneApplication {
     fn on_window_created(&mut self, context: &AppContext) -> anyhow::Result<()> {
         let window = context.window();
         window.set_cursor_visible(false);
+        context
+            .window()
+            .set_cursor_grab(if cfg!(target_os = "linux") {
+                engine::winit::window::CursorGrabMode::Locked
+            } else {
+                engine::winit::window::CursorGrabMode::Confined
+            })
+            .unwrap();
         Ok(())
     }
 }
