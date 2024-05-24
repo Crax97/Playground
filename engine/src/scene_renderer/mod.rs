@@ -634,6 +634,7 @@ impl SceneRenderer {
                             mesh.uv_component,
                         ]);
                         scene_output_pass.set_index_buffer(mesh.index_buffer);
+                        scene_output_pass.set_draw_label(info.material.identifier().to_string());
                         scene_output_pass.draw_indexed(mesh.info.num_indices, 1, 0, 0, 0)?;
                     }
                 }

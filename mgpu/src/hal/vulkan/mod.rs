@@ -2298,6 +2298,40 @@ impl Hal for VulkanHal {
         self.resolver
             .remove::<VulkanSwapchain>(unsafe { Handle::from_u64(id) })
     }
+
+    fn begin_debug_region(
+        &self,
+        command_recorder: CommandRecorder,
+        region_name: &str,
+        color: [f32; 3],
+    ) {
+        let vk_buffer = vk::CommandBuffer::from_raw(command_recorder.id);
+
+        if let Some(debug_utils) = &self.debug_utilities {
+            let region_name = CString::new(region_name).unwrap();
+            let region_name = region_name.as_c_str();
+            unsafe {
+                debug_utils.debug_device.cmd_begin_debug_utils_label(
+                    vk_buffer,
+                    &vk::DebugUtilsLabelEXT::default()
+                        .color([color[0], color[1], color[2], 1.0])
+                        .label_name(region_name),
+                )
+            };
+        }
+    }
+
+    fn end_debug_region(&self, command_recorder: CommandRecorder) {
+        let vk_buffer = vk::CommandBuffer::from_raw(command_recorder.id);
+
+        if let Some(debug_utils) = &self.debug_utilities {
+            unsafe {
+                debug_utils
+                    .debug_device
+                    .cmd_end_debug_utils_label(vk_buffer)
+            };
+        }
+    }
 }
 
 impl VulkanHal {

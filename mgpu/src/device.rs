@@ -19,7 +19,7 @@ use bitflags::bitflags;
 use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::ops::DerefMut;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 #[cfg(feature = "swapchain")]
@@ -203,7 +203,7 @@ impl Device {
         let mut current_graphics = 0;
         let mut current_compute = 0;
         let mut current_transfer = 0;
-
+        
         let mut current_submission_group = SubmissionGroup::default();
         for step in &compiled.sequence {
             match step {
@@ -220,6 +220,12 @@ impl Device {
                                 .transition_resources(command_recorder, &pass.prequisites)?;
                             match &node.ty {
                                 Node::RenderPass { info } => {
+                                    let render_pass_label = if let Some(label) = info.label.as_deref() {
+                                        label 
+                                    } else {
+                                        "Render Pass"
+                                    };
+                                    self.hal.begin_debug_region(command_recorder, render_pass_label, next_hsl_color(0.5));
                                     unsafe { self.hal.begin_render_pass(command_recorder, info)? };
                                     for (step_idx, step) in info.steps.iter().enumerate() {
                                         for command in &step.commands {
@@ -230,7 +236,12 @@ impl Device {
                                                 binding_sets,
                                                 push_constants,
                                                 draw_type,
+                                                label
                                             } = command;
+                                            
+                                            if let Some(label) = label {
+                                                self.hal.begin_debug_region(command_recorder, label, next_hsl_color(0.3));
+                                            }
 
                                             unsafe {
                                                 self.hal.bind_graphics_pipeline(
@@ -292,6 +303,10 @@ impl Device {
                                                     }
                                                 }
                                             }
+
+                                            if label.is_some() {
+                                                self.hal.end_debug_region(command_recorder);
+                                            }
                                         }
 
                                         if step_idx < info.steps.len() - 1 {
@@ -301,6 +316,7 @@ impl Device {
                                         };
                                     }
                                     unsafe { self.hal.end_render_pass(command_recorder)? };
+                                    self.hal.end_debug_region(command_recorder);
                                 }
                                 Node::CopyBufferToBuffer {
                                     source,
@@ -555,6 +571,13 @@ impl Device {
         info: &crate::ComputePassInfo,
         command_recorder: hal::CommandRecorder,
     ) -> Result<(), crate::MgpuError> {
+
+        let label = if let Some(label) = info.label.as_deref() {
+            label
+        } else {
+            "Compute Pass"
+        };
+        self.hal.begin_debug_region(command_recorder, label, next_hsl_color(0.5));
         for step in info.steps.iter() {
             for command in &step.commands {
                 let DispatchCommand {
@@ -562,7 +585,12 @@ impl Device {
                     binding_sets,
                     push_constants,
                     dispatch_type,
+                    label,
                 } = command;
+                
+                if let Some(label) = label { 
+                    self.hal.begin_debug_region(command_recorder, label, next_hsl_color(0.3));
+                }
 
                 unsafe {
                     self.hal
@@ -585,8 +613,14 @@ impl Device {
                         }
                     }
                 }
+
+                if label.is_some() { 
+                    self.hal.end_debug_region(command_recorder);
+                }
             }
         }
+
+        self.hal.end_debug_region(command_recorder);
         Ok(())
     }
 
@@ -1220,4 +1254,36 @@ impl std::fmt::Display for DeviceInfo {
             self.frames_in_flight
         ))
     }
+}
+
+fn next_hsl_color(saturation: f32) -> [f32; 3] {
+static CURRENT_HSL_COUNTER: AtomicUsize = AtomicUsize::new(0);
+     hsl_color(CURRENT_HSL_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed), saturation)
+}
+
+
+fn hsl_color(index: usize, saturation: f32) -> [f32; 3] {
+    let hue_deg = (15.0 * index as f32) % 360.0;
+    let lightness = 0.5f32;
+
+    let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
+    let h1 = hue_deg / 60.0;
+    let x = chroma * (1.0 - ((h1 % 2.0) - 1.0).abs() );
+    
+    let (r, g, b) = if h1 <= 6.0 && h1 > 5.0 {
+        (chroma, 0.0, x)
+    }  else if h1 <= 5.0  && h1 > 4.0 {
+        (x, 0.0, chroma)
+    } else if h1 <= 4.0  && h1 > 3.0 {
+        (0.0, x, chroma)
+    } else if h1 <= 3.0 && h1 > 2.0 {
+        (0.0, chroma, x) 
+    } else if h1 <= 2.0 && h1 > 1.0 {
+        (x, chroma, 0.0)
+    } else {
+        (chroma, x, 0.0)
+    };
+    
+    let m = lightness - chroma * 0.5;
+    [r + m, g + m, b + m]
 }

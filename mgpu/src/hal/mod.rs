@@ -393,6 +393,14 @@ pub(crate) trait Hal: Send + Sync {
         buffer: Buffer,
         params: &BufferWriteParams,
     ) -> MgpuResult<()>;
+
+    fn begin_debug_region(
+        &self,
+        command_recorder: CommandRecorder,
+        region_name: &str,
+        color: [f32; 3],
+    );
+    fn end_debug_region(&self, command_recorder: CommandRecorder);
 }
 
 pub(crate) fn create(configuration: &DeviceConfiguration) -> MgpuResult<Arc<dyn Hal>> {

@@ -505,4 +505,14 @@ impl Hal for DummyHal {
     ) -> crate::MgpuResult<()> {
         Ok(())
     }
+
+    fn begin_debug_region(
+        &self,
+        _command_recorder: super::CommandRecorder,
+        _region_name: &str,
+        _color: [f32; 3],
+    ) {
+    }
+
+    fn end_debug_region(&self, _command_recorder: super::CommandRecorder) {}
 }

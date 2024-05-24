@@ -23,12 +23,15 @@ pub struct RenderPass<'c> {
     pipeline: Option<GraphicsPipeline>,
     vertex_buffers: Vec<Buffer>,
     index_buffer: Option<Buffer>,
+    current_draw_label: Option<String>,
 }
 
 pub struct ComputePass<'c, C: ComputeCommandRecorder> {
     command_recorder: &'c mut CommandRecorder<C>,
     info: ComputePassInfo,
     pipeline: Option<ComputePipeline>,
+    current_dispatch_label: Option<String>,
+    label: Option<String>,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -85,6 +88,7 @@ pub(crate) struct DrawCommand {
     pub(crate) binding_sets: Vec<BindingSet>,
     pub(crate) push_constants: Option<PushConstant>,
     pub(crate) draw_type: DrawType,
+    pub(crate) label: Option<String>,
 }
 
 #[derive(Debug, Hash)]
@@ -93,6 +97,7 @@ pub(crate) struct DispatchCommand {
     pub(crate) binding_sets: Vec<BindingSet>,
     pub(crate) push_constants: Option<PushConstant>,
     pub(crate) dispatch_type: DispatchType,
+    pub(crate) label: Option<String>,
 }
 
 #[derive(Debug, Hash)]
@@ -322,6 +327,7 @@ impl CommandRecorder<Graphics> {
             pipeline: None,
             vertex_buffers: Default::default(),
             index_buffer: Default::default(),
+            current_draw_label: None,
         })
     }
 
@@ -350,6 +356,8 @@ impl<C: ComputeCommandRecorder> CommandRecorder<C> {
                 steps: vec![ComputeStep::default()],
             },
             pipeline: None,
+            current_dispatch_label: None,
+            label: None,
         }
     }
 }
@@ -378,6 +386,10 @@ impl<'c> RenderPass<'c> {
         });
     }
 
+    pub fn set_draw_label(&mut self, label: impl Into<String>) {
+        self.current_draw_label = Some(label.into());
+    }
+
     pub fn draw(
         &mut self,
         vertices: usize,
@@ -389,6 +401,7 @@ impl<'c> RenderPass<'c> {
         self.validate_state(false)?;
 
         let step = self.info.steps.last_mut().unwrap();
+        let label = self.current_draw_label.take();
         step.commands.push(DrawCommand {
             pipeline: self.pipeline.unwrap(),
             vertex_buffers: self.vertex_buffers.clone(),
@@ -401,6 +414,7 @@ impl<'c> RenderPass<'c> {
                 first_vertex,
                 first_instance,
             },
+            label,
         });
         Ok(())
     }
@@ -417,6 +431,7 @@ impl<'c> RenderPass<'c> {
         self.validate_state(true)?;
 
         let step = self.info.steps.last_mut().unwrap();
+        let label = self.current_draw_label.take();
         step.commands.push(DrawCommand {
             pipeline: self.pipeline.unwrap(),
             vertex_buffers: self.vertex_buffers.clone(),
@@ -430,6 +445,7 @@ impl<'c> RenderPass<'c> {
                 vertex_offset,
                 first_instance,
             },
+            label,
         });
         Ok(())
     }
@@ -547,6 +563,10 @@ impl<'c, C: ComputeCommandRecorder> ComputePass<'c, C> {
         });
     }
 
+    pub fn set_dispatch_label(&mut self, label: impl Into<String>) {
+        self.label = Some(label.into())
+    }
+
     pub fn dispatch(
         &mut self,
         group_count_x: u32,
@@ -556,11 +576,13 @@ impl<'c, C: ComputeCommandRecorder> ComputePass<'c, C> {
         #[cfg(debug_assertions)]
         self.validate_state()?;
         let last_command_step = self.info.steps.last_mut().unwrap();
+        let label = self.current_dispatch_label.take();
         last_command_step.commands.push(DispatchCommand {
             pipeline: self.pipeline.unwrap(),
             dispatch_type: DispatchType::Dispatch(group_count_x, group_count_y, group_count_z),
             push_constants: self.command_recorder.push_constants.clone(),
             binding_sets: self.command_recorder.binding_sets.to_vec(),
+            label,
         });
         Ok(())
     }
