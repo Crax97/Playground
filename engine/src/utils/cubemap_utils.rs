@@ -265,10 +265,7 @@ pub fn read_cubemap_from_hdr(
         fragment_stage: Some(&FragmentStageInfo {
             shader: &fragment_shader,
             entry_point: "main",
-            render_targets: &[RenderTargetInfo {
-                format: params.format,
-                blend: None,
-            }],
+            render_targets: &[RenderTargetInfo { blend: None }],
             depth_stencil_target: None,
         }),
         primitive_restart_enabled: false,
@@ -301,10 +298,7 @@ pub fn read_cubemap_from_hdr(
         fragment_stage: Some(&FragmentStageInfo {
             shader: &irradiance_shader,
             entry_point: "main",
-            render_targets: &[RenderTargetInfo {
-                format: params.format,
-                blend: None,
-            }],
+            render_targets: &[RenderTargetInfo { blend: None }],
             depth_stencil_target: None,
         }),
         primitive_restart_enabled: false,
@@ -337,10 +331,7 @@ pub fn read_cubemap_from_hdr(
         fragment_stage: Some(&FragmentStageInfo {
             shader: &prefilter_diffuse,
             entry_point: "main",
-            render_targets: &[RenderTargetInfo {
-                format: params.format,
-                blend: None,
-            }],
+            render_targets: &[RenderTargetInfo { blend: None }],
             depth_stencil_target: None,
         }),
         primitive_restart_enabled: false,

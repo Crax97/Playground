@@ -147,26 +147,11 @@ impl Material {
                 shader: &fragment_shader,
                 entry_point: "main",
                 render_targets: &[
-                    RenderTargetInfo {
-                        format: ImageFormat::Rgba32f,
-                        blend: None,
-                    },
-                    RenderTargetInfo {
-                        format: ImageFormat::Rgba32f,
-                        blend: None,
-                    },
-                    RenderTargetInfo {
-                        format: ImageFormat::Rgba32f,
-                        blend: None,
-                    },
-                    RenderTargetInfo {
-                        format: ImageFormat::Rgba32f,
-                        blend: None,
-                    },
-                    RenderTargetInfo {
-                        format: ImageFormat::Rgba8,
-                        blend: None,
-                    },
+                    RenderTargetInfo { blend: None },
+                    RenderTargetInfo { blend: None },
+                    RenderTargetInfo { blend: None },
+                    RenderTargetInfo { blend: None },
+                    RenderTargetInfo { blend: None },
                 ],
                 depth_stencil_target: Some(&DepthStencilTargetInfo {
                     format: ImageFormat::Depth32,
@@ -264,7 +249,7 @@ impl Material {
 
             assert!(
                 next.is_some_and(|bs| matches!(bs.ty, BindingSetElementKind::Sampler)),
-                "The user textures must come in pair: for each texture there must be a sampler, it was {:?}", 
+                "The user textures must come in pair: for each texture there must be a sampler, it was {:?}",
                 bs.ty
             );
         }

@@ -503,10 +503,7 @@ impl SceneRenderer {
                 fragment_stage: Some(&FragmentStageInfo {
                     shader: &scene_lightning_fragment,
                     entry_point: "main",
-                    render_targets: &[RenderTargetInfo {
-                        format: ImageFormat::Rgba8,
-                        blend: None,
-                    }],
+                    render_targets: &[RenderTargetInfo { blend: None }],
                     depth_stencil_target: None,
                 }),
                 primitive_restart_enabled: false,

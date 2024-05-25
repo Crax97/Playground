@@ -517,7 +517,6 @@ pub struct ColorWriteMask : u8 {
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Debug, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RenderTargetInfo {
-    pub format: ImageFormat,
     pub blend: Option<BlendSettings>,
 }
 

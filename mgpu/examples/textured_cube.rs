@@ -474,10 +474,7 @@ fn main() {
             .fragment_stage(&FragmentStageInfo {
                 shader: &fragment_shader_module,
                 entry_point: "main",
-                render_targets: &[RenderTargetInfo {
-                    format: ImageFormat::Rgba8,
-                    blend: None,
-                }],
+                render_targets: &[RenderTargetInfo { blend: None }],
                 depth_stencil_target: Some(&DepthStencilTargetInfo {
                     format: ImageFormat::Depth32,
                 }),

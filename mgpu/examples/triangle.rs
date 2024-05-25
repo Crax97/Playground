@@ -3,10 +3,10 @@ mod util;
 use mgpu::{
     AttachmentStoreOp, Buffer, BufferDescription, BufferUsageFlags, Device, DeviceConfiguration,
     DeviceFeatures, DevicePreference, Extents2D, FragmentStageInfo, Graphics, GraphicsPipeline,
-    GraphicsPipelineDescription, ImageFormat, MemoryDomain, Rect2D, RenderPassDescription,
-    RenderTarget, RenderTargetInfo, RenderTargetLoadOp, SampleCount, ShaderModule,
-    ShaderModuleDescription, Swapchain, SwapchainCreationInfo, VertexInputDescription,
-    VertexInputFrequency, VertexStageInfo,
+    GraphicsPipelineDescription, MemoryDomain, Rect2D, RenderPassDescription, RenderTarget,
+    RenderTargetInfo, RenderTargetLoadOp, SampleCount, ShaderModule, ShaderModuleDescription,
+    Swapchain, SwapchainCreationInfo, VertexInputDescription, VertexInputFrequency,
+    VertexStageInfo,
 };
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -103,10 +103,7 @@ fn main() {
             .fragment_stage(&FragmentStageInfo {
                 shader: &fragment_shader_module,
                 entry_point: "main",
-                render_targets: &[RenderTargetInfo {
-                    format: ImageFormat::Rgba8,
-                    blend: None,
-                }],
+                render_targets: &[RenderTargetInfo { blend: None }],
                 depth_stencil_target: None,
             }),
         )
