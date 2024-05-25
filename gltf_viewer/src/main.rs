@@ -378,11 +378,7 @@ impl GltfViewerApplication {
         context
             .window()
             .set_cursor_grab(if captured {
-                if cfg!(target_os = "linux") {
-                    engine::winit::window::CursorGrabMode::Locked
-                } else {
-                    engine::winit::window::CursorGrabMode::Confined
-                }
+                engine::winit::window::CursorGrabMode::Confined
             } else {
                 engine::winit::window::CursorGrabMode::None
             })
