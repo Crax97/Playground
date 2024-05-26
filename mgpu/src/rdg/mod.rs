@@ -1634,7 +1634,7 @@ mod tests {
                             first_instance: 0,
                         },
                         label: None,
-                        scissor_rect: None,,
+                        scissor_rect: None,
                     }],
                 }],
             },
