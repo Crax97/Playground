@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::SystemTime};
 
 use bytemuck::{Pod, Zeroable};
 use copypasta::{ClipboardContext, ClipboardProvider};
@@ -224,8 +224,11 @@ impl EguiMgpuIntegration {
         })
     }
 
-    pub fn begin_frame(&mut self, window: &Window, time_since_start: f64) {
-        let input = self.take_input(window, time_since_start);
+    pub fn begin_frame(&mut self, window: &Window) {
+        let time_since_start = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap();
+        let input = self.take_input(window, time_since_start.as_secs_f64());
         self.context.begin_frame(input);
     }
 
@@ -573,6 +576,63 @@ impl EguiMgpuIntegration {
         }
         Ok(())
     }
+
+    /// Call with the output given by `egui`.
+    ///
+    /// This will, if needed:
+    /// * update the cursor
+    /// * copy text to the clipboard
+    /// * open any clicked urls
+    /// * update the IME
+    /// *
+    pub fn handle_platform_output(
+        &mut self,
+        window: &Window,
+        platform_output: egui::PlatformOutput,
+    ) {
+        let egui::PlatformOutput {
+            cursor_icon,
+            open_url,
+            copied_text,
+            events: _,                    // handled elsewhere
+            mutable_text_under_cursor: _, // only used in eframe web
+            ime,
+            #[cfg(feature = "accesskit")]
+            accesskit_update,
+        } = platform_output;
+
+        self.set_cursor_icon(window, cursor_icon);
+
+        if let Some(_open_url) = open_url {
+            log::trace!("open_url_in_browser(&open_url.url);");
+        }
+
+        if !copied_text.is_empty() {
+            log::trace!("Clipboard copy is not supported");
+            let _ = self
+                .clipboard_context
+                .set_contents(copied_text)
+                .inspect_err(|e| {
+                    log::error!("Clipboard error: {e:?}");
+                });
+        }
+
+        if let Some(ime) = ime {
+            let rect = ime.rect;
+            let pixels_per_point = Self::compute_pixels_per_point(&self.context, window);
+            window.set_ime_cursor_area(
+                winit::dpi::PhysicalPosition {
+                    x: pixels_per_point * rect.min.x,
+                    y: pixels_per_point * rect.min.y,
+                },
+                winit::dpi::PhysicalSize {
+                    width: pixels_per_point * rect.width(),
+                    height: pixels_per_point * rect.height(),
+                },
+            );
+        }
+    }
+
     fn set_clip_rect(
         render_passs: &mut RenderPass,
         [width_px, height_px]: [u32; 2],
