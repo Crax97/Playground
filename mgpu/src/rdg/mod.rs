@@ -5,8 +5,8 @@ use crate::{
         AttachmentType, QueueType, Resource, ResourceAccessMode, ResourceInfo, ResourceTransition,
     },
     util::check,
-    AttachmentStoreOp, Buffer, ComputePassInfo, FilterMode, Image, ImageRegion, MgpuResult,
-    RenderPassInfo, StorageAccessMode,
+    AttachmentStoreOp, Buffer, ComputePassInfo, FilterMode, Image, ImageRegion, ImageView,
+    MgpuResult, RenderPassInfo, StorageAccessMode,
 };
 
 #[derive(Debug)]
@@ -36,6 +36,12 @@ pub enum Node {
         dest: Image,
         dest_region: ImageRegion,
         filter: FilterMode,
+    },
+    Clear {
+        target: ImageView,
+        // If the image is a depth image, only the first value is used
+        // IF the image is a stencil image, the value is transformed to an u8
+        color: [f32; 4],
     },
 }
 
@@ -328,7 +334,7 @@ impl Rdg {
             if node_depths[node] != usize::MAX && depth > node_depths[node] {
                 panic!(
                     "Encountered a loop while sorting the nodes for execution
-                    On node 
+                    On node
                     {:#?}
                     first encountered at depth {} and then at depth {}",
                     self.nodes[node], node_depths[node], depth
@@ -767,6 +773,17 @@ impl Node {
                 }]
                 .into(),
             ),
+            Node::Clear { target, .. } => (
+                [].into(),
+                [ResourceInfo {
+                    resource: Resource::Image {
+                        image: target.owner,
+                        subresource: target.subresource,
+                    },
+                    access_mode: ResourceAccessMode::TransferDst,
+                }]
+                .into(),
+            ),
             Node::ComputePass { info } => {
                 let all_resource_bindings_written = info.steps.iter().flat_map(|step| {
                     step.commands.iter().flat_map(|cmd| {
@@ -956,6 +973,9 @@ impl RdgCompiledGraph {
                     dest_region.base_array_layer,
                     dest_region.mip
                 )
+            }
+            Node::Clear { target, color } => {
+                format!("Clear {} color {:?}", target.id, color)
             }
         }
     }
@@ -1238,6 +1258,8 @@ mod tests {
                         },
                         push_constants: None,
                         label: None,
+
+                        scissor_rect: None,
                     }],
                 }],
             },
@@ -1397,6 +1419,8 @@ mod tests {
                         },
 
                         label: None,
+
+                        scissor_rect: None,
                     }],
                 }],
             },
@@ -1562,6 +1586,8 @@ mod tests {
                             first_instance: 0,
                         },
                         label: None,
+
+                        scissor_rect: None,
                     }],
                 }],
             },
@@ -1608,6 +1634,7 @@ mod tests {
                             first_instance: 0,
                         },
                         label: None,
+                        scissor_rect: None,,
                     }],
                 }],
             },
@@ -1654,6 +1681,7 @@ mod tests {
                             first_instance: 0,
                         },
                         label: None,
+                        scissor_rect: None,
                     }],
                 }],
             },

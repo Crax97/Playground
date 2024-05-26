@@ -132,6 +132,13 @@ impl Hal for DummyHal {
         Ok(())
     }
 
+    unsafe fn set_scissor_rect(
+        &self,
+        _command_recorder: super::CommandRecorder,
+        _scissor_rect: crate::Rect2D,
+    ) {
+    }
+
     unsafe fn bind_graphics_binding_sets(
         &self,
         _command_recorder: super::CommandRecorder,
@@ -515,4 +522,12 @@ impl Hal for DummyHal {
     }
 
     fn end_debug_region(&self, _command_recorder: super::CommandRecorder) {}
+
+    unsafe fn cmd_clear_image(
+        &self,
+        _command_recorder: super::CommandRecorder,
+        _target: crate::ImageView,
+        _color: [f32; 4],
+    ) {
+    }
 }

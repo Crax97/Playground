@@ -449,6 +449,10 @@ pub enum VertexAttributeFormat {
     Float2,
     Float3,
     Float4,
+    FloatUnorm,
+    Float2Unorm,
+    Float3Unorm,
+    Float4Unorm,
     Mat2x2,
     Mat3x3,
     Mat4x4,
@@ -458,6 +462,7 @@ pub enum VertexAttributeFormat {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct VertexInputDescription {
     pub location: usize,
+    pub binding: usize,
     pub stride: usize,
     pub offset: usize,
     pub format: VertexAttributeFormat,
@@ -1131,6 +1136,29 @@ impl<'a> GraphicsPipelineDescription<'a> {
 }
 
 impl VertexAttributeFormat {
+    pub fn channels(self) -> usize {
+        match self {
+            VertexAttributeFormat::Int => 1,
+            VertexAttributeFormat::Int2 => 2,
+            VertexAttributeFormat::Int3 => 3,
+            VertexAttributeFormat::Int4 => 4,
+            VertexAttributeFormat::Uint => 1,
+            VertexAttributeFormat::Uint2 => 2,
+            VertexAttributeFormat::Uint3 => 3,
+            VertexAttributeFormat::Uint4 => 4,
+            VertexAttributeFormat::Float => 1,
+            VertexAttributeFormat::Float2 => 2,
+            VertexAttributeFormat::Float3 => 3,
+            VertexAttributeFormat::Float4 => 4,
+            VertexAttributeFormat::FloatUnorm => 1,
+            VertexAttributeFormat::Float2Unorm => 2,
+            VertexAttributeFormat::Float3Unorm => 3,
+            VertexAttributeFormat::Float4Unorm => 4,
+            VertexAttributeFormat::Mat2x2 => 2,
+            VertexAttributeFormat::Mat3x3 => 3,
+            VertexAttributeFormat::Mat4x4 => 4,
+        }
+    }
     pub fn size_bytes(&self) -> usize {
         match self {
             VertexAttributeFormat::Int => 4,
@@ -1148,6 +1176,10 @@ impl VertexAttributeFormat {
             VertexAttributeFormat::Mat2x2 => 8 * 8,
             VertexAttributeFormat::Mat3x3 => 12 * 12,
             VertexAttributeFormat::Mat4x4 => 16 * 16,
+            VertexAttributeFormat::FloatUnorm => 1,
+            VertexAttributeFormat::Float2Unorm => 2,
+            VertexAttributeFormat::Float3Unorm => 3,
+            VertexAttributeFormat::Float4Unorm => 4,
         }
     }
 }

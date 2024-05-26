@@ -3,8 +3,8 @@ use std::marker::PhantomData;
 use crate::{
     hal::QueueType, rdg::Node, AttachmentStoreOp, BindingSet, BlitParams, Buffer,
     ComputePassDescription, ComputePipeline, DepthStencilTarget, Device, Extents2D,
-    GraphicsPipeline, MgpuResult, Rect2D, RenderPassDescription, RenderPassFlags, RenderTarget,
-    ShaderStageFlags,
+    GraphicsPipeline, ImageView, MgpuResult, Rect2D, RenderPassDescription, RenderPassFlags,
+    RenderTarget, ShaderStageFlags,
 };
 #[cfg(debug_assertions)]
 use crate::{util::check, BufferUsageFlags, ImageUsageFlags};
@@ -24,6 +24,7 @@ pub struct RenderPass<'c> {
     vertex_buffers: Vec<Buffer>,
     index_buffer: Option<Buffer>,
     current_draw_label: Option<String>,
+    scissor_rect: Option<Rect2D>,
 }
 
 pub struct ComputePass<'c, C: ComputeCommandRecorder> {
@@ -88,6 +89,7 @@ pub(crate) struct DrawCommand {
     pub(crate) binding_sets: Vec<BindingSet>,
     pub(crate) push_constants: Option<PushConstant>,
     pub(crate) draw_type: DrawType,
+    pub(crate) scissor_rect: Option<Rect2D>,
     pub(crate) label: Option<String>,
 }
 
@@ -328,7 +330,12 @@ impl CommandRecorder<Graphics> {
             vertex_buffers: Default::default(),
             index_buffer: Default::default(),
             current_draw_label: None,
+            scissor_rect: None,
         })
+    }
+
+    pub fn clear_image(&mut self, target: ImageView, color: [f32; 4]) {
+        self.new_nodes.push(Node::Clear { target, color });
     }
 
     pub fn blit(&mut self, params: &BlitParams) {
@@ -390,6 +397,10 @@ impl<'c> RenderPass<'c> {
         self.current_draw_label = Some(label.into());
     }
 
+    pub fn set_scissor_rect(&mut self, scissor_rect: Rect2D) {
+        self.scissor_rect = Some(scissor_rect);
+    }
+
     pub fn draw(
         &mut self,
         vertices: usize,
@@ -408,6 +419,7 @@ impl<'c> RenderPass<'c> {
             index_buffer: self.index_buffer,
             binding_sets: self.command_recorder.binding_sets.clone(),
             push_constants: self.command_recorder.push_constants.clone(),
+            scissor_rect: self.scissor_rect,
             draw_type: DrawType::Draw {
                 vertices,
                 instances,
@@ -438,6 +450,7 @@ impl<'c> RenderPass<'c> {
             index_buffer: self.index_buffer,
             binding_sets: self.command_recorder.binding_sets.clone(),
             push_constants: self.command_recorder.push_constants.clone(),
+            scissor_rect: self.scissor_rect,
             draw_type: DrawType::DrawIndexed {
                 indices,
                 instances,
@@ -465,17 +478,17 @@ impl<'c> RenderPass<'c> {
 
         let pipeline_label = pipeline_layout.label.as_deref().unwrap_or("Unknown");
         for input in &pipeline_layout.vertex_stage.vertex_inputs {
-            let vertex_buffer = self.vertex_buffers.get(input.location);
+            let vertex_buffer = self.vertex_buffers.get(input.binding);
             check!(
                 vertex_buffer.is_some(),
                 &format!(
-                    "Pipeline '{}' expects a vertex buffer at location {}, but none was bound",
+                    "Pipeline '{}' expects a vertex buffer at binding index {}, but none was bound",
                     pipeline_label, input.location
                 )
             );
             let vertex_buffer = vertex_buffer.unwrap();
             check!(vertex_buffer.usage_flags.contains(BufferUsageFlags::VERTEX_BUFFER),
-            &format!("Bound a vertex buffer at location {} that doesn't have the VERTEX_BUFFER usage flag", input.location));
+                        &format!("Bound a vertex buffer at location {} that doesn't have the VERTEX_BUFFER usage flag", input.binding));
         }
 
         if check_index_buffer {

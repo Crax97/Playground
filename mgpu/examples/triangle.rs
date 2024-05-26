@@ -92,6 +92,7 @@ fn main() {
                     shader: &vertex_shader_module,
                     entry_point: "main",
                     vertex_inputs: &[VertexInputDescription {
+                        binding: 0,
                         location: 0,
                         stride: std::mem::size_of::<Position>(),
                         offset: 0,

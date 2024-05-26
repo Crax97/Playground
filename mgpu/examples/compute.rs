@@ -558,6 +558,7 @@ fn main() {
                     entry_point: "main",
                     vertex_inputs: &[
                         VertexInputDescription {
+                            binding: 0,
                             location: 0,
                             stride: std::mem::size_of::<Vertex>(),
                             offset: 0,
@@ -565,6 +566,7 @@ fn main() {
                             format: mgpu::VertexAttributeFormat::Float3,
                         },
                         VertexInputDescription {
+                            binding: 1,
                             location: 1,
                             stride: std::mem::size_of::<Vertex>(),
                             offset: offset_of!(Vertex, uv),

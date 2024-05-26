@@ -1,5 +1,5 @@
 use mgpu::{
-    Device, DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D, Swapchain,
+    Device, DeviceConfiguration, DeviceFeatures, DevicePreference, Extents2D, Graphics, Swapchain,
     SwapchainCreationInfo,
 };
 
@@ -53,6 +53,11 @@ fn main() {
             self.window = Some(window);
         }
 
+        fn exiting(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+            self.device.wait_idle().unwrap();
+            self.swapchain.as_mut().unwrap().destroy().unwrap();
+        }
+
         fn window_event(
             &mut self,
             event_loop: &winit::event_loop::ActiveEventLoop,
@@ -61,16 +66,20 @@ fn main() {
         ) {
             match event {
                 WindowEvent::CloseRequested => {
-                    self.swapchain.as_mut().unwrap().destroy().unwrap();
                     event_loop.exit();
                 }
                 WindowEvent::RedrawRequested => {
-                    let _ = self
+                    let img = self
                         .swapchain
                         .as_mut()
                         .unwrap()
                         .acquire_next_image()
                         .unwrap();
+                    {
+                        let mut cmd = self.device.create_command_recorder::<Graphics>();
+                        cmd.clear_image(img.view, [0.0; 4]);
+                        cmd.submit().unwrap();
+                    }
 
                     self.swapchain.as_mut().unwrap().present().unwrap();
 

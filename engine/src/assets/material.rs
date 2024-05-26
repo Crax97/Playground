@@ -353,6 +353,7 @@ impl Material {
 pub(crate) fn mesh_vertex_inputs() -> &'static [VertexInputDescription] {
     const VERTEX_INPUTS: &[VertexInputDescription] = &[
         VertexInputDescription {
+            binding: 0,
             location: 0,
             stride: std::mem::size_of::<[f32; 3]>(),
             offset: 0,
@@ -360,6 +361,7 @@ pub(crate) fn mesh_vertex_inputs() -> &'static [VertexInputDescription] {
             frequency: VertexInputFrequency::PerVertex,
         },
         VertexInputDescription {
+            binding: 1,
             location: 1,
             stride: std::mem::size_of::<[f32; 3]>(),
             offset: 0,
@@ -367,6 +369,7 @@ pub(crate) fn mesh_vertex_inputs() -> &'static [VertexInputDescription] {
             frequency: VertexInputFrequency::PerVertex,
         },
         VertexInputDescription {
+            binding: 2,
             location: 2,
             stride: std::mem::size_of::<[f32; 3]>(),
             offset: 0,
@@ -374,6 +377,7 @@ pub(crate) fn mesh_vertex_inputs() -> &'static [VertexInputDescription] {
             frequency: VertexInputFrequency::PerVertex,
         },
         VertexInputDescription {
+            binding: 3,
             location: 3,
             stride: std::mem::size_of::<[f32; 3]>(),
             offset: 0,
@@ -381,6 +385,7 @@ pub(crate) fn mesh_vertex_inputs() -> &'static [VertexInputDescription] {
             frequency: VertexInputFrequency::PerVertex,
         },
         VertexInputDescription {
+            binding: 4,
             location: 4,
             stride: std::mem::size_of::<[f32; 2]>(),
             offset: 0,
@@ -388,7 +393,7 @@ pub(crate) fn mesh_vertex_inputs() -> &'static [VertexInputDescription] {
             frequency: VertexInputFrequency::PerVertex,
         },
     ];
-    &VERTEX_INPUTS
+    VERTEX_INPUTS
 }
 
 impl MaterialParameters {

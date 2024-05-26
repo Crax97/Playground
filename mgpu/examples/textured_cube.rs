@@ -456,12 +456,14 @@ fn main() {
                     vertex_inputs: &[
                         VertexInputDescription {
                             location: 0,
+                            binding: 0,
                             stride: std::mem::size_of::<Vertex>(),
                             offset: 0,
                             frequency: VertexInputFrequency::PerVertex,
                             format: mgpu::VertexAttributeFormat::Float3,
                         },
                         VertexInputDescription {
+                            binding: 1,
                             location: 1,
                             stride: std::mem::size_of::<Vertex>(),
                             offset: offset_of!(Vertex, uv),

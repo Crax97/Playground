@@ -118,14 +118,15 @@ impl Device {
         let hal = Arc::new(DummyHal::default());
         let device_info = hal.device_info();
 
-        let staging_buffer = hal.create_buffer(&BufferDescription {
-            label: Some("Staging buffer"),
-            usage_flags: BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::TRANSFER_SRC,
-            size: Self::STAGING_BUFFER_SIZE,
-            memory_domain: MemoryDomain::Cpu,
-        }).unwrap();
-        let staging_buffer_allocator =
-            StagingBufferAllocator::new(staging_buffer, 3).unwrap();
+        let staging_buffer = hal
+            .create_buffer(&BufferDescription {
+                label: Some("Staging buffer"),
+                usage_flags: BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::TRANSFER_SRC,
+                size: Self::STAGING_BUFFER_SIZE,
+                memory_domain: MemoryDomain::Cpu,
+            })
+            .unwrap();
+        let staging_buffer_allocator = StagingBufferAllocator::new(staging_buffer, 3).unwrap();
 
         let cleanup_context = DeviceCleanupContext {
             hal: hal.clone(),
@@ -147,21 +148,22 @@ impl Device {
     pub fn dump_rdg(&self) {
         DUMP_RDG.store(true, std::sync::atomic::Ordering::Relaxed);
     }
-    
 
     pub fn submit(&self) -> MgpuResult<()> {
-        
         let mut staging_buffer = self.staging_buffer_allocator.lock().unwrap();
         staging_buffer.flush(self.hal.as_ref())?;
 
         let mut rdg = self.write_rdg();
         let compiled = rdg.compile()?;
         rdg.clear();
+
         if DUMP_RDG.load(std::sync::atomic::Ordering::Relaxed) {
             compiled.save_to_svg(&format!(
                 "rdg_graph_{}.svg",
-                std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH)
-                .unwrap().as_millis()
+                std::time::SystemTime::now()
+                    .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis()
             ));
             DUMP_RDG.store(false, std::sync::atomic::Ordering::Relaxed);
         }
@@ -203,7 +205,7 @@ impl Device {
         let mut current_graphics = 0;
         let mut current_compute = 0;
         let mut current_transfer = 0;
-        
+
         let mut current_submission_group = SubmissionGroup::default();
         for step in &compiled.sequence {
             match step {
@@ -220,12 +222,17 @@ impl Device {
                                 .transition_resources(command_recorder, &pass.prequisites)?;
                             match &node.ty {
                                 Node::RenderPass { info } => {
-                                    let render_pass_label = if let Some(label) = info.label.as_deref() {
-                                        label 
-                                    } else {
-                                        "Render Pass"
-                                    };
-                                    self.hal.begin_debug_region(command_recorder, render_pass_label, next_hsl_color(0.5));
+                                    let render_pass_label =
+                                        if let Some(label) = info.label.as_deref() {
+                                            label
+                                        } else {
+                                            "Render Pass"
+                                        };
+                                    self.hal.begin_debug_region(
+                                        command_recorder,
+                                        render_pass_label,
+                                        next_hsl_color(0.5),
+                                    );
                                     unsafe { self.hal.begin_render_pass(command_recorder, info)? };
                                     for (step_idx, step) in info.steps.iter().enumerate() {
                                         for command in &step.commands {
@@ -236,11 +243,19 @@ impl Device {
                                                 binding_sets,
                                                 push_constants,
                                                 draw_type,
-                                                label
+                                                scissor_rect,
+                                                label,
                                             } = command;
-                                            
+
+                                            let scissor_rect =
+                                                scissor_rect.unwrap_or(info.render_area);
+
                                             if let Some(label) = label {
-                                                self.hal.begin_debug_region(command_recorder, label, next_hsl_color(0.3));
+                                                self.hal.begin_debug_region(
+                                                    command_recorder,
+                                                    label,
+                                                    next_hsl_color(0.3),
+                                                );
                                             }
 
                                             unsafe {
@@ -252,6 +267,11 @@ impl Device {
                                                     command_recorder,
                                                     vertex_buffers,
                                                 )?;
+
+                                                self.hal.set_scissor_rect(
+                                                    command_recorder,
+                                                    scissor_rect,
+                                                );
 
                                                 if let Some(index_buffer) = index_buffer {
                                                     self.hal.set_index_buffer(
@@ -268,7 +288,12 @@ impl Device {
                                                     )?;
                                                 }
                                                 for pc in push_constants.iter() {
-                                                    self.hal.set_graphics_push_constant(command_recorder, *pipeline, &pc.data, pc.visibility)?;
+                                                    self.hal.set_graphics_push_constant(
+                                                        command_recorder,
+                                                        *pipeline,
+                                                        &pc.data,
+                                                        pc.visibility,
+                                                    )?;
                                                 }
                                                 match *draw_type {
                                                     Draw {
@@ -367,6 +392,9 @@ impl Device {
                                 Node::ComputePass { info } => {
                                     self.execute_compute_pass(info, command_recorder)?;
                                 }
+                                Node::Clear { target, color } => unsafe {
+                                    self.hal.cmd_clear_image(command_recorder, *target, *color)
+                                },
                             }
                         }
 
@@ -397,6 +425,7 @@ impl Device {
                                 Node::ComputePass { info } => {
                                     self.execute_compute_pass(info, command_recorder)?
                                 }
+                                Node::Clear { .. } => unreachable!(),
                             }
                         }
                         current_compute += 1;
@@ -446,6 +475,7 @@ impl Device {
                                     unreachable!()
                                 }
                                 Node::ComputePass { .. } => unreachable!(),
+                                Node::Clear { .. } => unreachable!(),
                             }
                         }
                         current_transfer += 1;
@@ -554,14 +584,13 @@ impl Device {
 
         unsafe { self.hal.end_rendering()? };
 
-        staging_buffer
-            .end_frame();
+        staging_buffer.end_frame();
 
         unsafe { self.hal.prepare_next_frame()? };
 
         Ok(())
     }
-    
+
     pub fn wait_idle(&self) -> MgpuResult<()> {
         self.hal.device_wait_idle()
     }
@@ -571,13 +600,13 @@ impl Device {
         info: &crate::ComputePassInfo,
         command_recorder: hal::CommandRecorder,
     ) -> Result<(), crate::MgpuError> {
-
         let label = if let Some(label) = info.label.as_deref() {
             label
         } else {
             "Compute Pass"
         };
-        self.hal.begin_debug_region(command_recorder, label, next_hsl_color(0.5));
+        self.hal
+            .begin_debug_region(command_recorder, label, next_hsl_color(0.5));
         for step in info.steps.iter() {
             for command in &step.commands {
                 let DispatchCommand {
@@ -587,18 +616,24 @@ impl Device {
                     dispatch_type,
                     label,
                 } = command;
-                
-                if let Some(label) = label { 
-                    self.hal.begin_debug_region(command_recorder, label, next_hsl_color(0.3));
+
+                if let Some(label) = label {
+                    self.hal
+                        .begin_debug_region(command_recorder, label, next_hsl_color(0.3));
                 }
 
                 unsafe {
                     self.hal
                         .bind_compute_pipeline(command_recorder, *pipeline)?;
 
-                        if let Some(pc) = &push_constants {
-                            self.hal.set_compute_push_constant(command_recorder, *pipeline, &pc.data, pc.visibility)?;
-                        }
+                    if let Some(pc) = &push_constants {
+                        self.hal.set_compute_push_constant(
+                            command_recorder,
+                            *pipeline,
+                            &pc.data,
+                            pc.visibility,
+                        )?;
+                    }
 
                     if !binding_sets.is_empty() {
                         self.hal.bind_compute_binding_sets(
@@ -614,7 +649,7 @@ impl Device {
                     }
                 }
 
-                if label.is_some() { 
+                if label.is_some() {
                     self.hal.end_debug_region(command_recorder);
                 }
             }
@@ -670,7 +705,13 @@ impl Device {
             .staging_buffer_allocator
             .lock()
             .expect("Failed to lock staging buffer allocator");
-        allocator.write_buffer(self.hal.as_ref(), buffer, params.data, params.offset, params.size)?;
+        allocator.write_buffer(
+            self.hal.as_ref(),
+            buffer,
+            params.data,
+            params.offset,
+            params.size,
+        )?;
 
         Ok(())
     }
@@ -705,27 +746,42 @@ impl Device {
             })?;
 
             while num_written < total_size_to_write {
-                let to_write_this_iteration = if total_size_to_write - num_written > allocator.staging_buffer.size {
-                    allocator.staging_buffer.size
-                } else {
-                    total_size_to_write - num_written
-                };
-                allocator.write_buffer(self.hal.as_ref(), ausiliary_buffer, &params.data[num_written..num_written + to_write_this_iteration], num_written, to_write_this_iteration)?;
+                let to_write_this_iteration =
+                    if total_size_to_write - num_written > allocator.staging_buffer.size {
+                        allocator.staging_buffer.size
+                    } else {
+                        total_size_to_write - num_written
+                    };
+                allocator.write_buffer(
+                    self.hal.as_ref(),
+                    ausiliary_buffer,
+                    &params.data[num_written..num_written + to_write_this_iteration],
+                    num_written,
+                    to_write_this_iteration,
+                )?;
                 num_written += to_write_this_iteration;
             }
 
             allocator.flush(self.hal.as_ref())?;
 
-            let one_submit_cmd_buffer = unsafe {self.hal.request_oneshot_command_recorder(QueueType::Graphics)? };
-            unsafe { self.hal.cmd_copy_buffer_to_image(one_submit_cmd_buffer, ausiliary_buffer, image, 0, params.region)?;
-            
-                self.hal.finalize_command_recorder(one_submit_cmd_buffer)?;
-                self.hal.submit_command_recorder_immediate(one_submit_cmd_buffer)?;
-                self.hal.device_wait_queue(QueueType::Graphics)?;
-            
+            let one_submit_cmd_buffer = unsafe {
+                self.hal
+                    .request_oneshot_command_recorder(QueueType::Graphics)?
             };
+            unsafe {
+                self.hal.cmd_copy_buffer_to_image(
+                    one_submit_cmd_buffer,
+                    ausiliary_buffer,
+                    image,
+                    0,
+                    params.region,
+                )?;
 
-
+                self.hal.finalize_command_recorder(one_submit_cmd_buffer)?;
+                self.hal
+                    .submit_command_recorder_immediate(one_submit_cmd_buffer)?;
+                self.hal.device_wait_queue(QueueType::Graphics)?;
+            };
         } else {
             allocator.write_image(self.hal.as_ref(), image, params.data, params.region)?;
         }
@@ -882,13 +938,25 @@ impl Device {
             "The depth of an image cannot be 0"
         );
 
-        if image_description.creation_flags.contains(ImageCreationFlags::CUBE_COMPATIBLE) {
-            check!(image_description.dimension == ImageDimension::D2, "If an image is CUBE_COMPATIBLE, it must be 2D");
-            check!(image_description.array_layers.get() == 6, "If an image is CUBE_COMPATIBLE, it must have exactly six layers");
+        if image_description
+            .creation_flags
+            .contains(ImageCreationFlags::CUBE_COMPATIBLE)
+        {
+            check!(
+                image_description.dimension == ImageDimension::D2,
+                "If an image is CUBE_COMPATIBLE, it must be 2D"
+            );
+            check!(
+                image_description.array_layers.get() == 6,
+                "If an image is CUBE_COMPATIBLE, it must have exactly six layers"
+            );
         }
 
         if image_description.dimension == ImageDimension::D3 {
-            check!(image_description.array_layers.get() == 1, "A 3D image can only have one layer");
+            check!(
+                image_description.array_layers.get() == 1,
+                "A 3D image can only have one layer"
+            );
         }
 
         let total_texels = image_description.extents.width
@@ -901,11 +969,21 @@ impl Device {
 
         match image_description.format.aspect() {
             ImageAspect::Color => {
-                check!(!image_description.usage_flags.contains(ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT), "A color image cannot be used as a depth attachment!");
-            },
+                check!(
+                    !image_description
+                        .usage_flags
+                        .contains(ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT),
+                    "A color image cannot be used as a depth attachment!"
+                );
+            }
             ImageAspect::Depth => {
-                check!(!image_description.usage_flags.contains(ImageUsageFlags::COLOR_ATTACHMENT), "A depth image cannot be used as a color attachment!");
-            },
+                check!(
+                    !image_description
+                        .usage_flags
+                        .contains(ImageUsageFlags::COLOR_ATTACHMENT),
+                    "A depth image cannot be used as a color attachment!"
+                );
+            }
         }
     }
 
@@ -913,18 +991,37 @@ impl Device {
     fn validate_image_view_description(image_view_description: &ImageViewDescription) {
         use crate::{ImageCreationFlags, ImageViewType};
 
-        if !image_view_description.image.creation_flags.contains(ImageCreationFlags::MUTABLE_FORMAT) {
+        if !image_view_description
+            .image
+            .creation_flags
+            .contains(ImageCreationFlags::MUTABLE_FORMAT)
+        {
             check!(image_view_description.format == image_view_description.image.format, "If an image was not created with the MUTABLE_FORMAT flag, creating a view whose format is different from the image's format is not allowed.");
         }
 
         if image_view_description.view_ty == ImageViewType::D2 {
-            check!(image_view_description.image_subresource.num_layers.get() == 1, "When creating a 2D image view only one layer can be used");
-            check!(image_view_description.image.dimension == ImageDimension::D2, "If an image view is 2D then the image must be 2D too");
+            check!(
+                image_view_description.image_subresource.num_layers.get() == 1,
+                "When creating a 2D image view only one layer can be used"
+            );
+            check!(
+                image_view_description.image.dimension == ImageDimension::D2,
+                "If an image view is 2D then the image must be 2D too"
+            );
         }
-        
+
         if image_view_description.view_ty == ImageViewType::Cube {
-            check!(image_view_description.image.creation_flags.contains(ImageCreationFlags::CUBE_COMPATIBLE), "Cannot create an image view of an image which is not CUBE_COMPATIBLE");
-            check!(image_view_description.image_subresource.num_layers.get() == 6, "When creating a Cubemap the image view subresource must have 6 layers");
+            check!(
+                image_view_description
+                    .image
+                    .creation_flags
+                    .contains(ImageCreationFlags::CUBE_COMPATIBLE),
+                "Cannot create an image view of an image which is not CUBE_COMPATIBLE"
+            );
+            check!(
+                image_view_description.image_subresource.num_layers.get() == 6,
+                "When creating a Cubemap the image view subresource must have 6 layers"
+            );
         }
     }
 
@@ -942,7 +1039,7 @@ impl Device {
         let texel_byte_size = image.format.byte_size();
         let total_bytes = total_image_texels as usize * texel_byte_size;
 
-        check!(params.data.len() >= total_bytes, 
+        check!(params.data.len() >= total_bytes,
             &format!("Attempted to execute a write operation without enough source data, expected at least {total_bytes} bytes, got {}", params.data.len()));
         check!(
             params.region.extents.area() > 0,
@@ -987,7 +1084,7 @@ impl Device {
             params.size > 0,
             "A buffer write operation cannot have data length of 0!"
         );
-        let expected_data_len = params.size - params.offset;
+        let expected_data_len = params.size;
         check!(
             params.data.len() >= expected_data_len,
             &format!(
@@ -1036,7 +1133,11 @@ impl Device {
             .transpose()?;
         let mut already_defined_inputs: HashSet<usize> = HashSet::default();
         for input in graphics_pipeline_description.vertex_stage.vertex_inputs {
-            check!(!already_defined_inputs.contains(&input.location), "Vertex attribute {} was defined twice", input.location);
+            check!(
+                !already_defined_inputs.contains(&input.location),
+                "Vertex attribute {} was defined twice",
+                input.location
+            );
             already_defined_inputs.insert(input.location);
         }
         for input in &vertex_shader_layout.inputs {
@@ -1045,12 +1146,12 @@ impl Device {
                 .vertex_inputs
                 .get(input.location);
 
-            check!(pipeline_input.is_some(), 
-                &format!("Vertex shader expects input at location {} with format {:?}, but the pipeline description does not provide it",
+            check!(pipeline_input.is_some(),
+                &format!("Vertex shader expects input at location {} compatible with format {:?}, but the pipeline description does not provide it",
                 input.location, input.format));
             let pipeline_input = pipeline_input.unwrap();
-            check!(pipeline_input.format == input.format,
-                &format!("The format of vertex attribute at location '{}' differs from the one in the pipeline description! Expected {:?}, got {:?}", input.location, input.format, pipeline_input.format)
+            check!(pipeline_input.format.channels() == input.format.channels(),
+                &format!("Vertex shader expects at location {} input with '{}' channels (format {:?}), but pipeline provieds {}", input.location, input.format.channels(), input.format, pipeline_input.format.channels())
             )
         }
 
@@ -1074,10 +1175,11 @@ impl Device {
                     .clone()
                     .filter(|entry| entry.set == binding_set_layout_info.set)
                     .flat_map(|shader_bs| {
-                        shader_bs.layout.binding_set_elements.iter().find(|l| {
-                            l.binding == bs_element.binding
-                                
-                        })
+                        shader_bs
+                            .layout
+                            .binding_set_elements
+                            .iter()
+                            .find(|l| l.binding == bs_element.binding)
                     })
                     .next();
 
@@ -1100,10 +1202,18 @@ impl Device {
             }
         }
 
-       if let Some(pc) = &graphics_pipeline_description.push_constant_info {
-            let whole_push_constant_shader_stages = vertex_shader_layout.push_constant.unwrap_or_default() | 
-                fragment_shader_layout.as_ref().and_then(|v| v.push_constant).unwrap_or_default();
-            check!(pc.size <= crate::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES, "A push constant range cannot exceed the maximum size of {} bytes", crate::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES);
+        if let Some(pc) = &graphics_pipeline_description.push_constant_info {
+            let whole_push_constant_shader_stages =
+                vertex_shader_layout.push_constant.unwrap_or_default()
+                    | fragment_shader_layout
+                        .as_ref()
+                        .and_then(|v| v.push_constant)
+                        .unwrap_or_default();
+            check!(
+                pc.size <= crate::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES,
+                "A push constant range cannot exceed the maximum size of {} bytes",
+                crate::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES
+            );
             check!(pc.visibility.contains(whole_push_constant_shader_stages), "The pipeline's push constant visibility doesn't include all the shader stage where the
              push constant is used, expected {:?} got {:?}", whole_push_constant_shader_stages, pc.visibility);
         }
@@ -1156,9 +1266,13 @@ impl Device {
             }
         }
 
-       if let Some(pc) = &compute_pipeline_description.push_constant_info {
-            let whole_push_constant_shader_stages = shader_layout.push_constant.unwrap_or_default() ;
-            check!(pc.size <= crate::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES, "A push constant range cannot exceed the maximum size of {} bytes", crate::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES);
+        if let Some(pc) = &compute_pipeline_description.push_constant_info {
+            let whole_push_constant_shader_stages = shader_layout.push_constant.unwrap_or_default();
+            check!(
+                pc.size <= crate::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES,
+                "A push constant range cannot exceed the maximum size of {} bytes",
+                crate::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES
+            );
             check!(pc.visibility.contains(whole_push_constant_shader_stages), "The pipeline's push constant visibility doesn't include all the shader stage where the
              push constant is used, expected {:?} got {:?}", whole_push_constant_shader_stages, pc.visibility);
         }
@@ -1171,8 +1285,12 @@ impl Device {
         description: &BindingSetDescription,
         layout: &BindingSetLayout,
     ) {
-        check!(layout.binding_set_elements.len() == description.bindings.len(), "Layout expects {} elements, but {} were provided: they must match exactly",
-            layout.binding_set_elements.len(), description.bindings.len());
+        check!(
+            layout.binding_set_elements.len() == description.bindings.len(),
+            "Layout expects {} elements, but {} were provided: they must match exactly",
+            layout.binding_set_elements.len(),
+            description.bindings.len()
+        );
         // TODO: Ensure that bindings in description are present in layout
         for layout_binding in layout.binding_set_elements {
             let description_binding = description
@@ -1257,10 +1375,12 @@ impl std::fmt::Display for DeviceInfo {
 }
 
 fn next_hsl_color(saturation: f32) -> [f32; 3] {
-static CURRENT_HSL_COUNTER: AtomicUsize = AtomicUsize::new(0);
-     hsl_color(CURRENT_HSL_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed), saturation)
+    static CURRENT_HSL_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    hsl_color(
+        CURRENT_HSL_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        saturation,
+    )
 }
-
 
 fn hsl_color(index: usize, saturation: f32) -> [f32; 3] {
     let hue_deg = (15.0 * index as f32) % 360.0;
@@ -1268,22 +1388,22 @@ fn hsl_color(index: usize, saturation: f32) -> [f32; 3] {
 
     let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
     let h1 = hue_deg / 60.0;
-    let x = chroma * (1.0 - ((h1 % 2.0) - 1.0).abs() );
-    
+    let x = chroma * (1.0 - ((h1 % 2.0) - 1.0).abs());
+
     let (r, g, b) = if h1 <= 6.0 && h1 > 5.0 {
         (chroma, 0.0, x)
-    }  else if h1 <= 5.0  && h1 > 4.0 {
+    } else if h1 <= 5.0 && h1 > 4.0 {
         (x, 0.0, chroma)
-    } else if h1 <= 4.0  && h1 > 3.0 {
+    } else if h1 <= 4.0 && h1 > 3.0 {
         (0.0, x, chroma)
     } else if h1 <= 3.0 && h1 > 2.0 {
-        (0.0, chroma, x) 
+        (0.0, chroma, x)
     } else if h1 <= 2.0 && h1 > 1.0 {
         (x, chroma, 0.0)
     } else {
         (chroma, x, 0.0)
     };
-    
+
     let m = lightness - chroma * 0.5;
     [r + m, g + m, b + m]
 }

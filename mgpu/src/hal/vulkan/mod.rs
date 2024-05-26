@@ -174,78 +174,59 @@ pub enum VulkanHalError {
 pub type VulkanHalResult<T> = Result<T, VulkanHalError>;
 
 impl Hal for VulkanHal {
-    fn device_info(&self) -> crate::DeviceInfo {
-        let major = vk::api_version_major(Self::VULKAN_API_VERSION);
-        let minor = vk::api_version_minor(Self::VULKAN_API_VERSION);
-        let patch = vk::api_version_patch(Self::VULKAN_API_VERSION);
-        crate::DeviceInfo {
-            name: self.physical_device.name.clone(),
-            api_description: format!("Vulkan {}.{}.{}", major, minor, patch),
-            swapchain_support: self.physical_device.features.swapchain_support,
-            frames_in_flight: self.configuration.frames_in_flight,
-        }
+    fn device_wait_idle(&self) -> MgpuResult<()> {
+        unsafe { self.logical_device.handle.device_wait_idle() }?;
+        Ok(())
     }
 
-    #[cfg(feature = "swapchain")]
-    fn create_swapchain_impl(
-        &self,
-        swapchain_info: &crate::SwapchainCreationInfo,
-    ) -> MgpuResult<SwapchainInfo> {
-        let swapchain = VulkanSwapchain::create(self, swapchain_info)?;
-
-        let format = swapchain.data.current_format.format.to_mgpu();
-        let present_mode = PresentMode::Immediate;
-
-        let handle = self.resolver.add(swapchain);
-        let info = SwapchainInfo {
-            id: handle.to_u64(),
-            format,
-            present_mode,
+    fn device_wait_queue(&self, queue: QueueType) -> MgpuResult<()> {
+        let queue = match queue {
+            QueueType::Graphics => self.logical_device.graphics_queue.handle,
+            QueueType::AsyncCompute => self.logical_device.compute_queue.handle,
+            QueueType::AsyncTransfer => self.logical_device.transfer_queue.handle,
         };
-        Ok(info)
+        unsafe { self.logical_device.handle.queue_wait_idle(queue)? };
+        Ok(())
     }
 
-    #[cfg(feature = "swapchain")]
-    fn swapchain_acquire_next_image(&self, id: u64) -> MgpuResult<crate::SwapchainImage> {
-        use crate::SwapchainImage;
+    unsafe fn prepare_next_frame(&self) -> MgpuResult<()> {
+        let mut current_frame = self.frames_in_flight.lock().unwrap();
+        let current_frame = current_frame.current_mut();
+        let device = &self.logical_device.handle;
+        unsafe {
+            device.wait_for_fences(
+                &[
+                    current_frame.graphics_work_ended_fence,
+                    current_frame.transfer_work_ended_fence,
+                    current_frame.compute_work_ended_fence,
+                ],
+                true,
+                u64::MAX,
+            )?
+        };
+        unsafe {
+            device.reset_fences(&[
+                current_frame.graphics_work_ended_fence,
+                current_frame.transfer_work_ended_fence,
+                current_frame.compute_work_ended_fence,
+            ])?
+        };
 
-        Ok(self
-            .resolver
-            .apply_mut::<VulkanSwapchain, SwapchainImage>(
-                unsafe { Handle::from_u64(id) },
-                |swapchain| {
-                    let (index, suboptimal) = unsafe {
-                        swapchain
-                            .swapchain_device
-                            .acquire_next_image(
-                                swapchain.handle,
-                                u64::MAX,
-                                vk::Semaphore::null(),
-                                swapchain.acquire_fence,
-                            )
-                            .expect("Failed to get swapchain")
-                    };
-                    if suboptimal {
-                        info!("Acquired swapchain image {index} is suboptimal, recreate the swapchain");
-                    }
-
-                    unsafe {
-                        self.logical_device.handle.wait_for_fences(
-                            &[swapchain.acquire_fence],
-                            true,
-                            u64::MAX,
-                        )?;
-
-                        self.logical_device
-                            .handle
-                            .reset_fences(&[swapchain.acquire_fence])?;
-                    };
-                    swapchain.current_image_index = Some(index);
-
-                    Ok(swapchain.data.images[index as usize])
-                },
-            )
-            .expect("TODO Correct error"))
+        unsafe {
+            device.reset_command_pool(
+                current_frame.graphics_command_pool,
+                vk::CommandPoolResetFlags::RELEASE_RESOURCES,
+            )?;
+            device.reset_command_pool(
+                current_frame.compute_command_pool,
+                vk::CommandPoolResetFlags::RELEASE_RESOURCES,
+            )?;
+            device.reset_command_pool(
+                current_frame.transfer_command_pool,
+                vk::CommandPoolResetFlags::RELEASE_RESOURCES,
+            )?;
+        }
+        Ok(())
     }
 
     unsafe fn begin_rendering(&self) -> MgpuResult<RenderState> {
@@ -269,522 +250,6 @@ impl Hal for VulkanHal {
         })
     }
 
-    unsafe fn submit(&self, end_rendering_info: SubmitInfo) -> MgpuResult<()> {
-        #[cfg(debug_assertions)]
-        self.validate_submission_info(&end_rendering_info)?;
-        let mut current_frame = self.frames_in_flight.lock().unwrap();
-        let current_frame = current_frame.current_mut();
-
-        let current_semaphore_value = current_frame
-            .atomic_semaphore_counter
-            .fetch_add(1, Ordering::Relaxed)
-            + 1;
-
-        let mut command_buffer_states = self
-            .command_buffer_states
-            .write()
-            .expect("Failed to lock command buffer states");
-        command_buffer_states.clear();
-
-        let mut all_semaphores_to_signal = vec![];
-        let mut all_command_buffers = vec![];
-        let mut all_semaphores_to_wait = vec![vec![]];
-        let mut all_semaphores_values_to_wait = vec![];
-
-        let device = &self.logical_device.handle;
-
-        let mut graphics_queue_submit = vec![];
-        let mut async_compute_queue_submit = vec![];
-        let mut transfer_queue_submit = vec![];
-
-        let semaphore_values = [current_semaphore_value; 256];
-
-        for (i, group) in end_rendering_info.submission_groups.iter().enumerate() {
-            let mut signals = vec![];
-            let mut command_buffers = vec![];
-            for cb in &group.command_recorders {
-                let semaphore_to_signal = current_frame.allocate_semaphore(device)?;
-                signals.push([semaphore_to_signal]);
-                command_buffers.push([vk::CommandBuffer::from_raw(cb.id)]);
-            }
-            all_semaphores_to_signal.push(signals);
-            all_command_buffers.push(command_buffers);
-            let num_semaphores_to_wait = if i > 0 {
-                let semaphores_to_wait = all_semaphores_to_signal[i - 1]
-                    .iter()
-                    .flatten()
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let num_semaphores_to_wait = semaphores_to_wait.len();
-                all_semaphores_to_wait.push(semaphores_to_wait);
-                num_semaphores_to_wait
-            } else {
-                0
-            };
-
-            let timeline_info = vk::TimelineSemaphoreSubmitInfo::default()
-                .signal_semaphore_values(&semaphore_values[0..1])
-                .wait_semaphore_values(&semaphore_values[0..num_semaphores_to_wait]);
-
-            all_semaphores_values_to_wait.push(timeline_info);
-        }
-
-        let all_stages = [vk::PipelineStageFlags::TOP_OF_PIPE; 256];
-        for (i, group) in end_rendering_info.submission_groups.iter().enumerate() {
-            let semaphores_to_wait = all_semaphores_to_wait[i].as_slice();
-            for (c, cb) in group.command_recorders.iter().enumerate() {
-                let semaphore_to_signal = &all_semaphores_to_signal[i][c];
-                let vk_cb = &all_command_buffers[i][c];
-
-                let submission_queue = match cb.queue_type {
-                    QueueType::Graphics => &mut graphics_queue_submit,
-                    QueueType::AsyncCompute => &mut async_compute_queue_submit,
-                    QueueType::AsyncTransfer => &mut transfer_queue_submit,
-                };
-
-                let submit_info = vk::SubmitInfo::default()
-                    .command_buffers(vk_cb)
-                    .signal_semaphores(semaphore_to_signal.as_slice())
-                    .wait_dst_stage_mask(&all_stages)
-                    .wait_semaphores(semaphores_to_wait)
-                    .push_next(unsafe {
-                        (&mut all_semaphores_values_to_wait[i]
-                            as *mut vk::TimelineSemaphoreSubmitInfo)
-                            .as_mut()
-                            .unwrap()
-                    });
-
-                submission_queue.push(submit_info);
-            }
-        }
-
-        let values = &[current_semaphore_value];
-        let (_wait_semaphores, _values) = if let Some(info) = graphics_queue_submit.last() {
-            (
-                unsafe { std::slice::from_raw_parts(info.p_signal_semaphores, 1) },
-                values.as_slice(),
-            )
-        } else {
-            ([].as_slice(), [].as_slice())
-        };
-
-        {
-            unsafe {
-                device.queue_submit(
-                    self.logical_device.graphics_queue.handle,
-                    &graphics_queue_submit,
-                    current_frame.graphics_work_ended_fence,
-                )?;
-                device.queue_submit(
-                    self.logical_device.transfer_queue.handle,
-                    &transfer_queue_submit,
-                    current_frame.transfer_work_ended_fence,
-                )?;
-                device.queue_submit(
-                    self.logical_device.compute_queue.handle,
-                    &async_compute_queue_submit,
-                    current_frame.compute_work_ended_fence,
-                )?;
-            }
-        }
-        Ok(())
-    }
-    unsafe fn end_rendering(&self) -> MgpuResult<()> {
-        let mut ff = self.frames_in_flight.lock().unwrap();
-
-        let current_frame_idx = ff.current_frame_in_flight;
-        let current_frame = ff.current_mut();
-        current_frame.cached_semaphores = current_frame.allocated_semaphores.to_vec();
-        current_frame.cached_semaphores_binary = current_frame.allocated_semaphores_binary.to_vec();
-
-        ff.current_frame_in_flight = (current_frame_idx + 1) % self.configuration.frames_in_flight;
-        self.resolver.update(self)?;
-        Ok(())
-    }
-
-    fn swapchain_on_resized(
-        &self,
-        id: u64,
-        new_size: crate::Extents2D,
-        window_handle: WindowHandle,
-        display_handle: DisplayHandle,
-    ) -> MgpuResult<()> {
-        if new_size.width == 0 || new_size.height == 0 {
-            // Don't recreate the swapchain when reduced to icon
-            return Ok(());
-        }
-        self.resolver.apply_mut(
-            unsafe { Handle::<VulkanSwapchain>::from_u64(id) },
-            |swapchain| {
-                swapchain.rebuild(
-                    self,
-                    &crate::SwapchainCreationInfo {
-                        display_handle,
-                        window_handle,
-                        preferred_format: Some(swapchain.data.current_format.format.to_mgpu()),
-                        preferred_present_mode: Some(swapchain.data.current_present_mode.to_mgpu()),
-                        extents: new_size,
-                    },
-                )
-            },
-        )
-    }
-
-    fn create_image(
-        &self,
-        image_description: &crate::ImageDescription,
-    ) -> MgpuResult<crate::Image> {
-        let flags = image_description.creation_flags.to_vk();
-        let tiling = if image_description.memory_domain == MemoryDomain::Gpu {
-            vk::ImageTiling::OPTIMAL
-        } else {
-            vk::ImageTiling::LINEAR
-        };
-        let image_create_info = vk::ImageCreateInfo::default()
-            .flags(flags)
-            .image_type(image_description.dimension.to_vk())
-            .format(image_description.format.to_vk())
-            .extent(image_description.extents.to_vk())
-            .mip_levels(image_description.mips.get())
-            .array_layers(image_description.array_layers.get())
-            .samples(image_description.samples.to_vk())
-            .tiling(tiling)
-            .usage(image_description.usage_flags.to_vk())
-            .sharing_mode(vk::SharingMode::EXCLUSIVE)
-            .initial_layout(vk::ImageLayout::UNDEFINED);
-        let device = &self.logical_device.handle;
-        let image = unsafe { device.create_image(&image_create_info, get_allocation_callbacks())? };
-
-        self.try_assign_debug_name(
-            image,
-            image_description
-                .label
-                .unwrap_or(&format!("Image {:?}", image)),
-        )?;
-
-        let requirements = unsafe { device.get_image_memory_requirements(image) };
-        let location = match image_description.memory_domain {
-            MemoryDomain::Cpu => MemoryLocation::CpuToGpu,
-            MemoryDomain::Gpu => MemoryLocation::GpuOnly,
-        };
-        let fallback_name = format!("Memory allocation for image {:?}", image);
-        let allocation_create_desc = AllocationCreateDesc {
-            name: image_description.label.unwrap_or(&fallback_name),
-            requirements,
-            location,
-            linear: image_description.memory_domain == MemoryDomain::Gpu,
-            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
-        };
-        let allocation = self
-            .memory_allocator
-            .write()
-            .expect("Failed to lock memory allocator")
-            .allocate(&allocation_create_desc)
-            .map_err(|e| MgpuError::VulkanError(VulkanHalError::GpuAllocatorError(e)))?;
-        unsafe { device.bind_image_memory(image, allocation.memory(), allocation.offset())? };
-
-        let mips = iter::repeat(LayoutInfo::default())
-            .take(image_description.mips.get() as usize)
-            .collect::<Vec<_>>();
-        let mut layouts = vec![];
-        layouts.resize(image_description.array_layers.get() as usize, mips);
-        let vulkan_image = VulkanImage {
-            label: image_description.label.map(ToOwned::to_owned),
-            handle: image,
-            external: false,
-            allocation: Some(allocation),
-            subresource_layouts: layouts,
-        };
-
-        info!(
-            "Created image {:?} {:?} dimension {:?} layers {} mips {} format {:?}",
-            image_description.label,
-            image_description.extents,
-            image_description.dimension,
-            image_description.array_layers.get(),
-            image_description.mips.get(),
-            image_description.format,
-        );
-
-        let handle = self.resolver.add(vulkan_image);
-        let image = Image {
-            id: handle.to_u64(),
-            usage_flags: image_description.usage_flags,
-            creation_flags: image_description.creation_flags,
-            extents: image_description.extents,
-            dimension: image_description.dimension,
-            num_mips: image_description.mips,
-            array_layers: image_description.array_layers,
-            samples: image_description.samples,
-            format: image_description.format,
-        };
-        Ok(image)
-    }
-    fn destroy_image(&self, image: crate::Image) -> MgpuResult<()> {
-        self.resolver
-            .remove::<VulkanImage>(unsafe { Handle::from_u64(image.id) })
-    }
-
-    fn destroy_image_view(&self, image_view: crate::ImageView) -> MgpuResult<()> {
-        self.resolver
-            .remove::<VulkanImageView>(unsafe { Handle::from_u64(image_view.id) })
-    }
-
-    fn image_name(&self, image: Image) -> MgpuResult<Option<String>> {
-        self.resolver
-            .apply::<VulkanImage, Option<String>>(image, |vk_image| Ok(vk_image.label.clone()))
-    }
-
-    fn create_buffer(&self, buffer_description: &BufferDescription) -> MgpuResult<Buffer> {
-        let buffer_create_info = vk::BufferCreateInfo::default()
-            .usage(buffer_description.usage_flags.to_vk())
-            .size(buffer_description.size as _);
-        let device = &self.logical_device.handle;
-        let buffer =
-            unsafe { device.create_buffer(&buffer_create_info, get_allocation_callbacks())? };
-        let memory_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
-
-        if let Some(label) = buffer_description.label {
-            self.try_assign_debug_name(buffer, label)?;
-        }
-
-        let fallback_name = format!("Memory allocation for buffer {:?}", buffer);
-        let name = buffer_description.label.unwrap_or(&fallback_name);
-        let allocation_description = AllocationCreateDesc {
-            name,
-            requirements: memory_requirements,
-            location: match buffer_description.memory_domain {
-                MemoryDomain::Cpu => MemoryLocation::CpuToGpu,
-                MemoryDomain::Gpu => MemoryLocation::GpuOnly,
-            },
-            linear: true,
-            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
-        };
-
-        let mut allocator = self
-            .memory_allocator
-            .write()
-            .expect("Failed to lock memory allocator");
-        let allocation = allocator
-            .allocate(&allocation_description)
-            .map_err(|e| MgpuError::VulkanError(VulkanHalError::GpuAllocatorError(e)))?;
-
-        unsafe {
-            device.bind_buffer_memory(buffer, allocation.memory(), allocation.offset())?;
-        }
-
-        let vulkan_buffer = VulkanBuffer {
-            label: buffer_description.label.map(ToOwned::to_owned),
-            handle: buffer,
-            allocation,
-            current_access_mask: vk::AccessFlags2::empty(),
-            current_stage_mask: vk::PipelineStageFlags2::empty(),
-        };
-        let handle = self.resolver.add(vulkan_buffer);
-
-        info!(
-            "Created buffer {:?} of size {}",
-            buffer_description.label, buffer_description.size,
-        );
-        Ok(Buffer {
-            id: handle.to_u64(),
-            usage_flags: buffer_description.usage_flags,
-            size: buffer_description.size,
-            memory_domain: buffer_description.memory_domain,
-        })
-    }
-
-    fn buffer_name(&self, buffer: Buffer) -> MgpuResult<Option<String>> {
-        self.resolver
-            .apply::<VulkanBuffer, Option<String>>(buffer, |vk_buffer| Ok(vk_buffer.label.clone()))
-    }
-
-    fn destroy_buffer(&self, buffer: Buffer) -> MgpuResult<()> {
-        self.resolver.remove(buffer)
-    }
-
-    unsafe fn write_host_visible_buffer(
-        &self,
-        buffer: Buffer,
-        params: &crate::BufferWriteParams,
-    ) -> MgpuResult<()> {
-        debug_assert!(params.data.len() >= params.size);
-        debug_assert!(buffer.size >= params.size);
-        self.resolver.apply(buffer, |buffer| {
-            let allocation = &buffer.allocation;
-            let ptr = allocation
-                .mapped_ptr()
-                .expect("Tried to do a host visible write without a peristent ptr");
-            let ptr = unsafe { ptr.cast::<u8>().as_ptr().add(params.offset) };
-            unsafe { ptr.copy_from(params.data.as_ptr(), params.size) };
-            Ok(())
-        })
-    }
-
-    fn create_shader_module(
-        &self,
-        shader_module_description: &crate::ShaderModuleDescription,
-    ) -> MgpuResult<ShaderModule> {
-        let layout = self.reflect_layout(shader_module_description)?;
-        let shader_module_create_info = vk::ShaderModuleCreateInfo::default()
-            .flags(vk::ShaderModuleCreateFlags::default())
-            .code(shader_module_description.source);
-        let shader_module = unsafe {
-            self.logical_device
-                .handle
-                .create_shader_module(&shader_module_create_info, get_allocation_callbacks())?
-        };
-        if let Some(name) = shader_module_description.label {
-            self.try_assign_debug_name(shader_module, name)?;
-        }
-
-        let vulkan_shader_module = SpirvShaderModule {
-            label: shader_module_description.label.map(ToOwned::to_owned),
-            handle: shader_module,
-            layout,
-        };
-
-        info!(
-            "Created shader module {:?}",
-            shader_module_description.label
-        );
-
-        let handle = self.resolver.add(vulkan_shader_module);
-        Ok(ShaderModule {
-            id: handle.to_u64(),
-        })
-    }
-
-    fn get_shader_module_layout(
-        &self,
-        shader_module: ShaderModule,
-    ) -> MgpuResult<ShaderModuleLayout> {
-        self.resolver
-            .apply(shader_module, |module| Ok(module.layout.clone()))
-    }
-
-    fn destroy_shader_module(&self, shader_module: ShaderModule) -> MgpuResult<()> {
-        self.resolver.remove(shader_module)
-    }
-
-    fn create_graphics_pipeline(
-        &self,
-        graphics_pipeline_description: &GraphicsPipelineDescription,
-    ) -> MgpuResult<GraphicsPipeline> {
-        // The actual creation of the pipeline is deferred until a render pass using the pipeline is executed
-
-        #[cfg(debug_assertions)]
-        self.validate_graphics_pipeline_shader_layouts(graphics_pipeline_description);
-
-        let bind_set_layouts = graphics_pipeline_description
-            .binding_set_layouts
-            .iter()
-            .map(Into::into)
-            .collect();
-
-        let owned_info = graphics_pipeline_description.to_vk_owned(bind_set_layouts);
-
-        let pipeline_layout = self.get_pipeline_layout(
-            graphics_pipeline_description.label,
-            &owned_info.binding_sets_infos,
-            owned_info.push_constant_range.as_ref(),
-        )?;
-        let vulkan_graphics_pipeline_info = VulkanGraphicsPipelineInfo {
-            label: graphics_pipeline_description.label.map(ToOwned::to_owned),
-            layout: owned_info,
-            vk_layout: pipeline_layout,
-            pipelines: vec![],
-        };
-        let handle = self.resolver.add(vulkan_graphics_pipeline_info);
-
-        info!(
-            "Created GraphicsPipeline {:?}",
-            graphics_pipeline_description.label
-        );
-
-        Ok(GraphicsPipeline {
-            id: handle.to_u64(),
-        })
-    }
-
-    fn create_compute_pipeline(
-        &self,
-        compute_pipeline_description: &ComputePipelineDescription,
-    ) -> MgpuResult<ComputePipeline> {
-        #[cfg(debug_assertions)]
-        self.validate_compute_pipeline_shader_layouts(compute_pipeline_description);
-        let bind_set_layouts = compute_pipeline_description
-            .binding_set_layouts
-            .iter()
-            .map(Into::into)
-            .collect();
-
-        let owned_info = compute_pipeline_description.to_vk_owned(bind_set_layouts);
-
-        let pipeline_layout = self.get_pipeline_layout(
-            compute_pipeline_description.label,
-            &owned_info.binding_sets_infos,
-            owned_info.push_constant_range.as_ref(),
-        )?;
-        let compute_entrypt = CString::new(compute_pipeline_description.entry_point).unwrap();
-        let pipeline_create_info = vk::ComputePipelineCreateInfo::default()
-            .layout(pipeline_layout)
-            .stage(
-                vk::PipelineShaderStageCreateInfo::default()
-                    .stage(vk::ShaderStageFlags::COMPUTE)
-                    .module(
-                        self.resolver
-                            .resolve_vulkan(compute_pipeline_description.shader)
-                            .ok_or(MgpuError::InvalidHandle)?,
-                    )
-                    .name(&compute_entrypt),
-            );
-
-        let pipeline = unsafe {
-            self.logical_device
-                .handle
-                .create_compute_pipelines(
-                    vk::PipelineCache::null(),
-                    &[pipeline_create_info],
-                    get_allocation_callbacks(),
-                )
-                .map_err(|(_, err)| VulkanHalError::ApiError(err))?[0]
-        };
-
-        if let Some(name) = compute_pipeline_description.label {
-            self.try_assign_debug_name(pipeline, name)?;
-        }
-
-        let vk_pipeline = VulkanComputePipelineInfo {
-            label: compute_pipeline_description.label.map(ToOwned::to_owned),
-            handle: pipeline,
-            layout: owned_info,
-            vk_layout: pipeline_layout,
-        };
-        let handle = self.resolver.add(vk_pipeline);
-        info!(
-            "Created vulkan compute pipeline {:?}",
-            compute_pipeline_description.label
-        );
-        Ok(ComputePipeline {
-            id: handle.to_u64(),
-        })
-    }
-    fn get_compute_pipeline_layout(
-        &self,
-        compute_pipeline: ComputePipeline,
-    ) -> MgpuResult<ComputePipelineLayout> {
-        self.resolver
-            .apply(compute_pipeline, |pipeline| Ok(pipeline.layout.clone()))
-    }
-
-    fn destroy_graphics_pipeline(&self, graphics_pipeline: GraphicsPipeline) -> MgpuResult<()> {
-        self.resolver.remove(graphics_pipeline)
-    }
-
-    fn destroy_compute_pipeline(&self, pipeline: ComputePipeline) -> MgpuResult<()> {
-        self.resolver.remove(pipeline)
-    }
     unsafe fn request_oneshot_command_recorder(
         &self,
         queue_type: QueueType,
@@ -827,7 +292,6 @@ impl Hal for VulkanHal {
             queue_type,
         })
     }
-
     unsafe fn submit_command_recorder_immediate(
         &self,
         command_recorder: CommandRecorder,
@@ -886,125 +350,6 @@ impl Hal for VulkanHal {
         })
     }
 
-    unsafe fn present_image(&self, swapchain_id: u64, image: Image) -> MgpuResult<()> {
-        let mut current_frame = self.frames_in_flight.lock().unwrap();
-        let current_frame = current_frame.current_mut();
-
-        // Wait for all work on the graphics queue to be over
-        // TODO: Wait for compute/async copy queues too?
-        let work_done = [current_frame.work_ended_semaphore];
-        let submits = [vk::SubmitInfo::default().signal_semaphores(&work_done)];
-        unsafe {
-            self.logical_device.handle.queue_submit(
-                self.logical_device.graphics_queue.handle,
-                &submits,
-                vk::Fence::null(),
-            )?;
-        }
-        let swapchain = unsafe { Handle::from_u64(swapchain_id) };
-        let mut images = self.resolver.get_mut::<VulkanImage>();
-        let mut swapchains = self.resolver.get_mut::<VulkanSwapchain>();
-        let swapchain = swapchains.resolve_mut(swapchain).unwrap();
-        let vk_image = images.resolve_mut(image).unwrap();
-        let image_layout = vk_image.get_subresource_layout(image.whole_subresource());
-
-        let queue = self.logical_device.graphics_queue.handle;
-        let current_index = swapchain
-            .current_image_index
-            .take()
-            .expect("Either a Present has already been issued, or acquire has never been called");
-        let indices = [current_index];
-        let swapchains = [swapchain.handle];
-        let mut queue_wait_semaphore = current_frame.work_ended_semaphore;
-        let wait_semaphores = [queue_wait_semaphore];
-
-        if image_layout.image_layout != vk::ImageLayout::PRESENT_SRC_KHR {
-            let device = &self.logical_device.handle;
-            let cb = device.allocate_command_buffers(
-                &vk::CommandBufferAllocateInfo::default()
-                    .command_buffer_count(1)
-                    .command_pool(current_frame.graphics_command_pool)
-                    .level(vk::CommandBufferLevel::PRIMARY),
-            )?[0];
-
-            device.begin_command_buffer(
-                cb,
-                &vk::CommandBufferBeginInfo::default()
-                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-            )?;
-
-            device.cmd_pipeline_barrier2(
-                cb,
-                &vk::DependencyInfo::default()
-                    .dependency_flags(vk::DependencyFlags::BY_REGION)
-                    .image_memory_barriers(&[vk::ImageMemoryBarrier2::default()
-                        .image(vk_image.handle)
-                        .src_access_mask(image_layout.access_mask)
-                        .src_stage_mask(image_layout.stage_mask)
-                        .old_layout(image_layout.image_layout)
-                        .dst_access_mask(vk::AccessFlags2::default())
-                        .dst_stage_mask(vk::PipelineStageFlags2::BOTTOM_OF_PIPE)
-                        .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-                        .subresource_range(vk::ImageSubresourceRange {
-                            aspect_mask: vk::ImageAspectFlags::COLOR,
-                            base_mip_level: 0,
-                            level_count: 1,
-                            base_array_layer: 0,
-                            layer_count: 1,
-                        })]),
-            );
-            device.end_command_buffer(cb)?;
-
-            vk_image.set_subresource_layout(
-                image.whole_subresource(),
-                LayoutInfo {
-                    image_layout: vk::ImageLayout::PRESENT_SRC_KHR,
-                    access_mask: vk::AccessFlags2::empty(),
-                    stage_mask: vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
-                },
-            );
-
-            let present_transition_done_semaphore =
-                current_frame.allocate_binary_semaphore(device)?;
-            let signal = [present_transition_done_semaphore];
-            device.queue_submit(
-                self.logical_device.graphics_queue.handle,
-                &[vk::SubmitInfo::default()
-                    .command_buffers(&[cb])
-                    .wait_semaphores(&wait_semaphores)
-                    .wait_dst_stage_mask(&[vk::PipelineStageFlags::BOTTOM_OF_PIPE])
-                    .signal_semaphores(&signal)],
-                vk::Fence::null(),
-            )?;
-            queue_wait_semaphore = present_transition_done_semaphore;
-        }
-
-        let wait_semaphores = [queue_wait_semaphore];
-
-        let present_info = vk::PresentInfoKHR::default()
-            .swapchains(&swapchains)
-            .wait_semaphores(&wait_semaphores)
-            .image_indices(&indices);
-        let swapchain_device = &swapchain.swapchain_device;
-
-        let suboptimal = unsafe { swapchain_device.queue_present(queue, &present_info)? };
-        if suboptimal {
-            swapchain.rebuild(
-                self,
-                &SwapchainCreationInfo {
-                    preferred_format: Some(swapchain.data.current_format.format.to_mgpu()),
-                    preferred_present_mode: Some(swapchain.data.current_present_mode.to_mgpu()),
-                    display_handle: unsafe {
-                        DisplayHandle::borrow_raw(swapchain.raw_display_handle)
-                    },
-                    window_handle: unsafe { WindowHandle::borrow_raw(swapchain.raw_window_handle) },
-                    extents: image.extents.to_2d(),
-                },
-            )?;
-        }
-        Ok(())
-    }
-
     unsafe fn finalize_command_recorder(&self, command_buffer: CommandRecorder) -> MgpuResult<()> {
         let mut states = self
             .command_buffer_states
@@ -1021,6 +366,52 @@ impl Hal for VulkanHal {
         }
         Ok(())
     }
+    unsafe fn set_graphics_push_constant(
+        &self,
+        command_recorder: CommandRecorder,
+        graphics_pipeline: GraphicsPipeline,
+        data: &[u8],
+        visibility: ShaderStageFlags,
+    ) -> MgpuResult<()> {
+        let cb = vk::CommandBuffer::from_raw(command_recorder.id);
+        let graphics_pipeline = self
+            .resolver
+            .apply(graphics_pipeline, |g| Ok(g.vk_layout))?;
+
+        unsafe {
+            self.logical_device.handle.cmd_push_constants(
+                cb,
+                graphics_pipeline,
+                visibility.to_vk(),
+                0,
+                data,
+            );
+        }
+        Ok(())
+    }
+
+    unsafe fn set_compute_push_constant(
+        &self,
+        command_recorder: CommandRecorder,
+        compute_pipeline: ComputePipeline,
+        data: &[u8],
+        visibility: ShaderStageFlags,
+    ) -> MgpuResult<()> {
+        let cb = vk::CommandBuffer::from_raw(command_recorder.id);
+        let compute_pipeline = self.resolver.apply(compute_pipeline, |g| Ok(g.vk_layout))?;
+
+        unsafe {
+            self.logical_device.handle.cmd_push_constants(
+                cb,
+                compute_pipeline,
+                visibility.to_vk(),
+                0,
+                data,
+            );
+        }
+        Ok(())
+    }
+
     unsafe fn begin_render_pass(
         &self,
         command_recorder: CommandRecorder,
@@ -1258,51 +649,6 @@ impl Hal for VulkanHal {
         Ok(())
     }
 
-    unsafe fn set_graphics_push_constant(
-        &self,
-        command_recorder: CommandRecorder,
-        graphics_pipeline: GraphicsPipeline,
-        data: &[u8],
-        visibility: ShaderStageFlags,
-    ) -> MgpuResult<()> {
-        let cb = vk::CommandBuffer::from_raw(command_recorder.id);
-        let graphics_pipeline = self
-            .resolver
-            .apply(graphics_pipeline, |g| Ok(g.vk_layout))?;
-
-        unsafe {
-            self.logical_device.handle.cmd_push_constants(
-                cb,
-                graphics_pipeline,
-                visibility.to_vk(),
-                0,
-                data,
-            );
-        }
-        Ok(())
-    }
-
-    unsafe fn set_compute_push_constant(
-        &self,
-        command_recorder: CommandRecorder,
-        compute_pipeline: ComputePipeline,
-        data: &[u8],
-        visibility: ShaderStageFlags,
-    ) -> MgpuResult<()> {
-        let cb = vk::CommandBuffer::from_raw(command_recorder.id);
-        let compute_pipeline = self.resolver.apply(compute_pipeline, |g| Ok(g.vk_layout))?;
-
-        unsafe {
-            self.logical_device.handle.cmd_push_constants(
-                cb,
-                compute_pipeline,
-                visibility.to_vk(),
-                0,
-                data,
-            );
-        }
-        Ok(())
-    }
     unsafe fn bind_graphics_binding_sets(
         &self,
         command_recorder: CommandRecorder,
@@ -1422,6 +768,258 @@ impl Hal for VulkanHal {
         Ok(())
     }
 
+    unsafe fn present_image(&self, swapchain_id: u64, image: Image) -> MgpuResult<()> {
+        let mut current_frame = self.frames_in_flight.lock().unwrap();
+        let current_frame = current_frame.current_mut();
+
+        // Wait for all work on the graphics queue to be over
+        // TODO: Wait for compute/async copy queues too?
+        let work_done = [current_frame.work_ended_semaphore];
+        let submits = [vk::SubmitInfo::default().signal_semaphores(&work_done)];
+        unsafe {
+            self.logical_device.handle.queue_submit(
+                self.logical_device.graphics_queue.handle,
+                &submits,
+                vk::Fence::null(),
+            )?;
+        }
+        let swapchain = unsafe { Handle::from_u64(swapchain_id) };
+        let mut images = self.resolver.get_mut::<VulkanImage>();
+        let mut swapchains = self.resolver.get_mut::<VulkanSwapchain>();
+        let swapchain = swapchains.resolve_mut(swapchain).unwrap();
+        let vk_image = images.resolve_mut(image).unwrap();
+        let image_layout = vk_image.get_subresource_layout(image.whole_subresource());
+
+        let queue = self.logical_device.graphics_queue.handle;
+        let current_index = swapchain
+            .current_image_index
+            .take()
+            .expect("Either a Present has already been issued, or acquire has never been called");
+        let indices = [current_index];
+        let swapchains = [swapchain.handle];
+        let mut queue_wait_semaphore = current_frame.work_ended_semaphore;
+        let wait_semaphores = [queue_wait_semaphore];
+
+        if image_layout.image_layout != vk::ImageLayout::PRESENT_SRC_KHR {
+            let device = &self.logical_device.handle;
+            let cb = device.allocate_command_buffers(
+                &vk::CommandBufferAllocateInfo::default()
+                    .command_buffer_count(1)
+                    .command_pool(current_frame.graphics_command_pool)
+                    .level(vk::CommandBufferLevel::PRIMARY),
+            )?[0];
+
+            device.begin_command_buffer(
+                cb,
+                &vk::CommandBufferBeginInfo::default()
+                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+            )?;
+
+            device.cmd_pipeline_barrier2(
+                cb,
+                &vk::DependencyInfo::default()
+                    .dependency_flags(vk::DependencyFlags::BY_REGION)
+                    .image_memory_barriers(&[vk::ImageMemoryBarrier2::default()
+                        .image(vk_image.handle)
+                        .src_access_mask(image_layout.access_mask)
+                        .src_stage_mask(image_layout.stage_mask)
+                        .old_layout(image_layout.image_layout)
+                        .dst_access_mask(vk::AccessFlags2::default())
+                        .dst_stage_mask(vk::PipelineStageFlags2::BOTTOM_OF_PIPE)
+                        .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+                        .subresource_range(vk::ImageSubresourceRange {
+                            aspect_mask: vk::ImageAspectFlags::COLOR,
+                            base_mip_level: 0,
+                            level_count: 1,
+                            base_array_layer: 0,
+                            layer_count: 1,
+                        })]),
+            );
+            device.end_command_buffer(cb)?;
+
+            vk_image.set_subresource_layout(
+                image.whole_subresource(),
+                LayoutInfo {
+                    image_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+                    access_mask: vk::AccessFlags2::empty(),
+                    stage_mask: vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
+                },
+            );
+
+            let present_transition_done_semaphore =
+                current_frame.allocate_binary_semaphore(device)?;
+            let signal = [present_transition_done_semaphore];
+            device.queue_submit(
+                self.logical_device.graphics_queue.handle,
+                &[vk::SubmitInfo::default()
+                    .command_buffers(&[cb])
+                    .wait_semaphores(&wait_semaphores)
+                    .wait_dst_stage_mask(&[vk::PipelineStageFlags::BOTTOM_OF_PIPE])
+                    .signal_semaphores(&signal)],
+                vk::Fence::null(),
+            )?;
+            queue_wait_semaphore = present_transition_done_semaphore;
+        }
+
+        let wait_semaphores = [queue_wait_semaphore];
+
+        let present_info = vk::PresentInfoKHR::default()
+            .swapchains(&swapchains)
+            .wait_semaphores(&wait_semaphores)
+            .image_indices(&indices);
+        let swapchain_device = &swapchain.swapchain_device;
+
+        let suboptimal = unsafe { swapchain_device.queue_present(queue, &present_info)? };
+        if suboptimal {
+            swapchain.rebuild(
+                self,
+                &SwapchainCreationInfo {
+                    preferred_format: Some(swapchain.data.current_format.format.to_mgpu()),
+                    preferred_present_mode: Some(swapchain.data.current_present_mode.to_mgpu()),
+                    display_handle: unsafe {
+                        DisplayHandle::borrow_raw(swapchain.raw_display_handle)
+                    },
+                    window_handle: unsafe { WindowHandle::borrow_raw(swapchain.raw_window_handle) },
+                    extents: image.extents.to_2d(),
+                },
+            )?;
+        }
+        Ok(())
+    }
+    unsafe fn submit(&self, end_rendering_info: SubmitInfo) -> MgpuResult<()> {
+        #[cfg(debug_assertions)]
+        self.validate_submission_info(&end_rendering_info)?;
+        let mut current_frame = self.frames_in_flight.lock().unwrap();
+        let current_frame = current_frame.current_mut();
+
+        let current_semaphore_value = current_frame
+            .atomic_semaphore_counter
+            .fetch_add(1, Ordering::Relaxed)
+            + 1;
+
+        let mut command_buffer_states = self
+            .command_buffer_states
+            .write()
+            .expect("Failed to lock command buffer states");
+        command_buffer_states.clear();
+
+        let mut all_semaphores_to_signal = vec![];
+        let mut all_command_buffers = vec![];
+        let mut all_semaphores_to_wait = vec![vec![]];
+        let mut all_semaphores_values_to_wait = vec![];
+
+        let device = &self.logical_device.handle;
+
+        let mut graphics_queue_submit = vec![];
+        let mut async_compute_queue_submit = vec![];
+        let mut transfer_queue_submit = vec![];
+
+        let semaphore_values = [current_semaphore_value; 256];
+
+        for (i, group) in end_rendering_info.submission_groups.iter().enumerate() {
+            let mut signals = vec![];
+            let mut command_buffers = vec![];
+            for cb in &group.command_recorders {
+                let semaphore_to_signal = current_frame.allocate_semaphore(device)?;
+                signals.push([semaphore_to_signal]);
+                command_buffers.push([vk::CommandBuffer::from_raw(cb.id)]);
+            }
+            all_semaphores_to_signal.push(signals);
+            all_command_buffers.push(command_buffers);
+            let num_semaphores_to_wait = if i > 0 {
+                let semaphores_to_wait = all_semaphores_to_signal[i - 1]
+                    .iter()
+                    .flatten()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let num_semaphores_to_wait = semaphores_to_wait.len();
+                all_semaphores_to_wait.push(semaphores_to_wait);
+                num_semaphores_to_wait
+            } else {
+                0
+            };
+
+            let timeline_info = vk::TimelineSemaphoreSubmitInfo::default()
+                .signal_semaphore_values(&semaphore_values[0..1])
+                .wait_semaphore_values(&semaphore_values[0..num_semaphores_to_wait]);
+
+            all_semaphores_values_to_wait.push(timeline_info);
+        }
+
+        let all_stages = [vk::PipelineStageFlags::TOP_OF_PIPE; 256];
+        for (i, group) in end_rendering_info.submission_groups.iter().enumerate() {
+            let semaphores_to_wait = all_semaphores_to_wait[i].as_slice();
+            for (c, cb) in group.command_recorders.iter().enumerate() {
+                let semaphore_to_signal = &all_semaphores_to_signal[i][c];
+                let vk_cb = &all_command_buffers[i][c];
+
+                let submission_queue = match cb.queue_type {
+                    QueueType::Graphics => &mut graphics_queue_submit,
+                    QueueType::AsyncCompute => &mut async_compute_queue_submit,
+                    QueueType::AsyncTransfer => &mut transfer_queue_submit,
+                };
+
+                let submit_info = vk::SubmitInfo::default()
+                    .command_buffers(vk_cb)
+                    .signal_semaphores(semaphore_to_signal.as_slice())
+                    .wait_dst_stage_mask(&all_stages)
+                    .wait_semaphores(semaphores_to_wait)
+                    .push_next(unsafe {
+                        (&mut all_semaphores_values_to_wait[i]
+                            as *mut vk::TimelineSemaphoreSubmitInfo)
+                            .as_mut()
+                            .unwrap()
+                    });
+
+                submission_queue.push(submit_info);
+            }
+        }
+
+        let values = &[current_semaphore_value];
+        let (_wait_semaphores, _values) = if let Some(info) = graphics_queue_submit.last() {
+            (
+                unsafe { std::slice::from_raw_parts(info.p_signal_semaphores, 1) },
+                values.as_slice(),
+            )
+        } else {
+            ([].as_slice(), [].as_slice())
+        };
+
+        {
+            unsafe {
+                device.queue_submit(
+                    self.logical_device.graphics_queue.handle,
+                    &graphics_queue_submit,
+                    current_frame.graphics_work_ended_fence,
+                )?;
+                device.queue_submit(
+                    self.logical_device.transfer_queue.handle,
+                    &transfer_queue_submit,
+                    current_frame.transfer_work_ended_fence,
+                )?;
+                device.queue_submit(
+                    self.logical_device.compute_queue.handle,
+                    &async_compute_queue_submit,
+                    current_frame.compute_work_ended_fence,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    unsafe fn end_rendering(&self) -> MgpuResult<()> {
+        let mut ff = self.frames_in_flight.lock().unwrap();
+
+        let current_frame_idx = ff.current_frame_in_flight;
+        let current_frame = ff.current_mut();
+        current_frame.cached_semaphores = current_frame.allocated_semaphores.to_vec();
+        current_frame.cached_semaphores_binary = current_frame.allocated_semaphores_binary.to_vec();
+
+        ff.current_frame_in_flight = (current_frame_idx + 1) % self.configuration.frames_in_flight;
+        self.resolver.update(self)?;
+        Ok(())
+    }
+
     unsafe fn bind_compute_pipeline(
         &self,
         command_recorder: CommandRecorder,
@@ -1441,7 +1039,6 @@ impl Hal for VulkanHal {
         }
         Ok(())
     }
-
     unsafe fn bind_compute_binding_sets(
         &self,
         command_recorder: CommandRecorder,
@@ -1493,19 +1090,6 @@ impl Hal for VulkanHal {
                 group_count_z,
             );
         }
-        Ok(())
-    }
-    fn device_wait_queue(&self, queue: QueueType) -> MgpuResult<()> {
-        let queue = match queue {
-            QueueType::Graphics => self.logical_device.graphics_queue.handle,
-            QueueType::AsyncCompute => self.logical_device.compute_queue.handle,
-            QueueType::AsyncTransfer => self.logical_device.transfer_queue.handle,
-        };
-        unsafe { self.logical_device.handle.queue_wait_idle(queue)? };
-        Ok(())
-    }
-    fn device_wait_idle(&self) -> MgpuResult<()> {
-        unsafe { self.logical_device.handle.device_wait_idle() }?;
         Ok(())
     }
 
@@ -1790,6 +1374,49 @@ impl Hal for VulkanHal {
 
         Ok(())
     }
+
+    unsafe fn cmd_clear_image(
+        &self,
+        command_recorder: CommandRecorder,
+        target: crate::ImageView,
+        color: [f32; 4],
+    ) {
+        let cb = vk::CommandBuffer::from_raw(command_recorder.id);
+        let device = &self.logical_device.handle;
+        let subresource = target.subresource;
+        match target.owner.format.aspect() {
+            crate::ImageAspect::Color => device.cmd_clear_color_image(
+                cb,
+                self.resolver.resolve_vulkan(target.owner).unwrap(),
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &vk::ClearColorValue { float32: color },
+                &[vk::ImageSubresourceRange {
+                    aspect_mask: target.owner.format.aspect().to_vk(),
+                    base_mip_level: subresource.mip,
+                    level_count: subresource.num_mips.get(),
+                    base_array_layer: subresource.base_array_layer,
+                    layer_count: subresource.num_layers.get(),
+                }],
+            ),
+            crate::ImageAspect::Depth => device.cmd_clear_depth_stencil_image(
+                cb,
+                self.resolver.resolve_vulkan(target.owner).unwrap(),
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &vk::ClearDepthStencilValue {
+                    depth: color[0],
+                    stencil: color[1] as u32,
+                },
+                &[vk::ImageSubresourceRange {
+                    aspect_mask: target.owner.format.aspect().to_vk(),
+                    base_mip_level: subresource.mip,
+                    level_count: subresource.num_mips.get(),
+                    base_array_layer: subresource.base_array_layer,
+                    layer_count: subresource.num_layers.get(),
+                }],
+            ),
+        }
+    }
+
     unsafe fn enqueue_synchronization(
         &self,
         infos: &[super::SynchronizationInfo],
@@ -2072,6 +1699,475 @@ impl Hal for VulkanHal {
         Ok(())
     }
 
+    #[cfg(feature = "swapchain")]
+    fn create_swapchain_impl(
+        &self,
+        swapchain_info: &crate::SwapchainCreationInfo,
+    ) -> MgpuResult<SwapchainInfo> {
+        let swapchain = VulkanSwapchain::create(self, swapchain_info)?;
+
+        let format = swapchain.data.current_format.format.to_mgpu();
+        let present_mode = PresentMode::Immediate;
+
+        let handle = self.resolver.add(swapchain);
+        let info = SwapchainInfo {
+            id: handle.to_u64(),
+            format,
+            present_mode,
+        };
+        Ok(info)
+    }
+
+    fn swapchain_destroy(&self, id: u64) -> MgpuResult<()> {
+        self.resolver
+            .remove::<VulkanSwapchain>(unsafe { Handle::from_u64(id) })
+    }
+
+    #[cfg(feature = "swapchain")]
+    fn swapchain_acquire_next_image(&self, id: u64) -> MgpuResult<crate::SwapchainImage> {
+        use crate::SwapchainImage;
+
+        Ok(self
+            .resolver
+            .apply_mut::<VulkanSwapchain, SwapchainImage>(
+                unsafe { Handle::from_u64(id) },
+                |swapchain| {
+                    let (index, suboptimal) = unsafe {
+                        swapchain
+                            .swapchain_device
+                            .acquire_next_image(
+                                swapchain.handle,
+                                u64::MAX,
+                                vk::Semaphore::null(),
+                                swapchain.acquire_fence,
+                            )
+                            .expect("Failed to get swapchain")
+                    };
+                    if suboptimal {
+                        info!("Acquired swapchain image {index} is suboptimal, recreate the swapchain");
+                    }
+
+                    unsafe {
+                        self.logical_device.handle.wait_for_fences(
+                            &[swapchain.acquire_fence],
+                            true,
+                            u64::MAX,
+                        )?;
+
+                        self.logical_device
+                            .handle
+                            .reset_fences(&[swapchain.acquire_fence])?;
+                    };
+                    swapchain.current_image_index = Some(index);
+
+                    Ok(swapchain.data.images[index as usize])
+                },
+            )
+            .expect("TODO Correct error"))
+    }
+
+    fn swapchain_on_resized(
+        &self,
+        id: u64,
+        new_size: crate::Extents2D,
+        window_handle: WindowHandle,
+        display_handle: DisplayHandle,
+    ) -> MgpuResult<()> {
+        if new_size.width == 0 || new_size.height == 0 {
+            // Don't recreate the swapchain when reduced to icon
+            return Ok(());
+        }
+        self.resolver.apply_mut(
+            unsafe { Handle::<VulkanSwapchain>::from_u64(id) },
+            |swapchain| {
+                swapchain.rebuild(
+                    self,
+                    &crate::SwapchainCreationInfo {
+                        display_handle,
+                        window_handle,
+                        preferred_format: Some(swapchain.data.current_format.format.to_mgpu()),
+                        preferred_present_mode: Some(swapchain.data.current_present_mode.to_mgpu()),
+                        extents: new_size,
+                    },
+                )
+            },
+        )
+    }
+    fn try_swapchain_set_present_mode(
+        &self,
+        id: u64,
+        present_mode: crate::PresentMode,
+    ) -> MgpuResult<crate::PresentMode> {
+        self.resolver.apply_mut::<VulkanSwapchain, PresentMode>(
+            unsafe { Handle::from_u64(id) },
+            |swapchain| {
+                let vk_present_mode = present_mode.to_vk();
+                if swapchain.data.present_modes.contains(&vk_present_mode) {
+                    swapchain.rebuild(
+                        self,
+                        &SwapchainCreationInfo {
+                            preferred_format: Some(swapchain.data.current_format.format.to_mgpu()),
+                            preferred_present_mode: Some(present_mode),
+                            display_handle: unsafe {
+                                DisplayHandle::borrow_raw(swapchain.raw_display_handle)
+                            },
+                            window_handle: unsafe {
+                                WindowHandle::borrow_raw(swapchain.raw_window_handle)
+                            },
+                            extents: swapchain.data.extents,
+                        },
+                    )?;
+                    Ok(present_mode)
+                } else {
+                    swapchain.rebuild(
+                        self,
+                        &SwapchainCreationInfo {
+                            preferred_format: Some(swapchain.data.current_format.format.to_mgpu()),
+                            preferred_present_mode: Some(PresentMode::Immediate),
+                            display_handle: unsafe {
+                                DisplayHandle::borrow_raw(swapchain.raw_display_handle)
+                            },
+                            window_handle: unsafe {
+                                WindowHandle::borrow_raw(swapchain.raw_window_handle)
+                            },
+                            extents: swapchain.data.extents,
+                        },
+                    )?;
+                    Ok(PresentMode::Immediate)
+                }
+            },
+        )
+    }
+
+    fn device_info(&self) -> crate::DeviceInfo {
+        let major = vk::api_version_major(Self::VULKAN_API_VERSION);
+        let minor = vk::api_version_minor(Self::VULKAN_API_VERSION);
+        let patch = vk::api_version_patch(Self::VULKAN_API_VERSION);
+        crate::DeviceInfo {
+            name: self.physical_device.name.clone(),
+            api_description: format!("Vulkan {}.{}.{}", major, minor, patch),
+            swapchain_support: self.physical_device.features.swapchain_support,
+            frames_in_flight: self.configuration.frames_in_flight,
+        }
+    }
+
+    fn create_image(
+        &self,
+        image_description: &crate::ImageDescription,
+    ) -> MgpuResult<crate::Image> {
+        let flags = image_description.creation_flags.to_vk();
+        let tiling = if image_description.memory_domain == MemoryDomain::Gpu {
+            vk::ImageTiling::OPTIMAL
+        } else {
+            vk::ImageTiling::LINEAR
+        };
+        let image_create_info = vk::ImageCreateInfo::default()
+            .flags(flags)
+            .image_type(image_description.dimension.to_vk())
+            .format(image_description.format.to_vk())
+            .extent(image_description.extents.to_vk())
+            .mip_levels(image_description.mips.get())
+            .array_layers(image_description.array_layers.get())
+            .samples(image_description.samples.to_vk())
+            .tiling(tiling)
+            .usage(image_description.usage_flags.to_vk())
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .initial_layout(vk::ImageLayout::UNDEFINED);
+        let device = &self.logical_device.handle;
+        let image = unsafe { device.create_image(&image_create_info, get_allocation_callbacks())? };
+
+        self.try_assign_debug_name(
+            image,
+            image_description
+                .label
+                .unwrap_or(&format!("Image {:?}", image)),
+        )?;
+
+        let requirements = unsafe { device.get_image_memory_requirements(image) };
+        let location = match image_description.memory_domain {
+            MemoryDomain::Cpu => MemoryLocation::CpuToGpu,
+            MemoryDomain::Gpu => MemoryLocation::GpuOnly,
+        };
+        let fallback_name = format!("Memory allocation for image {:?}", image);
+        let allocation_create_desc = AllocationCreateDesc {
+            name: image_description.label.unwrap_or(&fallback_name),
+            requirements,
+            location,
+            linear: image_description.memory_domain == MemoryDomain::Gpu,
+            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+        };
+        let allocation = self
+            .memory_allocator
+            .write()
+            .expect("Failed to lock memory allocator")
+            .allocate(&allocation_create_desc)
+            .map_err(|e| MgpuError::VulkanError(VulkanHalError::GpuAllocatorError(e)))?;
+        unsafe { device.bind_image_memory(image, allocation.memory(), allocation.offset())? };
+
+        let mips = iter::repeat(LayoutInfo::default())
+            .take(image_description.mips.get() as usize)
+            .collect::<Vec<_>>();
+        let mut layouts = vec![];
+        layouts.resize(image_description.array_layers.get() as usize, mips);
+        let vulkan_image = VulkanImage {
+            label: image_description.label.map(ToOwned::to_owned),
+            handle: image,
+            external: false,
+            allocation: Some(allocation),
+            subresource_layouts: layouts,
+        };
+
+        info!(
+            "Created image {:?} {:?} dimension {:?} layers {} mips {} format {:?}",
+            image_description.label,
+            image_description.extents,
+            image_description.dimension,
+            image_description.array_layers.get(),
+            image_description.mips.get(),
+            image_description.format,
+        );
+
+        let handle = self.resolver.add(vulkan_image);
+        let image = Image {
+            id: handle.to_u64(),
+            usage_flags: image_description.usage_flags,
+            creation_flags: image_description.creation_flags,
+            extents: image_description.extents,
+            dimension: image_description.dimension,
+            num_mips: image_description.mips,
+            array_layers: image_description.array_layers,
+            samples: image_description.samples,
+            format: image_description.format,
+        };
+        Ok(image)
+    }
+
+    fn image_name(&self, image: Image) -> MgpuResult<Option<String>> {
+        self.resolver
+            .apply::<VulkanImage, Option<String>>(image, |vk_image| Ok(vk_image.label.clone()))
+    }
+
+    fn destroy_image(&self, image: crate::Image) -> MgpuResult<()> {
+        self.resolver
+            .remove::<VulkanImage>(unsafe { Handle::from_u64(image.id) })
+    }
+
+    fn create_image_view(
+        &self,
+        image_view_description: &crate::ImageViewDescription,
+    ) -> MgpuResult<crate::ImageView> {
+        let image = image_view_description.image;
+
+        let image_view_create_info = vk::ImageViewCreateInfo::default()
+            .image(
+                self.resolver
+                    .resolve_vulkan(image)
+                    .ok_or(MgpuError::InvalidHandle)?,
+            )
+            .format(image_view_description.format.to_vk())
+            .view_type(image_view_description.view_ty.to_vk())
+            .subresource_range(
+                vk::ImageSubresourceRange::default()
+                    .aspect_mask(image_view_description.format.aspect_mask())
+                    .base_array_layer(image_view_description.image_subresource.base_array_layer)
+                    .base_mip_level(image_view_description.image_subresource.mip)
+                    .level_count(image_view_description.image_subresource.num_mips.get())
+                    .layer_count(image_view_description.image_subresource.num_layers.get()),
+            )
+            .components(ComponentMapping::default());
+
+        let image_view = unsafe {
+            self.logical_device
+                .handle
+                .create_image_view(&image_view_create_info, get_allocation_callbacks())?
+        };
+
+        if let Some(name) = image_view_description.label {
+            self.try_assign_debug_name(image_view, name)?;
+        }
+
+        info!("Created ImageView {:?}", image_view_description.label);
+
+        Ok(unsafe {
+            self.wrap_raw_image_view(
+                image,
+                image_view,
+                image_view_description.image_subresource,
+                image_view_description.label,
+            )?
+        })
+    }
+
+    fn create_buffer(&self, buffer_description: &BufferDescription) -> MgpuResult<Buffer> {
+        let buffer_create_info = vk::BufferCreateInfo::default()
+            .usage(buffer_description.usage_flags.to_vk())
+            .size(buffer_description.size as _);
+        let device = &self.logical_device.handle;
+        let buffer =
+            unsafe { device.create_buffer(&buffer_create_info, get_allocation_callbacks())? };
+        let memory_requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
+
+        if let Some(label) = buffer_description.label {
+            self.try_assign_debug_name(buffer, label)?;
+        }
+
+        let fallback_name = format!("Memory allocation for buffer {:?}", buffer);
+        let name = buffer_description.label.unwrap_or(&fallback_name);
+        let allocation_description = AllocationCreateDesc {
+            name,
+            requirements: memory_requirements,
+            location: match buffer_description.memory_domain {
+                MemoryDomain::Cpu => MemoryLocation::CpuToGpu,
+                MemoryDomain::Gpu => MemoryLocation::GpuOnly,
+            },
+            linear: true,
+            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+        };
+
+        let mut allocator = self
+            .memory_allocator
+            .write()
+            .expect("Failed to lock memory allocator");
+        let allocation = allocator
+            .allocate(&allocation_description)
+            .map_err(|e| MgpuError::VulkanError(VulkanHalError::GpuAllocatorError(e)))?;
+
+        unsafe {
+            device.bind_buffer_memory(buffer, allocation.memory(), allocation.offset())?;
+        }
+
+        let vulkan_buffer = VulkanBuffer {
+            label: buffer_description.label.map(ToOwned::to_owned),
+            handle: buffer,
+            allocation,
+            current_access_mask: vk::AccessFlags2::empty(),
+            current_stage_mask: vk::PipelineStageFlags2::empty(),
+        };
+        let handle = self.resolver.add(vulkan_buffer);
+
+        info!(
+            "Created buffer {:?} of size {}",
+            buffer_description.label, buffer_description.size,
+        );
+        Ok(Buffer {
+            id: handle.to_u64(),
+            usage_flags: buffer_description.usage_flags,
+            size: buffer_description.size,
+            memory_domain: buffer_description.memory_domain,
+        })
+    }
+
+    fn buffer_name(&self, buffer: Buffer) -> MgpuResult<Option<String>> {
+        self.resolver
+            .apply::<VulkanBuffer, Option<String>>(buffer, |vk_buffer| Ok(vk_buffer.label.clone()))
+    }
+    fn destroy_buffer(&self, buffer: Buffer) -> MgpuResult<()> {
+        self.resolver.remove(buffer)
+    }
+    fn create_graphics_pipeline(
+        &self,
+        graphics_pipeline_description: &GraphicsPipelineDescription,
+    ) -> MgpuResult<GraphicsPipeline> {
+        // The actual creation of the pipeline is deferred until a render pass using the pipeline is executed
+
+        #[cfg(debug_assertions)]
+        self.validate_graphics_pipeline_shader_layouts(graphics_pipeline_description);
+
+        let bind_set_layouts = graphics_pipeline_description
+            .binding_set_layouts
+            .iter()
+            .map(Into::into)
+            .collect();
+
+        let owned_info = graphics_pipeline_description.to_vk_owned(bind_set_layouts);
+
+        let pipeline_layout = self.get_pipeline_layout(
+            graphics_pipeline_description.label,
+            &owned_info.binding_sets_infos,
+            owned_info.push_constant_range.as_ref(),
+        )?;
+        let vulkan_graphics_pipeline_info = VulkanGraphicsPipelineInfo {
+            label: graphics_pipeline_description.label.map(ToOwned::to_owned),
+            layout: owned_info,
+            vk_layout: pipeline_layout,
+            pipelines: vec![],
+        };
+        let handle = self.resolver.add(vulkan_graphics_pipeline_info);
+
+        info!(
+            "Created GraphicsPipeline {:?}",
+            graphics_pipeline_description.label
+        );
+
+        Ok(GraphicsPipeline {
+            id: handle.to_u64(),
+        })
+    }
+
+    fn create_compute_pipeline(
+        &self,
+        compute_pipeline_description: &ComputePipelineDescription,
+    ) -> MgpuResult<ComputePipeline> {
+        #[cfg(debug_assertions)]
+        self.validate_compute_pipeline_shader_layouts(compute_pipeline_description);
+        let bind_set_layouts = compute_pipeline_description
+            .binding_set_layouts
+            .iter()
+            .map(Into::into)
+            .collect();
+
+        let owned_info = compute_pipeline_description.to_vk_owned(bind_set_layouts);
+
+        let pipeline_layout = self.get_pipeline_layout(
+            compute_pipeline_description.label,
+            &owned_info.binding_sets_infos,
+            owned_info.push_constant_range.as_ref(),
+        )?;
+        let compute_entrypt = CString::new(compute_pipeline_description.entry_point).unwrap();
+        let pipeline_create_info = vk::ComputePipelineCreateInfo::default()
+            .layout(pipeline_layout)
+            .stage(
+                vk::PipelineShaderStageCreateInfo::default()
+                    .stage(vk::ShaderStageFlags::COMPUTE)
+                    .module(
+                        self.resolver
+                            .resolve_vulkan(compute_pipeline_description.shader)
+                            .ok_or(MgpuError::InvalidHandle)?,
+                    )
+                    .name(&compute_entrypt),
+            );
+
+        let pipeline = unsafe {
+            self.logical_device
+                .handle
+                .create_compute_pipelines(
+                    vk::PipelineCache::null(),
+                    &[pipeline_create_info],
+                    get_allocation_callbacks(),
+                )
+                .map_err(|(_, err)| VulkanHalError::ApiError(err))?[0]
+        };
+
+        if let Some(name) = compute_pipeline_description.label {
+            self.try_assign_debug_name(pipeline, name)?;
+        }
+
+        let vk_pipeline = VulkanComputePipelineInfo {
+            label: compute_pipeline_description.label.map(ToOwned::to_owned),
+            handle: pipeline,
+            layout: owned_info,
+            vk_layout: pipeline_layout,
+        };
+        let handle = self.resolver.add(vk_pipeline);
+        info!(
+            "Created vulkan compute pipeline {:?}",
+            compute_pipeline_description.label
+        );
+        Ok(ComputePipeline {
+            id: handle.to_u64(),
+        })
+    }
+
     fn get_graphics_pipeline_layout(
         &self,
         graphics_pipeline: GraphicsPipeline,
@@ -2080,6 +2176,67 @@ impl Hal for VulkanHal {
             .resolve_clone(graphics_pipeline)
             .ok_or(MgpuError::InvalidHandle)
             .map(|layout| layout.layout)
+    }
+
+    fn get_compute_pipeline_layout(
+        &self,
+        compute_pipeline: ComputePipeline,
+    ) -> MgpuResult<ComputePipelineLayout> {
+        self.resolver
+            .apply(compute_pipeline, |pipeline| Ok(pipeline.layout.clone()))
+    }
+    fn destroy_graphics_pipeline(&self, graphics_pipeline: GraphicsPipeline) -> MgpuResult<()> {
+        self.resolver.remove(graphics_pipeline)
+    }
+
+    fn destroy_compute_pipeline(&self, pipeline: ComputePipeline) -> MgpuResult<()> {
+        self.resolver.remove(pipeline)
+    }
+
+    fn create_shader_module(
+        &self,
+        shader_module_description: &crate::ShaderModuleDescription,
+    ) -> MgpuResult<ShaderModule> {
+        let layout = self.reflect_layout(shader_module_description)?;
+        let shader_module_create_info = vk::ShaderModuleCreateInfo::default()
+            .flags(vk::ShaderModuleCreateFlags::default())
+            .code(shader_module_description.source);
+        let shader_module = unsafe {
+            self.logical_device
+                .handle
+                .create_shader_module(&shader_module_create_info, get_allocation_callbacks())?
+        };
+        if let Some(name) = shader_module_description.label {
+            self.try_assign_debug_name(shader_module, name)?;
+        }
+
+        let vulkan_shader_module = SpirvShaderModule {
+            label: shader_module_description.label.map(ToOwned::to_owned),
+            handle: shader_module,
+            layout,
+        };
+
+        info!(
+            "Created shader module {:?}",
+            shader_module_description.label
+        );
+
+        let handle = self.resolver.add(vulkan_shader_module);
+        Ok(ShaderModule {
+            id: handle.to_u64(),
+        })
+    }
+
+    fn get_shader_module_layout(
+        &self,
+        shader_module: ShaderModule,
+    ) -> MgpuResult<ShaderModuleLayout> {
+        self.resolver
+            .apply(shader_module, |module| Ok(module.layout.clone()))
+    }
+
+    fn destroy_shader_module(&self, shader_module: ShaderModule) -> MgpuResult<()> {
+        self.resolver.remove(shader_module)
     }
 
     fn create_sampler(&self, sampler_description: &SamplerDescription) -> MgpuResult<Sampler> {
@@ -2162,141 +2319,27 @@ impl Hal for VulkanHal {
         self.resolver.remove(binding_set)
     }
 
-    fn create_image_view(
-        &self,
-        image_view_description: &crate::ImageViewDescription,
-    ) -> MgpuResult<crate::ImageView> {
-        let image = image_view_description.image;
-
-        let image_view_create_info = vk::ImageViewCreateInfo::default()
-            .image(
-                self.resolver
-                    .resolve_vulkan(image)
-                    .ok_or(MgpuError::InvalidHandle)?,
-            )
-            .format(image_view_description.format.to_vk())
-            .view_type(image_view_description.view_ty.to_vk())
-            .subresource_range(
-                vk::ImageSubresourceRange::default()
-                    .aspect_mask(image_view_description.format.aspect_mask())
-                    .base_array_layer(image_view_description.image_subresource.base_array_layer)
-                    .base_mip_level(image_view_description.image_subresource.mip)
-                    .level_count(image_view_description.image_subresource.num_mips.get())
-                    .layer_count(image_view_description.image_subresource.num_layers.get()),
-            )
-            .components(ComponentMapping::default());
-
-        let image_view = unsafe {
-            self.logical_device
-                .handle
-                .create_image_view(&image_view_create_info, get_allocation_callbacks())?
-        };
-
-        if let Some(name) = image_view_description.label {
-            self.try_assign_debug_name(image_view, name)?;
-        }
-
-        info!("Created ImageView {:?}", image_view_description.label);
-
-        Ok(unsafe {
-            self.wrap_raw_image_view(
-                image,
-                image_view,
-                image_view_description.image_subresource,
-                image_view_description.label,
-            )?
-        })
-    }
-
-    unsafe fn prepare_next_frame(&self) -> MgpuResult<()> {
-        let mut current_frame = self.frames_in_flight.lock().unwrap();
-        let current_frame = current_frame.current_mut();
-        let device = &self.logical_device.handle;
-        unsafe {
-            device.wait_for_fences(
-                &[
-                    current_frame.graphics_work_ended_fence,
-                    current_frame.transfer_work_ended_fence,
-                    current_frame.compute_work_ended_fence,
-                ],
-                true,
-                u64::MAX,
-            )?
-        };
-        unsafe {
-            device.reset_fences(&[
-                current_frame.graphics_work_ended_fence,
-                current_frame.transfer_work_ended_fence,
-                current_frame.compute_work_ended_fence,
-            ])?
-        };
-
-        unsafe {
-            device.reset_command_pool(
-                current_frame.graphics_command_pool,
-                vk::CommandPoolResetFlags::RELEASE_RESOURCES,
-            )?;
-            device.reset_command_pool(
-                current_frame.compute_command_pool,
-                vk::CommandPoolResetFlags::RELEASE_RESOURCES,
-            )?;
-            device.reset_command_pool(
-                current_frame.transfer_command_pool,
-                vk::CommandPoolResetFlags::RELEASE_RESOURCES,
-            )?;
-        }
-        Ok(())
-    }
-
-    fn try_swapchain_set_present_mode(
-        &self,
-        id: u64,
-        present_mode: crate::PresentMode,
-    ) -> MgpuResult<crate::PresentMode> {
-        self.resolver.apply_mut::<VulkanSwapchain, PresentMode>(
-            unsafe { Handle::from_u64(id) },
-            |swapchain| {
-                let vk_present_mode = present_mode.to_vk();
-                if swapchain.data.present_modes.contains(&vk_present_mode) {
-                    swapchain.rebuild(
-                        self,
-                        &SwapchainCreationInfo {
-                            preferred_format: Some(swapchain.data.current_format.format.to_mgpu()),
-                            preferred_present_mode: Some(present_mode),
-                            display_handle: unsafe {
-                                DisplayHandle::borrow_raw(swapchain.raw_display_handle)
-                            },
-                            window_handle: unsafe {
-                                WindowHandle::borrow_raw(swapchain.raw_window_handle)
-                            },
-                            extents: swapchain.data.extents,
-                        },
-                    )?;
-                    Ok(present_mode)
-                } else {
-                    swapchain.rebuild(
-                        self,
-                        &SwapchainCreationInfo {
-                            preferred_format: Some(swapchain.data.current_format.format.to_mgpu()),
-                            preferred_present_mode: Some(PresentMode::Immediate),
-                            display_handle: unsafe {
-                                DisplayHandle::borrow_raw(swapchain.raw_display_handle)
-                            },
-                            window_handle: unsafe {
-                                WindowHandle::borrow_raw(swapchain.raw_window_handle)
-                            },
-                            extents: swapchain.data.extents,
-                        },
-                    )?;
-                    Ok(PresentMode::Immediate)
-                }
-            },
-        )
-    }
-
-    fn swapchain_destroy(&self, id: u64) -> MgpuResult<()> {
+    fn destroy_image_view(&self, image_view: crate::ImageView) -> MgpuResult<()> {
         self.resolver
-            .remove::<VulkanSwapchain>(unsafe { Handle::from_u64(id) })
+            .remove::<VulkanImageView>(unsafe { Handle::from_u64(image_view.id) })
+    }
+
+    unsafe fn write_host_visible_buffer(
+        &self,
+        buffer: Buffer,
+        params: &crate::BufferWriteParams,
+    ) -> MgpuResult<()> {
+        debug_assert!(params.data.len() >= params.size);
+        debug_assert!(buffer.size >= params.size);
+        self.resolver.apply(buffer, |buffer| {
+            let allocation = &buffer.allocation;
+            let ptr = allocation
+                .mapped_ptr()
+                .expect("Tried to do a host visible write without a peristent ptr");
+            let ptr = unsafe { ptr.cast::<u8>().as_ptr().add(params.offset) };
+            unsafe { ptr.copy_from(params.data.as_ptr(), params.size) };
+            Ok(())
+        })
     }
 
     fn begin_debug_region(
@@ -2331,6 +2374,17 @@ impl Hal for VulkanHal {
                     .cmd_end_debug_utils_label(vk_buffer)
             };
         }
+    }
+
+    unsafe fn set_scissor_rect(
+        &self,
+        command_recorder: CommandRecorder,
+        scissor_rect: crate::Rect2D,
+    ) {
+        let cb = vk::CommandBuffer::from_raw(command_recorder.id);
+        self.logical_device
+            .handle
+            .cmd_set_scissor(cb, 0, &[scissor_rect.to_vk()]);
     }
 }
 
@@ -3238,26 +3292,30 @@ impl VulkanHal {
             .vertex_stage
             .vertex_inputs
             .iter()
-            .enumerate()
-            .map(|(i, attribute)| {
+            .map(|attribute| {
                 vk::VertexInputAttributeDescription::default()
-                    .binding(i as _)
+                    .binding(attribute.binding as _)
                     .location(attribute.location as _)
                     .format(attribute.format.to_vk())
                     .offset(attribute.offset as _)
             })
             .collect::<Vec<_>>();
-        let vertex_binding_descriptions = pipeline_layout
+        let mut vertex_binding_descriptions = HashMap::new();
+        pipeline_layout
             .vertex_stage
             .vertex_inputs
             .iter()
-            .enumerate()
-            .map(|(i, attrib)| {
-                vk::VertexInputBindingDescription::default()
-                    .binding(i as _)
-                    .stride(attrib.stride as _)
-                    .input_rate(attrib.frequency.to_vk())
-            })
+            .for_each(|attrib| {
+                vertex_binding_descriptions.insert(
+                    attrib.binding,
+                    vk::VertexInputBindingDescription::default()
+                        .binding(attrib.binding as _)
+                        .stride(attrib.stride as _)
+                        .input_rate(attrib.frequency.to_vk()),
+                );
+            });
+        let vertex_binding_descriptions = vertex_binding_descriptions
+            .into_values()
             .collect::<Vec<_>>();
 
         let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()

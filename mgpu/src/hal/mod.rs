@@ -4,9 +4,9 @@ use crate::{
     DepthStencilTargetInfo, DeviceConfiguration, DeviceInfo, FilterMode, FrontFace,
     GraphicsPipeline, GraphicsPipelineDescription, Image, ImageDescription, ImageRegion,
     ImageSubresource, ImageView, ImageViewDescription, MgpuResult, MultisampleState,
-    OwnedBindingSetLayoutInfo, PolygonMode, PrimitiveTopology, PushConstantInfo, RenderPassInfo,
-    RenderTargetInfo, Sampler, SamplerDescription, ShaderModule, ShaderModuleDescription,
-    ShaderModuleLayout, ShaderStageFlags, VertexInputDescription,
+    OwnedBindingSetLayoutInfo, PolygonMode, PrimitiveTopology, PushConstantInfo, Rect2D,
+    RenderPassInfo, RenderTargetInfo, Sampler, SamplerDescription, ShaderModule,
+    ShaderModuleDescription, ShaderModuleLayout, ShaderStageFlags, VertexInputDescription,
 };
 use std::sync::Arc;
 
@@ -215,6 +215,8 @@ pub(crate) trait Hal: Send + Sync {
         index_buffer: Buffer,
     ) -> MgpuResult<()>;
 
+    unsafe fn set_scissor_rect(&self, command_recorder: CommandRecorder, scissor_rect: Rect2D);
+
     unsafe fn bind_graphics_binding_sets(
         &self,
         command_recorder: CommandRecorder,
@@ -294,6 +296,13 @@ pub(crate) trait Hal: Send + Sync {
         dest_region: ImageRegion,
         filter: FilterMode,
     ) -> MgpuResult<()>;
+
+    unsafe fn cmd_clear_image(
+        &self,
+        command_recorder: CommandRecorder,
+        target: ImageView,
+        color: [f32; 4],
+    );
 
     unsafe fn enqueue_synchronization(&self, infos: &[SynchronizationInfo]) -> MgpuResult<()>;
     fn transition_resources(
