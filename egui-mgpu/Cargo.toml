@@ -1,0 +1,19 @@
+[package]
+name = "egui-mgpu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+mgpu = { path = "../mgpu" }
+egui = { version = "0.27.2", features = ["bytemuck"] }
+copypasta = "0.10.1"
+log = "0.4.21"
+anyhow = "1.0.86"
+bytemuck = { version = "1.16.0", features = ["derive"] }
+winit = "0.30.0"
+
+[dev-dependencies]
+raw-window-handle = "0.6.*"
+
+[build-dependencies]
+engine_build_utils = { path = "../engine_build_utils" }
