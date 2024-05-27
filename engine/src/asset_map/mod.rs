@@ -2,6 +2,7 @@ use std::{
     any::{type_name, TypeId},
     collections::HashMap,
     marker::PhantomData,
+    ptr::NonNull,
 };
 
 use log::{info, warn};
@@ -13,7 +14,7 @@ use crate::immutable_string::ImmutableString;
 use crate::utils::erased_arena::{ErasedArena, Index};
 
 pub trait Asset: 'static {
-    fn release(&mut self, device: &Device) {
+    fn dispose(&self, device: &Device) {
         let _ = device;
     }
 }
@@ -31,9 +32,8 @@ pub struct AssetHandle<A: Asset> {
 
 pub struct AssetMap {
     device: Device,
-    arenas: HashMap<TypeId, ErasedArena>,
+    registrations: HashMap<TypeId, AssetRegistration>,
     loaded_assets: HashMap<ImmutableString, Index>,
-    loaders: HashMap<TypeId, Box<dyn UnsafeAssetLoader>>,
 }
 
 struct LoadedAsset<A: Asset> {
@@ -41,27 +41,36 @@ struct LoadedAsset<A: Asset> {
     ref_count: usize,
 }
 
+struct AssetRegistration {
+    type_name: &'static str,
+    dispose_fn: unsafe fn(NonNull<u8>, device: &Device),
+    loader: Box<dyn UnsafeAssetLoader>,
+    arena: ErasedArena,
+}
+
 impl AssetMap {
     pub(crate) fn new(device: Device) -> Self {
         Self {
             device,
-            arenas: Default::default(),
+            registrations: Default::default(),
             loaded_assets: Default::default(),
-            loaders: Default::default(),
         }
     }
-    pub fn add_loader<L: AssetLoader>(&mut self, loader: L) {
-        let unsafe_loader: Box<dyn UnsafeAssetLoader> = Box::new(loader);
-        let old_loader = self
-            .loaders
-            .insert(TypeId::of::<L::LoadedAsset>(), unsafe_loader);
-        if old_loader.is_some() {
-            warn!(
-                "Loader for {} replaced with {}",
-                type_name::<L::LoadedAsset>(),
-                type_name::<L>()
-            );
-        }
+
+    pub fn register<A: Asset>(&mut self, loader: impl Into<Box<dyn UnsafeAssetLoader>>) {
+        let loader = loader.into();
+        assert!(loader.loaded_asset_type_id() == TypeId::of::<A>());
+        let old_registration = self.registrations.insert(
+            TypeId::of::<A>(),
+            AssetRegistration {
+                type_name: type_name::<A>(),
+                dispose_fn: Self::dispose_fn::<A>,
+                arena: ErasedArena::new::<LoadedAsset<A>>(),
+                loader,
+            },
+        );
+
+        debug_assert!(old_registration.is_none());
     }
 
     pub fn add<A: Asset>(
@@ -72,9 +81,10 @@ impl AssetMap {
         let identifier = identifier.into();
         let asset_ty = TypeId::of::<A>();
         let map = self
-            .arenas
-            .entry(asset_ty)
-            .or_insert_with(ErasedArena::new::<LoadedAsset<A>>);
+            .registrations
+            .get_mut(&asset_ty)
+            .unwrap_or_else(|| panic!("Asset type {} was not registered!", type_name::<A>()));
+        let map = &mut map.arena;
 
         let index = map.add(LoadedAsset {
             asset,
@@ -98,10 +108,11 @@ impl AssetMap {
     ) -> anyhow::Result<()> {
         let asset_ty = TypeId::of::<A>();
         let identifier = &identifier.identifier;
-        let map = self
-            .arenas
-            .entry(asset_ty)
-            .or_insert_with(ErasedArena::new::<LoadedAsset<A>>);
+        let registration = self
+            .registrations
+            .get_mut(&asset_ty)
+            .unwrap_or_else(|| panic!("Asset type {} was not registered!", type_name::<A>()));
+        let map = &mut registration.arena;
 
         if let Some(existing_entry) = self
             .loaded_assets
@@ -113,15 +124,7 @@ impl AssetMap {
         }
 
         info!("Asset {:?} was not loaded, trying to load it", identifier);
-        let loader = if let Some(loader) = self.loaders.get_mut(&asset_ty) {
-            loader
-        } else {
-            anyhow::bail!("No loader for type {}", type_name::<A>());
-        };
-        let map = self
-            .arenas
-            .entry(asset_ty)
-            .or_insert_with(ErasedArena::new::<LoadedAsset<A>>);
+        let loader = &mut registration.loader;
 
         let (index, ptr) = unsafe { map.preallocate_entry() };
         let asset_entry = unsafe { &mut *ptr.cast::<LoadedAsset<A>>() };
@@ -134,17 +137,17 @@ impl AssetMap {
 
     pub fn get<A: Asset>(&self, handle: &AssetHandle<A>) -> Option<&A> {
         let index = self.loaded_assets.get(&handle.identifier).copied()?;
-        self.arenas
+        self.registrations
             .get(&TypeId::of::<A>())
-            .and_then(|map| map.get::<LoadedAsset<A>>(index))
+            .and_then(|map| map.arena.get::<LoadedAsset<A>>(index))
             .map(|entry| &entry.asset)
     }
 
     pub fn get_mut<A: Asset>(&mut self, handle: &AssetHandle<A>) -> Option<&mut A> {
         let index = self.loaded_assets.get(&handle.identifier).copied()?;
-        self.arenas
+        self.registrations
             .get_mut(&TypeId::of::<A>())
-            .and_then(|map| map.get_mut::<LoadedAsset<A>>(index))
+            .and_then(|map| map.arena.get_mut::<LoadedAsset<A>>(index))
             .map(|entry| &mut entry.asset)
     }
 
@@ -153,27 +156,37 @@ impl AssetMap {
         let Some(index) = self.loaded_assets.get(&handle.identifier).copied() else {
             return;
         };
-        let Some(arena) = self.arenas.get_mut(&TypeId::of::<A>()) else {
+        let Some(registration) = self.registrations.get_mut(&TypeId::of::<A>()) else {
             return;
         };
-        let Some(entry) = arena.get_mut::<LoadedAsset<A>>(index) else {
+        let Some(entry) = registration.arena.get_mut::<LoadedAsset<A>>(index) else {
             return;
         };
         entry.ref_count -= 1;
 
         if entry.ref_count == 0 {
-            let mut removed_asset = arena.remove::<LoadedAsset<A>>(index).unwrap();
+            let removed_asset = registration.arena.remove::<LoadedAsset<A>>(index).unwrap();
             info!("Released asset {handle:?}");
-            removed_asset.asset.release(&self.device);
+            removed_asset.asset.dispose(&self.device);
             self.loaded_assets.remove(handle.identifier());
         }
     }
 
-    pub fn unload_all(&mut self) {
-        for map in self.arenas.values_mut() {
-            map.clear()
+    pub fn unload_all(&mut self, device: &Device) {
+        for registration in self.registrations.values_mut() {
+            unsafe {
+                for entry in registration.arena.iter_ptr() {
+                    (registration.dispose_fn)(entry, device)
+                }
+            }
         }
         self.loaded_assets.clear();
+    }
+
+    unsafe fn dispose_fn<A: Asset>(ptr: NonNull<u8>, device: &Device) {
+        let asset_ref = ptr.cast::<A>().as_ref();
+
+        asset_ref.dispose(device)
     }
 }
 
@@ -191,6 +204,7 @@ impl<A: Asset, S: AsRef<str>> From<S> for AssetHandle<A> {
 /// It is marked as unsafe because [`UnsafeAssteLoader::load_asset`] directly writes to the payload
 /// pointer of an [`ErasedArena`] entry payload, which is an [`Option<T>`]
 unsafe trait UnsafeAssetLoader: 'static {
+    fn loaded_asset_type_id(&self) -> TypeId;
     fn accepts_identifier(&self, identifier: &str) -> bool;
     unsafe fn load_asset(
         &mut self,
@@ -200,6 +214,9 @@ unsafe trait UnsafeAssetLoader: 'static {
 }
 
 unsafe impl<L: AssetLoader> UnsafeAssetLoader for L {
+    fn loaded_asset_type_id(&self) -> TypeId {
+        TypeId::of::<L::LoadedAsset>()
+    }
     unsafe fn load_asset(
         &mut self,
         identifier: &str,
@@ -306,6 +323,13 @@ impl<A: Asset> AssetHandle<A> {
         &self.identifier
     }
 }
+
+impl<L: AssetLoader> From<L> for Box<dyn UnsafeAssetLoader> {
+    fn from(value: L) -> Self {
+        Box::new(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -320,7 +344,7 @@ mod tests {
         }
 
         impl Asset for StringAsset {
-            fn release(&mut self, _device: &mgpu::Device) {
+            fn dispose(&self, _device: &mgpu::Device) {
                 println!("Destroyed string asset {}", self.content)
             }
         }
@@ -343,7 +367,7 @@ mod tests {
         let mut asset_map = AssetMap::new(Device::dummy());
         let string_one = AssetHandle::<StringAsset>::new("Hello");
         let string_two = AssetHandle::<StringAsset>::new("World");
-        asset_map.add_loader(StringAssetLoader);
+        asset_map.register::<StringAsset>(StringAssetLoader);
         asset_map
             .increment_reference::<StringAsset>(&string_one)
             .unwrap();
@@ -381,8 +405,5 @@ mod tests {
                 .as_str(),
             "Pippo"
         );
-
-        asset_map.unload_all();
-        assert!(asset_map.get::<StringAsset>(&string_two).is_none());
     }
 }

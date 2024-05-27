@@ -1,4 +1,4 @@
-use std::mem::MaybeUninit;
+use std::{marker::PhantomData, mem::MaybeUninit};
 
 use glam::{vec2, vec3};
 use mgpu::{
@@ -15,8 +15,10 @@ use winit::{
 };
 
 use crate::{
-    asset_map::AssetMap,
+    asset_map::{Asset, AssetLoader, AssetMap},
     assets::{
+        loaders::FsTextureLoader,
+        material::Material,
         mesh::{Mesh, MeshDescription},
         texture::{Texture, TextureDescription, TextureSamplerConfiguration, TextureUsageFlags},
     },
@@ -267,11 +269,41 @@ impl Default for AppDescription {
     }
 }
 
+struct NullAssetLoader<A: Asset> {
+    _ph: PhantomData<A>,
+}
+
+impl<A: Asset> NullAssetLoader<A> {
+    pub fn new() -> Self {
+        Self { _ph: PhantomData }
+    }
+}
+
+impl<A: Asset> AssetLoader for NullAssetLoader<A> {
+    type LoadedAsset = A;
+
+    fn accepts_identifier(&self, _identifier: &str) -> bool {
+        false
+    }
+
+    fn load(&mut self, _identifier: &str) -> anyhow::Result<Self::LoadedAsset> {
+        panic!("NullAssetLoader tried to load an asset!");
+    }
+}
+
 pub fn asset_map_with_defaults(
     device: &Device,
     sampler_allocator: &SamplerAllocator,
 ) -> anyhow::Result<AssetMap> {
     let mut map = AssetMap::new(device.clone());
+
+    map.register::<Mesh>(NullAssetLoader::<Mesh>::new());
+    map.register::<Material>(NullAssetLoader::<Material>::new());
+    map.register::<Texture>(FsTextureLoader::new(
+        device.clone(),
+        sampler_allocator.clone(),
+    ));
+
     map.add(
         create_cube_mesh(device)?,
         CUBE_MESH_HANDLE.identifier().clone(),

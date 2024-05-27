@@ -61,9 +61,6 @@ impl App for CubesSceneApplication {
         shader_cache.add_shader("simple_vertex_shader", vertex_shader_module);
         shader_cache.add_shader("simple_fragment_shader", fragment_shader_module);
 
-        let texture_loader =
-            FsTextureLoader::new(context.device.clone(), sampler_allocator.clone());
-        asset_map.add_loader(texture_loader);
         let david_texture = AssetHandle::<Texture>::new("assets/images/david.jpg");
         asset_map.increment_reference::<Texture>(&david_texture)?;
         let mut scene = Scene::default();

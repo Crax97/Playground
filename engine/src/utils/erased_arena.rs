@@ -50,6 +50,9 @@ pub struct ErasedArena {
     // Tries to drop the entry at the pointer, returning the new generation if the operation succeeds
     drop_fn: unsafe fn(*mut u8) -> Option<u32>,
 
+    // Tries to get the entry at the pointer
+    get_fn: unsafe fn(*mut u8) -> Option<*mut u8>,
+
     // The second arg is an offset, the third is a count
     // Function responsibile for setting the entries in (ptr)[offset..count] to their default value
     default_fn: unsafe fn(*mut u8, usize, usize),
@@ -66,6 +69,7 @@ impl ErasedArena {
             len: 0,
             capacity: 0,
             drop_fn: Self::drop_fn::<T>,
+            get_fn: Self::get_fn::<T>,
             default_fn: Self::default_fn::<T>,
             entry_layout: Self::entry_layout::<T>(),
             freed_indices: vec![],
@@ -208,6 +212,21 @@ impl ErasedArena {
         self.len = 0;
     }
 
+    /// Iterates all the valid entries in the map, giving back their pointers
+    /// # Safety
+    /// The given ptr's value must:
+    ///     1. Not be dropped
+    ///     2. Not be written using a type different from the one stored in the map
+    ///         (Reading is fine, but it may be a logical error)
+    pub unsafe fn iter_ptr(&mut self) -> impl Iterator<Item = NonNull<u8>> + '_ {
+        // Count up to capacity because when calling remove len is decreased
+        // thus we might miss the elements at the end of the arena
+        (0..self.capacity).filter_map(|i| {
+            let entry = self.erased_payload_mut_ptr_at(i);
+            unsafe { (self.get_fn)(entry).map(|p| NonNull::new(p).unwrap()) }
+        })
+    }
+
     /// # Safety
     /// The entry pointed by index must be written with a valid value, before any read operations
     pub unsafe fn allocate_index(&mut self) -> Index {
@@ -307,6 +326,12 @@ impl ErasedArena {
         } else {
             None
         }
+    }
+
+    fn get_fn<T: 'static>(data: *mut u8) -> Option<*mut u8> {
+        let ptr_t = data.cast::<Entry<T>>();
+        let ref_t = unsafe { ptr_t.as_mut().unwrap_unchecked() };
+        ref_t.payload.as_mut().map(|r| (r as *mut T).cast())
     }
     fn default_fn<T: 'static>(data: *mut u8, offset: usize, count: usize) {
         let data = unsafe { data.cast::<Entry<T>>().add(offset) };

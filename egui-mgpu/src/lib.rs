@@ -976,7 +976,7 @@ impl EguiMgpuIntegration {
 
     fn take_input(&mut self, window: &Window, time_since_start: f64) -> RawInput {
         let mut input = self.raw_input.take();
-        input.time = Some(time_since_start as f64);
+        input.time = Some(time_since_start);
 
         let screen_size_pixels = window.inner_size().cast::<f32>();
         let screen_size_pixels = Vec2 {
