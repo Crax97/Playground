@@ -51,7 +51,7 @@ fn main() {
                 .expect("Failed to create swapchain");
 
             event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
-            let egui_integration = EguiMgpuIntegration::new(&self.device, &window).unwrap();
+            let egui_integration = EguiMgpuIntegration::new(&self.device).unwrap();
             let ctx = egui_integration.context();
 
             egui_extras::install_image_loaders(&ctx);

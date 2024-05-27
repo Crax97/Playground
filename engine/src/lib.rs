@@ -8,11 +8,14 @@ pub mod math;
 pub mod scene;
 pub mod scene_renderer;
 
+pub mod editor;
+
 #[macro_use]
 pub mod utils;
 
 pub use utils::*;
 
+pub use egui_mgpu;
 pub use glam;
 pub use winit;
 

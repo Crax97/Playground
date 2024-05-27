@@ -101,7 +101,7 @@ mod tests {
 
         assert!(scene.children_of(a).unwrap().any(|n| n == b));
         assert!(scene.children_of(a).unwrap().any(|n| n == c));
-        assert!(scene.children_of(f).is_none())
+        assert!(scene.children_of(f).unwrap().next().is_none())
     }
 
     #[test]
@@ -109,8 +109,8 @@ mod tests {
         let mut scene = Scene::new();
         let a = make_node(&mut scene, "a");
         for _ in 0..1000 {
-        let c = make_node(&mut scene, "c");
-        scene.add_child(a, c);
+            let c = make_node(&mut scene, "c");
+            scene.add_child(a, c);
         }
 
         let serializable = SerializableScene::from(&scene);

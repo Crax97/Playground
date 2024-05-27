@@ -9,6 +9,8 @@ use engine::assets::material::{
 };
 use engine::assets::texture::{Texture, TextureDescription, TextureUsageFlags};
 use engine::constants::CUBE_MESH_HANDLE;
+use engine::editor::SceneEditor;
+use engine::egui_mgpu::{egui, EguiMgpuIntegration};
 use engine::glam::{vec3, EulerRot, Mat4, Vec4Swizzles};
 use engine::glam::{Quat, Vec3};
 use engine::math::{constants, Transform};
@@ -58,6 +60,8 @@ pub struct GltfViewerApplication {
     camera_mode: CameraMode,
     is_mouse_captured: bool,
     cubemap_handle: SceneNodeId,
+    scene_editor: SceneEditor,
+    egui_integration: EguiMgpuIntegration,
 }
 
 impl App for GltfViewerApplication {
@@ -193,6 +197,8 @@ impl App for GltfViewerApplication {
             camera_mode: CameraMode::Orbit,
             is_mouse_captured: false,
             cubemap_handle,
+            egui_integration: EguiMgpuIntegration::new(&context.device)?,
+            scene_editor: SceneEditor::new(),
         })
     }
 
@@ -204,6 +210,8 @@ impl App for GltfViewerApplication {
         if let WindowEvent::Focused(false) = event {
             self.set_cursor_captured(false, context);
         }
+        self.egui_integration
+            .on_window_event(context.window(), event);
         Ok(())
     }
 
@@ -216,6 +224,16 @@ impl App for GltfViewerApplication {
     }
 
     fn update(&mut self, context: &engine::app::AppContext) -> anyhow::Result<()> {
+        self.egui_integration.begin_frame(context.window());
+        let egui_context = self.egui_integration.context();
+
+        egui::Window::new("Scene Editor")
+            .show(&egui_context, |ui| {
+                self.scene_editor
+                    .show(ui, &mut self.scene, &mut self.asset_map);
+            })
+            .unwrap();
+
         if context.input.is_key_just_pressed(engine::input::Key::F1) {
             self.output = SceneOutput::BaseColor;
         }
@@ -266,6 +284,11 @@ impl App for GltfViewerApplication {
         context: &engine::app::AppContext,
         render_context: engine::app::RenderContext,
     ) -> anyhow::Result<()> {
+        let output = self.egui_integration.end_frame();
+
+        self.egui_integration
+            .handle_platform_output(context.window(), output.platform_output);
+
         self.pov.projection_mode = ProjectionMode::Perspective {
             fov_y_radians: 75.0f32.to_radians(),
             aspect_ratio: render_context.swapchain_image.extents.width as f32
@@ -279,6 +302,12 @@ impl App for GltfViewerApplication {
             output_image: render_context.swapchain_image.view,
             output: self.output,
         })?;
+        self.egui_integration.paint_frame(
+            &context.device,
+            render_context.swapchain_image.view,
+            output.textures_delta,
+            output.shapes,
+        )?;
         Ok(())
     }
 
@@ -291,8 +320,9 @@ impl App for GltfViewerApplication {
     }
 
     fn shutdown(&mut self, context: &engine::app::AppContext) -> anyhow::Result<()> {
-        self.scene.release_assets(&mut self.asset_map);
+        self.scene.dispose(&mut self.asset_map);
         self.scene_renderer.release_resources(&context.device)?;
+        self.egui_integration.destroy(&context.device)?;
         Ok(())
     }
 

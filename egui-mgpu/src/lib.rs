@@ -1,3 +1,5 @@
+pub use egui;
+
 use std::{collections::HashMap, time::SystemTime};
 
 use bytemuck::{Pod, Zeroable};
@@ -85,7 +87,7 @@ impl EguiMgpuIntegration {
     const MAX_VERTICES: usize = Self::MAX_NUM_VERTICES * std::mem::size_of::<Vertex>();
     const MAX_INDICES: usize = Self::MAX_NUM_VERTICES * std::mem::size_of::<u32>();
 
-    pub fn new(device: &Device, window: &Window) -> anyhow::Result<Self> {
+    pub fn new(device: &Device) -> anyhow::Result<Self> {
         let frames_in_flight = device.get_info().frames_in_flight;
         let mut mesh_buffers = Vec::with_capacity(frames_in_flight);
 
@@ -198,7 +200,7 @@ impl EguiMgpuIntegration {
         })?;
 
         let context = Context::default();
-        let pixels_per_point = Self::compute_pixels_per_point(&context, window);
+        let pixels_per_point = 1.0;
         context.set_fonts(FontDefinitions::default());
 
         context.set_pixels_per_point(pixels_per_point);
@@ -1296,20 +1298,5 @@ fn translate_cursor(cursor_icon: egui::CursorIcon) -> Option<winit::window::Curs
         egui::CursorIcon::Wait => Some(winit::window::CursorIcon::Wait),
         egui::CursorIcon::ZoomIn => Some(winit::window::CursorIcon::ZoomIn),
         egui::CursorIcon::ZoomOut => Some(winit::window::CursorIcon::ZoomOut),
-    }
-}
-
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
     }
 }

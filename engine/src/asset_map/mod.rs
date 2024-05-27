@@ -1,7 +1,6 @@
 use std::{
     any::{type_name, TypeId},
     collections::HashMap,
-    fmt::Write,
     marker::PhantomData,
 };
 
@@ -113,6 +112,7 @@ impl AssetMap {
             return Ok(());
         }
 
+        info!("Asset {:?} was not loaded, trying to load it", identifier);
         let loader = if let Some(loader) = self.loaders.get_mut(&asset_ty) {
             loader
         } else {
@@ -150,7 +150,7 @@ impl AssetMap {
 
     pub fn decrement_reference<A: Asset>(&mut self, handle: impl Into<AssetHandle<A>>) {
         let handle = handle.into();
-        let Some(index) = self.loaded_assets.remove(&handle.identifier) else {
+        let Some(index) = self.loaded_assets.get(&handle.identifier).copied() else {
             return;
         };
         let Some(arena) = self.arenas.get_mut(&TypeId::of::<A>()) else {
@@ -165,6 +165,7 @@ impl AssetMap {
             let mut removed_asset = arena.remove::<LoadedAsset<A>>(index).unwrap();
             info!("Released asset {handle:?}");
             removed_asset.asset.release(&self.device);
+            self.loaded_assets.remove(handle.identifier());
         }
     }
 

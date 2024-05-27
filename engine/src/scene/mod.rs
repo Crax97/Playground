@@ -72,7 +72,7 @@ impl Scene {
         Ok(())
     }
 
-    pub fn release_assets(&self, asset_map: &mut AssetMap) {
+    pub fn dispose(&self, asset_map: &mut AssetMap) {
         for node in self.nodes.iter() {
             match &node.primitive_type {
                 ScenePrimitive::Group => {}
@@ -101,11 +101,14 @@ impl Scene {
 
     pub fn add_node(&mut self, node: SceneNode) -> SceneNodeId {
         let index = self.nodes.add(node);
+        self.children.insert(SceneNodeId(index), Default::default());
         SceneNodeId(index)
     }
 
     pub fn remove_node(&mut self, node: SceneNodeId) {
         self.nodes.remove(node.0);
+        self.parents.remove(&node);
+        self.children.remove(&node).unwrap();
     }
 
     pub fn add_child(&mut self, node: SceneNodeId, child: SceneNodeId) {
@@ -113,7 +116,7 @@ impl Scene {
             return;
         }
 
-        self.children.entry(node).or_default().insert(child);
+        self.children.get_mut(&node).unwrap().insert(child);
         self.set_parent(child, Some(node));
     }
 
@@ -129,7 +132,7 @@ impl Scene {
                 self.children.get_mut(&old_parent).unwrap().remove(&node);
             }
 
-            let children = self.children.entry(new_parent).or_default();
+            let children = self.children.get_mut(&new_parent).unwrap();
             children.insert(node);
         } else {
             self.parents.remove(&node);
@@ -147,13 +150,16 @@ impl Scene {
                 continue;
             };
 
-            if let Some(children) = self.children.get(&node) {
-                let delta_transform = transform.difference(&old_transform);
-                for child in children {
-                    if let Some(child_transform) = self.nodes.get(child.0) {
-                        transform_queue
-                            .push((*child, child_transform.transform.compose(&delta_transform)))
-                    }
+            let children = self.children.get(&node).unwrap();
+            if children.is_empty() {
+                return;
+            }
+
+            let delta_transform = transform.difference(&old_transform);
+            for child in children {
+                if let Some(child_transform) = self.nodes.get(child.0) {
+                    transform_queue
+                        .push((*child, child_transform.transform.compose(&delta_transform)))
                 }
             }
         }
@@ -189,6 +195,16 @@ impl Scene {
         self.nodes.iter()
     }
 
+    pub fn iter_with_ids(&self) -> impl Iterator<Item = (SceneNodeId, &SceneNode)> {
+        self.nodes
+            .iter_with_index()
+            .map(|(i, n)| (SceneNodeId(i), n))
+    }
+
+    pub fn parent_of(&self, node: SceneNodeId) -> Option<SceneNodeId> {
+        self.parents.get(&node).copied()
+    }
+
     pub fn children_of(
         &self,
         scene_node_id: SceneNodeId,
@@ -201,6 +217,14 @@ impl Scene {
             .iter_with_index()
             .find(|(_, node)| node.tags.iter().any(|s| s.as_str() == tag.as_ref()))
             .map(|(i, _)| SceneNodeId(i))
+    }
+
+    pub fn get_node(&self, node: SceneNodeId) -> Option<&SceneNode> {
+        self.nodes.get(node.0)
+    }
+
+    pub fn get_node_mut(&mut self, node: SceneNodeId) -> Option<&mut SceneNode> {
+        self.nodes.get_mut(node.0)
     }
 }
 

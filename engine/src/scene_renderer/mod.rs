@@ -606,7 +606,10 @@ impl SceneRenderer {
                 match &item.primitive_type {
                     crate::scene::ScenePrimitive::Group => {}
                     crate::scene::ScenePrimitive::Mesh(info) => {
-                        let mesh = params.asset_map.get(&info.handle).expect("No mesh");
+                        let mesh = params
+                            .asset_map
+                            .get(&info.handle)
+                            .unwrap_or_else(|| panic!("No mesh {:?}", info.handle));
                         let material = params.asset_map.get(&info.material).expect("No material");
                         let model_matrix = GPUPerObjectDrawData {
                             model_matrix: item.transform.matrix(),

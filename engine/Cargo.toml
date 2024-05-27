@@ -27,6 +27,8 @@ shaderc = "0.8.3"
 kecs = { git = "https://github.com/Crax97/kecs.git" }
 
 mgpu = { path = "../mgpu", features = ["serde"] }
+egui-mgpu = { path = "../egui-mgpu" }
+
 rand = "0.8.5"
 num_enum = "0.7.2"
 copypasta = "0.10.1"
