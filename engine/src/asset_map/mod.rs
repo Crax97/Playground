@@ -181,20 +181,48 @@ impl AssetMap {
         Ok(())
     }
 
-    pub fn get<A: Asset>(&self, handle: &AssetHandle<A>) -> Option<&A> {
-        let index = self.loaded_assets.get(&handle.identifier).copied()?;
+    // Gets a reference to an asset, loading it if it is not loaded
+    pub fn load<A: Asset>(&mut self, handle: &AssetHandle<A>) -> &A {
+        if !self.loaded_assets.contains_key(&handle.identifier) {
+            self.preload(&handle.identifier);
+        }
+        self.get(handle)
+    }
+
+    // Gets a mutable reference to an asset, loading it if it is not loaded
+    pub fn load_mut<A: Asset>(&mut self, handle: &AssetHandle<A>) -> &mut A {
+        if !self.loaded_assets.contains_key(&handle.identifier) {
+            self.preload(&handle.identifier);
+        }
+        self.get_mut(handle)
+    }
+
+    /// Gets a reference to the given asset, panicking if it is not loaded
+    pub fn get<A: Asset>(&self, handle: &AssetHandle<A>) -> &A {
+        let index = self
+            .loaded_assets
+            .get(&handle.identifier)
+            .copied()
+            .expect("Asset is not loaded! Use load if you're unsure wether the asset might be loaded or not");
         self.registrations
             .get(&TypeId::of::<A>())
             .and_then(|map| map.arena.get::<LoadedAsset<A>>(index))
             .map(|entry| &entry.asset)
+            .unwrap()
     }
 
-    pub fn get_mut<A: Asset>(&mut self, handle: &AssetHandle<A>) -> Option<&mut A> {
-        let index = self.loaded_assets.get(&handle.identifier).copied()?;
+    /// Gets a mutable reference to the given asset, panicking if it is not loaded
+    pub fn get_mut<A: Asset>(&mut self, handle: &AssetHandle<A>) -> &mut A {
+        let index = self
+            .loaded_assets
+            .get(&handle.identifier)
+            .copied()
+            .expect("Asset is not loaded! Use load if you're unsure wether the asset might be loaded or not");
         self.registrations
             .get_mut(&TypeId::of::<A>())
             .and_then(|map| map.arena.get_mut::<LoadedAsset<A>>(index))
             .map(|entry| &mut entry.asset)
+            .unwrap()
     }
 
     pub fn decrement_reference<A: Asset>(&mut self, handle: impl Into<AssetHandle<A>>) {

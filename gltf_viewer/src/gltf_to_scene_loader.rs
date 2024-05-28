@@ -11,8 +11,8 @@ use engine::{
         mesh::{Mesh, MeshDescription},
         texture::{Texture, TextureDescription, TextureSamplerConfiguration, TextureUsageFlags},
     },
+    constants::{BLACK_TEXTURE_HANDLE, WHITE_TEXTURE_HANDLE},
     glam::{vec2, vec3, Mat4},
-    immutable_string::ImmutableString,
     math::Transform,
     sampler_allocator::SamplerAllocator,
     scene::{Scene, SceneMesh, SceneNode},
@@ -20,11 +20,6 @@ use engine::{
 
 use gltf::image::Data;
 use mgpu::{Device, Extents2D, FilterMode};
-
-const WHITE_TEXTURE_HANDLE: AssetHandle<Texture> =
-    AssetHandle::new_const(ImmutableString::new("gltf.textures.white"));
-const BLACK_TEXTURE_HANDLE: AssetHandle<Texture> =
-    AssetHandle::new_const(ImmutableString::new("gltf.textures.black"));
 
 pub fn load(
     device: &Device,
@@ -225,60 +220,6 @@ fn create_textures(
     image_data: Vec<Data>,
     device: &Device,
 ) -> anyhow::Result<Vec<AssetHandle<Texture>>> {
-    if asset_map
-        .get(&AssetHandle::<Texture>::new(
-            WHITE_TEXTURE_HANDLE.identifier().clone(),
-        ))
-        .is_none()
-    {
-        let texture = Texture::new(
-            device,
-            &TextureDescription {
-                label: Some("gltf white texture"),
-                data: &[&[255, 255, 255, 255]],
-                ty: engine::assets::texture::TextureType::D2(Extents2D {
-                    width: 1,
-                    height: 1,
-                }),
-                format: mgpu::ImageFormat::Rgba8,
-                usage_flags: TextureUsageFlags::default(),
-                num_mips: 1.try_into().unwrap(),
-                auto_generate_mips: false,
-                sampler_configuration: TextureSamplerConfiguration::default(),
-            },
-            sampler_allocator,
-        )?;
-
-        asset_map.add(texture, WHITE_TEXTURE_HANDLE.identifier().clone());
-    }
-
-    if asset_map
-        .get(&AssetHandle::<Texture>::new(
-            BLACK_TEXTURE_HANDLE.identifier().clone(),
-        ))
-        .is_none()
-    {
-        let texture = Texture::new(
-            device,
-            &TextureDescription {
-                label: Some("gltf black texture"),
-                data: &[&[0, 0, 0, 255]],
-                ty: engine::assets::texture::TextureType::D2(Extents2D {
-                    width: 1,
-                    height: 1,
-                }),
-                format: mgpu::ImageFormat::Rgba8,
-                usage_flags: TextureUsageFlags::default(),
-                num_mips: 1.try_into().unwrap(),
-                auto_generate_mips: false,
-                sampler_configuration: TextureSamplerConfiguration::default(),
-            },
-            sampler_allocator,
-        )?;
-
-        asset_map.add(texture, BLACK_TEXTURE_HANDLE.identifier().clone());
-    }
-
     let mut textures = vec![];
     for (idx, texture) in document.textures().enumerate() {
         let texture_image = texture.source();

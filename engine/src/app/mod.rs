@@ -19,9 +19,15 @@ use crate::{
     assets::{
         material::Material,
         mesh::{Mesh, MeshDescription},
-        texture::{Texture, TextureDescription, TextureSamplerConfiguration, TextureUsageFlags},
+        texture::{
+            Texture, TextureDescription, TextureSamplerConfiguration, TextureType,
+            TextureUsageFlags,
+        },
     },
-    constants::{BRDF_LUT_HANDLE, CUBE_MESH_HANDLE, DEFAULT_ENV_WHITE_HANDLE},
+    constants::{
+        BLACK_TEXTURE_HANDLE, BRDF_LUT_HANDLE, CUBE_MESH_HANDLE, DEFAULT_ENV_WHITE_HANDLE,
+        WHITE_TEXTURE_HANDLE,
+    },
     core::Time,
     cubemap_utils,
     fps_limiter::FpsLimiter,
@@ -280,6 +286,11 @@ pub fn asset_map_with_defaults(
     map.register::<Material>();
     map.register::<Texture>();
 
+    let (white, black) = create_white_black_textures(device, sampler_allocator)?;
+
+    map.add(white, WHITE_TEXTURE_HANDLE.identifier().clone());
+    map.add(black, BLACK_TEXTURE_HANDLE.identifier().clone());
+
     map.add(
         create_cube_mesh(device)?,
         CUBE_MESH_HANDLE.identifier().clone(),
@@ -432,6 +443,49 @@ fn create_cube_mesh(device: &mgpu::Device) -> anyhow::Result<Mesh> {
     };
     let cube_mesh = Mesh::new(device, &mesh_description)?;
     Ok(cube_mesh)
+}
+
+fn create_white_black_textures(
+    device: &mgpu::Device,
+    sampler_allocator: &SamplerAllocator,
+) -> anyhow::Result<(Texture, Texture)> {
+    let white = Texture::new(
+        device,
+        &TextureDescription {
+            label: Some("gltf white texture"),
+            data: &[&[255, 255, 255, 255]],
+            ty: TextureType::D2(Extents2D {
+                width: 1,
+                height: 1,
+            }),
+            format: mgpu::ImageFormat::Rgba8,
+            usage_flags: TextureUsageFlags::default(),
+            num_mips: 1.try_into().unwrap(),
+            auto_generate_mips: false,
+            sampler_configuration: TextureSamplerConfiguration::default(),
+        },
+        sampler_allocator,
+    )?;
+
+    let black = Texture::new(
+        device,
+        &TextureDescription {
+            label: Some("gltf black texture"),
+            data: &[&[0, 0, 0, 255]],
+            ty: TextureType::D2(Extents2D {
+                width: 1,
+                height: 1,
+            }),
+            format: mgpu::ImageFormat::Rgba8,
+            usage_flags: TextureUsageFlags::default(),
+            num_mips: 1.try_into().unwrap(),
+            auto_generate_mips: false,
+            sampler_configuration: TextureSamplerConfiguration::default(),
+        },
+        sampler_allocator,
+    )?;
+
+    Ok((white, black))
 }
 
 fn create_default_env(

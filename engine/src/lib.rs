@@ -34,6 +34,12 @@ pub mod constants {
 
     pub const BRDF_LUT_HANDLE: AssetHandle<Texture> =
         AssetHandle::new_const(ImmutableString::new("textures.brdf-lut"));
+
+    pub const WHITE_TEXTURE_HANDLE: AssetHandle<Texture> =
+        AssetHandle::new_const(ImmutableString::new("textures.white"));
+
+    pub const BLACK_TEXTURE_HANDLE: AssetHandle<Texture> =
+        AssetHandle::new_const(ImmutableString::new("textures.black"));
 }
 
 /*

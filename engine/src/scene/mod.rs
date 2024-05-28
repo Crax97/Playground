@@ -61,7 +61,7 @@ impl Scene {
                     asset_map.increment_reference(handle)?;
                     asset_map.increment_reference(material)?;
 
-                    let material = asset_map.get(material).unwrap();
+                    let material = asset_map.get(material);
                     let textures = material.get_used_textures();
                     for tex in textures {
                         asset_map.increment_reference(&tex)?;
@@ -80,13 +80,7 @@ impl Scene {
                     handle,
                     material: material_handle,
                 }) => {
-                    let Some(material) = asset_map.get(material_handle) else {
-                        warn!(
-                            "Material {:?} was already released",
-                            material_handle.identifier()
-                        );
-                        continue;
-                    };
+                    let material = asset_map.get(material_handle);
                     let textures = material.get_used_textures();
                     for tex in textures {
                         asset_map.decrement_reference(tex);

@@ -160,7 +160,7 @@ impl App for GltfViewerApplication {
                 format: ImageFormat::Rgba32f,
                 samples: mgpu::SampleCount::One,
             },
-            asset_map.get(&CUBE_MESH_HANDLE).unwrap(),
+            asset_map.get(&CUBE_MESH_HANDLE),
             &sampler_allocator,
         )?;
 

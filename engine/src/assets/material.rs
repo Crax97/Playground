@@ -282,7 +282,7 @@ impl Material {
                     .iter()
                     .find(|param| tex.name == param.name);
                 tex_value.map(|param| {
-                    let texture = asset_map.get(&param.texture).unwrap();
+                    let texture = asset_map.get(&param.texture);
                     [
                         Binding {
                             binding: tex.binding,
