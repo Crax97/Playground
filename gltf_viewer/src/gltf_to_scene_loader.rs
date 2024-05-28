@@ -13,18 +13,13 @@ use engine::{
     },
     glam::{vec2, vec3, Mat4},
     immutable_string::ImmutableString,
-    include_spirv,
     math::Transform,
     sampler_allocator::SamplerAllocator,
     scene::{Scene, SceneMesh, SceneNode},
-    shader_cache::ShaderCache,
 };
 
 use gltf::image::Data;
-use mgpu::{Device, Extents2D, FilterMode, ShaderModuleDescription};
-
-const VERTEX_SHADER: &[u8] = include_spirv!("../spirv/base_pass/pbr_vertex.vert.spv");
-const FRAGMENT_SHADER: &[u8] = include_spirv!("../spirv/base_pass/pbr_fragment.frag.spv");
+use mgpu::{Device, Extents2D, FilterMode};
 
 const WHITE_TEXTURE_HANDLE: AssetHandle<Texture> =
     AssetHandle::new_const(ImmutableString::new("gltf.textures.white"));
@@ -35,13 +30,12 @@ pub fn load(
     device: &Device,
     path: impl AsRef<Path>,
     sampler_allocator: &SamplerAllocator,
-    shader_cache: &mut ShaderCache,
     asset_map: &mut AssetMap,
 ) -> anyhow::Result<Scene> {
     let (document, buffer_data, image_data) = gltf::import(path.as_ref())?;
 
     let textures = create_textures(&document, asset_map, sampler_allocator, image_data, device)?;
-    let materials = create_materials(&document, asset_map, textures, shader_cache, device)?;
+    let materials = create_materials(&document, asset_map, textures, device)?;
     let meshes = create_meshes(&document, buffer_data, asset_map, device)?;
 
     assemble_scene(document, materials, meshes)
@@ -80,24 +74,9 @@ fn create_materials(
     document: &gltf::Document,
     asset_map: &mut AssetMap,
     textures: Vec<AssetHandle<Texture>>,
-    shader_cache: &mut ShaderCache,
     device: &Device,
 ) -> anyhow::Result<Vec<AssetHandle<Material>>> {
     let mut materials = vec![];
-    let vertex_shader_module = device
-        .create_shader_module(&ShaderModuleDescription {
-            label: Some("PBR Vertex Shader"),
-            source: bytemuck::cast_slice(VERTEX_SHADER),
-        })
-        .unwrap();
-    let fragment_shader_module = device
-        .create_shader_module(&ShaderModuleDescription {
-            label: Some("PBR Fragment Shader"),
-            source: bytemuck::cast_slice(FRAGMENT_SHADER),
-        })
-        .unwrap();
-    shader_cache.add_shader("pbr_vertex", vertex_shader_module);
-    shader_cache.add_shader("pbr_fragment", fragment_shader_module);
 
     for (idx, material) in document.materials().enumerate() {
         let pbr_info = material.pbr_metallic_roughness();
@@ -151,7 +130,6 @@ fn create_materials(
                 },
             },
             asset_map,
-            shader_cache,
         )?;
         let material = asset_map.add(material, &identifier);
         materials.push(material);

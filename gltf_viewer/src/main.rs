@@ -34,6 +34,9 @@ const ROTATION_DEGREES: f64 = 3200.0;
 const VIEW_CUBEMAP_VERT: &[u8] = include_spirv!("../spirv/base_pass/view_cubemap.vert.spv");
 const VIEW_CUBEMAP_FRAG: &[u8] = include_spirv!("../spirv/base_pass/view_cubemap.frag.spv");
 
+const PBR_VERTEX: &[u8] = include_spirv!("../spirv/base_pass/pbr_vertex.vert.spv");
+const PBR_FRAGMENT: &[u8] = include_spirv!("../spirv/base_pass/pbr_fragment.frag.spv");
+
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct GltfViewerArgs {
@@ -85,11 +88,31 @@ impl App for GltfViewerApplication {
                 source: bytemuck::cast_slice(VIEW_CUBEMAP_VERT),
             })?;
 
-        let sampler_allocator = SamplerAllocator::default();
-        let mut asset_map = app::asset_map_with_defaults(&context.device, &sampler_allocator)?;
+        let pbr_vertex = context
+            .device
+            .create_shader_module(&ShaderModuleDescription {
+                label: Some("PBR Vertex Shader"),
+                source: bytemuck::cast_slice(PBR_VERTEX),
+            })
+            .unwrap();
+        let pbr_fragment = context
+            .device
+            .create_shader_module(&ShaderModuleDescription {
+                label: Some("PBR Fragment Shader"),
+                source: bytemuck::cast_slice(PBR_FRAGMENT),
+            })
+            .unwrap();
+
         let mut shader_cache = ShaderCache::new();
         shader_cache.add_shader("view_cubemap_vert", view_cubemap_vert);
         shader_cache.add_shader("view_cubemap_frag", view_cubemap_frag);
+        shader_cache.add_shader("pbr_vertex", pbr_vertex);
+        shader_cache.add_shader("pbr_fragment", pbr_fragment);
+        let sampler_allocator = SamplerAllocator::default();
+
+        let mut asset_map =
+            app::asset_map_with_defaults(&context.device, &sampler_allocator, shader_cache)?;
+
         let mut pov = PointOfView::new_perspective(0.01, 1000.0, 75.0, 1920.0 / 1080.0);
         pov.transform.location = vec3(0.0, 0.0, -2.0);
 
@@ -97,7 +120,6 @@ impl App for GltfViewerApplication {
             &context.device,
             &args.file,
             &sampler_allocator,
-            &mut shader_cache,
             &mut asset_map,
         )?;
 
@@ -161,7 +183,6 @@ impl App for GltfViewerApplication {
                 },
             },
             &mut asset_map,
-            &mut shader_cache,
         )?;
         let material = asset_map.add(cube_material, "materials.cubemap");
 

@@ -85,11 +85,14 @@ impl Material {
         device: &Device,
         description: &MaterialDescription,
         asset_map: &mut AssetMap,
-        shader_cache: &mut ShaderCache,
     ) -> anyhow::Result<Material> {
         let mut user_bindings = HashMap::<usize, _>::default();
-        let vertex_shader = shader_cache.get_shader_module(&description.vertex_shader);
-        let fragment_shader = shader_cache.get_shader_module(&description.fragment_shader);
+        let vertex_shader = asset_map
+            .shader_cache()
+            .get_shader_module(&description.vertex_shader);
+        let fragment_shader = asset_map
+            .shader_cache()
+            .get_shader_module(&description.fragment_shader);
         let vertex_shader_layout = device.get_shader_module_layout(vertex_shader)?;
         let fragment_shader_layout = device.get_shader_module_layout(fragment_shader)?;
 

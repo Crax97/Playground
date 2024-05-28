@@ -40,10 +40,12 @@ erased-serde = "0.4.4"
 glam = { version = "0.27.0", features = ["bytemuck", "serde", "glam-assert"] }
 crossbeam = "0.8.4"
 serde_json = "1.0.117"
+toml = "0.8.13"
 
 [dev-dependencies]
 approx = "0.5.1"
 ron = "0.8.1"
+toml = "0.8.13"
 
 [build-dependencies]
 engine_build_utils = { path = "../engine_build_utils" }

@@ -5,32 +5,41 @@ use std::{
     ptr::NonNull,
 };
 
-use log::{info, warn};
+use bitflags::serde::serialize;
+use log::info;
 use mgpu::Device;
 use serde::{Deserialize, Serialize};
 
-use crate::immutable_string::ImmutableString;
+use crate::{
+    immutable_string::ImmutableString, sampler_allocator::SamplerAllocator,
+    shader_cache::ShaderCache,
+};
 
 use crate::utils::erased_arena::{ErasedArena, Index};
 
 pub struct AssetMap {
     device: Device,
+    shader_cache: ShaderCache,
+    sampler_allocator: SamplerAllocator,
     registrations: HashMap<TypeId, AssetRegistration>,
     loaded_assets: HashMap<ImmutableString, Index>,
 }
 
+pub struct LoadContext<'a> {
+    pub device: &'a Device,
+    pub shader_cache: &'a ShaderCache,
+    pub sampler_allocator: &'a SamplerAllocator,
+}
+
 pub trait Asset: 'static {
-    fn identifier() -> &'static str;
+    type Metadata: 'static + Serialize + for<'a> Deserialize<'a>;
+    fn asset_type_name() -> &'static str;
+    fn load(metadata: Self::Metadata, context: &LoadContext) -> anyhow::Result<Self>
+    where
+        Self: Sized;
     fn dispose(&self, device: &Device) {
         let _ = device;
     }
-}
-
-pub trait AssetLoader: 'static {
-    type LoadedAsset: Asset;
-
-    fn accepts_identifier(&self, identifier: &str) -> bool;
-    fn load(&mut self, identifier: &str) -> anyhow::Result<Self::LoadedAsset>;
 }
 
 pub struct AssetHandle<A: Asset> {
@@ -43,32 +52,42 @@ struct LoadedAsset<A: Asset> {
     ref_count: usize,
 }
 
+#[derive(Serialize, Deserialize)]
+struct AssetSpecifier<A: Asset> {
+    asset_type: String,
+    metadata: A::Metadata,
+}
+
 struct AssetRegistration {
     identifier: &'static str,
     dispose_fn: unsafe fn(NonNull<u8>, device: &Device),
-    loader: Box<dyn UnsafeAssetLoader>,
+    load_fn: unsafe fn(&str, &mut ErasedArena, &LoadContext) -> Index,
     arena: ErasedArena,
 }
 
 impl AssetMap {
-    pub(crate) fn new(device: Device) -> Self {
+    pub(crate) fn new(
+        device: Device,
+        shader_cache: ShaderCache,
+        sampler_allocator: SamplerAllocator,
+    ) -> Self {
         Self {
             device,
             registrations: Default::default(),
             loaded_assets: Default::default(),
+            sampler_allocator,
+            shader_cache,
         }
     }
 
-    pub fn register<A: Asset>(&mut self, loader: impl Into<Box<dyn UnsafeAssetLoader>>) {
-        let loader = loader.into();
-        assert!(loader.loaded_asset_type_id() == TypeId::of::<A>());
+    pub fn register<A: Asset>(&mut self) {
         let old_registration = self.registrations.insert(
             TypeId::of::<A>(),
             AssetRegistration {
-                identifier: A::identifier(),
+                identifier: A::asset_type_name(),
                 dispose_fn: Self::dispose_fn::<A>,
+                load_fn: Self::load_fn::<A>,
                 arena: ErasedArena::new::<LoadedAsset<A>>(),
-                loader,
             },
         );
 
@@ -126,13 +145,18 @@ impl AssetMap {
         }
 
         info!("Asset {:?} was not loaded, trying to load it", identifier);
-        let loader = &mut registration.loader;
+        let index = unsafe {
+            (registration.load_fn)(
+                &identifier,
+                &mut registration.arena,
+                &LoadContext {
+                    device: &self.device,
+                    shader_cache: &self.shader_cache,
+                    sampler_allocator: &self.sampler_allocator,
+                },
+            )
+        };
 
-        let (index, ptr) = unsafe { map.preallocate_entry() };
-        let asset_entry = unsafe { &mut *ptr.cast::<LoadedAsset<A>>() };
-        asset_entry.ref_count = 1;
-
-        unsafe { loader.load_asset(identifier, (&mut asset_entry.asset as *mut A).cast::<u8>())? };
         self.loaded_assets.insert(identifier.clone(), index);
         Ok(())
     }
@@ -190,6 +214,56 @@ impl AssetMap {
 
         asset_ref.dispose(device)
     }
+
+    // Loads dynamically an asset into an erased arena by first reading it's specifier
+    // then creating the asset through the specifier's metadata
+    unsafe fn load_fn<A: Asset>(
+        path: &str,
+        erased_arena: &mut ErasedArena,
+        context: &LoadContext,
+    ) -> Index {
+        let (index, option_ptr) = erased_arena.preallocate_entry();
+        let file_content = std::fs::read_to_string(path).unwrap_or_else(|e| {
+            panic!(
+                "Failed to read specifier file for {}: {e:?}",
+                A::asset_type_name()
+            )
+        });
+        let specifier = toml::from_str::<AssetSpecifier<A>>(&file_content).unwrap_or_else(|e| {
+            panic!(
+                "Failed to parse specifier for asset {}: {e:?}",
+                A::asset_type_name()
+            )
+        });
+
+        let asset = A::load(specifier.metadata, context).unwrap_or_else(|e| {
+            panic!(
+                "Failed to load asset {} from metadata: {e:?}",
+                A::asset_type_name()
+            )
+        });
+
+        option_ptr
+            .cast::<Option<LoadedAsset<A>>>()
+            .write(Some(LoadedAsset {
+                asset,
+                ref_count: 1,
+            }));
+        index
+    }
+
+    pub fn shader_cache(&self) -> &ShaderCache {
+        &self.shader_cache
+    }
+}
+
+impl<A: Asset> AssetSpecifier<A> {
+    fn new(metadata: A::Metadata) -> Self {
+        Self {
+            asset_type: A::asset_type_name().to_owned(),
+            metadata,
+        }
+    }
 }
 
 impl<A: Asset, S: AsRef<str>> From<S> for AssetHandle<A> {
@@ -198,45 +272,6 @@ impl<A: Asset, S: AsRef<str>> From<S> for AssetHandle<A> {
             _phantom_data: PhantomData,
             identifier: ImmutableString::new_dynamic(value.as_ref()),
         }
-    }
-}
-
-/// # Safety
-/// This trait is safely implemented for all the types that implement AssetLoader
-/// It is marked as unsafe because [`UnsafeAssteLoader::load_asset`] directly writes to the payload
-/// pointer of an [`ErasedArena`] entry payload, which is an [`Option<T>`]
-unsafe trait UnsafeAssetLoader: 'static {
-    fn loaded_asset_type_id(&self) -> TypeId;
-    fn accepts_identifier(&self, identifier: &str) -> bool;
-    unsafe fn load_asset(
-        &mut self,
-        identifier: &str,
-        backing_memory: *mut u8,
-    ) -> anyhow::Result<()>;
-}
-
-unsafe impl<L: AssetLoader> UnsafeAssetLoader for L {
-    fn loaded_asset_type_id(&self) -> TypeId {
-        TypeId::of::<L::LoadedAsset>()
-    }
-    unsafe fn load_asset(
-        &mut self,
-        identifier: &str,
-        backing_memory: *mut u8,
-    ) -> anyhow::Result<()> {
-        let asset = <Self as AssetLoader>::load(self, identifier)?;
-        unsafe {
-            // The backing memory points at the payload of the Entry<T> for this item
-            // which is an Option<A>
-            backing_memory
-                .cast::<Option<L::LoadedAsset>>()
-                .write(Some(asset));
-        }
-        Ok(())
-    }
-
-    fn accepts_identifier(&self, identifier: &str) -> bool {
-        <Self as AssetLoader>::accepts_identifier(self, identifier)
     }
 }
 impl<A: Asset> std::fmt::Debug for AssetHandle<A> {
@@ -326,18 +361,20 @@ impl<A: Asset> AssetHandle<A> {
     }
 }
 
-impl<L: AssetLoader> From<L> for Box<dyn UnsafeAssetLoader> {
-    fn from(value: L) -> Self {
-        Box::new(value)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-
     use mgpu::Device;
+    use serde::{Deserialize, Serialize};
 
-    use crate::asset_map::{Asset, AssetHandle, AssetLoader, AssetMap};
+    use crate::{
+        asset_map::{Asset, AssetHandle, AssetMap, AssetSpecifier, LoadContext},
+        assets::{
+            texture::{Texture, TextureSamplerConfiguration},
+            TextureMetadata,
+        },
+        sampler_allocator::SamplerAllocator,
+        shader_cache::ShaderCache,
+    };
 
     #[test]
     fn basic_operations() {
@@ -346,30 +383,31 @@ mod tests {
         }
 
         impl Asset for StringAsset {
+            type Metadata = String;
             fn dispose(&self, _device: &mgpu::Device) {
                 println!("Destroyed string asset {}", self.content)
             }
-        }
 
-        struct StringAssetLoader;
-        impl AssetLoader for StringAssetLoader {
-            type LoadedAsset = StringAsset;
-
-            fn accepts_identifier(&self, _identifier: &str) -> bool {
-                true
+            fn asset_type_name() -> &'static str {
+                "StringAsset"
             }
 
-            fn load(&mut self, identifier: &str) -> anyhow::Result<Self::LoadedAsset> {
-                Ok(StringAsset {
-                    content: identifier.to_string(),
-                })
+            fn load(metadata: Self::Metadata, _ctx: &LoadContext) -> anyhow::Result<Self>
+            where
+                Self: Sized,
+            {
+                Ok(StringAsset { content: metadata })
             }
         }
 
-        let mut asset_map = AssetMap::new(Device::dummy());
+        let mut asset_map = AssetMap::new(
+            Device::dummy(),
+            ShaderCache::new(),
+            SamplerAllocator::default(),
+        );
         let string_one = AssetHandle::<StringAsset>::new("Hello");
         let string_two = AssetHandle::<StringAsset>::new("World");
-        asset_map.register::<StringAsset>(StringAssetLoader);
+        asset_map.register::<StringAsset>();
         asset_map
             .increment_reference::<StringAsset>(&string_one)
             .unwrap();
@@ -407,5 +445,67 @@ mod tests {
                 .as_str(),
             "Pippo"
         );
+    }
+
+    #[test]
+    fn specifier() {
+        struct CharacterStats {
+            health: u32,
+            attack: u32,
+            defense: u32,
+        }
+
+        #[derive(Serialize, Deserialize)]
+        struct CharacterStatsMetadata {
+            health: u32,
+            attack: u32,
+            defense: u32,
+        }
+
+        impl Asset for CharacterStats {
+            type Metadata = CharacterStatsMetadata;
+
+            fn asset_type_name() -> &'static str {
+                "CharacterStats"
+            }
+
+            fn load(metadata: Self::Metadata, _ctx: &LoadContext) -> anyhow::Result<Self>
+            where
+                Self: Sized,
+            {
+                Ok(Self {
+                    health: metadata.health,
+                    attack: metadata.attack,
+                    defense: metadata.defense,
+                })
+            }
+        }
+
+        let metadata = CharacterStatsMetadata {
+            health: 10,
+            attack: 15,
+            defense: 5,
+        };
+        let specifier = AssetSpecifier::<CharacterStats>::new(metadata);
+        let serialized_specifier = toml::to_string(&specifier).unwrap();
+        println!("Specifier\n{serialized_specifier}");
+        let specifier =
+            toml::from_str::<AssetSpecifier<CharacterStats>>(&serialized_specifier).unwrap();
+
+        // The LoadContext is not used, we should be fine
+        let asset =
+            CharacterStats::load(specifier.metadata, unsafe { std::mem::zeroed() }).unwrap();
+        assert_eq!(asset.health, 10);
+        assert_eq!(asset.attack, 15);
+        assert_eq!(asset.defense, 5);
+    }
+
+    #[test]
+    fn poo() {
+        let specifier = AssetSpecifier::<Texture>::new(TextureMetadata {
+            source_path: "poo".into(),
+            sampler_configuration: TextureSamplerConfiguration::default(),
+        });
+        println!("{}", toml::to_string(&specifier).unwrap());
     }
 }

@@ -4,7 +4,6 @@ use engine::{
     app::{self, bootstrap, App, AppContext, AppDescription},
     asset_map::{AssetHandle, AssetMap},
     assets::{
-        loaders::FsTextureLoader,
         material::{
             Material, MaterialDescription, MaterialDomain, MaterialParameters, MaterialProperties,
             MaterialType,
@@ -54,14 +53,15 @@ impl App for CubesSceneApplication {
             })
             .unwrap();
 
-        let sampler_allocator = SamplerAllocator::default();
-        let mut asset_map = app::asset_map_with_defaults(&context.device, &sampler_allocator)?;
         let mut shader_cache = ShaderCache::new();
-
         shader_cache.add_shader("simple_vertex_shader", vertex_shader_module);
         shader_cache.add_shader("simple_fragment_shader", fragment_shader_module);
 
-        let david_texture = AssetHandle::<Texture>::new("assets/images/david.jpg");
+        let sampler_allocator = SamplerAllocator::default();
+        let mut asset_map =
+            app::asset_map_with_defaults(&context.device, &sampler_allocator, shader_cache)?;
+
+        let david_texture = AssetHandle::<Texture>::new("assets/images/david.toml");
         asset_map.increment_reference::<Texture>(&david_texture)?;
         let mut scene = Scene::default();
         let material = Material::new(
@@ -78,7 +78,6 @@ impl App for CubesSceneApplication {
                 },
             },
             &mut asset_map,
-            &mut shader_cache,
         );
         let simple_material = material.unwrap();
         let material_handle = asset_map.add(simple_material, "simple_material");
