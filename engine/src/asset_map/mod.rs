@@ -5,7 +5,6 @@ use std::{
     ptr::NonNull,
 };
 
-use bitflags::serde::serialize;
 use log::info;
 use mgpu::Device;
 use serde::{Deserialize, Serialize};
@@ -59,7 +58,7 @@ struct AssetSpecifier<A: Asset> {
 }
 
 struct AssetRegistration {
-    identifier: &'static str,
+    asset_type_name: &'static str,
     dispose_fn: unsafe fn(NonNull<u8>, device: &Device),
     load_fn: unsafe fn(&str, &mut ErasedArena, &LoadContext) -> Index,
     arena: ErasedArena,
@@ -84,7 +83,7 @@ impl AssetMap {
         let old_registration = self.registrations.insert(
             TypeId::of::<A>(),
             AssetRegistration {
-                identifier: A::asset_type_name(),
+                asset_type_name: A::asset_type_name(),
                 dispose_fn: Self::dispose_fn::<A>,
                 load_fn: Self::load_fn::<A>,
                 arena: ErasedArena::new::<LoadedAsset<A>>(),
@@ -92,6 +91,39 @@ impl AssetMap {
         );
 
         debug_assert!(old_registration.is_none());
+    }
+
+    pub fn preload(&mut self, identifier: &str) {
+        let toml_specifier = std::fs::read_to_string(identifier)
+            .unwrap_or_else(|e| panic!("Failed to load asset {identifier}! {e:?}"));
+        let toml = toml::from_str::<toml::Table>(&toml_specifier)
+            .unwrap_or_else(|e| panic!("Failed to parse {identifier} as toml! {e:?}"));
+        let asset_type: &str = toml["asset_type"]
+            .as_str()
+            .expect("Asset has no 'asset_type' field!");
+
+        for registration in self.registrations.values_mut() {
+            if asset_type == registration.asset_type_name {
+                let index = unsafe {
+                    (registration.load_fn)(
+                        identifier,
+                        &mut registration.arena,
+                        &LoadContext {
+                            device: &self.device,
+                            shader_cache: &self.shader_cache,
+                            sampler_allocator: &self.sampler_allocator,
+                        },
+                    )
+                };
+
+                self.loaded_assets
+                    .insert(ImmutableString::new_dynamic(identifier), index);
+
+                return;
+            }
+        }
+
+        panic!("Asset of type '{}' was not registered!", asset_type);
     }
 
     pub fn add<A: Asset>(
@@ -145,19 +177,7 @@ impl AssetMap {
         }
 
         info!("Asset {:?} was not loaded, trying to load it", identifier);
-        let index = unsafe {
-            (registration.load_fn)(
-                &identifier,
-                &mut registration.arena,
-                &LoadContext {
-                    device: &self.device,
-                    shader_cache: &self.shader_cache,
-                    sampler_allocator: &self.sampler_allocator,
-                },
-            )
-        };
-
-        self.loaded_assets.insert(identifier.clone(), index);
+        self.preload(identifier);
         Ok(())
     }
 

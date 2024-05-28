@@ -16,7 +16,6 @@ use crate::{
     asset_map::{AssetHandle, AssetMap},
     immutable_string::ImmutableString,
     scene_renderer::{self, SceneRenderer},
-    shader_cache::ShaderCache,
 };
 
 use super::texture::Texture;

@@ -61,8 +61,9 @@ impl App for CubesSceneApplication {
         let mut asset_map =
             app::asset_map_with_defaults(&context.device, &sampler_allocator, shader_cache)?;
 
+        asset_map.preload("assets/images/david.toml");
+
         let david_texture = AssetHandle::<Texture>::new("assets/images/david.toml");
-        asset_map.increment_reference::<Texture>(&david_texture)?;
         let mut scene = Scene::default();
         let material = Material::new(
             &context.device,
