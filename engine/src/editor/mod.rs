@@ -1,4 +1,6 @@
+mod asset_picker;
 mod scene_editor;
+
 use glam::Quat;
 pub use scene_editor::*;
 

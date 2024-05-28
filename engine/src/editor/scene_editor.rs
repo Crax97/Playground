@@ -6,17 +6,20 @@ use crate::asset_map::AssetMap;
 use crate::scene::serializable_scene::SerializableScene;
 use crate::scene::{Scene, SceneNodeId};
 
+use super::asset_picker::AssetPicker;
 use super::{edit_transform, edit_vec};
 
 #[derive(Default)]
 pub struct SceneEditor {
     selected_node: Option<SceneNodeId>,
+    asset_picker: AssetPicker,
 }
 
 impl SceneEditor {
     pub fn new() -> Self {
         Self {
             selected_node: None,
+            asset_picker: AssetPicker::default(),
         }
     }
     pub fn show(&mut self, ui: &mut Ui, scene: &mut Scene, asset_map: &mut AssetMap) {
@@ -72,7 +75,7 @@ impl SceneEditor {
 
         egui::CollapsingHeader::new("Node Editor").show(ui, |ui| {
             if let Some(selected_node) = self.selected_node {
-                self.node_ui(selected_node, ui, scene);
+                self.node_ui(selected_node, ui, scene, asset_map);
             } else {
                 ui.label("Select a node");
             }
@@ -117,7 +120,13 @@ impl SceneEditor {
         }
     }
 
-    fn node_ui(&mut self, node_id: SceneNodeId, ui: &mut Ui, scene: &mut Scene) {
+    fn node_ui(
+        &mut self,
+        node_id: SceneNodeId,
+        ui: &mut Ui,
+        scene: &mut Scene,
+        asset_map: &mut AssetMap,
+    ) {
         let node = scene.get_node_mut(node_id).unwrap();
         let mut label = node.label.clone().unwrap_or_default();
         egui::Grid::new(node_id).show(ui, |ui| {
@@ -129,6 +138,18 @@ impl SceneEditor {
                 node.label = Some(label);
             } else {
                 node.label = None;
+            }
+            ui.end_row();
+
+            match &mut node.primitive_type {
+                crate::scene::ScenePrimitive::Group => {
+                    ui.label("Group node");
+                }
+                crate::scene::ScenePrimitive::Mesh(info) => {
+                    ui.group(|ui| {
+                        self.asset_picker.draw(ui, &mut info.handle, asset_map);
+                    });
+                }
             }
             ui.end_row();
 

@@ -49,6 +49,7 @@ pub struct AssetHandle<A: Asset> {
 struct LoadedAsset<A: Asset> {
     asset: A,
     ref_count: usize,
+    identifier: ImmutableString,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -142,6 +143,7 @@ impl AssetMap {
         let index = map.add(LoadedAsset {
             asset,
             ref_count: 1,
+            identifier: identifier.clone(),
         });
         let old = self.loaded_assets.insert(identifier.clone(), index);
         debug_assert!(
@@ -179,6 +181,24 @@ impl AssetMap {
         info!("Asset {:?} was not loaded, trying to load it", identifier);
         self.preload(identifier);
         Ok(())
+    }
+
+    /// Gets an iterator of all the assets of a certain type.
+    /// Panics if the asset type was not registered
+    pub fn iter_ids<A: Asset>(&self) -> impl Iterator<Item = &ImmutableString> {
+        let registration = self
+            .registrations
+            .get(&TypeId::of::<A>())
+            .unwrap_or_else(|| {
+                panic!(
+                    "Asset of type '{}' was not registered!",
+                    A::asset_type_name(),
+                )
+            });
+        registration
+            .arena
+            .iter::<LoadedAsset<A>>()
+            .map(|loaded_asset| &loaded_asset.identifier)
     }
 
     // Gets a reference to an asset, loading it if it is not loaded
@@ -296,6 +316,7 @@ impl AssetMap {
             .write(Some(LoadedAsset {
                 asset,
                 ref_count: 1,
+                identifier: path.into(),
             }));
         index
     }
