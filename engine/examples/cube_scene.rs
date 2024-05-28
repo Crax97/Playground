@@ -119,6 +119,7 @@ impl App for CubesSceneApplication {
         );
         scene.add_child(first_node_handle, second_cube);
         scene.add_child(first_node_handle, third_cube);
+
         let scene_renderer = SceneRenderer::new(&context.device, &asset_map)?;
         let mut pov = PointOfView::new_perspective(0.01, 1000.0, 75.0, 1920.0 / 1080.0);
         pov.transform.location = vec3(0.0, 10.0, -5.0);
@@ -164,7 +165,6 @@ impl App for CubesSceneApplication {
         );
         self.scene
             .set_node_world_transform(self.first_node_handle, node_transform);
-
         Ok(())
     }
 
@@ -206,11 +206,7 @@ impl App for CubesSceneApplication {
         window.set_cursor_visible(false);
         context
             .window()
-            .set_cursor_grab(if cfg!(target_os = "linux") {
-                engine::winit::window::CursorGrabMode::Locked
-            } else {
-                engine::winit::window::CursorGrabMode::Confined
-            })
+            .set_cursor_grab(engine::winit::window::CursorGrabMode::Confined)
             .unwrap();
         Ok(())
     }

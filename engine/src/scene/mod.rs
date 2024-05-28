@@ -112,6 +112,7 @@ impl Scene {
     }
 
     pub fn add_child(&mut self, node: SceneNodeId, child: SceneNodeId) {
+        assert!(node != child);
         if self.nodes.get(node.0).is_none() || self.nodes.get(child.0).is_none() {
             return;
         }
@@ -126,6 +127,7 @@ impl Scene {
         }
 
         if let Some(new_parent) = new_parent {
+            assert!(new_parent != node);
             let old_parent = self.parents.insert(node, new_parent);
 
             if let Some(old_parent) = old_parent {
@@ -141,26 +143,21 @@ impl Scene {
 
     pub fn set_node_world_transform(&mut self, node: SceneNodeId, transform: Transform) {
         let mut transform_queue = vec![(node, transform)];
+        if self.nodes.get(node.0).is_none() {
+            return;
+        }
         while let Some((node, transform)) = transform_queue.pop() {
-            let old_transform = if let Some(scene_node) = self.nodes.get_mut(node.0) {
-                let old_transform = scene_node.transform;
-                scene_node.transform = transform;
-                old_transform
-            } else {
-                continue;
-            };
-
+            let scene_node = self.nodes.get_mut(node.0).unwrap();
+            let old_transform = std::mem::replace(&mut scene_node.transform, transform);
             let children = self.children.get(&node).unwrap();
             if children.is_empty() {
-                return;
+                continue;
             }
 
             let delta_transform = transform.difference(&old_transform);
             for child in children {
-                if let Some(child_transform) = self.nodes.get(child.0) {
-                    transform_queue
-                        .push((*child, child_transform.transform.compose(&delta_transform)))
-                }
+                let child_transform = self.nodes.get(child.0).unwrap();
+                transform_queue.push((*child, child_transform.transform.compose(&delta_transform)))
             }
         }
     }
