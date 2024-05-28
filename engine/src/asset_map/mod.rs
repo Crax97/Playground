@@ -13,7 +13,14 @@ use crate::immutable_string::ImmutableString;
 
 use crate::utils::erased_arena::{ErasedArena, Index};
 
+pub struct AssetMap {
+    device: Device,
+    registrations: HashMap<TypeId, AssetRegistration>,
+    loaded_assets: HashMap<ImmutableString, Index>,
+}
+
 pub trait Asset: 'static {
+    fn identifier() -> &'static str;
     fn dispose(&self, device: &Device) {
         let _ = device;
     }
@@ -25,15 +32,10 @@ pub trait AssetLoader: 'static {
     fn accepts_identifier(&self, identifier: &str) -> bool;
     fn load(&mut self, identifier: &str) -> anyhow::Result<Self::LoadedAsset>;
 }
+
 pub struct AssetHandle<A: Asset> {
     _phantom_data: PhantomData<A>,
     pub(crate) identifier: ImmutableString,
-}
-
-pub struct AssetMap {
-    device: Device,
-    registrations: HashMap<TypeId, AssetRegistration>,
-    loaded_assets: HashMap<ImmutableString, Index>,
 }
 
 struct LoadedAsset<A: Asset> {
@@ -42,7 +44,7 @@ struct LoadedAsset<A: Asset> {
 }
 
 struct AssetRegistration {
-    type_name: &'static str,
+    identifier: &'static str,
     dispose_fn: unsafe fn(NonNull<u8>, device: &Device),
     loader: Box<dyn UnsafeAssetLoader>,
     arena: ErasedArena,
@@ -63,7 +65,7 @@ impl AssetMap {
         let old_registration = self.registrations.insert(
             TypeId::of::<A>(),
             AssetRegistration {
-                type_name: type_name::<A>(),
+                identifier: A::identifier(),
                 dispose_fn: Self::dispose_fn::<A>,
                 arena: ErasedArena::new::<LoadedAsset<A>>(),
                 loader,
