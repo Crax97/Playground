@@ -288,20 +288,20 @@ pub fn asset_map_with_defaults(
 
     let (white, black) = create_white_black_textures(device, sampler_allocator)?;
 
-    map.add(white, WHITE_TEXTURE_HANDLE.identifier().clone());
-    map.add(black, BLACK_TEXTURE_HANDLE.identifier().clone());
+    map.add(white, WHITE_TEXTURE_HANDLE.identifier().unwrap().clone());
+    map.add(black, BLACK_TEXTURE_HANDLE.identifier().unwrap().clone());
 
     map.add(
         create_cube_mesh(device)?,
-        CUBE_MESH_HANDLE.identifier().clone(),
+        CUBE_MESH_HANDLE.identifier().unwrap().clone(),
     );
     map.add(
         create_default_env(device, sampler_allocator)?,
-        DEFAULT_ENV_WHITE_HANDLE.identifier().clone(),
+        DEFAULT_ENV_WHITE_HANDLE.identifier().unwrap().clone(),
     );
     map.add(
         cubemap_utils::generate_ibl_lut(device, sampler_allocator)?,
-        BRDF_LUT_HANDLE.identifier().clone(),
+        BRDF_LUT_HANDLE.identifier().unwrap().clone(),
     );
     Ok(map)
 }

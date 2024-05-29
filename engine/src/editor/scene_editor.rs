@@ -2,9 +2,9 @@ use egui_mgpu::egui::Ui;
 use egui_mgpu::egui::{self, Sense};
 use log::error;
 
-use crate::asset_map::AssetMap;
+use crate::asset_map::{AssetHandle, AssetMap};
 use crate::scene::serializable_scene::SerializableScene;
-use crate::scene::{Scene, SceneNodeId};
+use crate::scene::{Scene, SceneMesh, SceneNodeId, ScenePrimitive};
 
 use super::asset_picker::AssetPicker;
 use super::{edit_transform, edit_vec};
@@ -141,13 +141,63 @@ impl SceneEditor {
             }
             ui.end_row();
 
+            let stringify_prim = |prim_ty: &ScenePrimitive| match prim_ty {
+                ScenePrimitive::Group => "Group",
+                ScenePrimitive::Mesh(_) => "Mesh",
+            };
+
+            egui::containers::ComboBox::new(
+                ui.next_auto_id(),
+                stringify_prim(&node.primitive_type),
+            )
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut node.primitive_type, ScenePrimitive::Group, "Group");
+                ui.selectable_value(
+                    &mut node.primitive_type,
+                    ScenePrimitive::Mesh(SceneMesh {
+                        handle: AssetHandle::null(),
+                        material: AssetHandle::null(),
+                    }),
+                    "Mesh",
+                );
+            });
+
             match &mut node.primitive_type {
                 crate::scene::ScenePrimitive::Group => {
                     ui.label("Group node");
                 }
                 crate::scene::ScenePrimitive::Mesh(info) => {
+                    ui.vertical(|ui| {
+                        ui.group(|ui| {
+                            self.asset_picker.modify(ui, &mut info.handle, asset_map);
+                        });
+                        ui.group(|ui| {
+                            self.asset_picker.modify(ui, &mut info.material, asset_map);
+                        });
+                    });
+
                     ui.group(|ui| {
-                        self.asset_picker.draw(ui, &mut info.handle, asset_map);
+                        let tex_asset_map =
+                            unsafe { (asset_map as *mut AssetMap).as_mut().unwrap() };
+                        if info.material.is_null() {
+                            return;
+                        }
+                        let material = asset_map.get_mut(&info.material);
+                        egui::Grid::new(ui.next_auto_id()).show(ui, |ui| {
+                            // for texture in &mut material.parameters.textures {
+                            //     ui.horizontal(|ui| {
+                            //         ui.label(&texture.name);
+                            //         if self.asset_picker.modify(
+                            //             ui,
+                            //             &mut texture.texture,
+                            //             tex_asset_map,
+                            //         ) {
+                            //             println!("Rebind textures")
+                            //         }
+                            //     });
+                            //     ui.end_row();
+                            // }
+                        });
                     });
                 }
             }

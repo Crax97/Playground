@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{shader_parameter_writer::ScalarParameterWriter, utils::shader_parameter_writer::*};
+use crate::{
+    constants::WHITE_TEXTURE_HANDLE, shader_parameter_writer::ScalarParameterWriter,
+    utils::shader_parameter_writer::*,
+};
 
 use mgpu::{
     Binding, BindingSet, BindingSetDescription, BindingSetElement, BindingSetElementKind,
@@ -75,8 +78,8 @@ pub struct MaterialProperties {
 
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct MaterialParameters {
-    scalars: Vec<ScalarMaterialParameter>,
-    textures: Vec<TextureMaterialParameter>,
+    pub scalars: Vec<ScalarMaterialParameter>,
+    pub textures: Vec<TextureMaterialParameter>,
 }
 
 impl Material {
@@ -282,7 +285,9 @@ impl Material {
                     .iter()
                     .find(|param| tex.name == param.name);
                 tex_value.map(|param| {
-                    let texture = asset_map.get(&param.texture);
+                    let texture = asset_map
+                        .get(&param.texture)
+                        .unwrap_or(asset_map.get(&WHITE_TEXTURE_HANDLE).unwrap());
                     [
                         Binding {
                             binding: tex.binding,

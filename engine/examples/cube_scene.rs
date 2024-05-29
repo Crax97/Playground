@@ -61,9 +61,10 @@ impl App for CubesSceneApplication {
         let mut asset_map =
             app::asset_map_with_defaults(&context.device, &sampler_allocator, shader_cache)?;
 
-        asset_map.preload("assets/images/david.toml");
+        asset_map.discover_assets("assets");
+        asset_map.preload("assets/images/david");
 
-        let david_texture = AssetHandle::<Texture>::new("assets/images/david.toml");
+        let david_texture = AssetHandle::<Texture>::new("assets/images/david");
         let mut scene = Scene::default();
         let material = Material::new(
             &context.device,
@@ -111,7 +112,7 @@ impl App for CubesSceneApplication {
                 .label("Third Cube")
                 .primitive(engine::scene::ScenePrimitive::Mesh(SceneMesh {
                     handle: CUBE_MESH_HANDLE.clone(),
-                    material: material_handle,
+                    material: material_handle.clone(),
                 }))
                 .transform(Transform {
                     location: vec3(-10.0, 0.0, 10.0),

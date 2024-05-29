@@ -1035,9 +1035,9 @@ impl Device {
 
     #[cfg(debug_assertions)]
     fn validate_image_write_params(&self, image: Image, params: &ImageWriteParams) {
-        let total_image_texels = image.extents.area();
+        let total_texels_needed = params.region.extents.area();
         let texel_byte_size = image.format.byte_size();
-        let total_bytes = total_image_texels as usize * texel_byte_size;
+        let total_bytes = total_texels_needed as usize * texel_byte_size;
 
         check!(params.data.len() >= total_bytes,
             &format!("Attempted to execute a write operation without enough source data, expected at least {total_bytes} bytes, got {}", params.data.len()));

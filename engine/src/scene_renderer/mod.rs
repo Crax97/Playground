@@ -98,8 +98,8 @@ impl SceneSetup {
     }
 
     fn new(device: &Device, asset_map: &AssetMap) -> anyhow::Result<Self> {
-        let default_env = asset_map.get(&DEFAULT_ENV_WHITE_HANDLE);
-        let brdf_lut = asset_map.get(&BRDF_LUT_HANDLE);
+        let default_env = asset_map.get(&DEFAULT_ENV_WHITE_HANDLE).unwrap();
+        let brdf_lut = asset_map.get(&BRDF_LUT_HANDLE).unwrap();
         let binding_set = device.create_binding_set(
             &BindingSetDescription {
                 label: Some("Scene binding set"),
@@ -169,9 +169,13 @@ impl SceneSetup {
     pub fn update(&mut self, device: &Device, asset_map: &AssetMap) -> anyhow::Result<()> {
         if self.needs_new_binding_set {
             self.needs_new_binding_set = false;
-            let diffuse_env_map = asset_map.get(&self.irradiance_map);
-            let env_map = asset_map.get(&self.prefiltered_map);
-            let brdf_lut = asset_map.get(&BRDF_LUT_HANDLE);
+            let diffuse_env_map = asset_map
+                .get(&self.irradiance_map)
+                .unwrap_or(asset_map.get(&DEFAULT_ENV_WHITE_HANDLE).unwrap());
+            let env_map = asset_map
+                .get(&self.prefiltered_map)
+                .unwrap_or(asset_map.get(&DEFAULT_ENV_WHITE_HANDLE).unwrap());
+            let brdf_lut = asset_map.get(&BRDF_LUT_HANDLE).unwrap();
             let new_binding_set = device.create_binding_set(
                 &BindingSetDescription {
                     label: Some("Scene binding set"),
@@ -604,9 +608,12 @@ impl SceneRenderer {
                 match &item.primitive_type {
                     crate::scene::ScenePrimitive::Group => {}
                     crate::scene::ScenePrimitive::Mesh(info) => {
-                        let mesh = params.asset_map.get(&info.handle);
+                        if info.material.is_null() || info.handle.is_null() {
+                            continue;
+                        }
 
-                        let material = params.asset_map.get(&info.material);
+                        let mesh = params.asset_map.get(&info.handle).unwrap();
+                        let material = params.asset_map.get(&info.material).unwrap();
                         let model_matrix = GPUPerObjectDrawData {
                             model_matrix: item.transform.matrix(),
                             material_ty: [material.properties.ty as usize as u32; 4],
@@ -630,7 +637,8 @@ impl SceneRenderer {
                             mesh.uv_component,
                         ]);
                         scene_output_pass.set_index_buffer(mesh.index_buffer);
-                        scene_output_pass.set_draw_label(info.material.identifier().to_string());
+                        scene_output_pass
+                            .set_draw_label(info.material.identifier().unwrap().to_string());
                         scene_output_pass.draw_indexed(mesh.info.num_indices, 1, 0, 0, 0)?;
                     }
                 }

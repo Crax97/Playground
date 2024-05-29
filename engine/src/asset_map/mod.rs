@@ -2,6 +2,7 @@ use std::{
     any::{type_name, TypeId},
     collections::HashMap,
     marker::PhantomData,
+    path::PathBuf,
     ptr::NonNull,
 };
 
@@ -21,7 +22,7 @@ pub struct AssetMap {
     shader_cache: ShaderCache,
     sampler_allocator: SamplerAllocator,
     registrations: HashMap<TypeId, AssetRegistration>,
-    loaded_assets: HashMap<ImmutableString, Index>,
+    known_assets: HashMap<ImmutableString, AssetInfo>,
 }
 
 pub struct LoadContext<'a> {
@@ -43,7 +44,34 @@ pub trait Asset: 'static {
 
 pub struct AssetHandle<A: Asset> {
     _phantom_data: PhantomData<A>,
-    pub(crate) identifier: ImmutableString,
+    pub(crate) identifier: Option<ImmutableString>,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+enum AssetStatus {
+    Loaded(Index),
+    Unloaded,
+}
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+enum AssetStorage {
+    Dynamic,
+    Disk,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+struct AssetInfo {
+    status: AssetStatus,
+    asset_storage: AssetStorage,
+    asset_ty: TypeId,
+}
+
+impl AssetStatus {
+    fn assume_loaded(&self) -> Index {
+        match self {
+            AssetStatus::Loaded(index) => *index,
+            AssetStatus::Unloaded => panic!("Asset wasn't loaded! Call load/load_mut if you're unsure wether the asset might be loaded or not"),
+        }
+    }
 }
 
 struct LoadedAsset<A: Asset> {
@@ -74,9 +102,52 @@ impl AssetMap {
         Self {
             device,
             registrations: Default::default(),
-            loaded_assets: Default::default(),
+            known_assets: Default::default(),
             sampler_allocator,
             shader_cache,
+        }
+    }
+
+    pub fn discover_assets(&mut self, base_path: impl Into<PathBuf>) {
+        let base_path = base_path.into();
+
+        for entry in walkdir::WalkDir::new(base_path)
+            .into_iter()
+            .filter_map(|s| s.ok())
+            .filter(|s| {
+                s.file_type().is_file() && s.path().extension().is_some_and(|e| e == "toml")
+            })
+        {
+            let entry = entry.path();
+            let toml_specifier = std::fs::read_to_string(entry)
+                .unwrap_or_else(|e| panic!("Failed to load asset {entry:?}! {e:?}"));
+            let toml = toml::from_str::<toml::Table>(&toml_specifier)
+                .unwrap_or_else(|e| panic!("Failed to parse {entry:?} as toml! {e:?}"));
+            let asset_type: &str = toml["asset_type"]
+                .as_str()
+                .expect("Asset has no 'asset_type' field!");
+            let mut found_map = false;
+            for (ty, registration) in &mut self.registrations {
+                if asset_type == registration.asset_type_name {
+                    let entry_name = entry.with_extension("");
+                    let entry_name = entry_name.to_str().unwrap();
+                    let entry_name = entry_name.replace('\\', "/");
+                    self.known_assets.insert(
+                        ImmutableString::new_dynamic(entry_name),
+                        AssetInfo {
+                            status: AssetStatus::Unloaded,
+                            asset_storage: AssetStorage::Disk,
+                            asset_ty: *ty,
+                        },
+                    );
+                    found_map = true;
+                    break;
+                }
+            }
+
+            if !found_map {
+                panic!("Asset of type '{}' was not registered!", asset_type);
+            }
         }
     }
 
@@ -95,36 +166,30 @@ impl AssetMap {
     }
 
     pub fn preload(&mut self, identifier: &str) {
-        let toml_specifier = std::fs::read_to_string(identifier)
-            .unwrap_or_else(|e| panic!("Failed to load asset {identifier}! {e:?}"));
-        let toml = toml::from_str::<toml::Table>(&toml_specifier)
-            .unwrap_or_else(|e| panic!("Failed to parse {identifier} as toml! {e:?}"));
-        let asset_type: &str = toml["asset_type"]
-            .as_str()
-            .expect("Asset has no 'asset_type' field!");
+        let info: &mut AssetInfo = self
+            .known_assets
+            .get_mut(&ImmutableString::new_dynamic(identifier))
+            .expect("Asset isn't known!");
+        let ty = info.asset_ty;
+        let registration = self.registrations.get_mut(&ty).unwrap();
+        let index = unsafe {
+            (registration.load_fn)(
+                identifier,
+                &mut registration.arena,
+                &LoadContext {
+                    device: &self.device,
+                    shader_cache: &self.shader_cache,
+                    sampler_allocator: &self.sampler_allocator,
+                },
+            )
+        };
+        assert!(
+            info.asset_storage == AssetStorage::Disk,
+            "Only disk assets can be preloaded!"
+        );
 
-        for registration in self.registrations.values_mut() {
-            if asset_type == registration.asset_type_name {
-                let index = unsafe {
-                    (registration.load_fn)(
-                        identifier,
-                        &mut registration.arena,
-                        &LoadContext {
-                            device: &self.device,
-                            shader_cache: &self.shader_cache,
-                            sampler_allocator: &self.sampler_allocator,
-                        },
-                    )
-                };
-
-                self.loaded_assets
-                    .insert(ImmutableString::new_dynamic(identifier), index);
-
-                return;
-            }
-        }
-
-        panic!("Asset of type '{}' was not registered!", asset_type);
+        debug_assert!(info.status == AssetStatus::Unloaded);
+        info.status = AssetStatus::Loaded(index);
     }
 
     pub fn add<A: Asset>(
@@ -145,7 +210,15 @@ impl AssetMap {
             ref_count: 1,
             identifier: identifier.clone(),
         });
-        let old = self.loaded_assets.insert(identifier.clone(), index);
+
+        let old = self.known_assets.insert(
+            identifier.clone(),
+            AssetInfo {
+                status: AssetStatus::Loaded(index),
+                asset_storage: AssetStorage::Dynamic,
+                asset_ty,
+            },
+        );
         debug_assert!(
             old.is_none(),
             "Another asset with identifier '{}' was already defined! identifiers must be unique!",
@@ -153,7 +226,7 @@ impl AssetMap {
         );
         AssetHandle {
             _phantom_data: PhantomData,
-            identifier,
+            identifier: Some(identifier),
         }
     }
 
@@ -162,24 +235,30 @@ impl AssetMap {
         identifier: &AssetHandle<A>,
     ) -> anyhow::Result<()> {
         let asset_ty = TypeId::of::<A>();
-        let identifier = &identifier.identifier;
+        let identifier = identifier
+            .identifier
+            .as_ref()
+            .expect("AssetHandle is null!");
         let registration = self
             .registrations
             .get_mut(&asset_ty)
             .unwrap_or_else(|| panic!("Asset type {} was not registered!", type_name::<A>()));
         let map = &mut registration.arena;
-
-        if let Some(existing_entry) = self
-            .loaded_assets
+        let asset_info = self
+            .known_assets
             .get(identifier)
-            .and_then(|index| map.get_mut::<LoadedAsset<A>>(*index))
-        {
-            existing_entry.ref_count += 1;
-            return Ok(());
-        }
+            .copied()
+            .expect("Asset is unknown!");
 
-        info!("Asset {:?} was not loaded, trying to load it", identifier);
-        self.preload(identifier);
+        match asset_info.status {
+            AssetStatus::Loaded(index) => {
+                map.get_mut::<LoadedAsset<A>>(index).unwrap().ref_count += 1;
+            }
+            AssetStatus::Unloaded => {
+                info!("Asset {:?} was not loaded, trying to load it", identifier);
+                self.preload(identifier)
+            }
+        }
         Ok(())
     }
 
@@ -203,66 +282,110 @@ impl AssetMap {
 
     // Gets a reference to an asset, loading it if it is not loaded
     pub fn load<A: Asset>(&mut self, handle: &AssetHandle<A>) -> &A {
-        if !self.loaded_assets.contains_key(&handle.identifier) {
-            self.preload(&handle.identifier);
+        let identifier = handle.identifier.as_ref().expect("AssetHandle is null!");
+        if self
+            .known_assets
+            .get(identifier)
+            .copied()
+            .expect("Asset isn't known!")
+            .status
+            == AssetStatus::Unloaded
+        {
+            self.preload(identifier);
         }
-        self.get(handle)
+        self.get(handle).unwrap()
     }
 
     // Gets a mutable reference to an asset, loading it if it is not loaded
     pub fn load_mut<A: Asset>(&mut self, handle: &AssetHandle<A>) -> &mut A {
-        if !self.loaded_assets.contains_key(&handle.identifier) {
-            self.preload(&handle.identifier);
+        let identifier = handle.identifier.as_ref().expect("AssetHandle is null!");
+        if self
+            .known_assets
+            .get(identifier)
+            .copied()
+            .expect("Asset isn't known")
+            .status
+            == AssetStatus::Unloaded
+        {
+            self.preload(identifier);
         }
-        self.get_mut(handle)
+        self.get_mut(handle).unwrap()
     }
 
     /// Gets a reference to the given asset, panicking if it is not loaded
-    pub fn get<A: Asset>(&self, handle: &AssetHandle<A>) -> &A {
+    /// Returns None only when the handle is null
+    pub fn get<A: Asset>(&self, handle: &AssetHandle<A>) -> Option<&A> {
+        let Some(identifier) = handle.identifier.as_ref() else {
+            return None;
+        };
         let index = self
-            .loaded_assets
-            .get(&handle.identifier)
+            .known_assets
+            .get(identifier)
             .copied()
-            .expect("Asset is not loaded! Use load if you're unsure wether the asset might be loaded or not");
-        self.registrations
-            .get(&TypeId::of::<A>())
-            .and_then(|map| map.arena.get::<LoadedAsset<A>>(index))
-            .map(|entry| &entry.asset)
-            .unwrap()
+            .unwrap_or_else(|| panic!("Asset '{}' isn't known!", identifier))
+            .status
+            .assume_loaded();
+        Some(
+            self.registrations
+                .get(&TypeId::of::<A>())
+                .and_then(|map| map.arena.get::<LoadedAsset<A>>(index))
+                .map(|entry| &entry.asset)
+                .unwrap(),
+        )
     }
 
     /// Gets a mutable reference to the given asset, panicking if it is not loaded
-    pub fn get_mut<A: Asset>(&mut self, handle: &AssetHandle<A>) -> &mut A {
+    /// Returns None only when the handle is null
+    pub fn get_mut<A: Asset>(&mut self, handle: &AssetHandle<A>) -> Option<&mut A> {
+        let Some(identifier) = handle.identifier.as_ref() else {
+            return None;
+        };
         let index = self
-            .loaded_assets
-            .get(&handle.identifier)
+            .known_assets
+            .get(identifier)
             .copied()
-            .expect("Asset is not loaded! Use load if you're unsure wether the asset might be loaded or not");
-        self.registrations
-            .get_mut(&TypeId::of::<A>())
-            .and_then(|map| map.arena.get_mut::<LoadedAsset<A>>(index))
-            .map(|entry| &mut entry.asset)
-            .unwrap()
+            .unwrap_or_else(|| panic!("Asset '{}' isn't known!", identifier))
+            .status
+            .assume_loaded();
+        Some(
+            self.registrations
+                .get_mut(&TypeId::of::<A>())
+                .and_then(|map| map.arena.get_mut::<LoadedAsset<A>>(index))
+                .map(|entry| &mut entry.asset)
+                .unwrap(),
+        )
     }
 
     pub fn decrement_reference<A: Asset>(&mut self, handle: impl Into<AssetHandle<A>>) {
         let handle = handle.into();
-        let Some(index) = self.loaded_assets.get(&handle.identifier).copied() else {
-            return;
-        };
-        let Some(registration) = self.registrations.get_mut(&TypeId::of::<A>()) else {
-            return;
-        };
-        let Some(entry) = registration.arena.get_mut::<LoadedAsset<A>>(index) else {
-            return;
-        };
-        entry.ref_count -= 1;
+        let asset_ty = TypeId::of::<A>();
+        let identifier = handle.identifier.as_ref().expect("AssetHandle is null!");
+        let registration = self
+            .registrations
+            .get_mut(&asset_ty)
+            .unwrap_or_else(|| panic!("Asset type {} was not registered!", type_name::<A>()));
+        let map = &mut registration.arena;
+        let asset_entry = self
+            .known_assets
+            .get_mut(identifier)
+            .expect("Asset is unknown!");
 
-        if entry.ref_count == 0 {
+        let (ref_count, index) = match asset_entry.status {
+            AssetStatus::Loaded(index) => {
+                let count = &mut map.get_mut::<LoadedAsset<A>>(index).unwrap().ref_count;
+                *count -= 1;
+                (*count, index)
+            }
+            AssetStatus::Unloaded => {
+                panic!("Asset {:?} was not loaded", identifier);
+            }
+        };
+
+        if ref_count == 0 {
             let removed_asset = registration.arena.remove::<LoadedAsset<A>>(index).unwrap();
             info!("Released asset {handle:?}");
             removed_asset.asset.dispose(&self.device);
-            self.loaded_assets.remove(handle.identifier());
+            asset_entry.status = AssetStatus::Unloaded;
         }
     }
 
@@ -274,13 +397,12 @@ impl AssetMap {
                 }
             }
         }
-        self.loaded_assets.clear();
+        self.known_assets.clear();
     }
 
     unsafe fn dispose_fn<A: Asset>(ptr: NonNull<u8>, device: &Device) {
-        let asset_ref = ptr.cast::<A>().as_ref();
-
-        asset_ref.dispose(device)
+        let asset_ref = ptr.cast::<LoadedAsset<A>>().as_ref();
+        asset_ref.asset.dispose(device)
     }
 
     // Loads dynamically an asset into an erased arena by first reading it's specifier
@@ -291,12 +413,14 @@ impl AssetMap {
         context: &LoadContext,
     ) -> Index {
         let (index, option_ptr) = erased_arena.preallocate_entry();
-        let file_content = std::fs::read_to_string(path).unwrap_or_else(|e| {
-            panic!(
-                "Failed to read specifier file for {}: {e:?}",
-                A::asset_type_name()
-            )
-        });
+        let file_content =
+            std::fs::read_to_string(std::path::Path::new(path).with_extension("toml"))
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "Failed to read specifier file for {}: {e:?}",
+                        A::asset_type_name()
+                    )
+                });
         let specifier = toml::from_str::<AssetSpecifier<A>>(&file_content).unwrap_or_else(|e| {
             panic!(
                 "Failed to parse specifier for asset {}: {e:?}",
@@ -339,7 +463,7 @@ impl<A: Asset, S: AsRef<str>> From<S> for AssetHandle<A> {
     fn from(value: S) -> Self {
         Self {
             _phantom_data: PhantomData,
-            identifier: ImmutableString::new_dynamic(value.as_ref()),
+            identifier: Some(ImmutableString::new_dynamic(value.as_ref())),
         }
     }
 }
@@ -348,7 +472,7 @@ impl<A: Asset> std::fmt::Debug for AssetHandle<A> {
         f.write_fmt(format_args!(
             "AssetHandle<{}>(\"{}\")",
             type_name::<A>(),
-            &self.identifier
+            self.identifier.as_deref().unwrap_or("Null")
         ))
     }
 }
@@ -405,7 +529,7 @@ impl<'de, A: Asset> Deserialize<'de> for AssetHandle<A> {
     {
         Ok(Self {
             _phantom_data: PhantomData,
-            identifier: ImmutableString::deserialize(deserializer)?,
+            identifier: Some(ImmutableString::deserialize(deserializer)?),
         })
     }
 }
@@ -414,19 +538,30 @@ impl<A: Asset> AssetHandle<A> {
     pub fn new(identifier: impl Into<ImmutableString>) -> Self {
         Self {
             _phantom_data: PhantomData,
-            identifier: identifier.into(),
+            identifier: Some(identifier.into()),
         }
     }
 
     pub const fn new_const(identifier: ImmutableString) -> Self {
         Self {
             _phantom_data: PhantomData,
-            identifier,
+            identifier: Some(identifier),
         }
     }
 
-    pub fn identifier(&self) -> &ImmutableString {
-        &self.identifier
+    pub fn identifier(&self) -> Option<&ImmutableString> {
+        self.identifier.as_ref()
+    }
+
+    pub fn null() -> AssetHandle<A> {
+        Self {
+            _phantom_data: PhantomData,
+            identifier: None,
+        }
+    }
+
+    pub fn is_null(&self) -> bool {
+        self.identifier.is_none()
     }
 }
 
@@ -436,7 +571,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use crate::{
-        asset_map::{Asset, AssetHandle, AssetMap, AssetSpecifier, LoadContext},
+        asset_map::{Asset, AssetSpecifier, LoadContext},
         assets::{
             texture::{Texture, TextureSamplerConfiguration},
             TextureMetadata,

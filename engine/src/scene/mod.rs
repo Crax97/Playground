@@ -3,7 +3,6 @@ pub mod serializable_scene;
 use std::collections::{HashMap, HashSet};
 
 use glam::Vec3;
-use log::warn;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -16,13 +15,13 @@ use crate::{
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub struct SceneNodeId(Index);
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Eq, PartialEq, PartialOrd, Ord)]
 pub struct SceneMesh {
     pub handle: AssetHandle<Mesh>,
     pub material: AssetHandle<Material>,
 }
 
-#[derive(Default, Serialize, Deserialize, Clone)]
+#[derive(Default, Serialize, Deserialize, Clone, Eq, PartialEq, PartialOrd, Ord)]
 pub enum ScenePrimitive {
     #[default]
     Group,
@@ -58,13 +57,22 @@ impl Scene {
             match &node.primitive_type {
                 ScenePrimitive::Group => {}
                 ScenePrimitive::Mesh(SceneMesh { handle, material }) => {
-                    asset_map.increment_reference(handle)?;
-                    asset_map.increment_reference(material)?;
+                    if !handle.is_null() {
+                        asset_map.increment_reference(handle)?;
+                    }
 
-                    let material = asset_map.get(material);
+                    if !material.is_null() {
+                        asset_map.increment_reference(material)?;
+                    }
+
+                    let Some(material) = asset_map.get(material) else {
+                        continue;
+                    };
                     let textures = material.get_used_textures();
                     for tex in textures {
-                        asset_map.increment_reference(&tex)?;
+                        if tex.is_null() {
+                            asset_map.increment_reference(&tex)?;
+                        }
                     }
                 }
             }
@@ -80,14 +88,22 @@ impl Scene {
                     handle,
                     material: material_handle,
                 }) => {
-                    let material = asset_map.get(material_handle);
+                    let Some(material) = asset_map.get(material_handle) else {
+                        continue;
+                    };
                     let textures = material.get_used_textures();
                     for tex in textures {
-                        asset_map.decrement_reference(tex);
+                        if tex.is_null() {
+                            asset_map.increment_reference(&tex).unwrap();
+                        }
+                    }
+                    if !handle.is_null() {
+                        asset_map.increment_reference(handle).unwrap();
                     }
 
-                    asset_map.decrement_reference(material_handle.clone());
-                    asset_map.decrement_reference(handle.clone());
+                    if !material_handle.is_null() {
+                        asset_map.increment_reference(material_handle).unwrap();
+                    }
                 }
             }
         }

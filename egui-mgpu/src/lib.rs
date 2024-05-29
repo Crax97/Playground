@@ -771,13 +771,17 @@ impl EguiMgpuIntegration {
                         .srgba_pixels(None)
                         .flat_map(|a| a.to_array())
                         .collect::<Vec<u8>>();
-
                     device.write_image_data(
                         texture.image,
                         &mgpu::ImageWriteParams {
                             data: &data,
                             region: ImageRegion {
                                 offset: Offset3D { x, y, z: 0 },
+                                extents: Extents3D {
+                                    width: image.size[0] as u32,
+                                    height: image.size[1] as u32,
+                                    depth: 1,
+                                },
                                 ..texture.image.whole_region()
                             },
                         },

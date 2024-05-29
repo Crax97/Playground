@@ -113,6 +113,8 @@ impl App for GltfViewerApplication {
         let mut asset_map =
             app::asset_map_with_defaults(&context.device, &sampler_allocator, shader_cache)?;
 
+        asset_map.discover_assets("assets");
+
         let mut pov = PointOfView::new_perspective(0.01, 1000.0, 75.0, 1920.0 / 1080.0);
         pov.transform.location = vec3(0.0, 0.0, -2.0);
 
@@ -160,7 +162,7 @@ impl App for GltfViewerApplication {
                 format: ImageFormat::Rgba32f,
                 samples: mgpu::SampleCount::One,
             },
-            asset_map.get(&CUBE_MESH_HANDLE),
+            asset_map.get(&CUBE_MESH_HANDLE).unwrap(),
             &sampler_allocator,
         )?;
 
