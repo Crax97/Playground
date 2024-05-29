@@ -5,7 +5,7 @@ use mgpu::Device;
 
 use crate::asset_map::{AssetHandle, AssetMap};
 use crate::scene::serializable_scene::SerializableScene;
-use crate::scene::{Scene, SceneMesh, SceneNodeId, ScenePrimitive};
+use crate::scene::{Scene, SceneMesh, SceneNode, SceneNodeId, ScenePrimitive};
 
 use super::asset_picker::AssetPicker;
 use super::{edit_transform, edit_vec};
@@ -78,6 +78,23 @@ impl SceneEditor {
             for root_node in root_nodes {
                 self.scene_node_outliner(root_node, ui, scene);
             }
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    if ui.button("Add node").clicked() {
+                        let id = scene.add_node(
+                            SceneNode::default().label(format!("SceneNode {}", scene.nodes.len())),
+                        );
+                        self.selected_node = Some(id);
+                    }
+                    if ui
+                        .add_enabled(self.selected_node.is_some(), egui::Button::new("Remove"))
+                        .clicked()
+                    {
+                        scene.remove_node(self.selected_node.unwrap());
+                        self.selected_node = None;
+                    }
+                })
+            });
         });
 
         egui::CollapsingHeader::new("Node Editor").show(ui, |ui| {
@@ -158,6 +175,7 @@ impl SceneEditor {
                 ui.next_auto_id(),
                 stringify_prim(&node.primitive_type),
             )
+            .selected_text(stringify_prim(&node.primitive_type))
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut node.primitive_type, ScenePrimitive::Group, "Group");
                 ui.selectable_value(
@@ -169,6 +187,7 @@ impl SceneEditor {
                     "Mesh",
                 );
             });
+            ui.end_row();
 
             match &mut node.primitive_type {
                 crate::scene::ScenePrimitive::Group => {
@@ -183,38 +202,41 @@ impl SceneEditor {
                             self.asset_picker.modify(ui, &mut info.material, asset_map);
                         });
                     });
+                    ui.end_row();
 
-                    ui.group(|ui| {
-                        let tex_asset_map =
-                            unsafe { (asset_map as *mut AssetMap).as_mut().unwrap() };
-                        if info.material.is_null() {
-                            return;
-                        }
-                        let Some(material) = asset_map.get_mut(&info.material) else {
-                            return;
-                        };
-                        let mut changed_textures = true;
-                        egui::Grid::new(ui.next_auto_id()).show(ui, |ui| {
-                            for texture in &mut material.parameters.textures {
-                                ui.horizontal(|ui| {
-                                    ui.label(&texture.name);
-                                    if self.asset_picker.modify(
-                                        ui,
-                                        &mut texture.texture,
-                                        tex_asset_map,
-                                    ) {
-                                        changed_textures = true;
-                                    }
-                                });
-                                ui.end_row();
+                    ui.collapsing("Material info", |ui| {
+                        ui.group(|ui| {
+                            let tex_asset_map =
+                                unsafe { (asset_map as *mut AssetMap).as_mut().unwrap() };
+                            if info.material.is_null() {
+                                return;
+                            }
+                            let Some(material) = asset_map.get_mut(&info.material) else {
+                                return;
+                            };
+                            let mut changed_textures = true;
+                            egui::Grid::new(ui.next_auto_id()).show(ui, |ui| {
+                                for texture in &mut material.parameters.textures {
+                                    ui.horizontal(|ui| {
+                                        ui.label(&texture.name);
+                                        if self.asset_picker.modify(
+                                            ui,
+                                            &mut texture.texture,
+                                            tex_asset_map,
+                                        ) {
+                                            changed_textures = true;
+                                        }
+                                    });
+                                    ui.end_row();
+                                }
+                            });
+
+                            if changed_textures {
+                                material
+                                    .recreate_binding_set_layout(device, tex_asset_map)
+                                    .unwrap();
                             }
                         });
-
-                        if changed_textures {
-                            material
-                                .recreate_binding_set_layout(device, tex_asset_map)
-                                .unwrap();
-                        }
                     });
                 }
             }
