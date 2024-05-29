@@ -9,8 +9,6 @@ use crate::asset_map::{Asset, LoadContext};
 
 use self::{material::Material, mesh::Mesh, texture::Texture};
 
-pub mod loaders;
-
 pub mod material;
 pub mod mesh;
 pub mod shader;
