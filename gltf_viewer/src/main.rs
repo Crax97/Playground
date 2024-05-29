@@ -253,7 +253,7 @@ impl App for GltfViewerApplication {
         egui::Window::new("Scene Editor")
             .show(&egui_context, |ui| {
                 self.scene_editor
-                    .show(ui, &mut self.scene, &mut self.asset_map);
+                    .show(&context.device, ui, &mut self.scene, &mut self.asset_map);
             })
             .unwrap();
 

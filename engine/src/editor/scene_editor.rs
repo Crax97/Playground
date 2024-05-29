@@ -1,6 +1,7 @@
 use egui_mgpu::egui::Ui;
 use egui_mgpu::egui::{self, Sense};
 use log::error;
+use mgpu::Device;
 
 use crate::asset_map::{AssetHandle, AssetMap};
 use crate::scene::serializable_scene::SerializableScene;
@@ -22,7 +23,13 @@ impl SceneEditor {
             asset_picker: AssetPicker::default(),
         }
     }
-    pub fn show(&mut self, ui: &mut Ui, scene: &mut Scene, asset_map: &mut AssetMap) {
+    pub fn show(
+        &mut self,
+        device: &Device,
+        ui: &mut Ui,
+        scene: &mut Scene,
+        asset_map: &mut AssetMap,
+    ) {
         let root_nodes = scene
             .iter_with_ids()
             .filter(|(i, _)| scene.parent_of(*i).is_none())
@@ -75,7 +82,7 @@ impl SceneEditor {
 
         egui::CollapsingHeader::new("Node Editor").show(ui, |ui| {
             if let Some(selected_node) = self.selected_node {
-                self.node_ui(selected_node, ui, scene, asset_map);
+                self.node_ui(device, selected_node, ui, scene, asset_map);
             } else {
                 ui.label("Select a node");
             }
@@ -122,6 +129,7 @@ impl SceneEditor {
 
     fn node_ui(
         &mut self,
+        device: &Device,
         node_id: SceneNodeId,
         ui: &mut Ui,
         scene: &mut Scene,
@@ -182,22 +190,31 @@ impl SceneEditor {
                         if info.material.is_null() {
                             return;
                         }
-                        let material = asset_map.get_mut(&info.material);
+                        let Some(material) = asset_map.get_mut(&info.material) else {
+                            return;
+                        };
+                        let mut changed_textures = true;
                         egui::Grid::new(ui.next_auto_id()).show(ui, |ui| {
-                            // for texture in &mut material.parameters.textures {
-                            //     ui.horizontal(|ui| {
-                            //         ui.label(&texture.name);
-                            //         if self.asset_picker.modify(
-                            //             ui,
-                            //             &mut texture.texture,
-                            //             tex_asset_map,
-                            //         ) {
-                            //             println!("Rebind textures")
-                            //         }
-                            //     });
-                            //     ui.end_row();
-                            // }
+                            for texture in &mut material.parameters.textures {
+                                ui.horizontal(|ui| {
+                                    ui.label(&texture.name);
+                                    if self.asset_picker.modify(
+                                        ui,
+                                        &mut texture.texture,
+                                        tex_asset_map,
+                                    ) {
+                                        changed_textures = true;
+                                    }
+                                });
+                                ui.end_row();
+                            }
                         });
+
+                        if changed_textures {
+                            material
+                                .recreate_binding_set_layout(device, tex_asset_map)
+                                .unwrap();
+                        }
                     });
                 }
             }

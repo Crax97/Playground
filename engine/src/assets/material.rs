@@ -9,9 +9,10 @@ use mgpu::{
     Binding, BindingSet, BindingSetDescription, BindingSetElement, BindingSetElementKind,
     BindingSetLayout, BindingSetLayoutInfo, BindingType, BufferDescription, BufferUsageFlags,
     CompareOp, CullMode, DepthStencilState, DepthStencilTargetInfo, Device, FragmentStageInfo,
-    FrontFace, GraphicsPipeline, GraphicsPipelineDescription, ImageFormat, PolygonMode,
-    PrimitiveTopology, PushConstantInfo, RenderTargetInfo, ShaderStageFlags, StorageAccessMode,
-    VertexAttributeFormat, VertexInputDescription, VertexInputFrequency, VertexStageInfo,
+    FrontFace, GraphicsPipeline, GraphicsPipelineDescription, ImageFormat, OwnedBindingSetLayout,
+    PolygonMode, PrimitiveTopology, PushConstantInfo, RenderTargetInfo, ShaderStageFlags,
+    StorageAccessMode, VertexAttributeFormat, VertexInputDescription, VertexInputFrequency,
+    VertexStageInfo,
 };
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +33,7 @@ pub struct Material {
     pub(crate) pipeline: GraphicsPipeline,
     // All the bindings in binding set 1 are user-settable parameters
     pub(crate) binding_set: BindingSet,
+    pub(crate) user_binding_set_layout: OwnedBindingSetLayout,
     // The stuff in set(1) binding (0) should be a struct
     pub(crate) scalar_parameter_writer: ScalarParameterWriter,
     user_buffer: Option<mgpu::Buffer>,
@@ -276,56 +278,12 @@ impl Material {
             None
         };
 
-        let bindings = user_textures
-            .iter()
-            .filter_map(|tex| {
-                let tex_value = description
-                    .parameters
-                    .textures
-                    .iter()
-                    .find(|param| tex.name == param.name);
-                tex_value.map(|param| {
-                    let texture = asset_map
-                        .get(&param.texture)
-                        .unwrap_or(asset_map.get(&WHITE_TEXTURE_HANDLE).unwrap());
-                    [
-                        Binding {
-                            binding: tex.binding,
-                            ty: if tex.is_storage {
-                                BindingType::StorageImage {
-                                    view: texture.view,
-                                    access_mode: tex.access_mode,
-                                }
-                            } else {
-                                BindingType::SampledImage { view: texture.view }
-                            },
-                            visibility: ShaderStageFlags::ALL_GRAPHICS,
-                        },
-                        Binding {
-                            binding: tex.binding + 1,
-                            ty: BindingType::Sampler(texture.sampler),
-                            visibility: ShaderStageFlags::ALL_GRAPHICS,
-                        },
-                    ]
-                    .into_iter()
-                })
-            })
-            .flatten()
-            .chain(user_buffer.iter().map(|&buf| Binding {
-                binding: 0,
-                ty: BindingType::UniformBuffer {
-                    buffer: buf,
-                    offset: 0,
-                    range: buf.size(),
-                },
-                visibility: ShaderStageFlags::ALL_GRAPHICS,
-            }))
-            .collect::<Vec<_>>();
-        let binding_set = device.create_binding_set(
-            &BindingSetDescription {
-                label: Some("Binding set for material"),
-                bindings: &bindings,
-            },
+        let binding_set = create_binding_set(
+            &user_textures,
+            &description.parameters.textures,
+            asset_map,
+            user_buffer,
+            device,
             &user_binding_layout,
         )?;
 
@@ -344,7 +302,30 @@ impl Material {
             texture_parameter_infos: user_textures,
             scalar_parameter_writer,
             user_buffer,
+            user_binding_set_layout: OwnedBindingSetLayout {
+                binding_set_elements: user_binding_layout.binding_set_elements.to_vec(),
+            },
         })
+    }
+
+    pub fn recreate_binding_set_layout(
+        &mut self,
+        device: &Device,
+        asset_map: &mut AssetMap,
+    ) -> anyhow::Result<()> {
+        let bs = create_binding_set(
+            &self.texture_parameter_infos,
+            &self.parameters.textures,
+            asset_map,
+            self.user_buffer,
+            device,
+            &BindingSetLayout {
+                binding_set_elements: &self.user_binding_set_layout.binding_set_elements,
+            },
+        )?;
+        let old = std::mem::replace(&mut self.binding_set, bs);
+        device.destroy_binding_set(old)?;
+        Ok(())
     }
 
     pub fn get_used_textures(&self) -> Vec<AssetHandle<Texture>> {
@@ -355,6 +336,65 @@ impl Material {
 
         result.into_iter().collect()
     }
+}
+
+fn create_binding_set(
+    user_textures: &[TextureParameterInfo],
+    textures: &[TextureMaterialParameter],
+    asset_map: &mut AssetMap,
+    user_buffer: Option<mgpu::Buffer>,
+    device: &Device,
+    user_binding_layout: &BindingSetLayout,
+) -> Result<BindingSet, anyhow::Error> {
+    let bindings = user_textures
+        .iter()
+        .filter_map(|tex| {
+            let tex_value = textures.iter().find(|param| tex.name == param.name);
+            tex_value.map(|param| {
+                let texture = asset_map
+                    .get(&param.texture)
+                    .unwrap_or(asset_map.get(&WHITE_TEXTURE_HANDLE).unwrap());
+                [
+                    Binding {
+                        binding: tex.binding,
+                        ty: if tex.is_storage {
+                            BindingType::StorageImage {
+                                view: texture.view,
+                                access_mode: tex.access_mode,
+                            }
+                        } else {
+                            BindingType::SampledImage { view: texture.view }
+                        },
+                        visibility: ShaderStageFlags::ALL_GRAPHICS,
+                    },
+                    Binding {
+                        binding: tex.binding + 1,
+                        ty: BindingType::Sampler(texture.sampler),
+                        visibility: ShaderStageFlags::ALL_GRAPHICS,
+                    },
+                ]
+                .into_iter()
+            })
+        })
+        .flatten()
+        .chain(user_buffer.iter().map(|&buf| Binding {
+            binding: 0,
+            ty: BindingType::UniformBuffer {
+                buffer: buf,
+                offset: 0,
+                range: buf.size(),
+            },
+            visibility: ShaderStageFlags::ALL_GRAPHICS,
+        }))
+        .collect::<Vec<_>>();
+    let binding_set = device.create_binding_set(
+        &BindingSetDescription {
+            label: Some("Binding set for material"),
+            bindings: &bindings,
+        },
+        user_binding_layout,
+    )?;
+    Ok(binding_set)
 }
 
 pub(crate) fn mesh_vertex_inputs() -> &'static [VertexInputDescription] {

@@ -315,9 +315,7 @@ impl AssetMap {
     /// Gets a reference to the given asset, panicking if it is not loaded
     /// Returns None only when the handle is null
     pub fn get<A: Asset>(&self, handle: &AssetHandle<A>) -> Option<&A> {
-        let Some(identifier) = handle.identifier.as_ref() else {
-            return None;
-        };
+        let identifier = handle.identifier.as_ref()?;
         let index = self
             .known_assets
             .get(identifier)
@@ -337,9 +335,7 @@ impl AssetMap {
     /// Gets a mutable reference to the given asset, panicking if it is not loaded
     /// Returns None only when the handle is null
     pub fn get_mut<A: Asset>(&mut self, handle: &AssetHandle<A>) -> Option<&mut A> {
-        let Some(identifier) = handle.identifier.as_ref() else {
-            return None;
-        };
+        let identifier = handle.identifier.as_ref()?;
         let index = self
             .known_assets
             .get(identifier)
