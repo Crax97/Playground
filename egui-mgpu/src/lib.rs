@@ -1045,6 +1045,10 @@ impl EguiMgpuIntegration {
 
         &BS
     }
+
+    pub fn pixels_per_point(&self) -> f32 {
+        self.pixels_per_point
+    }
 }
 
 fn free_texture(device: &Device, egui_texture: &EguiTexture) {

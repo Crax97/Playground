@@ -2,10 +2,10 @@ use std::io::{BufReader, Read};
 
 use anyhow::Context;
 use mgpu::Extents2D;
-use serde::{Deserialize, Serialize};
+use serde::{de::IntoDeserializer, Deserialize, Serialize};
 use texture::{TextureDescription, TextureSamplerConfiguration, TextureUsageFlags};
 
-use crate::asset_map::{Asset, LoadContext};
+use crate::asset_map::{Asset, AssetMap, LoadContext};
 
 use self::{material::Material, mesh::Mesh, texture::Texture};
 
@@ -29,7 +29,7 @@ impl Asset for Mesh {
         device.destroy_buffer(self.color_component).unwrap();
     }
 
-    fn load(_metadata: Self::Metadata, _ctx: &LoadContext) -> anyhow::Result<Self>
+    fn import(_base_id: &str, _metadata: Self::Metadata, _ctx: &mut AssetMap) -> anyhow::Result<()>
     where
         Self: Sized,
     {
@@ -54,7 +54,7 @@ impl Asset for Texture {
         device.destroy_image(self.image).unwrap();
     }
 
-    fn load(metadata: Self::Metadata, ctx: &LoadContext) -> anyhow::Result<Self>
+    fn import(base_id: &str, metadata: Self::Metadata, ctx: &mut AssetMap) -> anyhow::Result<()>
     where
         Self: Sized,
     {
@@ -69,8 +69,8 @@ impl Asset for Texture {
 
         let mips = Texture::compute_num_mips(image.width(), image.height());
 
-        Texture::new(
-            ctx.device,
+        let texture = Texture::new(
+            ctx.device(),
             &TextureDescription {
                 label: Some(&metadata.source_path),
                 data: &[&image_rgba_bytes],
@@ -84,8 +84,11 @@ impl Asset for Texture {
                 auto_generate_mips: true,
                 sampler_configuration: TextureSamplerConfiguration::default(),
             },
-            ctx.sampler_allocator,
-        )
+            ctx.sampler_allocator(),
+        )?;
+
+        ctx.add(texture, base_id);
+        Ok(())
     }
 }
 impl Asset for Material {
@@ -100,7 +103,7 @@ impl Asset for Material {
             .unwrap();
     }
 
-    fn load(metadata: Self::Metadata, _ctx: &LoadContext) -> anyhow::Result<Self>
+    fn import(_base_id: &str, _metadata: Self::Metadata, _ctx: &mut AssetMap) -> anyhow::Result<()>
     where
         Self: Sized,
     {

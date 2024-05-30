@@ -34,9 +34,11 @@ pub struct LoadContext<'a> {
 pub trait Asset: 'static {
     type Metadata: 'static + Serialize + for<'a> Deserialize<'a>;
     fn asset_type_name() -> &'static str;
-    fn load(metadata: Self::Metadata, context: &LoadContext) -> anyhow::Result<Self>
-    where
-        Self: Sized;
+    fn import(
+        base_id: &str,
+        metadata: Self::Metadata,
+        asset_map: &mut AssetMap,
+    ) -> anyhow::Result<()>;
     fn dispose(&self, device: &Device) {
         let _ = device;
     }
@@ -89,7 +91,7 @@ struct AssetSpecifier<A: Asset> {
 struct AssetRegistration {
     asset_type_name: &'static str,
     dispose_fn: unsafe fn(NonNull<u8>, device: &Device),
-    load_fn: unsafe fn(&str, &mut ErasedArena, &LoadContext) -> Index,
+    import_fn: unsafe fn(&str, &mut AssetMap),
     arena: ErasedArena,
 }
 
@@ -157,7 +159,7 @@ impl AssetMap {
             AssetRegistration {
                 asset_type_name: A::asset_type_name(),
                 dispose_fn: Self::dispose_fn::<A>,
-                load_fn: Self::load_fn::<A>,
+                import_fn: Self::import_fn::<A>,
                 arena: ErasedArena::new::<LoadedAsset<A>>(),
             },
         );
@@ -172,24 +174,14 @@ impl AssetMap {
             .expect("Asset isn't known!");
         let ty = info.asset_ty;
         let registration = self.registrations.get_mut(&ty).unwrap();
-        let index = unsafe {
-            (registration.load_fn)(
-                identifier,
-                &mut registration.arena,
-                &LoadContext {
-                    device: &self.device,
-                    shader_cache: &self.shader_cache,
-                    sampler_allocator: &self.sampler_allocator,
-                },
-            )
-        };
+        let import_fn = registration.import_fn;
+
         assert!(
             info.asset_storage == AssetStorage::Disk,
             "Only disk assets can be preloaded!"
         );
 
-        debug_assert!(info.status == AssetStatus::Unloaded);
-        info.status = AssetStatus::Loaded(index);
+        unsafe { (import_fn)(identifier, self) };
     }
 
     pub fn add<A: Asset>(
@@ -401,14 +393,8 @@ impl AssetMap {
         asset_ref.asset.dispose(device)
     }
 
-    // Loads dynamically an asset into an erased arena by first reading it's specifier
-    // then creating the asset through the specifier's metadata
-    unsafe fn load_fn<A: Asset>(
-        path: &str,
-        erased_arena: &mut ErasedArena,
-        context: &LoadContext,
-    ) -> Index {
-        let (index, option_ptr) = erased_arena.preallocate_entry();
+    // Loads dynamically one or more assets into the AssetMap
+    unsafe fn import_fn<A: Asset>(path: &str, map: &mut AssetMap) {
         let file_content =
             std::fs::read_to_string(std::path::Path::new(path).with_extension("toml"))
                 .unwrap_or_else(|e| {
@@ -424,25 +410,24 @@ impl AssetMap {
             )
         });
 
-        let asset = A::load(specifier.metadata, context).unwrap_or_else(|e| {
+        A::import(path, specifier.metadata, map).unwrap_or_else(|e| {
             panic!(
-                "Failed to load asset {} from metadata: {e:?}",
+                "Failed to import any assets {} from metadata: {e:?}",
                 A::asset_type_name()
             )
         });
-
-        option_ptr
-            .cast::<Option<LoadedAsset<A>>>()
-            .write(Some(LoadedAsset {
-                asset,
-                ref_count: 1,
-                identifier: path.into(),
-            }));
-        index
     }
 
     pub fn shader_cache(&self) -> &ShaderCache {
         &self.shader_cache
+    }
+
+    pub fn device(&self) -> &Device {
+        &self.device
+    }
+
+    pub fn sampler_allocator(&self) -> &SamplerAllocator {
+        &self.sampler_allocator
     }
 }
 
@@ -567,7 +552,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use crate::{
-        asset_map::{Asset, AssetSpecifier, LoadContext},
+        asset_map::{Asset, AssetMap, AssetSpecifier},
         assets::{
             texture::{Texture, TextureSamplerConfiguration},
             TextureMetadata,
@@ -603,17 +588,29 @@ mod tests {
                 "CharacterStats"
             }
 
-            fn load(metadata: Self::Metadata, _ctx: &LoadContext) -> anyhow::Result<Self>
+            fn import(
+                _base_id: &str,
+                metadata: Self::Metadata,
+                map: &mut AssetMap,
+            ) -> anyhow::Result<()>
             where
                 Self: Sized,
             {
-                Ok(Self {
+                let character_stats = Self {
                     health: metadata.health,
                     attack: metadata.attack,
                     defense: metadata.defense,
-                })
+                };
+
+                map.add(character_stats, "stats");
+
+                Ok(())
             }
         }
+
+        let shader_cache = ShaderCache::new();
+        let sampler_allocator = SamplerAllocator::default();
+        let mut dummy_map = AssetMap::new(Device::dummy(), shader_cache, sampler_allocator);
 
         let metadata = CharacterStatsMetadata {
             health: 10,
@@ -627,18 +624,10 @@ mod tests {
             toml::from_str::<AssetSpecifier<CharacterStats>>(&serialized_specifier).unwrap();
 
         let device = Device::dummy();
-        let shader_cache = ShaderCache::new();
-        let sampler_allocator = SamplerAllocator::default();
         // The LoadContext is not used, we should be fine
-        let asset = CharacterStats::load(
-            specifier.metadata,
-            &LoadContext {
-                device: &device,
-                shader_cache: &shader_cache,
-                sampler_allocator: &sampler_allocator,
-            },
-        )
-        .unwrap();
+        CharacterStats::import("", specifier.metadata, &mut dummy_map).unwrap();
+        let asset = dummy_map.get::<CharacterStats>(&("stats".into())).unwrap();
+
         assert_eq!(asset.health, 10);
         assert_eq!(asset.attack, 15);
         assert_eq!(asset.defense, 5);

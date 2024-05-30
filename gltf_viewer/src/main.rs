@@ -10,7 +10,7 @@ use engine::assets::material::{
 use engine::assets::texture::{Texture, TextureDescription, TextureUsageFlags};
 use engine::constants::CUBE_MESH_HANDLE;
 use engine::editor::SceneEditor;
-use engine::egui_mgpu::{egui, EguiMgpuIntegration};
+use engine::egui_mgpu::EguiMgpuIntegration;
 use engine::glam::{vec3, EulerRot, Mat4, Vec4Swizzles};
 use engine::glam::{Quat, Vec3};
 use engine::math::{constants, Transform};
@@ -250,12 +250,12 @@ impl App for GltfViewerApplication {
         self.egui_integration.begin_frame(context.window());
         let egui_context = self.egui_integration.context();
 
-        egui::Window::new("Scene Editor")
-            .show(&egui_context, |ui| {
-                self.scene_editor
-                    .show(&context.device, ui, &mut self.scene, &mut self.asset_map);
-            })
-            .unwrap();
+        self.scene_editor.show(
+            &context.device,
+            &egui_context,
+            &mut self.scene,
+            &mut self.asset_map,
+        );
 
         if context.input.is_key_just_pressed(engine::input::Key::F1) {
             self.output = SceneOutput::BaseColor;
@@ -287,14 +287,13 @@ impl App for GltfViewerApplication {
             self.set_cursor_captured(!self.is_mouse_captured, context);
         }
 
-        if !self.is_mouse_captured {
-            return Ok(());
-        }
-
         match self.camera_mode {
             CameraMode::Orbit => self.update_orbit_camera(context),
             CameraMode::Free => self.update_fps_camera(context),
         }
+
+        self.scene_editor
+            .update_pov(&self.pov, self.egui_integration.pixels_per_point());
 
         self.scene
             .set_node_world_location(self.cubemap_handle, self.pov.transform.location);
@@ -360,25 +359,26 @@ impl GltfViewerApplication {
     fn update_fps_camera(&mut self, context: &AppContext) {
         let mut camera_input = Vec3::default();
 
-        if context.input.is_key_pressed(engine::input::Key::A) {
-            camera_input.x = 1.0;
-        } else if context.input.is_key_pressed(engine::input::Key::D) {
-            camera_input.x = -1.0;
-        }
+        if self.is_mouse_captured {
+            if context.input.is_key_pressed(engine::input::Key::A) {
+                camera_input.x = 1.0;
+            } else if context.input.is_key_pressed(engine::input::Key::D) {
+                camera_input.x = -1.0;
+            }
 
-        if context.input.is_key_pressed(engine::input::Key::W) {
-            camera_input.z = 1.0;
-        } else if context.input.is_key_pressed(engine::input::Key::S) {
-            camera_input.z = -1.0;
-        }
-        if context.input.is_key_pressed(engine::input::Key::Q) {
-            camera_input.y = 1.0;
-        } else if context.input.is_key_pressed(engine::input::Key::E) {
-            camera_input.y = -1.0;
-        }
+            if context.input.is_key_pressed(engine::input::Key::W) {
+                camera_input.z = 1.0;
+            } else if context.input.is_key_pressed(engine::input::Key::S) {
+                camera_input.z = -1.0;
+            }
+            if context.input.is_key_pressed(engine::input::Key::Q) {
+                camera_input.y = 1.0;
+            } else if context.input.is_key_pressed(engine::input::Key::E) {
+                camera_input.y = -1.0;
+            }
 
-        camera_input *= (MOVEMENT_SPEED * context.time.delta_seconds()) as f32;
-
+            camera_input *= (MOVEMENT_SPEED * context.time.delta_seconds()) as f32;
+        }
         let mouse_delta = context.input.mouse_delta();
 
         self.cam_roll += mouse_delta.x * (ROTATION_DEGREES * context.time.delta_seconds()) as f32;
@@ -397,18 +397,20 @@ impl GltfViewerApplication {
     }
 
     fn update_orbit_camera(&mut self, context: &AppContext) {
-        let mouse_delta = context.input.mouse_delta();
-        if context.input.is_mouse_button_pressed(MouseButton::Left) {
-            self.cam_roll +=
-                mouse_delta.x * (ROTATION_DEGREES * context.time.delta_seconds()) as f32;
-            self.cam_pitch +=
-                mouse_delta.y * (ROTATION_DEGREES * context.time.delta_seconds()) as f32;
-            self.cam_pitch = self.cam_pitch.clamp(-89.0, 89.0);
-        }
-        if context.input.is_mouse_button_pressed(MouseButton::Right) {
-            self.orbit_distance +=
-                -mouse_delta.y * (MOVEMENT_SPEED * context.time.delta_seconds()) as f32;
-            self.orbit_distance = self.orbit_distance.max(0.1);
+        if self.is_mouse_captured {
+            let mouse_delta = context.input.mouse_delta();
+            if context.input.is_mouse_button_pressed(MouseButton::Left) {
+                self.cam_roll +=
+                    mouse_delta.x * (ROTATION_DEGREES * context.time.delta_seconds()) as f32;
+                self.cam_pitch +=
+                    mouse_delta.y * (ROTATION_DEGREES * context.time.delta_seconds()) as f32;
+                self.cam_pitch = self.cam_pitch.clamp(-89.0, 89.0);
+            }
+            if context.input.is_mouse_button_pressed(MouseButton::Right) {
+                self.orbit_distance +=
+                    -mouse_delta.y * (MOVEMENT_SPEED * context.time.delta_seconds()) as f32;
+                self.orbit_distance = self.orbit_distance.max(0.1);
+            }
         }
 
         let rotation = Quat::from_euler(
