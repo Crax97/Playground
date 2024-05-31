@@ -22,7 +22,7 @@ pub struct AssetMap {
     shader_cache: ShaderCache,
     sampler_allocator: SamplerAllocator,
     registrations: HashMap<TypeId, AssetRegistration>,
-    known_assets: HashMap<ImmutableString, AssetInfo>,
+    known_asset_types: HashMap<ImmutableString, TypeId>,
 }
 
 pub struct LoadContext<'a> {
@@ -56,7 +56,7 @@ enum AssetStatus {
 }
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 enum AssetStorage {
-    Dynamic,
+    Memory,
     Disk,
 }
 
@@ -93,6 +93,7 @@ struct AssetRegistration {
     dispose_fn: unsafe fn(NonNull<u8>, device: &Device),
     import_fn: unsafe fn(&str, &mut AssetMap),
     arena: ErasedArena,
+    known_assets: HashMap<ImmutableString, AssetInfo>,
 }
 
 impl AssetMap {
@@ -104,7 +105,7 @@ impl AssetMap {
         Self {
             device,
             registrations: Default::default(),
-            known_assets: Default::default(),
+            known_asset_types: Default::default(),
             sampler_allocator,
             shader_cache,
         }
@@ -112,6 +113,12 @@ impl AssetMap {
 
     pub fn discover_assets(&mut self, base_path: impl Into<PathBuf>) {
         let base_path = base_path.into();
+
+        debug_assert!(
+            std::fs::metadata(&base_path).is_ok(),
+            "Cannot access path '{:?}'",
+            base_path
+        );
 
         for entry in walkdir::WalkDir::new(base_path)
             .into_iter()
@@ -128,20 +135,23 @@ impl AssetMap {
             let asset_type: &str = toml["asset_type"]
                 .as_str()
                 .expect("Asset has no 'asset_type' field!");
+            info!("Discovered '{entry:?}' of type '{asset_type}'");
             let mut found_map = false;
             for (ty, registration) in &mut self.registrations {
                 if asset_type == registration.asset_type_name {
                     let entry_name = entry.with_extension("");
                     let entry_name = entry_name.to_str().unwrap();
                     let entry_name = entry_name.replace('\\', "/");
-                    self.known_assets.insert(
-                        ImmutableString::new_dynamic(entry_name),
+                    let asset_id = ImmutableString::new_dynamic(entry_name);
+                    registration.known_assets.insert(
+                        asset_id.clone(),
                         AssetInfo {
                             status: AssetStatus::Unloaded,
                             asset_storage: AssetStorage::Disk,
                             asset_ty: *ty,
                         },
                     );
+                    self.known_asset_types.insert(asset_id, *ty);
                     found_map = true;
                     break;
                 }
@@ -161,6 +171,7 @@ impl AssetMap {
                 dispose_fn: Self::dispose_fn::<A>,
                 import_fn: Self::import_fn::<A>,
                 arena: ErasedArena::new::<LoadedAsset<A>>(),
+                known_assets: Default::default(),
             },
         );
 
@@ -168,12 +179,16 @@ impl AssetMap {
     }
 
     pub fn preload(&mut self, identifier: &str) {
-        let info: &mut AssetInfo = self
+        let asset_id = identifier.into();
+        let asset_ty = self
+            .known_asset_types
+            .get(&asset_id)
+            .expect("Asset type is not known!");
+        let registration = self.registrations.get_mut(asset_ty).unwrap();
+        let info = registration
             .known_assets
-            .get_mut(&ImmutableString::new_dynamic(identifier))
-            .expect("Asset isn't known!");
-        let ty = info.asset_ty;
-        let registration = self.registrations.get_mut(&ty).unwrap();
+            .get(&asset_id)
+            .expect("Asset is not known!");
         let import_fn = registration.import_fn;
 
         assert!(
@@ -195,27 +210,23 @@ impl AssetMap {
             .registrations
             .get_mut(&asset_ty)
             .unwrap_or_else(|| panic!("Asset type {} was not registered!", type_name::<A>()));
-        let map = &mut map.arena;
+        let arena = &mut map.arena;
 
-        let index = map.add(LoadedAsset {
+        let index = arena.add(LoadedAsset {
             asset,
             ref_count: 1,
             identifier: identifier.clone(),
         });
 
-        let old = self.known_assets.insert(
+        map.known_assets.insert(
             identifier.clone(),
             AssetInfo {
                 status: AssetStatus::Loaded(index),
-                asset_storage: AssetStorage::Dynamic,
+                asset_storage: AssetStorage::Memory,
                 asset_ty,
             },
         );
-        debug_assert!(
-            old.is_none(),
-            "Another asset with identifier '{}' was already defined! identifiers must be unique!",
-            &identifier
-        );
+        self.known_asset_types.insert(identifier.clone(), asset_ty);
         AssetHandle {
             _phantom_data: PhantomData,
             identifier: Some(identifier),
@@ -236,11 +247,15 @@ impl AssetMap {
             .get_mut(&asset_ty)
             .unwrap_or_else(|| panic!("Asset type {} was not registered!", type_name::<A>()));
         let map = &mut registration.arena;
-        let asset_info = self
+        let asset_info = registration
             .known_assets
             .get(identifier)
             .copied()
             .expect("Asset is unknown!");
+
+        if asset_info.asset_storage == AssetStorage::Memory {
+            return Ok(());
+        }
 
         match asset_info.status {
             AssetStatus::Loaded(index) => {
@@ -266,16 +281,17 @@ impl AssetMap {
                     A::asset_type_name(),
                 )
             });
-        registration
-            .arena
-            .iter::<LoadedAsset<A>>()
-            .map(|loaded_asset| &loaded_asset.identifier)
+        registration.known_assets.keys()
     }
 
     // Gets a reference to an asset, loading it if it is not loaded
     pub fn load<A: Asset>(&mut self, handle: &AssetHandle<A>) -> &A {
         let identifier = handle.identifier.as_ref().expect("AssetHandle is null!");
-        if self
+        let registration = self
+            .registrations
+            .get(&TypeId::of::<A>())
+            .expect("asset type is not registered");
+        if registration
             .known_assets
             .get(identifier)
             .copied()
@@ -291,7 +307,11 @@ impl AssetMap {
     // Gets a mutable reference to an asset, loading it if it is not loaded
     pub fn load_mut<A: Asset>(&mut self, handle: &AssetHandle<A>) -> &mut A {
         let identifier = handle.identifier.as_ref().expect("AssetHandle is null!");
-        if self
+        let registration = self
+            .registrations
+            .get(&TypeId::of::<A>())
+            .expect("asset type is not registered");
+        if registration
             .known_assets
             .get(identifier)
             .copied()
@@ -308,7 +328,11 @@ impl AssetMap {
     /// Returns None only when the handle is null
     pub fn get<A: Asset>(&self, handle: &AssetHandle<A>) -> Option<&A> {
         let identifier = handle.identifier.as_ref()?;
-        let index = self
+        let registration = self
+            .registrations
+            .get(&TypeId::of::<A>())
+            .expect("asset type is not registered");
+        let index = registration
             .known_assets
             .get(identifier)
             .copied()
@@ -328,7 +352,11 @@ impl AssetMap {
     /// Returns None only when the handle is null
     pub fn get_mut<A: Asset>(&mut self, handle: &AssetHandle<A>) -> Option<&mut A> {
         let identifier = handle.identifier.as_ref()?;
-        let index = self
+        let registration = self
+            .registrations
+            .get(&TypeId::of::<A>())
+            .expect("asset type is not registered");
+        let index = registration
             .known_assets
             .get(identifier)
             .copied()
@@ -353,10 +381,14 @@ impl AssetMap {
             .get_mut(&asset_ty)
             .unwrap_or_else(|| panic!("Asset type {} was not registered!", type_name::<A>()));
         let map = &mut registration.arena;
-        let asset_entry = self
+        let asset_entry = registration
             .known_assets
             .get_mut(identifier)
             .expect("Asset is unknown!");
+
+        if asset_entry.asset_storage == AssetStorage::Memory {
+            return;
+        }
 
         let (ref_count, index) = match asset_entry.status {
             AssetStatus::Loaded(index) => {
@@ -385,7 +417,7 @@ impl AssetMap {
                 }
             }
         }
-        self.known_assets.clear();
+        self.known_asset_types.clear();
     }
 
     unsafe fn dispose_fn<A: Asset>(ptr: NonNull<u8>, device: &Device) {

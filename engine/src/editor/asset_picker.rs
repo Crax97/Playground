@@ -60,16 +60,21 @@ impl AssetPicker {
                         .clicked()
                     {
                         let new_handle = AssetHandle::new(self.selected_asset.take().unwrap());
-                        let _old = std::mem::replace(handle, new_handle);
-                        // dec ref
+                        asset_map.increment_reference(&new_handle).unwrap();
+                        let old = std::mem::replace(handle, new_handle);
+                        if !old.is_null() {
+                            asset_map.decrement_reference(old);
+                        }
                         self.is_shown = false;
                         self.picking_for = None;
                         picked = true;
                     };
 
                     if ui.button("Clear").clicked() {
-                        let _old = std::mem::replace(handle, AssetHandle::null());
-                        // dec ref
+                        let old = std::mem::replace(handle, AssetHandle::null());
+                        if !old.is_null() {
+                            asset_map.decrement_reference(old);
+                        }
                         self.is_shown = false;
                         self.selected_asset.take();
                         self.picking_for = None;

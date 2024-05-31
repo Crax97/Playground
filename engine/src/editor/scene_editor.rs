@@ -293,7 +293,7 @@ impl SceneEditor {
                             let Some(material) = asset_map.get_mut(&info.material) else {
                                 return;
                             };
-                            let mut changed_textures = true;
+                            let mut changed_textures = false;
                             egui::Grid::new(ui.next_auto_id()).show(ui, |ui| {
                                 for texture in &mut material.parameters.textures {
                                     ui.horizontal(|ui| {
