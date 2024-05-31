@@ -44,6 +44,7 @@ toml = "0.8.13"
 walkdir = "2.5.0"
 transform-gizmo-egui = "0.1.0"
 mint = "0.5.9"
+russimp = { version = "3.2.0", features = ["prebuilt"] }
 
 [dev-dependencies]
 approx = "0.5.1"
