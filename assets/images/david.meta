@@ -1,0 +1,14 @@
+{
+    "asset_type": "Texture",
+    "metadata": {
+        "source_path": "assets/images/david.jpg",
+
+        "sampler_configuration": {
+            "minmag_filter": "Linear",
+            "mipmap_mode": "Linear",
+            "wrap_u": "Repeat",
+            "wrap_v": "Repeat",
+            "wrap_w": "Repeat"
+        }
+    }
+}

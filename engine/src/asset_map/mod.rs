@@ -125,15 +125,15 @@ impl AssetMap {
             .into_iter()
             .filter_map(|s| s.ok())
             .filter(|s| {
-                s.file_type().is_file() && s.path().extension().is_some_and(|e| e == "toml")
+                s.file_type().is_file() && s.path().extension().is_some_and(|e| e == "meta")
             })
         {
             let entry = entry.path();
-            let toml_specifier = std::fs::read_to_string(entry)
+            let specifier_str = std::fs::read_to_string(entry)
                 .unwrap_or_else(|e| panic!("Failed to load asset {entry:?}! {e:?}"));
-            let toml = toml::from_str::<toml::Table>(&toml_specifier)
-                .unwrap_or_else(|e| panic!("Failed to parse {entry:?} as toml! {e:?}"));
-            let asset_type: &str = toml["asset_type"]
+            let json = serde_json::from_str::<serde_json::Value>(&specifier_str)
+                .unwrap_or_else(|e| panic!("Failed to parse {entry:?} as json! {e:?}"));
+            let asset_type: &str = json["asset_type"]
                 .as_str()
                 .expect("Asset has no 'asset_type' field!");
             info!("Discovered '{entry:?}' of type '{asset_type}'");
@@ -424,7 +424,7 @@ impl AssetMap {
 
     fn specifier_fn<A: Asset>() -> String {
         let specifier = AssetSpecifier::<A>::new(A::Metadata::default());
-        toml::to_string_pretty(&specifier).unwrap()
+        serde_json::to_string_pretty(&specifier).unwrap()
     }
 
     unsafe fn dispose_fn<A: Asset>(ptr: NonNull<u8>, device: &Device) {
@@ -435,19 +435,20 @@ impl AssetMap {
     // Loads dynamically one or more assets into the AssetMap
     unsafe fn import_fn<A: Asset>(path: &str, map: &mut AssetMap) {
         let file_content =
-            std::fs::read_to_string(std::path::Path::new(path).with_extension("toml"))
+            std::fs::read_to_string(std::path::Path::new(path).with_extension("meta"))
                 .unwrap_or_else(|e| {
                     panic!(
                         "Failed to read specifier file for {}: {e:?}",
                         A::asset_type_name()
                     )
                 });
-        let specifier = toml::from_str::<AssetSpecifier<A>>(&file_content).unwrap_or_else(|e| {
-            panic!(
-                "Failed to parse specifier for asset {}: {e:?}",
-                A::asset_type_name()
-            )
-        });
+        let specifier =
+            serde_json::from_str::<AssetSpecifier<A>>(&file_content).unwrap_or_else(|e| {
+                panic!(
+                    "Failed to parse specifier for asset {}: {e:?}",
+                    A::asset_type_name()
+                )
+            });
 
         A::import(path, specifier.metadata, map).unwrap_or_else(|e| {
             panic!(
@@ -654,6 +655,7 @@ mod tests {
         let shader_cache = ShaderCache::new();
         let sampler_allocator = SamplerAllocator::default();
         let mut dummy_map = AssetMap::new(Device::dummy(), shader_cache, sampler_allocator);
+        dummy_map.register::<CharacterStats>();
 
         let metadata = CharacterStatsMetadata {
             health: 10,
@@ -661,10 +663,10 @@ mod tests {
             defense: 5,
         };
         let specifier = AssetSpecifier::<CharacterStats>::new(metadata);
-        let serialized_specifier = toml::to_string(&specifier).unwrap();
+        let serialized_specifier = serde_json::to_string(&specifier).unwrap();
         println!("Specifier\n{serialized_specifier}");
         let specifier =
-            toml::from_str::<AssetSpecifier<CharacterStats>>(&serialized_specifier).unwrap();
+            serde_json::from_str::<AssetSpecifier<CharacterStats>>(&serialized_specifier).unwrap();
 
         let device = Device::dummy();
         // The LoadContext is not used, we should be fine
@@ -682,6 +684,6 @@ mod tests {
             source_path: "poo".into(),
             sampler_configuration: TextureSamplerConfiguration::default(),
         });
-        println!("{}", toml::to_string(&specifier).unwrap());
+        println!("{}", serde_json::to_string(&specifier).unwrap());
     }
 }
