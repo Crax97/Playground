@@ -311,9 +311,7 @@ impl SceneEditor {
                             });
 
                             if changed_textures {
-                                material
-                                    .recreate_binding_set_layout(device, tex_asset_map)
-                                    .unwrap();
+                                material.recreate_binding_set_layout(tex_asset_map).unwrap();
                             }
                         });
                     });

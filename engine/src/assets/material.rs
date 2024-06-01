@@ -1,18 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{
-    constants::WHITE_TEXTURE_HANDLE, shader_parameter_writer::ScalarParameterWriter,
-    utils::shader_parameter_writer::*,
-};
+use crate::{shader_parameter_writer::ScalarParameterWriter, utils::shader_parameter_writer::*};
 
 use mgpu::{
     Binding, BindingSet, BindingSetDescription, BindingSetElement, BindingSetElementKind,
     BindingSetLayout, BindingSetLayoutInfo, BindingType, BufferDescription, BufferUsageFlags,
-    CompareOp, CullMode, DepthStencilState, DepthStencilTargetInfo, Device, FragmentStageInfo,
-    FrontFace, GraphicsPipeline, GraphicsPipelineDescription, ImageFormat, OwnedBindingSetLayout,
-    PolygonMode, PrimitiveTopology, PushConstantInfo, RenderTargetInfo, ShaderStageFlags,
-    StorageAccessMode, VertexAttributeFormat, VertexInputDescription, VertexInputFrequency,
-    VertexStageInfo,
+    CompareOp, CullMode, DepthStencilState, DepthStencilTargetInfo, FragmentStageInfo, FrontFace,
+    GraphicsPipeline, GraphicsPipelineDescription, ImageFormat, OwnedBindingSetLayout, PolygonMode,
+    PrimitiveTopology, PushConstantInfo, RenderTargetInfo, ShaderStageFlags, StorageAccessMode,
+    VertexAttributeFormat, VertexInputDescription, VertexInputFrequency, VertexStageInfo,
 };
 use serde::{Deserialize, Serialize};
 
@@ -60,18 +56,20 @@ pub struct TextureMaterialParameter {
     pub texture: AssetHandle<Texture>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+#[derive(Serialize, Deserialize, Clone, Copy, Default)]
 pub enum MaterialType {
+    #[default]
     Lit,
     Unlit,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+#[derive(Serialize, Deserialize, Clone, Copy, Default)]
 pub enum MaterialDomain {
+    #[default]
     Surface,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
+#[derive(Serialize, Deserialize, Clone, Copy, Default)]
 pub struct MaterialProperties {
     pub domain: MaterialDomain,
     pub ty: MaterialType,
@@ -86,7 +84,6 @@ pub struct MaterialParameters {
 
 impl Material {
     pub fn new(
-        device: &Device,
         description: &MaterialDescription,
         asset_map: &mut AssetMap,
     ) -> anyhow::Result<Material> {
@@ -97,8 +94,10 @@ impl Material {
         let fragment_shader = asset_map
             .shader_cache()
             .get_shader_module(&description.fragment_shader);
-        let vertex_shader_layout = device.get_shader_module_layout(vertex_shader)?;
-        let fragment_shader_layout = device.get_shader_module_layout(fragment_shader)?;
+        let vertex_shader_layout = asset_map.device().get_shader_module_layout(vertex_shader)?;
+        let fragment_shader_layout = asset_map
+            .device()
+            .get_shader_module_layout(fragment_shader)?;
 
         if let Some(user_binding) = vertex_shader_layout
             .binding_sets
@@ -143,57 +142,60 @@ impl Material {
             binding_set_elements: &user_bindings,
         };
 
-        let pipeline = device.create_graphics_pipeline(&GraphicsPipelineDescription {
-            label: Some("Graphics pipeline for material"),
-            vertex_stage: &VertexStageInfo {
-                shader: &vertex_shader,
-                entry_point: "main",
-                vertex_inputs: mesh_vertex_inputs(),
-            },
-            fragment_stage: Some(&FragmentStageInfo {
-                shader: &fragment_shader,
-                entry_point: "main",
-                render_targets: &[
-                    RenderTargetInfo { blend: None },
-                    RenderTargetInfo { blend: None },
-                    RenderTargetInfo { blend: None },
-                    RenderTargetInfo { blend: None },
-                    RenderTargetInfo { blend: None },
-                ],
-                depth_stencil_target: Some(&DepthStencilTargetInfo {
-                    format: ImageFormat::Depth32,
-                }),
-            }),
-            primitive_restart_enabled: false,
-            primitive_topology: PrimitiveTopology::TriangleList,
-            polygon_mode: PolygonMode::Filled,
-            cull_mode: if description.properties.double_sided {
-                CullMode::None
-            } else {
-                CullMode::Back
-            },
-            front_face: FrontFace::CounterClockWise,
-            multisample_state: None,
-            depth_stencil_state: DepthStencilState {
-                depth_test_enabled: true,
-                depth_write_enabled: true,
-                depth_compare_op: CompareOp::Less,
-            },
-            binding_set_layouts: &[
-                BindingSetLayoutInfo {
-                    set: 0,
-                    layout: SceneRenderer::per_object_scene_binding_set_layout(),
-                },
-                BindingSetLayoutInfo {
-                    set: 1,
-                    layout: &user_binding_layout,
-                },
-            ],
-            push_constant_info: Some(PushConstantInfo {
-                size: std::mem::size_of::<scene_renderer::GPUPerObjectDrawData>(),
-                visibility: ShaderStageFlags::ALL_GRAPHICS,
-            }),
-        })?;
+        let pipeline =
+            asset_map
+                .device()
+                .create_graphics_pipeline(&GraphicsPipelineDescription {
+                    label: Some("Graphics pipeline for material"),
+                    vertex_stage: &VertexStageInfo {
+                        shader: &vertex_shader,
+                        entry_point: "main",
+                        vertex_inputs: mesh_vertex_inputs(),
+                    },
+                    fragment_stage: Some(&FragmentStageInfo {
+                        shader: &fragment_shader,
+                        entry_point: "main",
+                        render_targets: &[
+                            RenderTargetInfo { blend: None },
+                            RenderTargetInfo { blend: None },
+                            RenderTargetInfo { blend: None },
+                            RenderTargetInfo { blend: None },
+                            RenderTargetInfo { blend: None },
+                        ],
+                        depth_stencil_target: Some(&DepthStencilTargetInfo {
+                            format: ImageFormat::Depth32,
+                        }),
+                    }),
+                    primitive_restart_enabled: false,
+                    primitive_topology: PrimitiveTopology::TriangleList,
+                    polygon_mode: PolygonMode::Filled,
+                    cull_mode: if description.properties.double_sided {
+                        CullMode::None
+                    } else {
+                        CullMode::Back
+                    },
+                    front_face: FrontFace::CounterClockWise,
+                    multisample_state: None,
+                    depth_stencil_state: DepthStencilState {
+                        depth_test_enabled: true,
+                        depth_write_enabled: true,
+                        depth_compare_op: CompareOp::Less,
+                    },
+                    binding_set_layouts: &[
+                        BindingSetLayoutInfo {
+                            set: 0,
+                            layout: SceneRenderer::per_object_scene_binding_set_layout(),
+                        },
+                        BindingSetLayoutInfo {
+                            set: 1,
+                            layout: &user_binding_layout,
+                        },
+                    ],
+                    push_constant_info: Some(PushConstantInfo {
+                        size: std::mem::size_of::<scene_renderer::GPUPerObjectDrawData>(),
+                        visibility: ShaderStageFlags::ALL_GRAPHICS,
+                    }),
+                })?;
 
         let mut user_textures = vec![];
 
@@ -262,13 +264,13 @@ impl Material {
         }
 
         let mut scalar_parameter_writer = ScalarParameterWriter::new(
-            device,
+            asset_map.device(),
             &[&vertex_shader_layout, &fragment_shader_layout],
             1,
             0,
         )?;
         let user_buffer = if !scalar_parameter_writer.scalar_infos.is_empty() {
-            Some(device.create_buffer(&BufferDescription {
+            Some(asset_map.device().create_buffer(&BufferDescription {
                 label: Some("Material user buffer"),
                 usage_flags: BufferUsageFlags::TRANSFER_DST | BufferUsageFlags::UNIFORM_BUFFER,
                 size: scalar_parameter_writer.binary_blob.len(),
@@ -283,7 +285,6 @@ impl Material {
             &description.parameters.textures,
             asset_map,
             user_buffer,
-            device,
             &user_binding_layout,
         )?;
 
@@ -291,7 +292,7 @@ impl Material {
             scalar_parameter_writer.write(&parameter.name, parameter.value);
         }
         if let Some(buffer) = &user_buffer {
-            scalar_parameter_writer.update_buffer(device, *buffer)?;
+            scalar_parameter_writer.update_buffer(asset_map.device(), *buffer)?;
         }
 
         Ok(Material {
@@ -308,23 +309,18 @@ impl Material {
         })
     }
 
-    pub fn recreate_binding_set_layout(
-        &mut self,
-        device: &Device,
-        asset_map: &mut AssetMap,
-    ) -> anyhow::Result<()> {
+    pub fn recreate_binding_set_layout(&mut self, asset_map: &mut AssetMap) -> anyhow::Result<()> {
         let bs = create_binding_set(
             &self.texture_parameter_infos,
             &self.parameters.textures,
             asset_map,
             self.user_buffer,
-            device,
             &BindingSetLayout {
                 binding_set_elements: &self.user_binding_set_layout.binding_set_elements,
             },
         )?;
         let old = std::mem::replace(&mut self.binding_set, bs);
-        device.destroy_binding_set(old)?;
+        asset_map.device().destroy_binding_set(old)?;
         Ok(())
     }
 
@@ -343,7 +339,6 @@ fn create_binding_set(
     textures: &[TextureMaterialParameter],
     asset_map: &mut AssetMap,
     user_buffer: Option<mgpu::Buffer>,
-    device: &Device,
     user_binding_layout: &BindingSetLayout,
 ) -> Result<BindingSet, anyhow::Error> {
     let bindings = user_textures
@@ -351,9 +346,7 @@ fn create_binding_set(
         .filter_map(|tex| {
             let tex_value = textures.iter().find(|param| tex.name == param.name);
             tex_value.map(|param| {
-                let texture = asset_map
-                    .get(&param.texture)
-                    .unwrap_or(asset_map.get(&WHITE_TEXTURE_HANDLE).unwrap());
+                let texture = asset_map.load(&param.texture);
                 [
                     Binding {
                         binding: tex.binding,
@@ -387,7 +380,7 @@ fn create_binding_set(
             visibility: ShaderStageFlags::ALL_GRAPHICS,
         }))
         .collect::<Vec<_>>();
-    let binding_set = device.create_binding_set(
+    let binding_set = asset_map.device().create_binding_set(
         &BindingSetDescription {
             label: Some("Binding set for material"),
             bindings: &bindings,

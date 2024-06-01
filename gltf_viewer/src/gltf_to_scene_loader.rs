@@ -30,7 +30,7 @@ pub fn load(
     let (document, buffer_data, image_data) = gltf::import(path.as_ref())?;
 
     let textures = create_textures(&document, asset_map, sampler_allocator, image_data, device)?;
-    let materials = create_materials(&document, asset_map, textures, device)?;
+    let materials = create_materials(&document, asset_map, textures)?;
     let meshes = create_meshes(&document, buffer_data, asset_map, device)?;
 
     assemble_scene(document, materials, meshes)
@@ -69,7 +69,6 @@ fn create_materials(
     document: &gltf::Document,
     asset_map: &mut AssetMap,
     textures: Vec<AssetHandle<Texture>>,
-    device: &Device,
 ) -> anyhow::Result<Vec<AssetHandle<Material>>> {
     let mut materials = vec![];
 
@@ -104,7 +103,6 @@ fn create_materials(
 
         let identifier = format!("gltf.materials.{}", idx);
         let material = Material::new(
-            device,
             &MaterialDescription {
                 label: material.name(),
                 vertex_shader: "pbr_vertex".into(),

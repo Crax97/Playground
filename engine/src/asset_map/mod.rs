@@ -32,7 +32,7 @@ pub struct LoadContext<'a> {
 }
 
 pub trait Asset: 'static {
-    type Metadata: 'static + Serialize + for<'a> Deserialize<'a>;
+    type Metadata: 'static + Serialize + for<'a> Deserialize<'a> + Default;
     fn asset_type_name() -> &'static str;
     fn import(
         base_id: &str,
@@ -88,8 +88,9 @@ struct AssetSpecifier<A: Asset> {
     metadata: A::Metadata,
 }
 
-struct AssetRegistration {
-    asset_type_name: &'static str,
+pub struct AssetRegistration {
+    pub asset_type_name: &'static str,
+    pub specifier_fn: fn() -> String,
     dispose_fn: unsafe fn(NonNull<u8>, device: &Device),
     import_fn: unsafe fn(&str, &mut AssetMap),
     arena: ErasedArena,
@@ -170,6 +171,7 @@ impl AssetMap {
                 asset_type_name: A::asset_type_name(),
                 dispose_fn: Self::dispose_fn::<A>,
                 import_fn: Self::import_fn::<A>,
+                specifier_fn: Self::specifier_fn::<A>,
                 arena: ErasedArena::new::<LoadedAsset<A>>(),
                 known_assets: Default::default(),
             },
@@ -420,6 +422,11 @@ impl AssetMap {
         self.known_asset_types.clear();
     }
 
+    fn specifier_fn<A: Asset>() -> String {
+        let specifier = AssetSpecifier::<A>::new(A::Metadata::default());
+        toml::to_string_pretty(&specifier).unwrap()
+    }
+
     unsafe fn dispose_fn<A: Asset>(ptr: NonNull<u8>, device: &Device) {
         let asset_ref = ptr.cast::<LoadedAsset<A>>().as_ref();
         asset_ref.asset.dispose(device)
@@ -460,6 +467,10 @@ impl AssetMap {
 
     pub fn sampler_allocator(&self) -> &SamplerAllocator {
         &self.sampler_allocator
+    }
+
+    pub fn registrations(&self) -> impl Iterator<Item = &AssetRegistration> {
+        self.registrations.values()
     }
 }
 
@@ -606,7 +617,7 @@ mod tests {
             defense: u32,
         }
 
-        #[derive(Serialize, Deserialize)]
+        #[derive(Serialize, Deserialize, Default)]
         struct CharacterStatsMetadata {
             health: u32,
             attack: u32,

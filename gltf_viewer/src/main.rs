@@ -171,7 +171,6 @@ impl App for GltfViewerApplication {
         let prefiltered_map = asset_map.add(env_diffuse, "textures.hdr.pisa-spec_prefiltered");
 
         let cube_material = Material::new(
-            &context.device,
             &MaterialDescription {
                 label: Some("Cubemap material"),
                 vertex_shader: "view_cubemap_vert".into(),

@@ -7,16 +7,25 @@ use russimp::scene::PostProcess;
 use serde::{Deserialize, Serialize};
 use texture::{TextureDescription, TextureSamplerConfiguration, TextureUsageFlags};
 
-use crate::asset_map::{Asset, AssetMap};
+use crate::{
+    asset_map::{Asset, AssetMap},
+    constants::{BLACK_TEXTURE_HANDLE, WHITE_TEXTURE_HANDLE},
+    immutable_string::ImmutableString,
+    shader_parameter_writer::ScalarMaterialParameter,
+};
 
-use self::{material::Material, mesh::Mesh, texture::Texture};
+use self::{
+    material::{Material, MaterialParameters, MaterialProperties, TextureMaterialParameter},
+    mesh::Mesh,
+    texture::Texture,
+};
 
 pub mod material;
 pub mod mesh;
 pub mod shader;
 pub mod texture;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct MeshMetadata {
     pub source: String,
 }
@@ -109,7 +118,7 @@ impl Asset for Mesh {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct TextureMetadata {
     pub source_path: String,
     pub sampler_configuration: TextureSamplerConfiguration,
@@ -163,8 +172,53 @@ impl Asset for Texture {
         Ok(())
     }
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct MaterialMetadata {
+    pub vertex_shader: String,
+    pub fragment_shader: String,
+    pub parameters: MaterialParameters,
+    pub properties: MaterialProperties,
+}
+
+impl Default for MaterialMetadata {
+    fn default() -> Self {
+        Self {
+            vertex_shader: Default::default(),
+            fragment_shader: Default::default(),
+            parameters: MaterialParameters {
+                scalars: vec![
+                    ScalarMaterialParameter {
+                        name: "Foo".into(),
+                        value: crate::shader_parameter_writer::ScalarParameterType::Vec2(
+                            [1.0, 0.5].into(),
+                        ),
+                    },
+                    ScalarMaterialParameter {
+                        name: "Bar".into(),
+                        value: crate::shader_parameter_writer::ScalarParameterType::Vec3(
+                            [1.0, 0.5, 3.0].into(),
+                        ),
+                    },
+                ],
+                textures: vec![
+                    TextureMaterialParameter {
+                        name: "Tex1".into(),
+                        texture: WHITE_TEXTURE_HANDLE.clone(),
+                    },
+                    TextureMaterialParameter {
+                        name: "Tex2".into(),
+                        texture: BLACK_TEXTURE_HANDLE.clone(),
+                    },
+                ],
+            },
+            properties: Default::default(),
+        }
+    }
+}
+
 impl Asset for Material {
-    type Metadata = ();
+    type Metadata = MaterialMetadata;
     fn asset_type_name() -> &'static str {
         "Material"
     }
@@ -175,10 +229,22 @@ impl Asset for Material {
             .unwrap();
     }
 
-    fn import(_base_id: &str, _metadata: Self::Metadata, _ctx: &mut AssetMap) -> anyhow::Result<()>
+    fn import(base_id: &str, metadata: Self::Metadata, map: &mut AssetMap) -> anyhow::Result<()>
     where
         Self: Sized,
     {
-        unimplemented!()
+        let material = Material::new(
+            &material::MaterialDescription {
+                label: Some(base_id),
+                vertex_shader: metadata.vertex_shader.into(),
+                fragment_shader: metadata.fragment_shader.into(),
+                parameters: metadata.parameters,
+                properties: metadata.properties,
+            },
+            map,
+        )?;
+
+        map.add(material, base_id);
+        Ok(())
     }
 }

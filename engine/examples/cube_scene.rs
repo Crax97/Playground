@@ -67,7 +67,6 @@ impl App for CubesSceneApplication {
         let david_texture = AssetHandle::<Texture>::new("assets/images/david");
         let mut scene = Scene::default();
         let material = Material::new(
-            &context.device,
             &MaterialDescription {
                 label: Some("simple material"),
                 vertex_shader: "simple_vertex_shader".into(),
