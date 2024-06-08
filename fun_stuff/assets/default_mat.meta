@@ -1,0 +1,61 @@
+{
+  "asset_type": "Material",
+  "metadata": {
+    "vertex_shader": "pbr_vertex",
+    "fragment_shader": "pbr_fragment",
+    "parameters": {
+      "scalars": [
+        {
+          "name": "base_color_factor",
+          "value": {
+            "Vec4": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "name": "metallic_factor",
+          "value": {
+            "Scalar": 0.0
+          }
+        },
+        {
+          "name": "roughness_factor",
+          "value": {
+            "Scalar": 1.0
+          }
+        }
+      ],
+      "textures": [
+        {
+          "name": "base_color",
+          "texture": "assets/images/checker_map"
+        },
+        {
+          "name": "normal",
+          "texture": "textures.white"
+        },
+        {
+          "name": "occlusion",
+          "texture": "textures.white"
+        },
+        {
+          "name": "emissive",
+          "texture": "textures.black"
+        },
+        {
+          "name": "metallic_roughness",
+          "texture": "textures.black"
+        }
+      ]
+    },
+    "properties": {
+      "domain": "Surface",
+      "ty": "Lit",
+      "double_sided": false
+    }
+  }
+}

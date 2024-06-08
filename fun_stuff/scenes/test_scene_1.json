@@ -1,0 +1,66 @@
+{
+  "nodes": [
+    {
+      "label": "SceneNode 0",
+      "tags": [],
+      "enabled": false,
+      "transform": {
+        "location": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "primitive_type": {
+        "Mesh": {
+          "handle": "assets/meshes/cube",
+          "material": "assets/default_mat"
+        }
+      }
+    },
+    {
+      "label": "SceneNode 1",
+      "tags": [],
+      "enabled": false,
+      "transform": {
+        "location": [
+          0.0,
+          0.0,
+          -1.9686012
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "primitive_type": {
+        "Mesh": {
+          "handle": "assets/meshes/cube",
+          "material": "assets/default_mat"
+        }
+      }
+    }
+  ],
+  "adjacency_list": [
+    [],
+    []
+  ]
+}
