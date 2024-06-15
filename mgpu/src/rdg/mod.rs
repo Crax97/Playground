@@ -881,7 +881,7 @@ impl Node {
                                     })
                                 }
                                 crate::BindingType::StorageImage { view, access_mode } => {
-                                    if access_mode != StorageAccessMode::Write {
+                                    if access_mode == StorageAccessMode::Read {
                                         Some(ResourceInfo {
                                             resource: Resource::Image {
                                                 image: view.owner,

@@ -1,0 +1,103 @@
+#version 460
+
+#extension GL_EXT_debug_printf : enable
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+struct Sphere {
+  vec4 color;
+  vec4 position_radius;
+};
+
+struct CameraInfo {
+  vec4 position_fov;
+  vec4 direction;
+  vec2 image_size;
+};
+
+layout(set = 0, binding = 0, std140) readonly buffer Scene {
+  uint num_prims;
+  Sphere[] prims;
+};
+layout(set = 0, binding = 1, rgba8) uniform image2D output_image;
+
+layout(push_constant) uniform CameraData { CameraInfo camera; };
+
+struct RaySphereIntersectionResult {
+  bool intersection;
+  float t;
+  vec3 intersection_point;
+  vec3 hit_normal;
+};
+
+// ray_normal must be normalized
+RaySphereIntersectionResult ray_sphere_intersection(vec3 ray_origin,
+                                                    vec3 ray_normal,
+                                                    vec3 sphere_origin,
+                                                    float sphere_radius) {
+  RaySphereIntersectionResult result;
+  result.intersection_point = vec3(0.0);
+  result.hit_normal = vec3(0.0);
+
+  vec3 D = (sphere_origin - ray_origin);
+  float d_len = length(D);
+  float dd = d_len * d_len;
+  float rr = sphere_radius * sphere_radius;
+
+  float theta = dot(ray_normal, D);
+  float delta = theta * theta - dd + rr;
+
+  if (delta < 0.0) {
+    result.intersection = false;
+  } else if (delta < 0.005) {
+    result.intersection = true;
+    result.t = -theta;
+  } else {
+    result.intersection = true;
+    float sqrt_d = sqrt(delta);
+    float t1 = -theta + sqrt_d;
+    float t2 = -theta - sqrt_d;
+    result.t = min(t1, t2);
+  }
+
+  if (result.t > 0.0) {
+    result.intersection_point = ray_origin + ray_normal * result.t;
+    result.hit_normal = normalize(result.intersection_point - sphere_origin);
+  }
+  return result;
+}
+
+void main() {
+  uvec2 image_size = imageSize(output_image);
+
+  if (gl_GlobalInvocationID.x > image_size.x ||
+      gl_GlobalInvocationID.y > image_size.y) {
+    return;
+  }
+
+  vec2 st = (vec2(gl_GlobalInvocationID.xy) - vec2(image_size) * 0.5) /
+            vec2(image_size * 0.5);
+  float aspect_ratio = float(image_size.y) / float(image_size.x);
+  vec2 in_world = camera.image_size * st;
+  float in_sphere = 0.0;
+  float fovy_rads = camera.position_fov.z;
+  vec3 camera_dir =
+      normalize(camera.direction.xyz + vec3(st.x, cos(fovy_rads * st.y), 0.0));
+
+  vec3 pixel_color = vec3(0.0);
+
+  for (int i = 0; i < num_prims; i++) {
+    Sphere sphere = prims[i];
+    RaySphereIntersectionResult hit = ray_sphere_intersection(
+        camera.position_fov.xyz, camera_dir, sphere.position_radius.xyz,
+        sphere.position_radius.w);
+    debugPrintfEXT("Hit: %d", hit.intersection);
+    if (hit.intersection) {
+      pixel_color += vec3(1.0, 0.0, 0.0);
+    }
+  }
+
+  imageStore(output_image,
+             ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y),
+             vec4(pixel_color, 1.0));
+}

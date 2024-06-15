@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = [ "egui-mgpu","engine", "engine_build_utils", "gltf_viewer", "mgpu", "tools", "fun_stuff" ]
+members = [ "egui-mgpu","engine", "engine_build_utils", "gltf_viewer", "mgpu", "tools", "fun_stuff" , "raytracer"]
 
 [profile.release]
 debug = true

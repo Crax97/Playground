@@ -555,8 +555,8 @@ impl<'c> RenderPass<'c> {
 fn validate_push_constant_visibility(visibility: ShaderStageFlags, intersected: ShaderStageFlags) {
     check!(
         visibility.intersects(intersected),
-        "Tried to set the push constant in a render pass with invalid stage flags: {:?}",
-        visibility
+        "Tried to set the push constant in a render pass with invalid stage flags: {:?}, pass flags are {:?}",
+        visibility, intersected
     );
 }
 
@@ -625,10 +625,7 @@ impl<'c, C: ComputeCommandRecorder> ComputePass<'c, C> {
         }
 
         if let Some(push_constant) = &self.command_recorder.push_constants {
-            validate_push_constant_visibility(
-                push_constant.visibility,
-                ShaderStageFlags::ALL_GRAPHICS,
-            );
+            validate_push_constant_visibility(push_constant.visibility, ShaderStageFlags::COMPUTE);
         }
 
         Ok(())
