@@ -1,8 +1,6 @@
 use engine::{
     app::{bootstrap, App, AppDescription},
-    shader_parameter_writer::{
-        ScalarMaterialParameter, ScalarParameterType, ScalarParameterWriter,
-    },
+    shader_parameter_writer::{ScalarParameterType, ScalarParameterWriter},
 };
 use mgpu::{
     include_spirv, Binding, BindingSetDescription, BindingSetElement, BindingSetLayout,
@@ -206,6 +204,10 @@ impl App for RaytracerApp {
         render_context: engine::app::RenderContext,
     ) -> anyhow::Result<()> {
         let device = &context.device;
+
+        const GROUP_SIZE_X: u32 = 16;
+        const GROUP_SIZE_Y: u32 = 16;
+
         let mut command_recorder = device.create_command_recorder::<Graphics>();
         {
             let mut pass = command_recorder.begin_compute_pass(&ComputePassDescription {
@@ -218,7 +220,11 @@ impl App for RaytracerApp {
                 bytemuck::cast_slice(&[self.camera_info]),
                 ShaderStageFlags::COMPUTE,
             );
-            pass.dispatch((1024 / 16) + 1, (720 / 16) + 1, 1)?;
+            pass.dispatch(
+                (self.output_image.extents().width / GROUP_SIZE_X) + 1,
+                (self.output_image.extents().height / GROUP_SIZE_Y) + 1,
+                1,
+            )?;
         }
 
         command_recorder.blit(&BlitParams {
