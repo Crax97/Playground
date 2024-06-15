@@ -166,10 +166,20 @@ impl App for RaytracerApp {
             output_image_view,
             binding_set,
             parameter_writer,
-            spheres: vec![Sphere {
-                color: [1.0, 0.0, 0.0, 1.0],
-                position_radius: [0.0, 0.0, 10.0, 7.0],
-            }],
+            spheres: vec![
+                Sphere {
+                    color: [1.0, 0.0, 0.0, 1.0],
+                    position_radius: [0.0, 0.0, 20.0, 7.0],
+                },
+                Sphere {
+                    color: [0.0, 1.0, 0.0, 1.0],
+                    position_radius: [-10.0, 0.0, 20.0, 3.0],
+                },
+                Sphere {
+                    color: [0.0, 0.0, 1.0, 1.0],
+                    position_radius: [10.0, 0.0, 20.0, 6.0],
+                },
+            ],
             camera_info: CameraData {
                 position_fov: [0.0, 0.0, 0.0, 90.0f32.to_radians()],
                 direction: [0.0, 0.0, 1.0, 0.0],

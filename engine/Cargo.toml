@@ -37,13 +37,18 @@ serde = { version = "1.0.197", features = ["derive"] }
 rfd = "0.14.0"
 uuid = { version = "1.8.0", features = ["v4"] }
 erased-serde = "0.4.4"
-glam = { version = "0.27.0", features = ["bytemuck", "serde", "glam-assert", "mint"] }
+glam = { version = "0.27.0", features = [
+    "bytemuck",
+    "serde",
+    "glam-assert",
+    "mint",
+] }
 crossbeam = "0.8.4"
 serde_json = "1.0.117"
 walkdir = "2.5.0"
 transform-gizmo-egui = "0.1.0"
 mint = "0.5.9"
-russimp = { version = "3.2.0", features = ["prebuilt"] }
+russimp = { version = "3.2.0" }
 
 [dev-dependencies]
 approx = "0.5.1"
