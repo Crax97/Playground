@@ -1,24 +1,48 @@
 use engine::{
     app::{bootstrap, App, AppDescription},
+    glam::{Vec3, Vec4},
     shader_parameter_writer::{ScalarParameterType, ScalarParameterWriter},
 };
 use mgpu::{
     include_spirv, Binding, BindingSetDescription, BindingSetElement, BindingSetLayout,
     BindingSetLayoutInfo, BlitParams, Buffer, BufferDescription, BufferUsageFlags,
-    ComputePassDescription, ComputePipeline, ComputePipelineDescription, Extents2D, Extents3D,
-    Graphics, Image, ImageCreationFlags, ImageDescription, ImageFormat, ImageUsageFlags, ImageView,
-    ImageViewDescription, PushConstantInfo, ShaderModule, ShaderModuleDescription,
-    ShaderStageFlags,
+    BufferWriteParams, ComputePassDescription, ComputePipeline, ComputePipelineDescription,
+    Extents2D, Extents3D, Graphics, Image, ImageCreationFlags, ImageDescription, ImageFormat,
+    ImageUsageFlags, ImageView, ImageViewDescription, PushConstantInfo, ShaderModule,
+    ShaderModuleDescription, ShaderStageFlags,
 };
 
 const COMPUTE_SHADER_SOURCE: &[u8] = include_spirv!("../spirv/raytracer.comp.spv");
 
 #[repr(C)]
-#[derive(bytemuck::Zeroable, bytemuck::Pod, Copy, Clone)]
+#[derive(bytemuck::Zeroable, bytemuck::Pod, Copy, Clone, Default)]
 struct Sphere {
-    color: [f32; 4],
-    position_radius: [f32; 4],
+    position_radius: Vec4,
 }
+
+#[repr(C)]
+#[derive(bytemuck::Zeroable, bytemuck::Pod, Copy, Clone, Default)]
+struct Plane {
+    position: Vec4,
+    normal: Vec4,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+struct Primitive {
+    color: [f32; 4],
+    ty_index: u32,
+}
+
+#[derive(Default)]
+struct Scene {
+    primitives: Vec<Primitive>,
+    spheres: Vec<Sphere>,
+    planes: Vec<Plane>,
+}
+
+unsafe impl bytemuck::Zeroable for Primitive {}
+unsafe impl bytemuck::Pod for Primitive {}
 
 #[repr(C)]
 #[derive(bytemuck::Zeroable, bytemuck::Pod, Copy, Clone)]
@@ -29,15 +53,18 @@ struct CameraData {
 }
 
 struct RaytracerApp {
-    scene_buffer: Buffer,
+    primitives_buffer: Buffer,
+    spheres_buffer: Buffer,
+    planes_buffer: Buffer,
     compute_shader: ShaderModule,
     compute_pipeline: ComputePipeline,
     output_image: Image,
     output_image_view: ImageView,
     binding_set: mgpu::BindingSet,
     parameter_writer: ScalarParameterWriter,
-    spheres: Vec<Sphere>,
+    scene: Scene,
     camera_info: CameraData,
+    time: f32,
 }
 
 impl App for RaytracerApp {
@@ -46,12 +73,28 @@ impl App for RaytracerApp {
         Self: Sized,
     {
         let device = &context.device;
-        let scene_buffer = device.create_buffer(&BufferDescription {
-            label: Some("Scene Buffer"),
+        let primitives_buffer = device.create_buffer(&BufferDescription {
+            label: Some("Primitives Buffer"),
+            usage_flags: BufferUsageFlags::STORAGE_BUFFER
+                | BufferUsageFlags::UNIFORM_BUFFER
+                | BufferUsageFlags::TRANSFER_DST,
+            size: std::mem::size_of::<Primitive>() * 5000,
+            memory_domain: mgpu::MemoryDomain::Gpu,
+        })?;
+        let spheres_buffer = device.create_buffer(&BufferDescription {
+            label: Some("Spheres Buffer"),
             usage_flags: BufferUsageFlags::STORAGE_BUFFER
                 | BufferUsageFlags::UNIFORM_BUFFER
                 | BufferUsageFlags::TRANSFER_DST,
             size: std::mem::size_of::<Sphere>() * 5000,
+            memory_domain: mgpu::MemoryDomain::Gpu,
+        })?;
+        let planes_buffer = device.create_buffer(&BufferDescription {
+            label: Some("Planes Buffer"),
+            usage_flags: BufferUsageFlags::STORAGE_BUFFER
+                | BufferUsageFlags::UNIFORM_BUFFER
+                | BufferUsageFlags::TRANSFER_DST,
+            size: std::mem::size_of::<Plane>() * 5000,
             memory_domain: mgpu::MemoryDomain::Gpu,
         })?;
 
@@ -72,6 +115,24 @@ impl App for RaytracerApp {
                     ty: mgpu::BindingSetElementKind::StorageImage {
                         format: ImageFormat::Rgba8,
                         access_mode: mgpu::StorageAccessMode::ReadWrite,
+                    },
+                    shader_stage_flags: ShaderStageFlags::COMPUTE,
+                },
+                BindingSetElement {
+                    binding: 2,
+                    array_length: 1,
+                    ty: mgpu::BindingSetElementKind::Buffer {
+                        ty: mgpu::BufferType::Storage,
+                        access_mode: mgpu::StorageAccessMode::Read,
+                    },
+                    shader_stage_flags: ShaderStageFlags::COMPUTE,
+                },
+                BindingSetElement {
+                    binding: 3,
+                    array_length: 1,
+                    ty: mgpu::BindingSetElementKind::Buffer {
+                        ty: mgpu::BufferType::Storage,
+                        access_mode: mgpu::StorageAccessMode::Read,
                     },
                     shader_stage_flags: ShaderStageFlags::COMPUTE,
                 },
@@ -129,9 +190,9 @@ impl App for RaytracerApp {
                     Binding {
                         binding: 0,
                         ty: mgpu::BindingType::StorageBuffer {
-                            buffer: scene_buffer,
+                            buffer: primitives_buffer,
                             offset: 0,
-                            range: scene_buffer.size(),
+                            range: primitives_buffer.size(),
                             access_mode: mgpu::StorageAccessMode::Read,
                         },
                         visibility: ShaderStageFlags::COMPUTE,
@@ -141,6 +202,26 @@ impl App for RaytracerApp {
                         ty: mgpu::BindingType::StorageImage {
                             view: output_image_view,
                             access_mode: mgpu::StorageAccessMode::ReadWrite,
+                        },
+                        visibility: ShaderStageFlags::COMPUTE,
+                    },
+                    Binding {
+                        binding: 2,
+                        ty: mgpu::BindingType::StorageBuffer {
+                            buffer: spheres_buffer,
+                            offset: 0,
+                            range: spheres_buffer.size(),
+                            access_mode: mgpu::StorageAccessMode::Read,
+                        },
+                        visibility: ShaderStageFlags::COMPUTE,
+                    },
+                    Binding {
+                        binding: 3,
+                        ty: mgpu::BindingType::StorageBuffer {
+                            buffer: planes_buffer,
+                            offset: 0,
+                            range: planes_buffer.size(),
+                            access_mode: mgpu::StorageAccessMode::Read,
                         },
                         visibility: ShaderStageFlags::COMPUTE,
                     },
@@ -156,45 +237,90 @@ impl App for RaytracerApp {
             0,
         )?;
 
+        let mut scene = Scene::default();
+
+        scene.add_sphere([1.0, 0.0, 0.0, 0.0], Vec3::new(0.0, 0.0, 20.0), 5.0);
+        scene.add_sphere([0.0, 1.0, 0.0, 0.0], Vec3::new(-10.0, 0.0, 25.0), 3.0);
+        scene.add_sphere([0.0, 0.0, 1.0, 0.0], Vec3::new(10.0, 0.0, 25.0), 7.0);
+        scene.add_plane(
+            [0.0, 0.0, 1.0, 0.0],
+            Vec3::new(5.0, -10.0, 25.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+
         Ok(Self {
-            scene_buffer,
+            primitives_buffer,
+            spheres_buffer,
+            planes_buffer,
             compute_pipeline,
             compute_shader,
             output_image,
             output_image_view,
             binding_set,
             parameter_writer,
-            spheres: vec![
-                Sphere {
-                    color: [1.0, 0.0, 0.0, 1.0],
-                    position_radius: [0.0, 0.0, 20.0, 7.0],
-                },
-                Sphere {
-                    color: [0.0, 1.0, 0.0, 1.0],
-                    position_radius: [-10.0, 0.0, 20.0, 3.0],
-                },
-                Sphere {
-                    color: [0.0, 0.0, 1.0, 1.0],
-                    position_radius: [10.0, 0.0, 20.0, 6.0],
-                },
-            ],
+            scene,
             camera_info: CameraData {
                 position_fov: [0.0, 0.0, 0.0, 90.0f32.to_radians()],
                 direction: [0.0, 0.0, 1.0, 0.0],
                 image_size: [1024.0, 720.0, 0.0, 0.0],
             },
+            time: 0f32,
         })
     }
 
     fn update(&mut self, context: &engine::app::AppContext) -> anyhow::Result<()> {
-        self.parameter_writer.write(
-            "num_prims",
-            ScalarParameterType::ScalarU32(self.spheres.len() as u32),
-        );
-        self.parameter_writer
-            .write_array("prims", bytemuck::cast_slice(&self.spheres));
-        self.parameter_writer
-            .update_buffer(&context.device, self.scene_buffer)?;
+        if !self.scene.spheres.is_empty() {
+            context.device.write_buffer(
+                self.spheres_buffer,
+                &BufferWriteParams {
+                    data: bytemuck::cast_slice(&self.scene.spheres),
+                    offset: 0,
+                    size: std::mem::size_of_val(self.scene.spheres.as_slice()),
+                },
+            )?;
+        }
+        if !self.scene.planes.is_empty() {
+            context.device.write_buffer(
+                self.planes_buffer,
+                &BufferWriteParams {
+                    data: bytemuck::cast_slice(&self.scene.planes),
+                    offset: 0,
+                    size: std::mem::size_of_val(self.scene.planes.as_slice()),
+                },
+            )?;
+        }
+        // self.parameter_writer.write(
+        //     "num_prims",
+        //     ScalarParameterType::ScalarU32(self.scene.primitives.len() as u32),
+        // );
+        // // self.parameter_writer
+        // //     .write_array("prims", bytemuck::cast_slice(&self.scene.primitives));
+        // self.parameter_writer
+        //     .update_buffer(&context.device, self.primitives_buffer)?;
+
+        context.device.write_buffer(
+            self.primitives_buffer,
+            &BufferWriteParams {
+                data: bytemuck::cast_slice(&[self.scene.primitives.len() as u32]),
+                offset: 0,
+                size: std::mem::size_of::<u32>(),
+            },
+        )?;
+        context.device.write_buffer(
+            self.primitives_buffer,
+            &BufferWriteParams {
+                data: bytemuck::cast_slice(&self.scene.primitives),
+                offset: 16,
+                size: std::mem::size_of::<Primitive>() * self.scene.primitives.len(),
+            },
+        )?;
+
+        self.scene.spheres[0].position_radius = [0.0, self.time.sin() * 10.0, 15.0, 7.0].into();
+        self.scene.spheres[1].position_radius =
+            [7.0, (self.time + 7.0).sin() * 10.0, 5.0, 3.0].into();
+        self.scene.spheres[2].position_radius =
+            [-7.0, (self.time + 3.0).sin() * 10.0, 25.0, 5.0].into();
+        self.time += 0.01;
         Ok(())
     }
 
@@ -250,6 +376,37 @@ impl App for RaytracerApp {
 
     fn shutdown(&mut self, context: &engine::app::AppContext) -> anyhow::Result<()> {
         Ok(())
+    }
+}
+
+impl Scene {
+    pub const SPHERE: u32 = 0;
+    pub const PLANE: u32 = 1;
+
+    pub const TYPE_MASK: u32 = 0xF000;
+    pub fn add_sphere(&mut self, color: [f32; 4], origin: Vec3, radius: f32) {
+        let sphere = Sphere {
+            position_radius: [origin.x, origin.y, origin.z, radius].into(),
+        };
+        let prim_type = Self::SPHERE << 28;
+        let sphere_index = self.spheres.len() as u32;
+
+        let ty_index = prim_type | sphere_index;
+        self.spheres.push(sphere);
+        self.primitives.push(Primitive { color, ty_index });
+    }
+
+    pub fn add_plane(&mut self, color: [f32; 4], origin: Vec3, normal: Vec3) {
+        let plane = Plane {
+            position: origin.extend(0.0),
+            normal: normal.extend(0.0),
+        };
+        let prim_type = Self::PLANE << 28;
+        let sphere_index = self.planes.len() as u32;
+
+        let ty_index = prim_type | sphere_index;
+        self.planes.push(plane);
+        self.primitives.push(Primitive { color, ty_index });
     }
 }
 

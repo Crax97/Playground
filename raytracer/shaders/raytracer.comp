@@ -2,11 +2,30 @@
 
 #extension GL_EXT_debug_printf : enable
 
+#define FLT_MAX 3.402823466e+38
+#define FLT_MIN 1.175494351e-38
+#define PI 3.14159265358979323846264338327950288
+
+#define MAX_STACK_DEPTH 2048
+#define MAX_BOUNCES 2
+
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
+#define TYPE_SPHERE 0
+#define TYPE_PLANE 1
+
 struct Sphere {
-  vec4 color;
   vec4 position_radius;
+};
+struct Plane {
+  vec4 position;
+  vec4 normal;
+};
+// For a sphere data1 = position, radius
+// For a plane data1 = position, data2 = normal
+struct Primitive {
+  vec4 color;
+  uint type;
 };
 
 struct CameraInfo {
@@ -17,27 +36,76 @@ struct CameraInfo {
 
 layout(set = 0, binding = 0, std140) readonly buffer Scene {
   uint num_prims;
-  Sphere[] prims;
+  Primitive[] prims;
 };
 layout(set = 0, binding = 1, rgba8) uniform image2D output_image;
 
+layout(set = 0, binding = 2, std140) readonly buffer SpheresBlock {
+  Sphere[] spheres;
+};
+
+layout(set = 0, binding = 3, std140) readonly buffer PlanesBlock {
+  Plane[] planes;
+};
+
 layout(push_constant) uniform CameraData { CameraInfo camera; };
 
-struct RaySphereIntersectionResult {
+struct HitResult {
   bool intersection;
   float t;
   vec3 intersection_point;
   vec3 hit_normal;
 };
 
+struct Ray {
+  vec3 ray_origin;
+  vec3 ray_direction;
+  int parent;
+  int bounces;
+};
+
+/*
+Gets the Van der Corput representation of x, which is
+a decimal number with x's binary representation mirrored as the decimal part.
+
+e.g x = 154 = 0b10011010, so VdC(152) = 0.01011001
+The formula is
+
+VdC(x) = a_0 / 2 + ... + a_i / 2^i + ... + a_r / 2^r+1
+where a_i are factors in the binary representation of x
+*/
+float van_der_corput_representation(uint x) {
+  x = (x << 16u) | (x >> 16u);
+  x = ((x & 0x55555555u) << 1u) | ((x & 0xAAAAAAAAu) >> 1u);
+  x = ((x & 0x33333333u) << 2u) | ((x & 0xCCCCCCCCu) >> 2u);
+  x = ((x & 0x0F0F0F0Fu) << 4u) | ((x & 0xF0F0F0F0u) >> 4u);
+  x = ((x & 0x00FF00FFu) << 8u) | ((x & 0xFF00FF00u) >> 8u);
+  return float(x) * 2.3283064365386963e-10; // / 0x100000000
+}
+
+// Returns vec2(x / num_samples, VdC(x)), useful to e.g
+// This can be useful to e.g do "randomized" sampling on an hemisphere, since
+// the returned numbers are in the [0, 1) range (and can be thus converted to
+// hemispherical coords)
+vec2 hammersley(uint x, uint num_samples) {
+  return vec2(float(x) / float(num_samples), van_der_corput_representation(x));
+}
+
+vec3 hemisphereSample_cos(float u, float v) {
+  float phi = v * 2.0 * PI;
+  float cosTheta = sqrt(1.0 - u);
+  float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+  return vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
+}
+
 // ray_normal must be normalized
-RaySphereIntersectionResult ray_sphere_intersection(vec3 ray_origin,
-                                                    vec3 ray_normal,
-                                                    vec3 sphere_origin,
-                                                    float sphere_radius) {
-  RaySphereIntersectionResult result;
+HitResult ray_sphere_intersection(vec3 ray_origin, vec3 ray_normal,
+                                  vec3 sphere_origin, float sphere_radius) {
+  HitResult result;
+  result.intersection = false;
   result.intersection_point = vec3(0.0);
   result.hit_normal = vec3(0.0);
+  result.t = 0.0;
 
   vec3 D = (sphere_origin - ray_origin);
   float d_len = length(D);
@@ -48,7 +116,7 @@ RaySphereIntersectionResult ray_sphere_intersection(vec3 ray_origin,
   float delta = theta * theta - dd + rr;
 
   if (delta < 0.0) {
-    result.intersection = false;
+    return result;
   } else if (delta < 0.005) {
     result.intersection = true;
     result.t = theta;
@@ -61,9 +129,39 @@ RaySphereIntersectionResult ray_sphere_intersection(vec3 ray_origin,
   }
 
   if (result.t > 0.0) {
-    result.intersection_point = ray_origin + ray_normal * result.t;
+    result.intersection_point = ray_origin + ray_normal * (result.t + 0.01);
     result.hit_normal = normalize(result.intersection_point - sphere_origin);
   }
+  return result;
+}
+
+// ray_normal must be normalized
+HitResult ray_plane_intersection(vec3 ray_origin, vec3 ray_normal,
+                                 vec3 plane_origin, vec3 plane_normal) {
+  HitResult result;
+  result.intersection = false;
+  result.intersection_point = vec3(0.0);
+  result.hit_normal = vec3(0.0);
+  result.t = 0.0;
+
+  float bottom = dot(ray_normal, plane_normal);
+  if (bottom < 0.0) {
+    return result;
+  } else if (bottom < 0.005) {
+    result.intersection = true;
+    result.intersection_point = ray_origin;
+    result.hit_normal = plane_normal;
+  } else {
+    result.intersection = true;
+
+    result.t = dot(plane_normal, ray_origin - plane_origin) / bottom;
+  }
+
+  if (result.t > 0.0) {
+    result.intersection_point = ray_origin + ray_normal * (result.t + 0.01);
+    result.hit_normal = plane_normal;
+  }
+
   return result;
 }
 
@@ -80,7 +178,48 @@ vec3 get_camera_dir() {
   return camera_dir;
 }
 
+uint primitive_type(int prim_index) {
+  Primitive prim = prims[prim_index];
+  return (prim.type & 0xF000) >> 28;
+}
+uint primitive_index(int prim_index) {
+  Primitive prim = prims[prim_index];
+  return (prim.type & ~0xF000);
+}
+
+HitResult find_closest_hit(vec3 origin, vec3 direction, inout int prim_index) {
+  HitResult hit;
+  hit.intersection = false;
+  hit.t = FLT_MAX;
+
+  for (int i = 0; i < num_prims; i++) {
+    Primitive prim = prims[i];
+    HitResult current_hit;
+
+    uint prim_type = primitive_type(i);
+    uint prim_ty_index = primitive_index(i);
+
+    if (prim.type == TYPE_SPHERE) {
+      Sphere sphere = spheres[prim_ty_index];
+      current_hit =
+          ray_sphere_intersection(origin, direction, sphere.position_radius.xyz,
+                                  sphere.position_radius.w);
+    } else if (prim.type == TYPE_PLANE) {
+      Plane plane = planes[prim_ty_index];
+      current_hit = ray_plane_intersection(
+          origin, direction, plane.position.xyz, plane.normal.xyz);
+    }
+    if (current_hit.intersection && current_hit.t < hit.t) {
+      hit = current_hit;
+      prim_index = i;
+    }
+  }
+
+  return hit;
+}
+
 void main() {
+  vec2 stats = vec2(0);
   uvec2 image_size = imageSize(output_image);
 
   if (gl_GlobalInvocationID.x > image_size.x ||
@@ -88,19 +227,26 @@ void main() {
     return;
   }
 
-  vec3 camera_dir = get_camera_dir();
-
-  float in_sphere = 0.0;
+  vec3 ray_direction = get_camera_dir();
+  vec3 ray_origin = camera.position_fov.xyz;
   vec3 pixel_color = vec3(0.0);
-  for (int i = 0; i < num_prims; i++) {
-    Sphere sphere = prims[i];
-    RaySphereIntersectionResult hit = ray_sphere_intersection(
-        camera.position_fov.xyz, camera_dir, sphere.position_radius.xyz,
-        sphere.position_radius.w);
-    if (hit.intersection) {
-      debugPrintfEXT("Hit time %f", hit.t);
-      pixel_color += hit.hit_normal;
+  float contribute = 1.0;
+
+  int prim_index = -1;
+  int i = 0;
+  bool continue_trace = true;
+  while (continue_trace && i <= MAX_BOUNCES && contribute >= 0.005) {
+    HitResult hit = find_closest_hit(ray_origin, ray_direction, prim_index);
+    if (!hit.intersection) {
+      continue_trace = false;
+    } else {
+      pixel_color += prims[prim_index].color.rgb * contribute *
+                     dot(hit.hit_normal, -ray_direction);
+      contribute *= 0.5;
+      ray_origin = hit.intersection_point;
+      ray_direction = reflect(ray_direction, hit.hit_normal);
     }
+    i++;
   }
 
   imageStore(output_image,
