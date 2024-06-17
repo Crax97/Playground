@@ -48,7 +48,6 @@ serde_json = "1.0.117"
 walkdir = "2.5.0"
 transform-gizmo-egui = "0.1.0"
 mint = "0.5.9"
-russimp = { version = "3.2.0" }
 
 [dev-dependencies]
 approx = "0.5.1"
@@ -57,3 +56,9 @@ toml = "0.8.13"
 
 [build-dependencies]
 engine_build_utils = { path = "../engine_build_utils" }
+
+[target.'cfg(target_os="linux")'.dependencies]
+russimp = "3.2.0"
+
+[target.'cfg(target_os="windows")'.dependencies]
+russimp = { version = "3.2.0", features = ["prebuilt"] }

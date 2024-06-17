@@ -31,7 +31,7 @@ struct Plane {
 #[derive(Copy, Clone, Debug)]
 struct Primitive {
     color: [f32; 4],
-    ty_index: u32,
+    ty_index: [u32; 4],
 }
 
 #[derive(Default)]
@@ -243,9 +243,15 @@ impl App for RaytracerApp {
         scene.add_sphere([0.0, 1.0, 0.0, 0.0], Vec3::new(-10.0, 0.0, 25.0), 3.0);
         scene.add_sphere([0.0, 0.0, 1.0, 0.0], Vec3::new(10.0, 0.0, 25.0), 7.0);
         scene.add_plane(
-            [0.0, 0.0, 1.0, 0.0],
-            Vec3::new(5.0, -10.0, 25.0),
+            [1.0, 1.0, 1.0, 0.0],
+            Vec3::new(0.0, -50.0, 0.0),
             Vec3::new(0.0, 1.0, 0.0),
+        );
+
+        scene.add_plane(
+            [0.0, 0.3, 0.7, 0.0],
+            Vec3::new(0.0, 50.0, 0.0),
+            Vec3::new(0.0, -1.0, 0.0),
         );
 
         Ok(Self {
@@ -380,18 +386,18 @@ impl App for RaytracerApp {
 }
 
 impl Scene {
-    pub const SPHERE: u32 = 0;
-    pub const PLANE: u32 = 1;
+    pub const SPHERE: u32 = 0x00000000;
+    pub const PLANE: u32 = 0x00000001;
 
-    pub const TYPE_MASK: u32 = 0xF000;
+    pub const TYPE_MASK: u32 = 0xF0000000;
     pub fn add_sphere(&mut self, color: [f32; 4], origin: Vec3, radius: f32) {
         let sphere = Sphere {
             position_radius: [origin.x, origin.y, origin.z, radius].into(),
         };
         let prim_type = Self::SPHERE << 28;
-        let sphere_index = self.spheres.len() as u32;
+        let prim_index = self.spheres.len() as u32;
 
-        let ty_index = prim_type | sphere_index;
+        let ty_index = [prim_type | prim_index, 0, 0, 0];
         self.spheres.push(sphere);
         self.primitives.push(Primitive { color, ty_index });
     }
@@ -402,9 +408,9 @@ impl Scene {
             normal: normal.extend(0.0),
         };
         let prim_type = Self::PLANE << 28;
-        let sphere_index = self.planes.len() as u32;
+        let prim_index = self.planes.len() as u32;
 
-        let ty_index = prim_type | sphere_index;
+        let ty_index = [prim_type | prim_index, 0, 0, 0];
         self.planes.push(plane);
         self.primitives.push(Primitive { color, ty_index });
     }

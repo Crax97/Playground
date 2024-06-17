@@ -13,6 +13,8 @@ layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 #define TYPE_SPHERE 0
 #define TYPE_PLANE 1
+#define TYPE_MASK 0xF0000000
+#define INDEX_MASK ~TYPE_MASK
 
 struct Sphere {
   vec4 position_radius;
@@ -25,7 +27,7 @@ struct Plane {
 // For a plane data1 = position, data2 = normal
 struct Primitive {
   vec4 color;
-  uint type;
+  uvec4 type;
 };
 
 struct CameraInfo {
@@ -36,6 +38,9 @@ struct CameraInfo {
 
 layout(set = 0, binding = 0, std140) readonly buffer Scene {
   uint num_prims;
+  uint pad0;
+  uint pad1;
+  uint pad2;
   Primitive[] prims;
 };
 layout(set = 0, binding = 1, rgba8) uniform image2D output_image;
@@ -141,25 +146,18 @@ HitResult ray_plane_intersection(vec3 ray_origin, vec3 ray_normal,
   HitResult result;
   result.intersection = false;
   result.intersection_point = vec3(0.0);
-  result.hit_normal = vec3(0.0);
+  result.hit_normal = plane_normal;
   result.t = 0.0;
 
   float bottom = dot(ray_normal, plane_normal);
-  if (bottom < 0.0) {
-    return result;
-  } else if (bottom < 0.005) {
+  if (bottom >= 0.005) {
     result.intersection = true;
-    result.intersection_point = ray_origin;
-    result.hit_normal = plane_normal;
-  } else {
-    result.intersection = true;
-
-    result.t = dot(plane_normal, ray_origin - plane_origin) / bottom;
+    float top = -dot(plane_normal, plane_origin - ray_origin);
+    result.t = top / bottom;
   }
 
   if (result.t > 0.0) {
     result.intersection_point = ray_origin + ray_normal * (result.t + 0.01);
-    result.hit_normal = plane_normal;
   }
 
   return result;
@@ -180,11 +178,11 @@ vec3 get_camera_dir() {
 
 uint primitive_type(int prim_index) {
   Primitive prim = prims[prim_index];
-  return (prim.type & 0xF000) >> 28;
+  return (prim.type.x & TYPE_MASK) >> 28;
 }
 uint primitive_index(int prim_index) {
   Primitive prim = prims[prim_index];
-  return (prim.type & ~0xF000);
+  return (prim.type.x & INDEX_MASK);
 }
 
 HitResult find_closest_hit(vec3 origin, vec3 direction, inout int best_prim) {
@@ -199,12 +197,12 @@ HitResult find_closest_hit(vec3 origin, vec3 direction, inout int best_prim) {
     uint prim_type = primitive_type(i);
     uint prim_ty_index = primitive_index(i);
 
-    if (prim.type == TYPE_SPHERE) {
+    if (prim_type == TYPE_SPHERE) {
       Sphere sphere = spheres[prim_ty_index];
       current_hit =
           ray_sphere_intersection(origin, direction, sphere.position_radius.xyz,
                                   sphere.position_radius.w);
-    } else if (prim.type == TYPE_PLANE) {
+    } else if (prim_type == TYPE_PLANE) {
       Plane plane = planes[prim_ty_index];
       current_hit = ray_plane_intersection(
           origin, direction, plane.position.xyz, plane.normal.xyz);
@@ -240,8 +238,13 @@ void main() {
     if (!hit.intersection) {
       continue_trace = false;
     } else {
+
+      uint prim_type = primitive_type(prim_index);
+
       pixel_color += prims[prim_index].color.rgb * contribute *
-                     dot(hit.hit_normal, -ray_direction);
+                     (prim_type == TYPE_SPHERE
+                          ? clamp(dot(hit.hit_normal, -ray_direction), 0.0, 1.0)
+                          : 1.0);
       contribute *= 0.5;
       ray_origin = hit.intersection_point;
       ray_direction = reflect(ray_direction, hit.hit_normal);
