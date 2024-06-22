@@ -187,7 +187,7 @@ uint primitive_index(int prim_index) {
   return (prim.type & ~0xF000);
 }
 
-HitResult find_closest_hit(vec3 origin, vec3 direction, inout int prim_index) {
+HitResult find_closest_hit(vec3 origin, vec3 direction, inout int best_prim) {
   HitResult hit;
   hit.intersection = false;
   hit.t = FLT_MAX;
@@ -211,7 +211,7 @@ HitResult find_closest_hit(vec3 origin, vec3 direction, inout int prim_index) {
     }
     if (current_hit.intersection && current_hit.t < hit.t) {
       hit = current_hit;
-      prim_index = i;
+      best_prim = i;
     }
   }
 
@@ -219,7 +219,7 @@ HitResult find_closest_hit(vec3 origin, vec3 direction, inout int prim_index) {
 }
 
 void main() {
-  vec2 stats = vec2(0);
+  uvec2 stats = uvec2(0);
   uvec2 image_size = imageSize(output_image);
 
   if (gl_GlobalInvocationID.x > image_size.x ||
@@ -245,9 +245,12 @@ void main() {
       contribute *= 0.5;
       ray_origin = hit.intersection_point;
       ray_direction = reflect(ray_direction, hit.hit_normal);
+      stats.x += 1;
     }
     i++;
   }
+
+  debugPrintfEXT("Hits %d", stats.x);
 
   imageStore(output_image,
              ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y),
