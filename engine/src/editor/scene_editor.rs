@@ -73,6 +73,7 @@ impl SceneEditor {
                     }
 
                     if ui.button("Load scene").clicked() {
+                        self.selected_node = None;
                         if let Some(file) = rfd::FileDialog::new()
                             .add_filter("Scene file", &["json"])
                             .pick_file()
@@ -119,6 +120,14 @@ impl SceneEditor {
                         {
                             scene.remove_node(self.selected_node.unwrap());
                             self.selected_node = None;
+                        }
+
+                        if ui
+                            .add_enabled(self.selected_node.is_some(), egui::Button::new("Duplicate"))
+                            .clicked() && self.selected_node.is_some()
+                        {
+                            let id = scene.add_node(scene.get_node(self.selected_node.unwrap()).unwrap().clone());
+                            self.selected_node = Some(id);
                         }
                     })
                 });

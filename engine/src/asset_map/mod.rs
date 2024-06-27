@@ -253,7 +253,7 @@ impl AssetMap {
             .known_assets
             .get(identifier)
             .copied()
-            .expect("Asset is unknown!");
+            .unwrap_or_else(|| panic!("Asset '{identifier}' is unknown!"));
 
         if asset_info.asset_storage == AssetStorage::Memory {
             return Ok(());

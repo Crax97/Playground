@@ -1,0 +1,96 @@
+{
+  "nodes": [
+    {
+      "label": "SceneNode 2",
+      "tags": [],
+      "enabled": false,
+      "transform": {
+        "location": [
+          0.0,
+          2.0423334,
+          1.6073741
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "primitive_type": {
+        "Mesh": {
+          "handle": "assets/meshes/stairs",
+          "material": "assets/default_mat"
+        }
+      }
+    },
+    {
+      "label": "Base",
+      "tags": [],
+      "enabled": false,
+      "transform": {
+        "location": [
+          0.099367246,
+          0.55557096,
+          -23.765501
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          14.576752,
+          0.36379716,
+          22.760588
+        ]
+      },
+      "primitive_type": {
+        "Mesh": {
+          "handle": "assets/meshes/cube",
+          "material": "assets/default_mat"
+        }
+      }
+    },
+    {
+      "label": "Ramp 1",
+      "tags": [],
+      "enabled": false,
+      "transform": {
+        "location": [
+          0.08696412,
+          1.3678277,
+          -1.7077942
+        ],
+        "rotation": [
+          0.0,
+          -0.0123313265,
+          0.0,
+          0.999924
+        ],
+        "scale": [
+          0.49991974,
+          0.44386193,
+          0.53602165
+        ]
+      },
+      "primitive_type": {
+        "Mesh": {
+          "handle": "assets/meshes/ramp",
+          "material": "assets/default_mat"
+        }
+      }
+    }
+  ],
+  "adjacency_list": [
+    [],
+    [],
+    []
+  ]
+}
