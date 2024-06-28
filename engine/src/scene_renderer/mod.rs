@@ -1,5 +1,7 @@
+mod structs;
+
 use bytemuck::{Pod, Zeroable};
-use glam::{vec4, Mat4, Vec4};
+use glam::Mat4;
 use mgpu::{
     AttachmentStoreOp, Binding, BindingSet, BindingSetDescription, BindingSetElement,
     BindingSetLayout, BindingSetLayoutInfo, BlitParams, Buffer, BufferDescription,
@@ -21,6 +23,8 @@ use crate::{
     scene::Scene,
     shader_parameter_writer::{ScalarParameterType, ScalarParameterWriter},
 };
+use crate::scene::ScenePrimitive;
+use crate::scene_renderer::structs::GPULight;
 
 const QUAD_VERTEX: &[u8] = include_spirv!("../spirv/quad_vertex.vert.spv");
 const SCENE_LIGHTNING_FRAGMENT: &[u8] = include_spirv!("../spirv/scene_lightning.frag.spv");
@@ -319,14 +323,6 @@ pub(crate) struct GPUPerObjectDrawData {
     pub material_ty: [u32; 4],
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Zeroable, Pod)]
-pub(crate) struct GPULightInfo {
-    pos_radius: Vec4,
-    color_strength: Vec4,
-    ty: [u32; 4],
-}
-
 assert_size_does_not_exceed!(
     GPUPerObjectDrawData,
     mgpu::MAX_PUSH_CONSTANT_RANGE_SIZE_BYTES
@@ -375,12 +371,6 @@ impl SceneRenderer {
                         ShaderStageFlags::VERTEX.bits() | ShaderStageFlags::FRAGMENT.bits(),
                     ),
                 },
-                // BindingSetElement {
-                //     binding: 2,
-                //     array_length: 1,
-                //     ty: mgpu::BindingSetElementKind::SampledImage,
-                //     shader_stage_flags: ShaderStageFlags::ALL_GRAPHICS,
-                // },
             ],
         };
         &LAYOUT
@@ -432,7 +422,7 @@ impl SceneRenderer {
             })?;
 
             let scene_lightning_parameter_buffer = device.create_buffer(&BufferDescription {
-                label: Some("Material user buffer"),
+                label: Some("Scene Lighting infos"),
                 usage_flags: BufferUsageFlags::TRANSFER_DST
                     | BufferUsageFlags::UNIFORM_BUFFER
                     | BufferUsageFlags::STORAGE_BUFFER,
@@ -550,7 +540,10 @@ impl SceneRenderer {
         let device = params.device;
 
         self.scene_setup.update(device, params.asset_map)?;
-        self.update_buffers(params.device, params.pov)?;
+
+        let lights = self.collect_lights(params.scene, params.pov);
+
+        self.update_buffers(params.device, params.pov, &lights)?;
 
         let current_frame = &self.frames[self.current_frame];
 
@@ -606,8 +599,8 @@ impl SceneRenderer {
                 })?;
             for item in params.scene.iter() {
                 match &item.primitive_type {
-                    crate::scene::ScenePrimitive::Group => {}
-                    crate::scene::ScenePrimitive::Mesh(info) => {
+                    ScenePrimitive::Group | ScenePrimitive::Light(_) => {}
+                    ScenePrimitive::Mesh(info) => {
                         if info.material.is_null() || info.handle.is_null() {
                             continue;
                         }
@@ -710,7 +703,7 @@ impl SceneRenderer {
         &mut self.scene_setup
     }
 
-    fn update_buffers(&mut self, device: &Device, pov: &PointOfView) -> anyhow::Result<()> {
+    fn update_buffers(&mut self, device: &Device, pov: &PointOfView, lights: &[GPULight]) -> anyhow::Result<()> {
         let current_frame = &self.frames[self.current_frame];
         let pov_projection_matrix = pov.projection_matrix();
         let pov_view_matrix = pov.view_matrix();
@@ -738,24 +731,6 @@ impl SceneRenderer {
             ],
         );
 
-        let lights = [
-            GPULightInfo {
-                pos_radius: vec4(-1.0, 1.0, 1.0, 10.0),
-                color_strength: vec4(1.0, 1.0, 1.0, 1.0),
-                ty: [0; 4],
-            },
-            GPULightInfo {
-                pos_radius: vec4(1.0, 1.0, 1.0, 10.0),
-                color_strength: vec4(0.0, 1.0, 0.0, 1.0),
-                ty: [0; 4],
-            },
-            GPULightInfo {
-                pos_radius: vec4(0.0, 0.0, 1.0, 10.0),
-                color_strength: vec4(0.0, 0.0, 1.0, 1.0),
-                ty: [0; 4],
-            },
-        ];
-
         self.scene_lightning_parameters_writer
             .write("ambient_intensity", self.scene_setup.ambient_intensity);
         self.scene_lightning_parameters_writer
@@ -769,6 +744,15 @@ impl SceneRenderer {
         self.scene_lightning_parameters_writer
             .update_buffer(device, current_frame.scene_lightning_parameter_buffer)?;
         Ok(())
+    }
+
+    fn collect_lights(&self, scene: &Scene, _pov: &PointOfView) -> Vec<GPULight> {
+        scene.iter().filter_map(|n| match &n.primitive_type {
+           ScenePrimitive::Light(info) => Some((&n.transform, info)),
+            _ => None
+        }).map(|(transform, info)| {
+            GPULight::from_light(info, transform)
+        }).collect()
     }
 }
 

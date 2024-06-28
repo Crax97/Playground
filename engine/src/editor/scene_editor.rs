@@ -9,7 +9,7 @@ use transform_gizmo_egui::{enum_set, Gizmo, GizmoConfig, GizmoExt, GizmoMode, Gi
 use crate::asset_map::{AssetHandle, AssetMap};
 use crate::math::Transform;
 use crate::scene::serializable_scene::SerializableScene;
-use crate::scene::{Scene, SceneMesh, SceneNode, SceneNodeId, ScenePrimitive};
+use crate::scene::{LightInfo, LightType, Scene, SceneMesh, SceneNode, SceneNodeId, ScenePrimitive};
 use crate::scene_renderer::PointOfView;
 
 use super::asset_picker::AssetPicker;
@@ -100,7 +100,7 @@ impl SceneEditor {
 
         egui::SidePanel::right("SceneStuff").show(context, |ui| {
             egui::CollapsingHeader::new("Scene outliner").show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(ui.available_height() * 0.3).show(ui, |ui| {
                     for root_node in root_nodes {
                         self.scene_node_outliner(root_node, ui, scene);
                     }
@@ -174,7 +174,7 @@ impl SceneEditor {
                         rotation.v.z as _,
                         rotation.s as _,
                     )
-                    .normalize(),
+                        .normalize(),
                     scale: vec3(scale.x as _, scale.y as _, scale.z as _),
                 };
                 node.transform = transform;
@@ -233,7 +233,7 @@ impl SceneEditor {
 
     fn node_ui(
         &mut self,
-        device: &Device,
+        _device: &Device,
         node_id: SceneNodeId,
         ui: &mut Ui,
         scene: &mut Scene,
@@ -256,6 +256,7 @@ impl SceneEditor {
 
             let stringify_prim = |prim_ty: &ScenePrimitive| match prim_ty {
                 ScenePrimitive::Group => "Group",
+                ScenePrimitive::Light(_) => "Light",
                 ScenePrimitive::Mesh(_) => "Mesh",
             };
 
@@ -263,25 +264,27 @@ impl SceneEditor {
                 ui.next_auto_id(),
                 stringify_prim(&node.primitive_type),
             )
-            .selected_text(stringify_prim(&node.primitive_type))
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut node.primitive_type, ScenePrimitive::Group, "Group");
-                ui.selectable_value(
-                    &mut node.primitive_type,
-                    ScenePrimitive::Mesh(SceneMesh {
-                        handle: AssetHandle::null(),
-                        material: AssetHandle::null(),
-                    }),
-                    "Mesh",
-                );
-            });
+                .selected_text(stringify_prim(&node.primitive_type))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut node.primitive_type, ScenePrimitive::Group, "Group");
+                    ui.selectable_value(
+                        &mut node.primitive_type,
+                        ScenePrimitive::Mesh(SceneMesh {
+                            handle: AssetHandle::null(),
+                            material: AssetHandle::null(),
+                        }),
+                        "Mesh",
+                    );
+                    ui.selectable_value(&mut node.primitive_type,
+                                        ScenePrimitive::Light(LightInfo::default()), "Light");
+                });
             ui.end_row();
 
             match &mut node.primitive_type {
-                crate::scene::ScenePrimitive::Group => {
+                ScenePrimitive::Group => {
                     ui.label("Group node");
                 }
-                crate::scene::ScenePrimitive::Mesh(info) => {
+                ScenePrimitive::Mesh(info) => {
                     ui.vertical(|ui| {
                         ui.group(|ui| {
                             self.asset_picker.modify(ui, &mut info.handle, asset_map);
@@ -323,6 +326,61 @@ impl SceneEditor {
                                 material.recreate_binding_set_layout(tex_asset_map).unwrap();
                             }
                         });
+                    });
+                }
+                ScenePrimitive::Light(info) => {
+
+                    let stringify_light_type = |light_ty: &LightType| match light_ty {
+                        LightType::Directional => "Directional Light",
+                        LightType::Point { .. } => "Point Light",
+                        LightType::Spot { .. } => "Spot Light",
+                    };
+                    egui::ComboBox::new(ui.next_auto_id(), "Light type").selected_text(stringify_light_type(&info.ty))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut info.ty, LightType::Directional, stringify_light_type(&LightType::Directional));
+                            ui.selectable_value(&mut info.ty, LightType::Spot {
+                                radius: 100.0,
+                                inner_angle: 25.0,
+                                outer_angle: 30.0,
+                            }, stringify_light_type(&LightType::Spot { radius: 0.0, inner_angle: 0.0, outer_angle: 0.0 }));
+                            ui.selectable_value(&mut info.ty, LightType::Point { radius: 100.0 }, stringify_light_type(&LightType::Point { radius: 0.0 }));
+                        });
+                    ui.end_row();
+
+                    egui::Grid::new("LightSettings").show(ui, |ui| {
+                        ui.heading("Light Settings");
+                        ui.end_row();
+
+                        ui.label("Color");
+                        ui.color_edit_button_rgb(info.color.as_mut());
+                        ui.end_row();
+
+                        ui.label("Strength");
+                        ui.add(egui::DragValue::new(&mut info.strength).clamp_range(0.0..=f32::INFINITY).speed(0.1));
+                        ui.end_row();
+
+                        match &mut info.ty {
+                            LightType::Directional => {}
+                            LightType::Point { mut radius } => {
+                                ui.label("Radius");
+                                ui.add(egui::DragValue::new(&mut radius).clamp_range(0.0..=f32::INFINITY).speed(0.1));
+                                ui.end_row();
+                            }
+                            LightType::Spot { mut radius, mut inner_angle, mut outer_angle } => {
+                                ui.label("Radius");
+                                ui.add(egui::DragValue::new(&mut radius).clamp_range(0.0..=f32::INFINITY).speed(0.1));
+                                ui.end_row();
+
+                                ui.label("Inner angle (deg)");
+                                ui.add(egui::DragValue::new(&mut inner_angle).clamp_range(0.0..=outer_angle).speed(0.1));
+                                ui.end_row();
+
+                                ui.label("Outer angle (deg)");
+                                ui.add(egui::DragValue::new(&mut outer_angle).clamp_range(inner_angle..=90.0).speed(0.1));
+                                ui.end_row();
+                            }
+                        }
+
                     });
                 }
             }

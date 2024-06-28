@@ -21,12 +21,35 @@ pub struct SceneMesh {
     pub material: AssetHandle<Material>,
 }
 
-#[derive(Default, Serialize, Deserialize, Clone, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Default, Serialize, Deserialize, Clone, PartialEq)]
+pub enum LightType {
+    #[default]
+    Directional,
+    Point {
+        radius: f32,
+    },
+    Spot {
+        radius: f32,
+        inner_angle: f32,
+        outer_angle: f32,
+    }
+}
+
+#[derive(Default, Serialize, Deserialize, Clone, PartialEq)]
+pub struct LightInfo {
+    pub ty: LightType,
+    pub color: Vec3,
+    pub strength: f32,
+}
+
+#[derive(Default, Serialize, Deserialize, Clone, PartialEq)]
 pub enum ScenePrimitive {
     #[default]
     Group,
     Mesh(SceneMesh),
+    Light(LightInfo)
 }
+
 
 #[derive(Default, Serialize, Deserialize, Clone)]
 pub struct SceneNode {
@@ -55,7 +78,7 @@ impl Scene {
     pub fn preload(&self, asset_map: &mut AssetMap) -> anyhow::Result<()> {
         for node in self.nodes.iter() {
             match &node.primitive_type {
-                ScenePrimitive::Group => {}
+                ScenePrimitive::Group | ScenePrimitive::Light(_) => {}
                 ScenePrimitive::Mesh(SceneMesh { handle, material }) => {
                     if !handle.is_null() {
                         asset_map.increment_reference(handle)?;
@@ -83,7 +106,7 @@ impl Scene {
     pub fn dispose(&self, asset_map: &mut AssetMap) {
         for node in self.nodes.iter() {
             match &node.primitive_type {
-                ScenePrimitive::Group => {}
+                ScenePrimitive::Group | ScenePrimitive::Light(_) => {}
                 ScenePrimitive::Mesh(SceneMesh {
                     handle,
                     material: material_handle,

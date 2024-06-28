@@ -19,9 +19,12 @@ layout(set = 1, binding = 0, std140) uniform GlobalFrameData {
 };
 
 struct LightInfo {
-    vec4 pos_radius;
-    vec4 color_strength;
     uvec4 type;
+    vec4 color;
+    vec4 pos_strength;
+    vec4 direction_radius;
+    vec4 inner_outer_angle;
+
 };
 
 layout(set = 1, binding = 1, std140) readonly buffer SceneParameters {
@@ -34,6 +37,7 @@ layout(set = 1, binding = 1, std140) readonly buffer SceneParameters {
     LightInfo lights[];
     
 };
+
 layout(set = 2, binding = 0) uniform textureCube irradiance_map;
 layout(set = 2, binding = 1) uniform sampler irriadiance_map_sampler;
 layout(set = 2, binding = 2) uniform textureCube prefiltered_map;
@@ -126,10 +130,10 @@ void main() {
     vec3 light_0 = vec3(0.0);
     if (data.lit > 0.0) {
         for (uint i = 0; i < light_count; i ++) {
-            vec3 light_pos = lights[i].pos_radius.xyz;
-            float light_radius = lights[i].pos_radius.w;
-            vec3 light_color = lights[i].color_strength.xyz;
-            float light_strength = lights[i].color_strength.w;
+            vec3 light_pos = lights[i].pos_strength.xyz;
+            float light_radius = lights[i].direction_radius.w;
+            vec3 light_color = lights[i].color.xyz;
+            float light_strength = lights[i].pos_strength.w;
 
             vec3 light_dir = normalize(light_pos - data.world_position);
             vec3 half_view_vector = normalize(light_dir + view_dir);
