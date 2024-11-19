@@ -265,7 +265,7 @@ impl App for GltfViewerApplication {
         if context.input.is_key_just_pressed(engine::input::Key::F3) {
             self.output = SceneOutput::EmissiveAO;
         }
-        if context.input.is_key_just_pressed(engine::input::Key::F3) {
+        if context.input.is_key_just_pressed(engine::input::Key::F4) {
             self.output = SceneOutput::WorldPosition;
         }
         if context.input.is_key_just_pressed(engine::input::Key::F9) {

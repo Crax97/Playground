@@ -6,8 +6,7 @@
 #define FLT_MIN 1.175494351e-38
 #define PI 3.14159265358979323846264338327950288
 
-#define MAX_STACK_DEPTH 2048
-#define MAX_BOUNCES 2
+#define MAX_BOUNCES 10
 
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
@@ -33,7 +32,7 @@ struct Primitive {
 struct CameraInfo {
   vec4 position_fov;
   vec4 direction;
-  vec2 image_size;
+  vec4 image_size_time;
 };
 
 layout(set = 0, binding = 0, std140) readonly buffer Scene {
@@ -67,7 +66,32 @@ struct Ray {
   vec3 ray_direction;
   int parent;
   int bounces;
+  float contribute;
+  vec3 accumulated_color;
 };
+
+float hash( float n ){
+  return fract(sin(n)*1751.5453);
+}
+
+float hash1( vec2 p ){
+  return fract(sin(p.x+131.1*p.y)*1751.5453);
+}
+
+vec3 hash3( float n ){
+  return fract(sin(vec3(n,n+1.0,n+2.0))*vec3(43758.5453123,22578.1459123,19642.3490423));
+}
+
+vec3 random3(vec3 c) {
+  float j = 4096.0*sin(dot(c,vec3(17.0, 59.4, 15.0)));
+  vec3 r;
+  r.z = fract(512.0*j);
+  j *= .125;
+  r.x = fract(512.0*j);
+  j *= .125;
+  r.y = fract(512.0*j);
+  return r-0.5;
+}
 
 /*
 Gets the Van der Corput representation of x, which is
@@ -96,12 +120,6 @@ vec2 hammersley(uint x, uint num_samples) {
   return vec2(float(x) / float(num_samples), van_der_corput_representation(x));
 }
 
-vec3 hemisphereSample_cos(float u, float v) {
-  float phi = v * 2.0 * PI;
-  float cosTheta = sqrt(1.0 - u);
-  float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
-  return vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
-}
 
 // ray_normal must be normalized
 HitResult ray_sphere_intersection(vec3 ray_origin, vec3 ray_normal,
@@ -135,7 +153,7 @@ HitResult ray_sphere_intersection(vec3 ray_origin, vec3 ray_normal,
 
   if (result.t > 0.0) {
     result.intersection_point = ray_origin + ray_normal * (result.t + 0.01);
-    result.hit_normal = normalize(result.intersection_point - sphere_origin);
+    result.hit_normal = -normalize(result.intersection_point - sphere_origin);
   }
   return result;
 }
@@ -146,7 +164,7 @@ HitResult ray_plane_intersection(vec3 ray_origin, vec3 ray_normal,
   HitResult result;
   result.intersection = false;
   result.intersection_point = vec3(0.0);
-  result.hit_normal = plane_normal;
+  result.hit_normal = -plane_normal;
   result.t = 0.0;
 
   float bottom = dot(ray_normal, plane_normal);
@@ -168,7 +186,8 @@ vec3 get_camera_dir() {
   vec2 st =
       (vec2(gl_GlobalInvocationID.xy) + vec2(0.5) - vec2(image_size) * 0.5) /
       vec2(image_size * 0.5);
-  float aspect_ratio = float(camera.image_size.x) / float(camera.image_size.y);
+  float aspect_ratio =
+      float(camera.image_size_time.x) / float(camera.image_size_time.y);
   float fovy_rads = camera.position_fov.w;
   st = vec2(st.x * aspect_ratio, st.y) * tan(fovy_rads / 2.0);
 
@@ -216,6 +235,89 @@ HitResult find_closest_hit(vec3 origin, vec3 direction, inout int best_prim) {
   return hit;
 }
 
+vec3 randomSpherePoint(vec2 rand) {
+  float ang1 = (rand.x + 1.0) * PI; // [-1..1) -> [0..2*PI)
+  float u = rand.y; // [-1..1), cos and acos(2v-1) cancel each other out, so we
+                    // arrive at [-1..1)
+  float u2 = u * u;
+  float sqrt1MinusU2 = sqrt(1.0 - u2);
+  float x = sqrt1MinusU2 * cos(ang1);
+  float y = sqrt1MinusU2 * sin(ang1);
+  float z = u;
+  return vec3(x, y, z);
+}
+vec3 randomHemispherePoint(vec2 rand, vec3 n) {
+  /**
+   * Generate random sphere point and swap vector along the normal, if it
+   * points to the wrong of the two hemispheres.
+   * This method provides a uniform distribution over the hemisphere,
+   * provided that the sphere distribution is also uniform.
+   */
+  vec3 v = randomSpherePoint(rand);
+  return v * sign(dot(v, n));
+}
+
+vec3 trace_scene(vec3 camera_direction, uvec2 image_size, inout uvec2 stats) {
+  const int MAX_STACK_DEPTH = 1024;
+  Ray rays[MAX_STACK_DEPTH];
+  rays[0].ray_direction = camera_direction;
+  rays[0].ray_origin = camera.position_fov.xyz;
+  rays[0].parent = -1;
+  rays[0].bounces = 0;
+  rays[0].contribute = 1.0;
+  rays[0].accumulated_color = vec3(1.0);
+
+  uint current_ray_index = 0;
+  uint rays_dispatched = 1;
+
+  // 1 Dispatch rays
+  while(current_ray_index != rays_dispatched) {
+    uint current_top = rays_dispatched;
+
+    int prim_index = 0;
+    for (uint i = current_ray_index; i < current_top; i ++) {
+      Ray ray = rays[i];
+      HitResult hit = find_closest_hit(ray.ray_origin, ray.ray_direction, prim_index);
+      if (hit.intersection) {
+        rays[i].accumulated_color = prims[prim_index].color.xyz;
+        const uint RAYS_TO_DISPATCH_PER_HIT = 1;
+        for (uint r = 0; r < RAYS_TO_DISPATCH_PER_HIT && rays_dispatched < MAX_STACK_DEPTH; r ++) {
+          vec3 direction = randomHemispherePoint(hammersley(r, RAYS_TO_DISPATCH_PER_HIT), hit.hit_normal);
+
+          rays[rays_dispatched].ray_origin = hit.intersection_point;
+          rays[rays_dispatched].ray_direction = direction;
+          rays[rays_dispatched].contribute = ray.contribute * 0.5 * 1.0 / float(RAYS_TO_DISPATCH_PER_HIT);
+          rays[rays_dispatched].accumulated_color = vec3(1.0);
+          rays[rays_dispatched].parent = int(i);
+
+          rays_dispatched += 1;
+        }
+      } else {
+        rays[i].accumulated_color = vec3(1.0);
+      }
+
+      current_ray_index += 1;
+    }
+  }
+
+  int current_parent = rays[rays_dispatched-1].parent;
+  vec3 accum = vec3(0.0);
+  // 2 Accumulate ray colors
+  while (rays_dispatched > 0) {
+    rays_dispatched --;
+    Ray ray = rays[rays_dispatched];
+    if (ray.parent == current_parent) {
+      accum += ray.accumulated_color * ray.contribute;
+    } else {
+      rays[current_parent].accumulated_color *= accum;
+      current_parent = ray.parent;
+      accum = ray.accumulated_color;
+    }
+  }
+
+  return rays[0].accumulated_color;
+}
+
 void main() {
   uvec2 stats = uvec2(0);
   uvec2 image_size = imageSize(output_image);
@@ -225,35 +327,14 @@ void main() {
     return;
   }
 
-  vec3 ray_direction = get_camera_dir();
-  vec3 ray_origin = camera.position_fov.xyz;
   vec3 pixel_color = vec3(0.0);
-  float contribute = 1.0;
-
-  int prim_index = -1;
-  int i = 0;
-  bool continue_trace = true;
-  while (continue_trace && i <= MAX_BOUNCES && contribute >= 0.005) {
-    HitResult hit = find_closest_hit(ray_origin, ray_direction, prim_index);
-    if (!hit.intersection) {
-      continue_trace = false;
-    } else {
-
-      uint prim_type = primitive_type(prim_index);
-
-      pixel_color += prims[prim_index].color.rgb * contribute *
-                     (prim_type == TYPE_SPHERE
-                          ? clamp(dot(hit.hit_normal, -ray_direction), 0.0, 1.0)
-                          : 1.0);
-      contribute *= 0.5;
-      ray_origin = hit.intersection_point;
-      ray_direction = reflect(ray_direction, hit.hit_normal);
-      stats.x += 1;
-    }
-    i++;
+  const int NUM_SAMPLES = 1;
+  for (int i = 0; i < NUM_SAMPLES; i ++) {
+    vec3 dir = get_camera_dir();
+    pixel_color += trace_scene(dir, image_size, stats);
   }
+  pixel_color /= float(NUM_SAMPLES);
 
-  debugPrintfEXT("Hits %d", stats.x);
 
   imageStore(output_image,
              ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y),

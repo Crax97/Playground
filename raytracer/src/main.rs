@@ -49,7 +49,7 @@ unsafe impl bytemuck::Pod for Primitive {}
 struct CameraData {
     position_fov: [f32; 4],
     direction: [f32; 4],
-    image_size: [f32; 4],
+    image_size_time: [f32; 4],
 }
 
 struct RaytracerApp {
@@ -240,18 +240,13 @@ impl App for RaytracerApp {
         let mut scene = Scene::default();
 
         scene.add_sphere([1.0, 0.0, 0.0, 0.0], Vec3::new(0.0, 0.0, 20.0), 5.0);
-        scene.add_sphere([0.0, 1.0, 0.0, 0.0], Vec3::new(-10.0, 0.0, 25.0), 3.0);
-        scene.add_sphere([0.0, 0.0, 1.0, 0.0], Vec3::new(10.0, 0.0, 25.0), 7.0);
-        scene.add_plane(
-            [1.0, 1.0, 1.0, 0.0],
-            Vec3::new(0.0, -50.0, 0.0),
-            Vec3::new(0.0, 1.0, 0.0),
-        );
+        scene.add_sphere([0.0, 1.0, 0.0, 0.0], Vec3::new(-10.0, 2.0, 25.0), 3.0);
+        scene.add_sphere([0.0, 0.0, 1.0, 0.0], Vec3::new(10.0, 3.0, 25.0), 7.0);
 
         scene.add_plane(
-            [0.0, 0.3, 0.7, 0.0],
-            Vec3::new(0.0, 50.0, 0.0),
-            Vec3::new(0.0, -1.0, 0.0),
+            [0.3, 0.5, 0.2, 1.0],
+            Vec3::new(0.0, -10.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
         );
 
         Ok(Self {
@@ -268,7 +263,7 @@ impl App for RaytracerApp {
             camera_info: CameraData {
                 position_fov: [0.0, 0.0, 0.0, 90.0f32.to_radians()],
                 direction: [0.0, 0.0, 1.0, 0.0],
-                image_size: [1024.0, 720.0, 0.0, 0.0],
+                image_size_time: [1024.0, 720.0, 0.0, 0.0],
             },
             time: 0f32,
         })
@@ -321,12 +316,8 @@ impl App for RaytracerApp {
             },
         )?;
 
-        self.scene.spheres[0].position_radius = [0.0, self.time.sin() * 10.0, 15.0, 7.0].into();
-        self.scene.spheres[1].position_radius =
-            [7.0, (self.time + 7.0).sin() * 10.0, 5.0, 3.0].into();
-        self.scene.spheres[2].position_radius =
-            [-7.0, (self.time + 3.0).sin() * 10.0, 25.0, 5.0].into();
-        self.time += 0.01;
+        self.time += 0.1;
+        self.camera_info.image_size_time[2] = self.time;
         Ok(())
     }
 
